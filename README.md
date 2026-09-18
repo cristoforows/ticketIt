@@ -43,4 +43,4 @@ Issues and PRDs belong to [cristoforows/ticketIt](https://github.com/cristoforow
 
 That developer CLI profile is separate from ticketIt's planned runtime authentication: GitHub OAuth for owner sign-in, and a local fine-grained GitHub token for Michelin's API actions.
 
-Build, setup, and test commands will be added when the application scaffold exists.
+Application build, setup, and test commands will be added when the application scaffold exists; for M1 integration-proof experiments, see [experiments/README.md](experiments/README.md).
