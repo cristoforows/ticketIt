@@ -183,6 +183,8 @@ These are implementation recommendations, not a frozen database schema or new pr
 
 Galley alone changes authoritative domain records. Michelin reports facts and requests actions; Swiftlet renders state and submits owner commands. Framework checkpoints and engine histories are execution records, not substitutes for the application's state machine.
 
+The behavioral contract for this boundary, including identity, claiming, events, commands, and reconciliation, is recorded in [docs/contracts/execution-interface.md](contracts/execution-interface.md); the hard-to-reverse choices behind it are recorded in [docs/adr/](adr/).
+
 ## Engineering choices to make during implementation
 
 Select frontend tooling, Go routing/data-access libraries, package manager, contract format, transport, migration tooling, and test runners based on these boundaries. They are not yet approved product requirements. A practical starting direction is schema-described HTTP APIs and generated clients, PostgreSQL-backed work claims, and polling/reconciliation before adding another queue service.

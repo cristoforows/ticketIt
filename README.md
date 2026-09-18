@@ -23,6 +23,8 @@ Start here:
 3. [Open decisions](docs/open-decisions.md) — unresolved choices, recommendations, and when they matter.
 4. [Integration feasibility](docs/integration-feasibility.md) — evidence, limitations, and checks required before rollout.
 5. [Acceptance scenarios](docs/acceptance-scenarios.md) — research demonstration and coding/recovery checks.
+6. [Execution interface contract](docs/contracts/execution-interface.md) — Galley/Michelin execution contract and the Swiftlet→Galley owner-command boundary.
+7. [Architectural decision records](docs/adr/) — hard-to-reverse choices restating the approved design.
 
 Start implementation with [M1 — Foundational decisions and integration proofs (#2)](https://github.com/cristoforows/ticketIt/issues/2). Each milestone spans multiple sessions and is split into implementation-sized vertical slices when work begins. Manual workflows arrive in M2–M3, controlled Agent execution in M4, and real research/coding in M7/M8. Research and coding can proceed independently after their shared M5/M6 prerequisites.
 
