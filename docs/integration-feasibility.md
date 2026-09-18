@@ -1,6 +1,6 @@
 # Integration feasibility
 
-Read-only documentation/source review, 18 September 2026. These findings inform M0 in the [implementation plan](implementation-plan.md). No runtime experiments, model calls, or GitHub delivery tests have been executed for this review.
+Read-only documentation/source review, 18 September 2026. These findings inform [M1 — Foundational decisions and integration proofs (#2)](https://github.com/cristoforows/ticketIt/issues/2) in the approved [implementation plan](implementation-plan.md). No runtime experiments, model calls, or GitHub delivery tests have been executed for this review.
 
 Upstream `dev`/`main` source can differ from released packages. Pin versions and reproduce findings before relying on them.
 
@@ -29,9 +29,11 @@ Upstream `dev`/`main` source can differ from released packages. Pin versions and
 - Saving a configuration snapshot is insufficient unless the engine actually uses the fixed content rather than rereading mutable ambient files.
 - No selected library replaces ticket ownership checks, round accounting, human review, or idempotent side-effect handling.
 
-## Proposed feasibility experiments
+## Planned feasibility experiments
 
 Use deterministic local model/API stubs, synthetic credentials, fake clocks, and dispatch ledgers first. These are tests to build, not tests already passed.
+
+M1 runs bounded adapter proofs using controlled substitutes for application interfaces that do not yet exist. It does not require the completed Swiftlet/Galley/Michelin application. Exercise the corresponding application behavior through controlled Rounds in M4–M6, then verify the actual native and OpenCode integrations in M7 and M8. Release acceptance across the deployed application belongs to M10.
 
 ### S1 — OpenCode lifecycle and control
 

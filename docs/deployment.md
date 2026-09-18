@@ -1,6 +1,8 @@
 # Deployment and local execution
 
-See [implementation-plan.md](implementation-plan.md) for proposed delivery milestones and [open-decisions.md](open-decisions.md) for remaining selections. Application directories below describe the planned scaffold, not implemented services.
+See [implementation-plan.md](implementation-plan.md) for the approved M1–M10 milestones and [open-decisions.md](open-decisions.md) for remaining selections. Application directories below describe the planned scaffold, not implemented services.
+
+M2 establishes Swiftlet/Galley and PostgreSQL locally; M4 connects Michelin with controlled execution. M6 selects document storage, M7/M8 add real research/coding, and M10 completes hosting, reproducible operational setup, and deployed acceptance. The hosting-comparison demonstration runs after its provisional installation exists.
 
 ## Initial split
 

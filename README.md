@@ -2,7 +2,7 @@
 
 A personal ticket tracker with board/list views and configurable AI agents that carry out work in traceable rounds.
 
-**Status:** design documented; application implementation has not started.
+**Status:** [v1 spec #1](https://github.com/cristoforows/ticketIt/issues/1) and ten milestone issues published; application implementation has not started.
 
 ## Applications
 
@@ -19,10 +19,12 @@ The planned monorepo keeps these applications independently buildable under `app
 Start here:
 
 1. [V1 scope](docs/v1-scope.md) — consolidated approved behavior and deferred features.
-2. [Implementation plan](docs/implementation-plan.md) — dependency-ordered milestones and acceptance gates.
+2. [Implementation plan](docs/implementation-plan.md) — approved M1–M10 milestones, linked issues, blocking edges, scope, and acceptance gates.
 3. [Open decisions](docs/open-decisions.md) — unresolved choices, recommendations, and when they matter.
 4. [Integration feasibility](docs/integration-feasibility.md) — evidence, limitations, and checks required before rollout.
 5. [Acceptance scenarios](docs/acceptance-scenarios.md) — research demonstration and coding/recovery checks.
+
+Start implementation with [M1 — Foundational decisions and integration proofs (#2)](https://github.com/cristoforows/ticketIt/issues/2). Each milestone spans multiple sessions and is split into implementation-sized vertical slices when work begins. Manual workflows arrive in M2–M3, controlled Agent execution in M4, and real research/coding in M7/M8. Research and coding can proceed independently after their shared M5/M6 prerequisites.
 
 [CONTEXT.md](CONTEXT.md) defines domain vocabulary. Implementation details belong in the design docs:
 

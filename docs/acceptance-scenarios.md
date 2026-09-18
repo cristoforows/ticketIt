@@ -2,6 +2,8 @@
 
 These describe acceptance work to perform after implementation. They have not been executed. The hosting-comparison story was selected with the owner; the additional checks below derive from approved v1 behavior.
 
+The approved [implementation plan](implementation-plan.md) develops controlled execution checks in M4–M6, real-engine checks in M7/M8, and combined accounting in M9. [M10 — Deployment, operational setup, and v1 acceptance (#11)](https://github.com/cristoforows/ticketIt/issues/11) runs the complete hosted scenarios below. M7 and M8 have shared prerequisites but neither blocks the other.
+
 ## First research scenario: compare hosting for ticketIt
 
 Use a bounded comparison of three hosting options, informed by one Markdown recipe, as the first end-to-end research scenario.

@@ -2,6 +2,8 @@
 
 See [v1-scope.md](v1-scope.md) for consolidated scope, [implementation-plan.md](implementation-plan.md) for sequencing, and [integration-feasibility.md](integration-feasibility.md) for evidence and unverified engine assumptions.
 
+Delivery starts with isolated adapter proofs in M1 and controlled, scripted Round execution in M4. M5 adds human input, Permissions, and recovery; M6 adds versioned configuration/context. Real native research and Grill Mode arrive in M7, and real OpenCode coding in M8. Both depend on M5/M6 and can proceed independently; the v1 behavior below is not all part of the first runner milestone.
+
 ## Initial execution engines
 
 The first iteration supports two focused execution paths:

@@ -1,5 +1,7 @@
 # Usage accounting
 
+In the approved [implementation plan](implementation-plan.md), initial usage observations are persisted with controlled Rounds in M4. M7 adds research/Grill Mode observations and M8 adds coding observations. M9 reconciles those records and completes owner reporting; collection is not deferred until the dashboard milestone.
+
 ## Ticket totals
 
 Include all AI usage attributable to a ticket in its token and cost totals, including preparation and execution.

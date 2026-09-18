@@ -1,6 +1,6 @@
 # V1 scope
 
-Consolidated approved design. This document describes intended behavior, not completed software. Unresolved choices are tracked in [open-decisions.md](open-decisions.md); proposed implementation work is in [implementation-plan.md](implementation-plan.md).
+Consolidated approved design, published as [v1 spec #1](https://github.com/cristoforows/ticketIt/issues/1). This document describes intended behavior, not completed software. Unresolved choices are tracked in [open-decisions.md](open-decisions.md); the approved ten-milestone delivery sequence is in [implementation-plan.md](implementation-plan.md).
 
 ## Purpose
 
@@ -149,4 +149,4 @@ Distinguish estimates and reported costs; missing data is unknown rather than ze
 
 ## Acceptance
 
-Both native research and OpenCode coding belong to v1, even though research is delivered first. See [acceptance-scenarios.md](acceptance-scenarios.md). Deployment feasibility checks and integration gates are part of the build plan, not claims that the behavior is already available.
+Both native research and OpenCode coding belong to v1. M7 research and M8 coding can proceed independently after their shared M5/M6 prerequisites; research is not a blocker for coding. See [acceptance-scenarios.md](acceptance-scenarios.md) for complete hosted acceptance in M10. Deployment feasibility checks and integration gates are part of the build plan, not claims that the behavior is already available.
