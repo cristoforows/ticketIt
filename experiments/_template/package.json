@@ -1,0 +1,22 @@
+{
+  "name": "template",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Copyable starting point for a new M1 experiment package. Copy this directory to experiments/<name>/, rename the \"name\" field below, and update this description.",
+  "type": "module",
+  "engines": {
+    "node": "26.9.0"
+  },
+  "scripts": {
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "shared": "file:../shared"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.1",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2"
+  }
+}
