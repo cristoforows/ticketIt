@@ -1,0 +1,22 @@
+{
+  "name": "github-delivery",
+  "version": "0.1.0",
+  "private": true,
+  "description": "M1.16 (issue #27): mocked GitHub OAuth sign-in identity, fine-grained PAT identity/resource-scope, and fake SSH Git transport, proving the identity half of feasibility experiment S5 (docs/integration-feasibility.md) with local fixtures. Extended by issue #28 (delivery lifecycle) in the same package.",
+  "type": "module",
+  "engines": {
+    "node": "26.9.0"
+  },
+  "scripts": {
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "shared": "file:../shared"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.1",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2"
+  }
+}
