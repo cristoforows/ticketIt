@@ -1,0 +1,28 @@
+{
+  "name": "native-harness",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reusable native-harness library (LangChain JS createAgent, a scripted chat model, a marker tool, a PostgreSQL LangGraph checkpointer, and a Round/thread identity registry) plus its own boot test, for M1.11 (issue #22). Later M1 slices depend on this package via file:../native-harness.",
+  "type": "module",
+  "engines": {
+    "node": "26.9.0"
+  },
+  "scripts": {
+    "db:setup": "scripts/db-setup.sh",
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@langchain/core": "1.2.11",
+    "@langchain/langgraph": "1.4.15",
+    "@langchain/langgraph-checkpoint-postgres": "1.0.5",
+    "langchain": "1.5.11",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.1",
+    "@types/pg": "8.23.1",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2"
+  }
+}
