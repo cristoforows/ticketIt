@@ -96,9 +96,11 @@ development (see the evidence record's "Observed limitations").
   ID is never used as the Round ID (ADR 0002).
 - `createHarnessAgent({ model, tools, checkpointer, systemPrompt })` --
   wraps LangChain JS `createAgent`.
-- `runTurn(agent, { roundId, threadId, input })` -- runs one turn on the
+- `runTurn(agent, { roundId, threadId, input, signal? })` -- runs one turn on the
   given LangGraph thread; the Round ID is carried through the result but
-  never used as the LangGraph `thread_id`.
+  never used as the LangGraph `thread_id`. The optional `signal` (added for
+  M1.13, issue #24) is forwarded to `agent.invoke()`'s `RunnableConfig.signal`
+  when present; existing callers that omit it are unaffected.
 
 ## Verification
 
