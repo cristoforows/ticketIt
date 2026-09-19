@@ -10,6 +10,24 @@ import {
   type Config,
   type OpencodeClient,
 } from "@opencode-ai/sdk";
+// The pinned `@opencode-ai/sdk@1.18.31` package ships two generated client
+// surfaces from the same server. The bare import above (the "v1" surface)
+// has no `.permission`/`.question` namespaces at all, and its `Event` union
+// declares a `"permission.updated"` shape that this pinned server build
+// never actually emits (see docs/evidence/m1/17-opencode-questions.md,
+// "Documentation research" / "Observed limitations"). The `/v2` subpath
+// export is the one whose generated types actually match what the running
+// server emits and exposes (`permission.asked`, `question.asked`, plus
+// `client.permission.list()/.reply()` and `client.question.list()/.reply()/
+// .reject()` querying `/permission` and `/question` directly) — confirmed
+// by fetching the live server's own `/doc` OpenAPI document, not just by
+// reading either package's shipped `.d.ts` files. Both clients talk to the
+// same headless server process; only the generated request/response shapes
+// differ. `startManagedOpenCode` constructs both so callers get the
+// session/prompt helpers already proven by M1.5's boot test (via the v1
+// `client`) and the permission/question surface this slice adds (via
+// `v2Client`, see `src/pending.ts`).
+import { createOpencodeClient as createOpencodeV2Client, type OpencodeClient as OpencodeV2Client } from "@opencode-ai/sdk/v2";
 import { isolatedEnvOverrides, makeIsolatedPaths, type IsolatedPaths } from "./env.js";
 import { resolveOpencodeBinDir } from "./locate.js";
 
@@ -82,8 +100,16 @@ export interface ManagedOpenCodeCloseResult {
 }
 
 export interface ManagedOpenCode {
-  /** The full generated OpenCode SDK client. */
+  /** The full generated OpenCode SDK client (the "v1" surface; session/prompt/messages). */
   client: OpencodeClient;
+  /**
+   * The `/v2` generated OpenCode SDK client, pointed at the same server and
+   * directory as `client`. Use this for `.permission`/`.question`
+   * (list/reply/reject) and for anything else declared only in the `/v2`
+   * subpath's generated types — see the module-level comment on the import
+   * above for why two client instances exist.
+   */
+  v2Client: OpencodeV2Client;
   /** Convenience helpers layered on `client.session`. */
   session: ManagedOpenCodeSessionHelpers;
   serverUrl: string;
@@ -217,6 +243,7 @@ export async function startManagedOpenCode(options: StartManagedOpenCodeOptions)
 
   const pid = capturedChild?.pid;
   const client = createOpencodeClient({ baseUrl: server.url, directory: projectDir });
+  const v2Client = createOpencodeV2Client({ baseUrl: server.url, directory: projectDir });
 
   const session: ManagedOpenCodeSessionHelpers = {
     async create(title) {
@@ -283,6 +310,7 @@ export async function startManagedOpenCode(options: StartManagedOpenCodeOptions)
 
   return {
     client,
+    v2Client,
     session,
     serverUrl: server.url,
     projectDir,
