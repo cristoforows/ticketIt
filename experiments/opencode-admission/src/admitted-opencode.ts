@@ -32,6 +32,12 @@ export const ADMISSION_ENV = {
   resource: "TICKETIT_RESOURCE",
   holdPollMs: "TICKETIT_HOLD_POLL_MS",
   holdMaxAttempts: "TICKETIT_HOLD_MAX_ATTEMPTS",
+  /** #21 addition: gate every tool call (using its own id as the ledger action), not just one configured `action`. */
+  gateAllTools: "TICKETIT_GATE_ALL_TOOLS",
+  /** #21 addition: register a plugin tool with this id (paired with `customToolMarkerFile`). */
+  customToolName: "TICKETIT_CUSTOM_TOOL_NAME",
+  /** #21 addition: marker file the registered custom tool appends to when it actually executes. */
+  customToolMarkerFile: "TICKETIT_CUSTOM_TOOL_MARKER_FILE",
 } as const;
 
 export interface StartAdmittedOpenCodeOptions {
@@ -69,6 +75,20 @@ export interface StartAdmittedOpenCodeOptions {
   holdMaxAttempts?: number;
   /** Supply a pre-existing FakeClock (e.g. to share one across assertions). Defaults to a fresh `FakeClock(0)`. */
   clock?: FakeClock;
+  /**
+   * #21 addition: gate EVERY tool call (built-in, plugin-registered, or
+   * MCP-served), using each tool's own id as the ledger `action`, instead
+   * of only the single configured `action`/tool id. Default false (#20's
+   * original single-action behavior, unchanged).
+   */
+  gateAllTools?: boolean;
+  /**
+   * #21 addition: also register one custom plugin tool (via
+   * `@opencode-ai/plugin`'s `tool()` helper) whose `execute` appends a
+   * line to `markerFile` when it actually runs. Omitted by default (no
+   * custom tool registered), matching #20.
+   */
+  customTool?: { name: string; markerFile: string };
 }
 
 export interface AdmittedOpenCode {
@@ -120,6 +140,13 @@ export async function startAdmittedOpenCode(options: StartAdmittedOpenCodeOption
   }
   if (options.holdMaxAttempts !== undefined) {
     envVars[ADMISSION_ENV.holdMaxAttempts] = String(options.holdMaxAttempts);
+  }
+  if (options.gateAllTools) {
+    envVars[ADMISSION_ENV.gateAllTools] = "1";
+  }
+  if (options.customTool) {
+    envVars[ADMISSION_ENV.customToolName] = options.customTool.name;
+    envVars[ADMISSION_ENV.customToolMarkerFile] = options.customTool.markerFile;
   }
 
   // `startManagedOpenCode` (opencode-harness) spawns the OpenCode process

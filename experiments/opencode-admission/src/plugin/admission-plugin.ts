@@ -77,8 +77,35 @@
  * for `HOME`/`XDG_*`, relying on `createOpencodeServer` spawning with
  * `{...process.env}` — see `docs/evidence/m1/16-opencode-boot.md`,
  * "Observed limitations").
+ *
+ * Extended for M1.10 (issue #21), the action-path coverage matrix, with two
+ * additive capabilities, both OFF by default so every #20 test above is
+ * unaffected:
+ *
+ * 1. **Gate-all-tools mode** (`TICKETIT_GATE_ALL_TOOLS=1`): instead of only
+ *    gating `input.tool === action` (one configured tool id, default
+ *    "bash"), `tool.execute.before` gates EVERY tool call, using the
+ *    invoked tool's own id as the ledger `action` (keeping `resource`
+ *    fixed at the configured value). This is what makes a single
+ *    `AdmissionLedger` — with zero grants, i.e. "deny everything" — usable
+ *    to sweep every built-in/custom/MCP tool id in one process: each tool
+ *    id becomes its own distinct `(action, resource)` scope, so
+ *    `ledger.decisions()` shows exactly which tool ids the hook actually
+ *    fired for, correlated by `action`.
+ * 2. **An optional plugin-registered custom tool**
+ *    (`TICKETIT_CUSTOM_TOOL_NAME`/`TICKETIT_CUSTOM_TOOL_MARKER_FILE`): when
+ *    both env vars are set, this plugin ALSO returns a `tool` hook
+ *    (`Hooks["tool"]`, `{[name]: ToolDefinition}` — confirmed in
+ *    `node_modules/@opencode-ai/plugin/dist/index.d.ts`) registering one
+ *    tool via `@opencode-ai/plugin`'s own `tool()` helper
+ *    (`node_modules/@opencode-ai/plugin/dist/tool.d.ts`). Its `execute`
+ *    appends a line to the given marker file — the side-effect proof for
+ *    issue #21's "a custom plugin-registered tool" coverage row. Whether
+ *    `tool.execute.before` also gates a plugin-registered tool (as opposed
+ *    to only OpenCode's own built-ins) is exactly the open question this
+ *    row exists to answer; see `docs/evidence/m1/21-opencode-coverage-matrix.md`.
  */
-import type { Plugin } from "@opencode-ai/plugin";
+import { tool, type Plugin } from "@opencode-ai/plugin";
 
 const DEFAULT_ACTION = "bash";
 const DEFAULT_RESOURCE = "shell";
@@ -120,6 +147,10 @@ const admissionPlugin: Plugin = async () => {
   const resource = process.env.TICKETIT_RESOURCE ?? DEFAULT_RESOURCE;
   const holdPollMs = Number(process.env.TICKETIT_HOLD_POLL_MS ?? DEFAULT_HOLD_POLL_MS);
   const holdMaxAttempts = Number(process.env.TICKETIT_HOLD_MAX_ATTEMPTS ?? DEFAULT_HOLD_MAX_ATTEMPTS);
+  // #21 additions, both off unless explicitly configured (see module comment above).
+  const gateAllTools = process.env.TICKETIT_GATE_ALL_TOOLS === "1";
+  const customToolName = process.env.TICKETIT_CUSTOM_TOOL_NAME;
+  const customToolMarkerFile = process.env.TICKETIT_CUSTOM_TOOL_MARKER_FILE;
 
   // callID -> admissionId, for admitted-but-not-yet-completed dispatches.
   // Module-scope (per plugin instance, i.e. per OpenCode process), so two
@@ -127,20 +158,24 @@ const admissionPlugin: Plugin = async () => {
   // never collide: each has its own callID.
   const dispatchedByCallId = new Map<string, string>();
 
-  async function admitOnce(): Promise<AdmitResult> {
+  async function admitOnce(gatedAction: string): Promise<AdmitResult> {
     const res = await fetch(`${ledgerUrl}/admit`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ roundId, ticketId, agentId, account, action, resource }),
+      body: JSON.stringify({ roundId, ticketId, agentId, account, action: gatedAction, resource }),
     });
     return (await res.json()) as AdmitResult;
   }
 
-  return {
+  const hooks: Awaited<ReturnType<Plugin>> = {
     "tool.execute.before": async (input, _output) => {
-      if (input.tool !== action) return;
+      // Gate-all-tools mode (#21): every tool id becomes its own ledger
+      // action; single-action mode (#20, unchanged): only the configured
+      // tool id is gated at all, matching every existing #20 test exactly.
+      if (!gateAllTools && input.tool !== action) return;
+      const gatedAction = gateAllTools ? input.tool : action;
 
-      let result = await admitOnce();
+      let result = await admitOnce(gatedAction);
       let attempts = 0;
       // "hold" means the ledger is disconnected but would otherwise allow
       // this scope (see AdmissionLedger#admit's precedence rules). This is
@@ -149,7 +184,7 @@ const admissionPlugin: Plugin = async () => {
       // 20-opencode-admission.md, "whether the hook can hold or only deny".
       while (result.decision === "hold" && attempts < holdMaxAttempts) {
         await sleep(holdPollMs);
-        result = await admitOnce();
+        result = await admitOnce(gatedAction);
         attempts += 1;
       }
 
@@ -187,6 +222,28 @@ const admissionPlugin: Plugin = async () => {
       });
     },
   };
+
+  // #21 addition: optionally register one custom plugin tool, so this
+  // package can test whether tool.execute.before (gated above, same hook,
+  // same code path as every built-in tool) also covers a plugin-registered
+  // tool, not just OpenCode's own built-ins. Off unless both env vars are
+  // set, so every #20 test (which sets neither) gets an identical Hooks
+  // object to before this change.
+  if (customToolName && customToolMarkerFile) {
+    hooks.tool = {
+      [customToolName]: tool({
+        description: "ticketit coverage-matrix fixture: appends a line to a marker file when actually executed.",
+        args: { line: tool.schema.string().default("executed") },
+        execute: async (args) => {
+          const fs = await import("node:fs/promises");
+          await fs.appendFile(customToolMarkerFile, `${args.line}\n`, "utf8");
+          return { output: `appended "${args.line}" to marker file` };
+        },
+      }),
+    };
+  }
+
+  return hooks;
 };
 
 export default admissionPlugin;
