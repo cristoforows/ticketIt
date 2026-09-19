@@ -1,6 +1,6 @@
 # V1 implementation plan
 
-**Status:** approved ten-milestone plan, published as issues #2–#11 against [v1 spec #1](https://github.com/cristoforows/ticketIt/issues/1). Application implementation and runtime validation have not started. Unresolved product choices remain in [open-decisions.md](open-decisions.md).
+**Status:** approved ten-milestone plan, published as issues #2–#11 against [v1 spec #1](https://github.com/cristoforows/ticketIt/issues/1). [M1's](https://github.com/cristoforows/ticketIt/issues/2) bounded adapter proofs are complete — see [integration-feasibility.md](integration-feasibility.md) and [docs/evidence/m1/](evidence/m1/README.md) — pending only the Owner's D3 decision on [#13](https://github.com/cristoforows/ticketIt/issues/13) ([PR #30](https://github.com/cristoforows/ticketIt/pull/30)). Application implementation (M2) has not started. Unresolved product choices remain in [open-decisions.md](open-decisions.md).
 
 This document mirrors the published milestone scope and native blocking relationships. The linked issues hold acceptance checklists and current execution status; keep the plan and affected detail docs aligned when that scope or sequencing changes. [V1 scope](v1-scope.md) records the approved product behavior.
 
@@ -34,9 +34,11 @@ Work the frontier: a milestone can start when its blockers are complete. M5 and 
 - **M7:** real native research and Grill Mode through LangChain/OpenRouter.
 - **M8:** real coding through managed OpenCode, independently of research delivery.
 
-## M1 — Foundational decisions and integration proofs
+## M1 — Foundational decisions and integration proofs — complete pending D3
 
 **Output:** tested architecture/execution contracts, pinned adapter versions, and evidence about supported integration paths.
+
+**Status:** all 18 sub-issues landed; the consolidated gate report is [#29](https://github.com/cristoforows/ticketIt/issues/29). The one item not resolved by M1 itself is **D3** (Agent/template compatibility), proposed in [PR #30](https://github.com/cristoforows/ticketIt/pull/30) and awaiting the Owner's approval comment on [#13](https://github.com/cristoforows/ticketIt/issues/13). M2 can begin; M2's own D3-dependent work should track that PR.
 
 - Resolve initial Agent/Ticket Template compatibility and human-assigned lifecycle rules without making the Agent determine completion.
 - Establish Swiftlet/Galley/Michelin ownership and expected work-claim, event, question, stop, and reconciliation contracts. Keep Round identity separate from engine identity.
