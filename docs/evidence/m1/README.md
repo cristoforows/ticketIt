@@ -2,9 +2,8 @@
 
 Evidence records for [M1 — Foundational decisions and integration
 proofs (#2)](https://github.com/cristoforows/ticketIt/issues/2), backing
-the bounded experiments in
-[docs/integration-feasibility.md](../../integration-feasibility.md)
-("Planned feasibility experiments").
+the bounded experiments and observed S1–S5 results in
+[docs/integration-feasibility.md](../../integration-feasibility.md).
 
 ## Ownership
 

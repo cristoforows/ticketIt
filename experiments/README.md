@@ -3,8 +3,7 @@
 Bounded, isolated adapter proofs for [M1 — Foundational decisions and
 integration proofs (#2)](https://github.com/cristoforows/ticketIt/issues/2).
 See [docs/integration-feasibility.md](../docs/integration-feasibility.md)
-("Planned feasibility experiments") for what each experiment (S1–S5) is
-meant to prove, and
+for the observed S1–S5 results and outstanding checks, and
 [docs/implementation-plan.md](../docs/implementation-plan.md) (M1 section)
 for how this fits the overall plan.
 
@@ -18,10 +17,11 @@ for how this fits the overall plan.
 - Findings here inform M1 decisions and evidence; they are not
   themselves a shipped feature, a chosen provider, or a chosen model.
 - There is no root `package.json` and no npm workspaces. Every
-  experiment is a fully independent npm package with its own
+  experiment is a separately managed npm package with its own
   `package.json` and `package-lock.json`. This is deliberate: parallel
   M1 slices add experiment packages without ever touching a shared
-  manifest or lockfile, so they cannot conflict with each other.
+  manifest or lockfile. Shared harness changes can still affect their
+  consumers.
 
 ## Layout
 
@@ -34,12 +34,18 @@ experiments/
 └── <name>/                # one directory per experiment, e.g. tracer-fake-clock/
 ```
 
-`experiments/shared/` is the one package other experiment packages may
-depend on, through a local `dependencies: { "shared": "file:../shared" }`
-entry — never a published registry package, never a path outside
-`experiments/`.
+Experiment packages reuse utilities from `experiments/shared/` and harnesses
+or fixtures from sibling packages through local `file:../<package>`
+dependencies. Examples include `file:../shared`, `file:../opencode-harness`,
+`file:../native-harness`, and `file:../openrouter-fidelity`. Keep these
+dependencies inside `experiments/`; do not publish the local harnesses or
+replace them with registry dependencies.
 
 ## Running an experiment
+
+Use the Node version pinned in `experiments/.nvmrc`. Follow the package's
+README for prerequisites, including separate `npm ci` runs in required
+sibling harnesses and PostgreSQL setup where applicable.
 
 ```sh
 cd experiments/<name>
@@ -47,17 +53,19 @@ npm ci
 npm test
 ```
 
-`npm ci` requires the committed `package-lock.json` in that package; it
-does not touch any other package.
+`npm ci` uses the committed `package-lock.json` in that package. It does
+not replace the setup steps for sibling packages consumed through local
+`file:` dependencies.
 
 ## Adding a new experiment
 
 1. Copy the template: `cp -R experiments/_template experiments/<name>`.
 2. Rename the `"name"` field in `experiments/<name>/package.json` and
    update its `"description"`.
-3. Write the experiment and its tests. Depend on `shared` via
-   `file:../shared` if useful; keep every other dependency pinned to an
-   exact version (no `^` or `~`).
+3. Write the experiment and its tests. Reuse utilities, harnesses, or
+   fixtures through local `file:../<package>` dependencies where useful;
+   document their setup prerequisites. Pin direct registry dependencies
+   to exact versions (no `^` or `~`).
 4. Run `npm install` inside `experiments/<name>/` to generate that
    package's own `package-lock.json`, then commit it.
 5. Add exactly one evidence file at
@@ -69,11 +77,12 @@ does not touch any other package.
 ## Toolchain
 
 - Node: pinned in `experiments/.nvmrc` and every package's
-  `engines.node` (`26.9.0`, matching the development machine).
+  `engines.node` (`26.9.0`).
 - TypeScript + test runner: Node's built-in test runner (`node --test`)
   with `tsx` as the `--import` loader. See "Why this runner" below.
-- Every dependency is pinned to an exact version; lockfiles are
-  committed for every package.
+- Direct registry dependencies are pinned to exact versions; local
+  dependencies use `file:` references. Lockfiles are committed for every
+  package and fix the resolved registry dependency trees.
 
 ### Why this runner
 
