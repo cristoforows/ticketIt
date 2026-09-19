@@ -22,7 +22,7 @@ npm ci
 npm test
 ```
 
-`npm test` runs three suites end to end:
+`npm test` runs eight suites end to end:
 
 - `test/boot.test.ts`: starts a `StubModelServer`, starts a managed OpenCode
   server against it, creates a session, sends a prompt, asserts the stub
@@ -39,6 +39,16 @@ npm test
   the decoy.
 - `test/versions.test.ts`: confirms the pinned `opencode-ai` and
   `@opencode-ai/sdk` versions resolve to the matching lockstep release.
+- `test/permission-round-trip.test.ts`, `test/question-round-trip.test.ts`,
+  `test/reconnect-recovery.test.ts`, `test/duplicate-reply.test.ts`,
+  `test/once-versus-always.test.ts`: added for
+  [M1.6 — OpenCode questions, permission requests, and event reconciliation
+  (#17)](https://github.com/cristoforows/ticketIt/issues/17). See
+  `docs/evidence/m1/17-opencode-questions.md` for exact versions, the SDK
+  endpoints/types these exercise (including a documented mismatch between
+  the pinned SDK's default-export generated types and what the server
+  actually emits), fixture evidence per test, and the once-vs-always
+  finding that feeds the admission bridge slice (#20).
 
 ## Public API (`src/index.ts`)
 
@@ -75,6 +85,38 @@ npm test
   pinned executable and its version, and the `node_modules/.bin` directory
   that must be on `PATH` for the SDK's server helper (which spawns the bare
   command `opencode`) to find it.
+- `ManagedOpenCode.v2Client` — a second generated SDK client instance (from
+  the pinned package's `@opencode-ai/sdk/v2` subpath), pointed at the same
+  running server/directory as `client`. Added for #17: this pinned build's
+  bare `@opencode-ai/sdk` export has no `.permission`/`.question`
+  namespaces and declares an `Event` union whose permission shape
+  (`"permission.updated"`) the server never actually emits; the `/v2`
+  subpath's generated types are the ones that match observed runtime
+  behavior (`permission.asked`, `question.asked`, `client.permission.list()/
+  .reply()`, `client.question.list()/.reply()/.reject()`). See
+  `docs/evidence/m1/17-opencode-questions.md`.
+- `subscribeEvents(client)` — subscribes to `GET /event` (works with either
+  `client` or `v2Client`) and buffers every event into `.events` in arrival
+  order; `stop()` aborts the underlying fetch, `closed` resolves once the
+  background consumption loop has actually exited.
+- `listPending(v2Client, sessionId)` — queries `client.permission.list()`
+  and `client.question.list()` (REST queries, not the event stream) and
+  returns the pending permission/question requests belonging to
+  `sessionId`.
+- `replyPermission(v2Client, requestId, "once" | "always" | "reject")` /
+  `replyQuestion(v2Client, requestId, answers)` / `rejectQuestion(v2Client,
+  requestId)` — reply to a pending request via `POST /permission/{id}/reply`
+  or `POST /question/{id}/reply` / `/reject`. Return `{ok, error}` rather
+  than throwing, so a duplicate/rejected reply's exact engine error can be
+  inspected.
+- `scriptBashToolCall(...)` / `scriptQuestionToolCall(...)` /
+  `scriptTextTurn(...)` — build `ScriptedTurn`s for `StubModelServer` that
+  invoke OpenCode's built-in `"bash"` or `"question"` tools (OpenAI-style
+  `tool_calls`), or a plain follow-up text turn.
+- `markerAppendCommand(path, line?)` / `readMarkerLines(path)` — a shell
+  command (for `scriptBashToolCall`) that appends one line to a marker
+  file, and a reader for it, used as an external, engine-independent count
+  of how many times a scripted shell call actually executed.
 
 ## What this template pins
 

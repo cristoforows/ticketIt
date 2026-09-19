@@ -1,9 +1,29 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 
-/** One pre-scripted assistant turn the stub will return for a chat completion. */
+/**
+ * One OpenAI-style tool call the stub can script into an assistant turn
+ * (`choices[0].message.tool_calls`, or the streamed delta equivalent).
+ */
+export interface ScriptedToolCall {
+  /** Tool call id, echoed back by the engine in the follow-up tool-result message. */
+  id: string;
+  /** Registered OpenCode tool id, e.g. "bash" or "question" (see `client.tool.ids()`). */
+  name: string;
+  /** JSON-encoded arguments string, matching the tool's declared parameters schema. */
+  arguments: string;
+}
+
+/**
+ * One pre-scripted assistant turn the stub will return for a chat
+ * completion. Exactly one of `content` (plain text, finish_reason "stop")
+ * or `toolCalls` (finish_reason "tool_calls") is meaningful per turn: when
+ * `toolCalls` is non-empty, `content` is not sent (matches the OpenAI
+ * tool-calling shape, where a tool-call turn carries no assistant text).
+ */
 export interface ScriptedTurn {
   content: string;
+  toolCalls?: ScriptedToolCall[];
 }
 
 /** A request the stub received, logged so tests can assert what the engine sent. */
@@ -134,6 +154,7 @@ export class StubModelServer {
     const turn = this.nextTurn();
     const id = `chatcmpl-stub-${Date.now()}`;
     const created = Math.floor(Date.now() / 1000);
+    const hasToolCalls = Boolean(turn.toolCalls && turn.toolCalls.length > 0);
 
     if (body?.stream) {
       res.writeHead(200, {
@@ -141,26 +162,60 @@ export class StubModelServer {
         "cache-control": "no-cache",
         connection: "keep-alive",
       });
-      const deltaChunk = {
-        id,
-        object: "chat.completion.chunk",
-        created,
-        model: this.modelId,
-        choices: [{ index: 0, delta: { role: "assistant", content: turn.content }, finish_reason: null }],
-      };
+      const deltaChunk = hasToolCalls
+        ? {
+            id,
+            object: "chat.completion.chunk",
+            created,
+            model: this.modelId,
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  role: "assistant",
+                  tool_calls: turn.toolCalls!.map((tc, index) => ({
+                    index,
+                    id: tc.id,
+                    type: "function",
+                    function: { name: tc.name, arguments: tc.arguments },
+                  })),
+                },
+                finish_reason: null,
+              },
+            ],
+          }
+        : {
+            id,
+            object: "chat.completion.chunk",
+            created,
+            model: this.modelId,
+            choices: [{ index: 0, delta: { role: "assistant", content: turn.content }, finish_reason: null }],
+          };
       res.write(`data: ${JSON.stringify(deltaChunk)}\n\n`);
       const doneChunk = {
         id,
         object: "chat.completion.chunk",
         created,
         model: this.modelId,
-        choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+        choices: [{ index: 0, delta: {}, finish_reason: hasToolCalls ? "tool_calls" : "stop" }],
       };
       res.write(`data: ${JSON.stringify(doneChunk)}\n\n`);
       res.write("data: [DONE]\n\n");
       res.end();
       return;
     }
+
+    const message = hasToolCalls
+      ? {
+          role: "assistant",
+          content: null,
+          tool_calls: turn.toolCalls!.map((tc) => ({
+            id: tc.id,
+            type: "function",
+            function: { name: tc.name, arguments: tc.arguments },
+          })),
+        }
+      : { role: "assistant", content: turn.content };
 
     res.writeHead(200, { "content-type": "application/json" });
     res.end(
@@ -172,8 +227,8 @@ export class StubModelServer {
         choices: [
           {
             index: 0,
-            message: { role: "assistant", content: turn.content },
-            finish_reason: "stop",
+            message,
+            finish_reason: hasToolCalls ? "tool_calls" : "stop",
           },
         ],
         usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
