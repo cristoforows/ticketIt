@@ -5,7 +5,12 @@ the shared `AdmissionLedger`, proving the core of feasibility experiment
 S2 ("Live permission and disconnect admission",
 `docs/integration-feasibility.md`) for open decision **D1**. Built for
 [M1.9 — OpenCode live admission bridge across disconnect, expiry,
-revocation, and stop (#20)](https://github.com/cristoforows/ticketIt/issues/20).
+revocation, and stop (#20)](https://github.com/cristoforows/ticketIt/issues/20),
+extended for
+[M1.10 — OpenCode action-path coverage matrix
+(#21)](https://github.com/cristoforows/ticketIt/issues/21) with a
+gate-all-tools mode, an optional custom plugin-registered tool, and the
+full action-path coverage sweep.
 
 This is a **new, independent experiment package** (its own
 `package.json`/lockfile), separate from `experiments/opencode-harness`
@@ -19,7 +24,14 @@ See `docs/evidence/m1/20-opencode-admission.md` for exact versions,
 documentation research (the plugin registration/hook mechanism for this
 pinned build, cited from both the installed package and the compiled
 CLI's own embedded text), fixture evidence per scenario, and decision
-impacts (D1, D8).
+impacts (D1, D8). See `docs/evidence/m1/21-opencode-coverage-matrix.md`
+for the full action-path coverage matrix (every built-in tool, a custom
+plugin tool, a local stdio MCP tool, nested-shell/worktree-sandbox
+findings, the ambient-permission-vs-hook question, and model-only
+continuation), including two failed gates routed to D1 (model-only
+continuation; nested-shell sub-action granularity) and one unresolved
+risk (the local MCP tool never became dispatchable on this pinned
+build).
 
 ## Running
 
@@ -29,8 +41,11 @@ npm ci
 npm test
 ```
 
-`npm test` runs 8 suites end to end (all fixture/stub, no real network
-provider):
+`npm test` runs 14 test cases across 13 suites end to end (all
+fixture/stub, no real network provider), with `--test-timeout=60000` as
+a hard per-test bound (added for #21 after a genuine, reproducible hang
+during development; see the evidence record's "Observed limitations").
+The first 8 (#20, unchanged) are:
 
 - `test/00-baseline.test.ts`: the plugin loads for this pinned build, a
   valid grant admits the shell tool, and the ledger records exactly one
@@ -73,6 +88,47 @@ provider):
   still runs and still denies once the ledger's grant is revoked, proving
   external admission is a viable gate independent of engine memory.
 
+The 6 added for #21 (the action-path coverage matrix; see
+`docs/evidence/m1/21-opencode-coverage-matrix.md` for the full matrix and
+discussion):
+
+- `test/08-ambient-permission-vs-hook.test.ts`: the highest-priority
+  question this slice asks — does OpenCode's own ambient
+  `OPENCODE_PERMISSION` env var (found by #19 to silently override a
+  Round's native `permission.bash` config) also defeat this bridge's
+  hook? No: with zero grants, the hook still denies regardless.
+- `test/09-model-only-continuation.test.ts`: several text-only assistant
+  turns, ledger fully disconnected throughout; zero `admit()` calls are
+  ever made, since no tool is invoked — a structural, unclosable gap at
+  this hook position, recorded as a failed gate for D1.
+- `test/10-nested-shell-and-worktree-sandbox.test.ts`: one admitted
+  "bash" call runs git commit + a push over a local fake-SSH transport +
+  a loopback HTTP request; the ledger sees exactly one decision covering
+  all three ("gated only coarsely"). The same call also reads a marker
+  file placed outside the OpenCode-managed project directory and this
+  repository's own git worktree, demonstrating plainly that the worktree
+  is not a filesystem sandbox. Also documents a newly-discovered native
+  `permission.external_directory` gate (defaults to "ask" on this pinned
+  build) that silently hangs an unconfigured caller.
+- `test/11-built-in-tools-sweep.test.ts`: with `gateAllTools: true` and
+  zero grants, every other built-in tool id (`read`, `glob`, `grep`,
+  `edit`, `write`, `task`, `webfetch`, `todowrite`, `skill`, `question`)
+  is swept in one parallel-tool-call turn; every one is gated and denied,
+  proving the hook mechanism has no built-in-tool blind spot (though
+  #20's shipped single-action default gates only "bash" until
+  `gateAllTools` — or an equivalent — is actually configured). Also
+  confirms `websearch`/`apply_patch` are registered but not offered to
+  the generic stub provider ("not applicable" for provider-executed
+  tools, per D7).
+- `test/12-custom-tool-and-mcp-tool.test.ts` (two tests): a custom
+  plugin-registered tool (via this slice's `customTool` option) is fully
+  gated, both denied and allowed — no new mechanism needed. A local
+  stdio MCP tool (`test/fixtures/local-mcp-server.mjs`, a minimal
+  dependency-free MCP server) connects successfully and answers
+  `tools/list` correctly, but never becomes dispatchable on this pinned
+  build — a documented negative result/open risk for D1, not a passing
+  gate proof.
+
 ## Public API (`src/index.ts`)
 
 - `startAdmittedOpenCode(options)` — starts an `AdmissionLedger` (backed
@@ -82,14 +138,23 @@ provider):
   admission-bridge plugin via an absolute `file://` URL in
   `Config.plugin`. Returns `{ ledger, clock, ledgerServer, managed,
   agentId, account, ticketId, roundId, action, resource, close() }`.
+  Options added for #21, both additive and off by default (every #20
+  test is unaffected): `gateAllTools?: boolean` — gate EVERY tool call,
+  using each tool's own id as the ledger `action`, instead of only the
+  single configured `action`/tool id; `customTool?: { name, markerFile }`
+  — also register one plugin tool (via `@opencode-ai/plugin`'s `tool()`
+  helper) whose `execute` appends a line to `markerFile`, for testing
+  whether the hook covers a plugin-registered tool the same way it covers
+  built-ins.
 - `ADMISSION_PLUGIN_URL` — the absolute `file://` URL to the plugin
   module (`src/plugin/admission-plugin.ts`).
 - `ADMISSION_ENV` — the environment-variable names the plugin reads
   inside the spawned OpenCode process (ledger URL, agent/account/ticket/
-  round identifiers, the gated tool name, and the bounded hold-poll
-  parameters). Exported so the bridge and its tests share one source of
-  truth for this process-boundary contract instead of duplicated string
-  literals.
+  round identifiers, the gated tool name, the bounded hold-poll
+  parameters, and — added for #21 — `gateAllTools`/`customToolName`/
+  `customToolMarkerFile`). Exported so the bridge and its tests share one
+  source of truth for this process-boundary contract instead of
+  duplicated string literals.
 - `attachRoundMapping(roundId, engineExecutionReference)` — a small local
   helper for the Round-ID/engine-execution-reference identity mapping
   (ADR 0002), for a Round ID minted *before* the OpenCode session exists
