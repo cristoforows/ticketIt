@@ -1,0 +1,30 @@
+{
+  "name": "opencode-admission",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenCode live admission bridge: a plugin whose before-tool-execution hook consults the shared admission ledger (over an HTTP loopback facade) for the built-in shell tool, proving feasibility experiment S2 (docs/integration-feasibility.md) and open decision D1 across disconnect, expiry, revocation, and Stop. Built for M1.9 (issue #20); depends on experiments/opencode-harness and experiments/shared through local file: dependencies, never modifying either.",
+  "type": "module",
+  "engines": {
+    "node": "26.9.0"
+  },
+  "scripts": {
+    "test": "node --import tsx --test --test-timeout=60000 \"test/**/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "1.18.31",
+    "@opencode-ai/sdk": "1.18.31",
+    "opencode-ai": "1.18.31",
+    "opencode-harness": "file:../opencode-harness",
+    "shared": "file:../shared"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.1",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2"
+  },
+  "allowScripts": {
+    "opencode-ai@1.18.31": true,
+    "esbuild@0.28.2": true
+  }
+}

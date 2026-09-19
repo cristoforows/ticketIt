@@ -1,0 +1,22 @@
+{
+  "name": "tracer-fake-clock",
+  "version": "0.1.0",
+  "private": true,
+  "description": "M1.3 tracer: proves the experiments workspace path end to end (fresh clone -> npm ci -> npm test -> recorded evidence) using the shared FakeClock. See docs/evidence/m1/14-experiment-workspace.md.",
+  "type": "module",
+  "engines": {
+    "node": "26.9.0"
+  },
+  "scripts": {
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "shared": "file:../shared"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.1",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2"
+  }
+}

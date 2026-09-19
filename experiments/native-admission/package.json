@@ -1,0 +1,28 @@
+{
+  "name": "native-admission",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Native-path admission: wraps native-harness's createAgent tool execution and model invocation with the shared admission ledger, so disconnect/expiry/revocation/pending-Stop are checked before every tool call and every model call (provider-executed web search happens inside the model call, so that is also the only place it can be admitted). For M1.13 (issue #24). Depends on native-harness and shared via file: dependencies.",
+  "type": "module",
+  "engines": {
+    "node": "26.9.0"
+  },
+  "scripts": {
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@langchain/core": "1.2.11",
+    "@langchain/langgraph": "1.4.15",
+    "@langchain/langgraph-checkpoint-postgres": "1.0.5",
+    "native-harness": "file:../native-harness",
+    "pg": "8.23.0",
+    "shared": "file:../shared"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.1",
+    "@types/pg": "8.23.1",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2"
+  }
+}

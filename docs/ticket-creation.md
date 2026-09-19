@@ -7,9 +7,11 @@ Do not introduce a fixed General/Research/Coding work-type taxonomy. Tickets rem
 Use two built-in ticket templates in v1:
 
 - **Basic:** goal, context, success criteria, and constraints; completion through human acceptance.
-- **Coding:** the basic fields plus repository and PR sections; completion through merging the reviewed PR. Select the target repository before execution; the PR is produced during the coding workflow.
+- **Coding:** the basic fields plus repository and PR sections; completion through merging the reviewed PR. Select the target repository before repository-targeted coding execution; investigation can precede implementation.
 
 Templates determine presentation, required information, and the default completion condition. Retain that condition on the ticket independently of its assigned agent. Both templates create generic tickets rather than permanent work types.
+
+Under the [accepted D3 decision](decisions/d3-agent-template-compatibility.md), the Owner may assign any Agent to either template. A Researcher can investigate a Coding Ticket before a Coder implements it; a Coder can work on a Basic Ticket whose completion remains human acceptance. A Round may contribute without completing the entire Ticket. Relevant repository inputs must be available on either template when needed, using one Ticket repository reference.
 
 Keep the template structure extensible for user-defined templates and more customizable fields and completion rules later. A custom-template editor or full form/workflow designer is deferred beyond v1.
 
@@ -50,6 +52,8 @@ Title-only capture does not authorize agent execution. A goal and success criter
 
 This requirement applies regardless of whether the ticket becomes Ready before or after agent assignment. Context and constraints remain optional guidance.
 
-Coding tickets also explicitly select one target repository. The runner resolves that repository to a configured local checkout; see `agent-execution.md`.
+Repository-targeted coding work explicitly selects one target repository regardless of template. The runner resolves it to a configured local checkout; see `agent-execution.md`. A Coding-template research assignment does not need a checkout solely because of its template; actual actions still require their inputs and Permissions. Missing required inputs or an unavailable runtime can prevent execution without creating a template-based assignment prohibition.
 
 Readiness establishes that the required information is present; it does not guarantee that the ticket contains every answer an agent may need. Agents investigate available context and make reasonable, reversible assumptions within scope, seeking human input only when necessary.
+
+Human-assigned Tickets can enter Ready and In Progress with a title alone. Manual Blocked/resume, rework, completion, and rejected status skips follow the [D3 manual transition table](decisions/d3-agent-template-compatibility.md#2-human-assigned-workflow). Human work creates no new Round and retains any history from previous Agent assignments. Reassignment while Ready must still satisfy the Agent-readiness checks above before it requests execution.

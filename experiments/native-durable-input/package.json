@@ -1,0 +1,27 @@
+{
+  "name": "native-durable-input",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Native-harness durable question, duplicate-safe continuation, fixed-inputs-across-pause, restart-semantics, and process-death-rule proof for M1.12 (issue #23). Depends on native-harness (file:../native-harness) and shared (file:../shared); reuses native-harness's createAgent/checkpointer/RoundRegistry and its additive AIMessage/tool/z/interrupt/Command re-exports so every LangChain/LangGraph object this package constructs comes from native-harness's own installed copies (avoids a dual-package instanceof hazard -- see the note in native-harness/src/index.ts).",
+  "type": "module",
+  "engines": {
+    "node": "26.9.0"
+  },
+  "scripts": {
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "native-harness": "file:../native-harness",
+    "shared": "file:../shared",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@langchain/core": "1.2.11",
+    "@langchain/langgraph": "1.4.15",
+    "@types/node": "26.6.1",
+    "@types/pg": "8.23.1",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2"
+  }
+}

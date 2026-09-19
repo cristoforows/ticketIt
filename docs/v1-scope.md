@@ -35,7 +35,7 @@ Coding runs directly on the host in per-ticket Git worktrees. This is not a comp
 
 - A title is sufficient to capture a Backlog ticket.
 - A ticket may be assigned to the owner or an agent.
-- Before agent execution becomes eligible, require a goal and success criteria. Coding work also selects one target repository, mapped by Michelin to a local checkout.
+- Before agent execution becomes eligible, require a goal and success criteria. Repository-targeted coding work also selects one target repository, mapped by Michelin to a local checkout, regardless of template.
 - Manual-entry guidance covers goal, context, success criteria, and constraints.
 - Use a generic ticket model rather than permanent work-type enums.
 
@@ -44,7 +44,7 @@ Coding runs directly on the host in per-ticket Git worktrees. This is not a comp
 | Basic | Goal, context, success criteria, constraints | Human acceptance |
 | Coding | Basic fields plus repository and PR sections | Reviewed PR merged |
 
-The ticket retains its completion condition independently of its assignee. Templates do not permanently bind tickets to execution engines. Supported initial agent/template combinations still need explicit validation rules; see open decisions.
+The ticket retains its completion condition independently of its assignee. The [accepted D3 decision](decisions/d3-agent-template-compatibility.md) permits any Agent on either template: validate required inputs and actual action prerequisites rather than a template/capability whitelist. A Researcher may contribute to a Coding Ticket before implementation; a Coder may work on a Basic Ticket with human-acceptance completion. Relevant repository inputs are available on either template when needed. Temporary MVP gaps must be documented as implementation limitations with follow-up work, not permanent assignment restrictions.
 
 ## Board, list, and details
 
@@ -77,7 +77,7 @@ Ticket status, round outcome, and archive visibility are separate concepts.
 
 Do not automatically launch new rounds after failure, interruption, or stop. Reconnection of intact execution is continuation, not a retry of an ended round. Exact review evidence and exceptional PR cases remain open.
 
-Human-assigned tickets do not trigger agents and are moved into In Progress by the owner. Manual progression must still respect the ticket's completion condition; detailed human/engine compatibility rules are an open decision.
+Human-assigned tickets do not trigger agents and are moved into In Progress by the owner. Title alone is sufficient for human Ready/In Progress; the owner may manually mark their own work Blocked and resume it. Manual progression, rework, and rejected status skips follow [D3](decisions/d3-agent-template-compatibility.md#2-human-assigned-workflow) and retain the completion condition. Human work creates no new Round but preserves earlier Agent history. Reviewed-merge evidence remains D2's decision and is implemented in M8 for both assignee kinds; no early manual Done shortcut is introduced.
 
 ### Active ticket presentation
 

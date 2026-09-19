@@ -1,6 +1,6 @@
 # V1 implementation plan
 
-**Status:** approved ten-milestone plan, published as issues #2–#11 against [v1 spec #1](https://github.com/cristoforows/ticketIt/issues/1). Application implementation and runtime validation have not started. Unresolved product choices remain in [open-decisions.md](open-decisions.md).
+**Status:** approved ten-milestone plan, published as issues #2–#11 against [v1 spec #1](https://github.com/cristoforows/ticketIt/issues/1). [M1's](https://github.com/cristoforows/ticketIt/issues/2) bounded adapter proofs are complete — see [integration-feasibility.md](integration-feasibility.md) and [docs/evidence/m1/](evidence/m1/README.md) — and the Owner has accepted [D3](decisions/d3-agent-template-compatibility.md). Application implementation (M2) has not started. Remaining product choices and failed integration gates stay in [open-decisions.md](open-decisions.md).
 
 This document mirrors the published milestone scope and native blocking relationships. The linked issues hold acceptance checklists and current execution status; keep the plan and affected detail docs aligned when that scope or sequencing changes. [V1 scope](v1-scope.md) records the approved product behavior.
 
@@ -34,9 +34,11 @@ Work the frontier: a milestone can start when its blockers are complete. M5 and 
 - **M7:** real native research and Grill Mode through LangChain/OpenRouter.
 - **M8:** real coding through managed OpenCode, independently of research delivery.
 
-## M1 — Foundational decisions and integration proofs
+## M1 — Foundational decisions and integration proofs — D3 resolved
 
 **Output:** tested architecture/execution contracts, pinned adapter versions, and evidence about supported integration paths.
+
+**Status:** the consolidated experiment gate report is [#29](https://github.com/cristoforows/ticketIt/issues/29). [The Owner's decision on #13](https://github.com/cristoforows/ticketIt/issues/13#issuecomment-5743245026) resolves **D3**: any Agent may be assigned to either Template, retaining required inputs, completion conditions, and execution locks. [The accepted decision](decisions/d3-agent-template-compatibility.md) includes the human workflow and implementation rules for M2, M4, and M8. M2 can begin; failed integration gates remain assigned to their later milestones.
 
 - Resolve initial Agent/Ticket Template compatibility and human-assigned lifecycle rules without making the Agent determine completion.
 - Establish Swiftlet/Galley/Michelin ownership and expected work-claim, event, question, stop, and reconciliation contracts. Keep Round identity separate from engine identity.
@@ -182,6 +184,8 @@ These are implementation recommendations, not a frozen database schema or new pr
 | Accounting | Preparation/round usage observations, provider generation/message IDs, estimate provenance, time intervals |
 
 Galley alone changes authoritative domain records. Michelin reports facts and requests actions; Swiftlet renders state and submits owner commands. Framework checkpoints and engine histories are execution records, not substitutes for the application's state machine.
+
+The behavioral contract for this boundary, including identity, claiming, events, commands, and reconciliation, is recorded in [docs/contracts/execution-interface.md](contracts/execution-interface.md); the hard-to-reverse choices behind it are recorded in [docs/adr/](adr/).
 
 ## Engineering choices to make during implementation
 

@@ -1,240 +1,197 @@
-# D3 — Agent/Template compatibility and human-assigned workflow rules (proposal)
+# D3 — Owner-chosen Agents and human-assigned workflow
 
-**Status:** Proposed, awaiting Owner decision on [#13](https://github.com/cristoforows/ticketIt/issues/13).
-This document is a draft. It does not resolve D3; the Owner resolves it by approving
-options here (or requesting changes) on #13. See [open-decisions.md](../open-decisions.md).
+**Status:** Accepted. The [Owner's decision on #13](https://github.com/cristoforows/ticketIt/issues/13#issuecomment-5743245026)
+rejects template-based Agent restrictions, approves the human-assigned workflow and
+existing execution/field-lock rules, and allows temporary MVP implementation limits.
+This revision of [PR #30](https://github.com/cristoforows/ticketIt/pull/30) records that
+decision in place of the original restrictive proposal.
 
-## Scope
+## Scope and invariants
 
-Answers the four sub-questions in #13 for v1 only:
+This decision answers assignment, human workflow, reassignment, and manual-status
+questions for M2, M4, and M8. It does not resolve D2 (review/merge evidence), D4
+(exceptional PRs and repository/template changes after delivery), or D5 (stranded
+runner recovery).
 
-1. Supported Agent capability x Ticket Template combinations.
-2. The human-assigned manual workflow, including reaching Done for a reviewed-PR-merge
-   completion condition without an Agent.
-3. Reassignment (human<->Agent, Agent<->Agent).
-4. Manual status changes that must be rejected on Agent-assigned Tickets because
-   execution owns them.
+- The Owner chooses the Assignee. Templates supply presentation, information, and
+  default completion conditions; they do not whitelist execution engines.
+- Tickets remain generic. No permanent work-type or one-capability-per-Ticket rule
+  is introduced.
+- Assignment and reassignment never change the Ticket's completion condition.
+- A Round can contribute to a Ticket without completing the entire Ticket.
+- Human assignment never launches automation. An unarchived Ready Ticket with an
+  Agent requests execution in either order, subject to required-input validation.
+- Open-Round field locks, live Permissions, confirmed Stop, and explicit requeue
+  remain in force. Best-effort work does not bypass these controls.
 
-It does **not** resolve D2 (human-review evidence and merge authority) or D4 (exceptional
-PRs and template/repository changes after delivery). Both are explicitly routed, not
-answered, in [Routing](#routing-d2-and-d4-not-resolved-here).
+## 1. Assignment and execution prerequisites
 
-## Invariants held by every option below
+### Accepted matrix: Owner chooses the Assignee
 
-- The Agent never determines completion. Completion is always an owner action (accept,
-  or an observed/attested merge) or a system observation, never an Agent's self-report.
-- No work-type enum. "Capability" (native research, OpenCode coding) is a property of an
-  **Agent**'s execution engine, not a new classification on the **Ticket** or **Template**.
-- Tickets stay generic; templates supply presentation, required fields, and the default
-  completion condition, not a permanent execution binding.
-- A Ticket's completion condition is independent of its Assignee and is never changed by
-  assignment, reassignment, or engine capability.
-- Human assignment never launches automation.
-- Ready plus Agent assignment requests execution regardless of which condition became
-  true first, and the same validation applies regardless of order.
-
-## 1. Eligibility matrix: Agent capability x Ticket Template
-
-An Agent's execution engine declares one capability in v1: **native research** or
-**OpenCode coding**. The eligibility check runs at every point that could request or
-change execution: Agent assignment, Ready transition, and reassignment — not only at
-Ticket creation.
-
-### Recommended matrix (Option A)
+Every cell below permits assignment when no Round is open. "Allowed" is not a
+guarantee that an engine can finish the requested work or that execution can begin
+without its inputs and Permissions.
 
 | Template | Human Assignee | Native-research Agent | OpenCode-coding Agent |
 | --- | --- | --- | --- |
-| **Basic** (completion: human acceptance) | Eligible. No extra prerequisite; title alone is sufficient for Ready and In Progress. Manual-guidance fields (goal, context, Success Criteria, constraints) are recommended, not enforced, for a human Assignee. | Eligible. Prerequisites: goal and Success Criteria present (required for Ready + Agent-assigned in either order, per `ticket-creation.md`). | **Rejected.** Reason: Basic has no repository-selection field; OpenCode-coding cannot execute without a selected target repository. |
-| **Coding** (completion: reviewed PR merged) | Eligible. No extra prerequisite enforced at Ready; the human does the work outside Michelin and records the PR themselves (§2). Repository field can be filled for reference but does not block a human Assignee. | **Rejected.** Reason: native research cannot deliver or merge a pull request, so it can never satisfy this Template's completion condition — rejected even when goal, Success Criteria, and a repository are all present. | Eligible. Prerequisites: goal, Success Criteria, and one selected target repository mapped to a configured local checkout. |
+| **Basic** (human acceptance) | Allowed. Title alone is sufficient for manual Ready/In Progress. | Allowed. Agent readiness requires goal and Success Criteria. | Allowed. Agent readiness requires goal and Success Criteria; repository-targeted coding also requires the selected repository and configured checkout. |
+| **Coding** (reviewed PR merged) | Allowed. Title alone is sufficient for manual Ready/In Progress; completion still needs the retained PR-merge condition. | Allowed, including investigation before implementation. Goal and Success Criteria are required for Agent readiness; a research contribution does not complete the Ticket. | Allowed. Agent readiness requires goal and Success Criteria; repository-targeted coding also requires the selected repository and configured checkout. |
 
-Rejections are honest failures at the moment they are triggered (assignment,
-reassignment, or Ready), with the reason above surfaced to the owner — never a silent
-no-op and never a downgraded/partial acceptance.
+Separate three checks:
 
-### Alternative considered (Option B) — decouple repository from Template
+1. **Assignment:** never reject an Agent merely because of the Ticket Template or
+   the Agent's advertised research/coding capability. This applies in Backlog, Ready,
+   and reassignment after delivery. An open Round still locks the Assignee field.
+2. **Readiness:** preserve goal and Success Criteria before Ready + Agent-assigned
+   requests work. Validate the same required inputs whichever condition becomes true
+   second. Missing inputs remain an explicit validation failure, not an exemption
+   from readiness or a hidden template/engine restriction.
+3. **Action prerequisites:** repository-targeted coding needs one selected repository
+   mapped to a configured checkout and the necessary authority. That information
+   must be available on either template when needed. Reuse one Ticket repository
+   reference; do not introduce a competing Basic-only repository concept. Research
+   on a Coding-template Ticket does not require a checkout merely because of the
+   template; validate repository access when the requested action actually needs it.
 
-Add "repository" as a Ticket-level attribute available on any Template, so
-OpenCode-coding could be assigned to a Basic Ticket too (completion would stay human
-acceptance even though a PR was produced).
+An Agent attempts the requested work using available capabilities, makes reasonable
+assumptions within scope, and asks for necessary information or access through the
+existing same-Round input flow. It reports useful contributions and unmet Success
+Criteria honestly. If it cannot complete the requested work after reasonable
+attempts, the existing Failed/Blocked flow applies. Delivery still enters In Review;
+it never lets the Agent declare the Ticket Done.
 
-- **For:** lets the owner use a lightweight Basic Ticket for a small coding task without
-  adopting Coding's stricter reviewed-PR-merge gate.
-- **Against:** breaks the Template <-> completion-condition <-> capability alignment — a
-  Basic Ticket could get an open, unmerged PR "accepted" with no merge requirement,
-  expanding the D2 evidence question to Basic Tickets too. Adds a second, competing
-  repository concept alongside Coding's repository section. Not requested by any user
-  story; v1-scope only describes repository selection on Coding Tickets.
-- **Recommendation:** reject for v1. Revisit only alongside a future custom-template
-  system (deferred beyond v1).
+Example: a Researcher investigates a Coding Ticket and delivers findings. The Owner
+reviews them, reassigns to a Coder after the Round ends, and explicitly requeues.
+The second Round implements the change. The Ticket retains both results and remains
+subject to reviewed-PR-merge completion throughout. Conversely, coding work on a
+Basic Ticket retains human acceptance as its completion condition.
 
-Also considered and rejected: letting a native-research Agent run supplementary
-research on a Coding Ticket without owning completion. v1 keeps one capability per
-Ticket at a time; this is deferred rather than solved by loosening the matrix.
+### Options and consequences
+
+- **Option A — template-gated assignment (rejected by Owner):** reject Basic/Coder
+  and Coding/Researcher combinations. This simplifies a narrow initial UI but forbids
+  useful investigation and handoff workflows and turns templates into engine rules.
+- **Option B — Owner-chosen assignment (accepted):** allow all six combinations,
+  retain action/input validation, and let Agents attempt useful work. Completion
+  stays independent. This requires exposing relevant inputs beyond template defaults
+  and handling imperfect results honestly rather than predicting success upfront.
+
+Temporary MVP implementation limitations are acceptable when a path is not yet
+implemented or supporting it adds complexity. Surface the concrete limitation and
+record follow-up work; do not encode it as a permanent template/Agent prohibition or
+silently claim unsupported behavior works. An unavailable runtime can prevent actual
+execution without making the Owner's assignment invalid by design.
 
 ## 2. Human-assigned workflow
 
-### Manual transitions (human-assigned Tickets)
-
-No Round ever exists for a human-assigned Ticket, so every transition below is a plain
-owner-performed status change — there is no execution-owned state to defer to.
+Human work creates no execution Round. A currently human-assigned Ticket can still
+retain Rounds, Reports, PR links, and usage from an earlier Agent assignment; none
+of that history is erased. The following owner transitions apply with no open Round.
 
 | From | To | Allowed | Notes |
 | --- | --- | --- | --- |
-| Backlog | Ready | Yes | Title alone is sufficient (§1). |
-| Ready | Backlog | Yes | Owner can un-ready before starting. |
-| Ready | In Progress | Yes | Owner marks the start of their own work (glossary: "human assignees mark the start themselves"). |
-| In Progress | Ready | Yes | Owner can pause/back out. |
-| In Progress | Blocked | Yes (Option A, recommended) | Owner self-reports being stuck on something external. No Round exists, so this is a plain manual flag, not a Round-state consequence. |
-| Blocked | In Progress | Yes | Owner resumes when unblocked. |
-| In Progress | In Review | Yes | Owner marks their own work finished and awaiting the completion condition. |
-| In Review | In Progress | Yes | Manual rework — owner resumes further work. No new Round object is created because none ever existed. |
-| In Review | Done (Basic) | Yes, via explicit **Accept** | Same "human acceptance" action used for Agent-delivered work; always an owner action regardless of Assignee. |
-| In Review | Done (Coding) | No, via plain status-set | Only reachable through the observed/attested-merge mechanism below — identical rule for human- and Agent-assigned Coding Tickets. |
-| Done | Ready | Yes (reopen) | Symmetric with the Agent-assigned reopen case; does not restore any already-expired ticket-based Permission (N/A here — those are Agent-specific). |
-| Any other skip (e.g. Backlog -> In Progress/In Review/Done, Ready -> In Review/Done) | — | **Rejected** | Must proceed through the canonical sequence above; prevents silently declaring work started/reviewed/done. |
+| Backlog | Ready | Yes | Title alone is sufficient for a human Assignee. |
+| Ready | Backlog | Yes | Owner withdraws readiness. |
+| Ready | In Progress | Yes | Owner marks the start of their own work. |
+| In Progress | Ready | Yes | Owner pauses or backs out. |
+| In Progress | Blocked | Yes | Owner marks their own work stuck; no fake Round is created. |
+| Blocked | In Progress | Yes | Owner resumes human work when unblocked. |
+| In Progress | In Review | Yes | Owner marks their work ready for review/completion. |
+| In Review | In Progress | Yes | Manual rework; no new execution Round. |
+| In Review | Done (human-acceptance condition) | Via explicit Accept | Same owner action as acceptance of Agent-delivered work. |
+| In Review | Done (reviewed-PR-merge condition) | Not via plain status-set | Use the shared evidence mechanism selected by D2. |
+| Done | Ready | Yes, subject to D4 for an already-merged PR | Reopening never restores expired ticket-based Permissions. |
+| Other skips, such as Backlog → In Progress/Done or Ready → In Review/Done | Rejected | Follow the manual sequence and completion condition above. |
 
-**Blocked as a plain manual flag (Option A) vs. round-only (Option B):** the glossary's
-Blocked definition ("...including one whose Round is Waiting for Input, Interrupted, or
-Failed") uses "including," which leaves room for other causes. Option A adds a genuine
-manual Blocked for human-assigned Tickets (recommended above) so the owner has a way to
-flag being stuck without inventing a fake Round. Option B would disallow manual Blocked
-entirely, keeping Blocked strictly Round-derived and forcing the owner to just leave the
-Ticket In Progress or step it back to Ready/Backlog instead. Recommendation: Option A —
-low-risk, useful, and keeps human/Agent lifecycles symmetric. **This is a genuinely new
-rule, not implied verbatim by existing docs — flagged for explicit Owner sign-off.**
+**Manual Blocked options:** Option A permits the Owner to mark human work Blocked
+(accepted); Option B reserves Blocked solely for Agent execution (rejected). The
+accepted rule provides a way to report external obstacles without fabricating a
+Round. It does not add a manual Blocked override for Agent-assigned work.
 
-### Reaching Done without an Agent when completion requires a reviewed PR merge
+### Completing human work that requires a reviewed PR merge
 
-Two options, as named in #13:
+- **Option 1 — owner-recorded PR link plus observed merge (recommended to D2):** reuse
+  the same review/merge evidence path as Agent-delivered PRs. Consistent evidence is
+  the benefit; GitHub observation must be implemented before it can be used.
+- **Option 2 — explicit owner attestation (alternative for D2):** simpler and usable
+  without automatic observation, but evidence is weaker unless it is also the shared
+  Agent-delivery rule. Do not introduce a separate shortcut solely for human work.
 
-- **Option 1 (recommended): owner-recorded PR link + observed merge.** The owner links
-  a PR they authored/merged themselves to the Ticket. The same "observed merge"
-  evidence mechanism planned for Agent-delivered PRs (owned by D2/M8) also watches this
-  link and moves the Ticket to Done when the PR is observed merged. *Consequence:*
-  completion evidence is identical for human- and Agent-assigned Coding Tickets — the
-  cleanest reading of "completion condition independent of Assignee." *Cost:* this
-  mechanism does not exist before M8 ships; until then Galley must reject a manual Done
-  attempt on any Coding Ticket (human- or Agent-assigned) with an explicit reason,
-  rather than allowing it early via a different code path.
-- **Option 2: explicit manual attestation.** The owner clicks a "Confirm merged"
-  action, self-attesting completion with no automated verification. *Pros:* simplest,
-  no dependency on GitHub observation, works for any future non-GitHub delivery.
-  *Cons:* weaker evidence than the Agent path (unless D2 also lands on attestation for
-  agent-authored PRs, in which case Option 2 becomes the shared rule instead), and adds
-  a second completion code path alongside Option 1's.
-- **Recommendation:** Option 1, contingent on D2. If D2 instead settles on manual
-  attestation for agent-authored PRs (plausible, since the owner is often the same
-  GitHub identity that would "review" them — see D2's problem statement), the same
-  attestation action should be reused for the human-assigned case rather than building
-  a second mechanism. **D3 does not pick between Option 1 and Option 2 in isolation —
-  it picks "reuse whatever D2 decides," and asks D2 to decide once for both assignee
-  kinds.**
+**Accepted D3 rule:** use whichever review/merge evidence mechanism D2 selects for
+both human- and Agent-assigned Tickets. D3 does not select observation versus
+attestation or treat a merge fact alone as proof of human review. M8 implements that
+shared mechanism. Until it exists, reject completion of a Ticket requiring reviewed
+PR merge with an explicit current-implementation reason; do not silently downgrade
+the condition. Human-acceptance Tickets can complete independently in M2.
 
-## 3. Reassignment
+## 3. Reassignment before and after delivery
 
-| Round state | Reassignment allowed? |
+| Round state | Reassignment |
 | --- | --- |
-| Round open (In Progress; or Blocked because its Round is Waiting for Input) | **No.** Ticket fields, including Assignee, are locked until the Round ends (existing rule — `ticket-views.md`, `agent-execution.md`: "Changing the goal, success criteria, assignee, linked recipes, or other ticket fields requires ending the round first"). Owner must Stop the round, or let it deliver/fail/get interrupted, first. |
-| No open Round (Backlog; Ready; In Review; Blocked from Failed/Interrupted or the new manual human-Blocked flag in §2; Done) | **Yes.** |
+| Any open Round, including claimed-but-not-started, Waiting for Input, or disconnected | Rejected until the Round ends; the Assignee field remains locked. |
+| No open Round, including after delivery or human work | Allowed between human and Agent or between Agents, regardless of Template. Retain history and completion condition. |
 
-Rules that hold across every reassignment:
+- Reassignment outside Ready does not request execution. Reassignment to an Agent
+  while Ready does request execution when required-input validation passes.
+- Recheck readiness and actual execution prerequisites, never a template/capability
+  whitelist. For example, a title-only human Ready Ticket still needs goal and
+  Success Criteria before it can request Agent work.
+- In Review, changing the Assignee does not itself begin rework. Agent rework still
+  requires explicit return to Ready; human rework follows the manual table.
+- Preserve previous Round results and usage across handoffs. D4 still owns changing
+  the repository/template after delivery and exceptional PR transitions; ordinary
+  reassignment is not deferred wholesale to D4.
 
-- The completion condition always comes from the Template and is never copied, altered,
-  or reset by reassignment (human<->Agent or Agent<->Agent).
-- Reassignment alone never requests execution. Only Ready + Agent-assigned (in either
-  order) does (existing Assignee glossary rule).
-- Reassignment is checked against the §1 eligibility matrix **immediately, at
-  assignment time**, regardless of current status — not deferred until a later Ready
-  attempt. An Agent whose capability the matrix marks rejected for the Ticket's Template
-  (e.g., a native-research Agent onto a Coding Ticket) cannot be assigned at all, ever,
-  on that Ticket. This is simpler and more honest than allowing an invalid combination
-  to sit "pencilled in" until it fails later at Ready.
+**Options:** reject changes during an open Round (accepted) or queue a hidden future
+reassignment (rejected). The accepted choice preserves the visible field-lock
+contract. Waiting to reassign is an execution-consistency rule, not a restriction on
+which Agent the Owner may choose afterward.
 
-This section mostly restates existing, already-approved invariants rather than
-introducing new choices — the two "options" the issue names for the open-Round case
-(reject outright vs. queue the change for after the Round ends) resolve the same way:
-queuing a hidden pending change would contradict the existing "fields are read-only
-while a Round is open" rule, so only outright rejection is proposed.
+## 4. Manual moves on Agent-assigned Tickets
 
-## 4. Manual moves rejected on Agent-assigned Tickets
+| Attempted owner action | Rule |
+| --- | --- |
+| Manually set In Progress or In Review | Rejected; execution start and delivery own those transitions. |
+| Manually set free-form Blocked | Rejected; Agent-side Blocked follows Waiting for Input, Failed, or Interrupted. |
+| Force Done without the retained completion condition | Rejected; explicit Accept or D2's reviewed-merge evidence must apply. |
+| Edit Ticket fields during an open Round | Rejected, including Assignee and Recipe links. |
+| Force Backlog/Stopped for an open Round | Rejected; Stop must be requested and cessation confirmed. |
+| Start a Round bypassing Ready | Rejected; Ready + Agent-assigned remains the request path. |
 
-| Manual action attempted | Outcome | Reason |
-| --- | --- | --- |
-| Set status to In Progress | Rejected | Round start (execution) owns this transition. |
-| Set status to In Review | Rejected | Round delivery (execution) owns this transition. |
-| Set status to Blocked, other than because the Round is Waiting for Input / Interrupted / Failed | Rejected | Agent-assigned Tickets have no manual self-Blocked concept — contrast the new human-assigned manual Blocked in §2. |
-| Set status to Done on a Coding-template Ticket without an observed/attested PR merge | Rejected | Same evidence gate as §2, independent of Assignee. |
-| Edit any ticket field (goal, Success Criteria, Assignee, linked Recipes, etc.) while a Round is open | Rejected | Fields are locked until the Round ends. |
-| Force Backlog + Stopped badge directly | Rejected | Only reachable through explicit Stop request followed by Michelin's confirmed stop. |
-| Start a new Round directly, bypassing Ready | Rejected | Ready + Agent-assigned (either order) is the only execution-request path. |
+Owner actions remain available through their existing paths: Ready/Backlog changes
+when no Round is open, View, answer/Permission approval, Stop request, explicit rework,
+Accept for human-acceptance Tickets, reassignment when unlocked, and archive when no
+Round is open. Archive/restore retain their existing rules.
 
-For contrast, owner actions that **remain available** on an Agent-assigned Ticket:
-Ready<->Backlog toggling before execution starts; the explicit Stop-round request;
-explicit rework requeue (In Review -> Ready); Accept on a Basic Ticket (In Review ->
-Done); reassignment when no Round is open (§3); archiving when no Round is open.
+**Options:** retain strict execution-owned transitions (accepted), or allow an
+emergency manual override for an abandoned runner (not adopted here). The latter
+could falsely declare cessation while work remains active. D5 owns stranded-runner
+recovery; this decision does not invent an override or weaken confirmed Stop.
 
-**Options considered for this sub-question:**
+## Implementation rules and verification examples
 
-- **Option A (recommended): strict, no override.** All the rejections above are
-  absolute; the owner's only escape hatches for a stuck Round are Stop (with
-  confirmation) and, after Failed/Interrupted, returning to Ready for a new Round.
-- **Option B: a narrow emergency override**, letting the owner force a stuck
-  Agent-assigned Ticket back to Backlog/Blocked without a confirmed Stop, for a runner
-  that is permanently gone. More resilient to an abandoned runner, but risks a false
-  "stopped" confirmation and duplicate execution if the runner later reconnects —
-  directly conflicting with D5's stranded-runner invariant ("no automatic duplicate
-  execution or false stop confirmation").
-- **Recommendation:** Option A. The abandoned-runner case is D5's problem
-  (Stranded runner and stop recovery); an override here would preempt or duplicate that
-  decision rather than solve it. D3 does not attempt to resolve D5.
+| Rule / example | Owning milestone |
+| --- | --- |
+| Title-only human Ready; manual Blocked/resume; explicit Accept; rejected status skips | M2 |
+| All six assignment combinations allowed by design; no template-based rejection in Backlog or reassignment | M4 |
+| Required goal/Success Criteria enforced for either Ready/assignment order | M4 |
+| No reassignment during any open Round; unlocked handoffs retain completion and Round history | M4, with M5 waits/recovery |
+| Coding Ticket → Researcher findings → review → Coder reassignment → explicit requeue | M7/M8 composition |
+| Basic Ticket → Coder with repository inputs → delivery → explicit human acceptance | M8 |
+| Shared human/Agent reviewed-merge completion evidence, with no early manual Done shortcut | M8 after D2 |
+| Concrete MVP limitations surfaced with follow-up work instead of permanent assignment rules | Each implementing milestone |
 
-## Consolidated rules table (for M2, M4, M8)
+These are requirements and verification examples, not claims that application code
+or runtime tests already implement this decision.
 
-1. **Eligibility matrix** — §1 table. Enforce at Agent assignment, at Ready transition,
-   and at reassignment; whichever of Ready/assignment happens second must re-check.
-2. **Human-assigned manual transition table** — §2 table, including the new manual
-   Blocked flag and the Accept-only Basic Done path.
-3. **Coding Done evidence gate** — applies identically whether the Ticket is human- or
-   Agent-assigned: no plain manual Done on a Coding Ticket without observed/attested
-   merge (mechanism finalized by D2, built in M8).
-4. **Rejected-manual-move list for Agent-assigned Tickets** — §4 table.
-5. **Reassignment rule** — allowed only when no Round is open; always re-validates
-   against the eligibility matrix immediately; never changes the completion condition.
+## Routing: remaining decisions
 
-Owning milestones: M2 implements the human-assigned transition table and the Basic
-Accept-to-Done path; M4 implements the eligibility matrix at assignment/Ready and the
-Agent-assigned rejected-move list; M8 implements the Coding Done evidence gate for both
-assignee kinds once D2 is resolved.
-
-## Routing: D2 and D4 (not resolved here)
-
-- **D2 — Human-review evidence for PR completion and agent merge authority.** §2's
-  Option 1 vs. Option 2 choice for the human-assigned Coding Done path depends directly
-  on D2's outcome; D3 recommends reusing whichever mechanism D2 selects for both
-  assignee kinds instead of building two. D2 remains open and is owned by
-  [M8 review/merge implementation](https://github.com/cristoforows/ticketIt/issues/9).
-- **D4 — Exceptional PRs and template/repository changes after delivery.** Changing the
-  selected repository or Template after a Ticket already has a delivered/open PR (for
-  either assignee kind), closed-unmerged PRs, reopening after merge, and a merge
-  arriving mid-Round are all explicitly out of scope here and remain owned by
-  [M8 coding lifecycle](https://github.com/cristoforows/ticketIt/issues/9). D3's rules
-  above assume delivery has not yet started; D4 governs what happens once it has.
-- **D5 — Stranded runner and stop recovery**, mentioned only in passing in §4's
-  Option B discussion, is not resolved or reopened here; it remains owned by
-  [M5 controlled recovery](https://github.com/cristoforows/ticketIt/issues/6).
-
-## Assumptions and interpretations to flag for the Owner
-
-- Read `ticket-creation.md`'s goal/Success-Criteria gate as scoped specifically to
-  "Ready + Agent-assigned," not to human Ready — so a human-assigned Ticket can be
-  Ready/In Progress on a title alone. This is a literal reading of existing docs, not a
-  new invention, but is worth the Owner explicitly confirming.
-- Added a genuine new rule: a manual Blocked flag for human-assigned Tickets (§2),
-  since the glossary's Blocked definition is otherwise Round-centric. Flagged
-  explicitly above for sign-off; reject it (Option B in §2) if undesired.
-- Chose to validate the eligibility matrix immediately at assignment time rather than
-  deferring an "invalid" combination until a later Ready attempt (§3), for honesty over
-  convenience.
-- Recommended unifying human- and Agent-assigned Coding Done evidence into one
-  mechanism instead of two — a substantive recommendation for D2 to build on, not a
-  resolution of D2 itself.
+- **D2:** human-review evidence and merge authority, including observation versus
+  attestation. Choose once for both assignee kinds; still owned by M8.
+- **D4:** closed-unmerged PRs, reopening after merge, merge during a Round, and
+  repository/template changes after delivery. Preserve prior work; still owned by M8.
+- **D5:** stranded runner and stop recovery. Open-Round locks and confirmed cessation
+  remain required; still owned by M5.
+- Other model/provider, permission-enforcement, and execution-limit choices remain
+  tracked in [open-decisions.md](../open-decisions.md). Permissive assignment is not
+  a decision to bypass authority checks or declare a failed integration gate passed.

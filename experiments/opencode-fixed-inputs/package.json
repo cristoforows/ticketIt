@@ -1,0 +1,29 @@
+{
+  "name": "opencode-fixed-inputs",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Proves the OpenCode half of feasibility experiment S3 (fixed inputs across pause and ambient config) for M1.8 (issue #19): per-Round Agent instructions, a Skill file, and a Recipe are materialized at version A into a Round-private location; while the Round is Waiting for Input, version B is published to the mutable library location and conflicting ambient config/skill sources are planted; resuming the paused Round must still observe version A, while a brand-new Round observes version B. Depends on opencode-harness via a local file:../opencode-harness dependency (does not modify that package).",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "engines": {
+    "node": "26.9.0"
+  },
+  "scripts": {
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@opencode-ai/sdk": "1.18.31",
+    "opencode-ai": "1.18.31",
+    "opencode-harness": "file:../opencode-harness"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.1",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2"
+  },
+  "allowScripts": {
+    "opencode-ai@1.18.31": true
+  }
+}
