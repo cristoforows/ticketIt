@@ -19,15 +19,23 @@
  * and never given to this module's constructor can never be sent (see
  * the evidence record's fixture evidence for the test proving this from
  * the fake API's own request log).
+ *
+ * #28 (M1.17) extends this module with the delivery-lifecycle PR
+ * endpoints (list by head branch, create, get one, update, list reviews,
+ * list issue comments), each individually gated the same way through
+ * `#admitOrThrow` before any `fetch()` call, using the new
+ * `PULLS_READ`/`PULLS_WRITE` action constants below.
  */
 import { execFileSync } from "node:child_process";
 import type { AdmissionLedger, AdmitDecision, AdmitReason } from "shared";
+import type { IssueCommentView, PullRequestView, ReviewView } from "./fake-github-api.js";
 
 /** Action names used in every `ledger.admit()` call this module makes. Exported for reuse/tests. */
 export const GitHubConnectionActions = {
   VERIFY_IDENTITY: "github.identity.verify",
   REPO_READ: "github.repo.read",
   PULLS_READ: "github.pulls.read",
+  PULLS_WRITE: "github.pulls.write",
   GIT_COMMIT: "git.commit",
   GIT_PUSH: "git.push",
 } as const;
@@ -45,6 +53,77 @@ export function pullsResource(owner: string, repo: string): string {
 /** Build the ledger `resource` scope for a git push target (`"remoteUrl#branch"`). */
 export function pushResource(remote: string, branch: string): string {
   return `${remote}#${branch}`;
+}
+
+/** Re-exported for callers that only import from `github-connection.ts` (e.g. `DeliveryModule`). */
+export type { IssueCommentView, PullRequestView, ReviewView } from "./fake-github-api.js";
+
+/** Input to `createPullRequest`. `headSha` is the fixture-only bridging field — see `fake-github-api.ts`'s module doc comment. */
+export interface CreatePullRequestInput {
+  readonly title: string;
+  readonly head: string;
+  readonly base: string;
+  readonly body: string;
+  readonly draft: boolean;
+  readonly headSha: string;
+}
+
+/** Input to `updatePullRequest`. All fields optional; only the ones present are changed. */
+export interface UpdatePullRequestInput {
+  readonly title?: string;
+  readonly body?: string;
+  readonly headSha?: string;
+}
+
+function parsePullRequestView(json: unknown): PullRequestView {
+  const body = json as {
+    number: number;
+    title: string;
+    body: string;
+    draft: boolean;
+    state: "open" | "closed";
+    merged: boolean;
+    merged_at: string | null;
+    merge_commit_sha: string | null;
+    closed_at: string | null;
+    head: { ref: string; sha: string };
+    base: { ref: string };
+    created_at: string;
+    updated_at: string;
+  };
+  return {
+    number: body.number,
+    title: body.title,
+    body: body.body,
+    draft: body.draft,
+    state: body.state,
+    merged: body.merged,
+    mergedAt: body.merged_at,
+    mergeCommitSha: body.merge_commit_sha,
+    closedAt: body.closed_at,
+    headRef: body.head.ref,
+    headSha: body.head.sha,
+    baseRef: body.base.ref,
+    createdAt: body.created_at,
+    updatedAt: body.updated_at,
+  };
+}
+
+function parseReviewViews(json: unknown): ReviewView[] {
+  return (json as Array<{ id: number; state: ReviewView["state"]; body: string; submitted_at: string }>).map((entry) => ({
+    id: entry.id,
+    state: entry.state,
+    body: entry.body,
+    submittedAt: entry.submitted_at,
+  }));
+}
+
+function parseIssueCommentViews(json: unknown): IssueCommentView[] {
+  return (json as Array<{ id: number; body: string; created_at: string }>).map((entry) => ({
+    id: entry.id,
+    body: entry.body,
+    createdAt: entry.created_at,
+  }));
 }
 
 export interface GitAuthor {
@@ -227,6 +306,128 @@ export class GitHubConnection {
       throw new Error(`Unexpected status ${res.status} checking pull-request access to "${owner}/${repo}"`);
     }
     return (await res.json()) as unknown[];
+  }
+
+  /** List open (by default) pull requests whose head branch is `branch`. Gated by `PULLS_READ`. */
+  async listPullRequestsByHead(
+    owner: string,
+    repo: string,
+    branch: string,
+    state: "open" | "closed" | "all" = "open",
+  ): Promise<PullRequestView[]> {
+    this.#admitOrThrow(GitHubConnectionActions.PULLS_READ, pullsResource(owner, repo));
+    const url = new URL(`/repos/${owner}/${repo}/pulls`, this.#apiBaseUrl);
+    url.searchParams.set("head", `${owner}:${branch}`);
+    url.searchParams.set("state", state);
+    const res = await fetch(url, { headers: authHeader(this.#pat) });
+    if (res.status === 404) {
+      throw new RepositoryAccessError(404, owner, repo, "not found or outside the token's resource set");
+    }
+    if (res.status === 403) {
+      throw new PullRequestPermissionError(owner, repo);
+    }
+    if (res.status !== 200) {
+      throw new Error(`Unexpected status ${res.status} listing pull requests for "${owner}/${repo}"`);
+    }
+    return ((await res.json()) as unknown[]).map(parsePullRequestView);
+  }
+
+  /** Get one pull request's current state. Gated by `PULLS_READ`. */
+  async getPullRequest(owner: string, repo: string, number: number): Promise<PullRequestView> {
+    this.#admitOrThrow(GitHubConnectionActions.PULLS_READ, pullsResource(owner, repo));
+    const res = await fetch(new URL(`/repos/${owner}/${repo}/pulls/${number}`, this.#apiBaseUrl), {
+      headers: authHeader(this.#pat),
+    });
+    if (res.status === 404) {
+      throw new RepositoryAccessError(404, owner, repo, `pull request #${number} not found or outside the token's resource set`);
+    }
+    if (res.status === 403) {
+      throw new PullRequestPermissionError(owner, repo);
+    }
+    if (res.status !== 200) {
+      throw new Error(`Unexpected status ${res.status} getting pull request #${number} for "${owner}/${repo}"`);
+    }
+    return parsePullRequestView(await res.json());
+  }
+
+  /** Create a draft (or ready) pull request. Gated by `PULLS_WRITE`. */
+  async createPullRequest(owner: string, repo: string, input: CreatePullRequestInput): Promise<PullRequestView> {
+    this.#admitOrThrow(GitHubConnectionActions.PULLS_WRITE, pullsResource(owner, repo));
+    const res = await fetch(new URL(`/repos/${owner}/${repo}/pulls`, this.#apiBaseUrl), {
+      method: "POST",
+      headers: { ...authHeader(this.#pat), "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (res.status === 404) {
+      throw new RepositoryAccessError(404, owner, repo, "not found or outside the token's resource set");
+    }
+    if (res.status === 403) {
+      throw new PullRequestPermissionError(owner, repo);
+    }
+    if (res.status === 422) {
+      const errBody = (await res.json()) as { message?: string };
+      throw new Error(`Pull request creation validation failed for "${owner}/${repo}": ${errBody.message ?? "unknown"}`);
+    }
+    if (res.status !== 201) {
+      throw new Error(`Unexpected status ${res.status} creating pull request for "${owner}/${repo}"`);
+    }
+    return parsePullRequestView(await res.json());
+  }
+
+  /** Update an existing pull request's title/body (and, as a fixture bridging field, its observed head sha). Gated by `PULLS_WRITE`. */
+  async updatePullRequest(owner: string, repo: string, number: number, input: UpdatePullRequestInput): Promise<PullRequestView> {
+    this.#admitOrThrow(GitHubConnectionActions.PULLS_WRITE, pullsResource(owner, repo));
+    const res = await fetch(new URL(`/repos/${owner}/${repo}/pulls/${number}`, this.#apiBaseUrl), {
+      method: "PATCH",
+      headers: { ...authHeader(this.#pat), "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    if (res.status === 404) {
+      throw new RepositoryAccessError(404, owner, repo, `pull request #${number} not found or outside the token's resource set`);
+    }
+    if (res.status === 403) {
+      throw new PullRequestPermissionError(owner, repo);
+    }
+    if (res.status !== 200) {
+      throw new Error(`Unexpected status ${res.status} updating pull request #${number} for "${owner}/${repo}"`);
+    }
+    return parsePullRequestView(await res.json());
+  }
+
+  /** List reviews submitted on a pull request. Gated by `PULLS_READ`. */
+  async listReviews(owner: string, repo: string, number: number): Promise<ReviewView[]> {
+    this.#admitOrThrow(GitHubConnectionActions.PULLS_READ, pullsResource(owner, repo));
+    const res = await fetch(new URL(`/repos/${owner}/${repo}/pulls/${number}/reviews`, this.#apiBaseUrl), {
+      headers: authHeader(this.#pat),
+    });
+    if (res.status === 404) {
+      throw new RepositoryAccessError(404, owner, repo, `pull request #${number} not found or outside the token's resource set`);
+    }
+    if (res.status === 403) {
+      throw new PullRequestPermissionError(owner, repo);
+    }
+    if (res.status !== 200) {
+      throw new Error(`Unexpected status ${res.status} listing reviews for pull request #${number} in "${owner}/${repo}"`);
+    }
+    return parseReviewViews(await res.json());
+  }
+
+  /** List issue (PR) comments. Real GitHub serves PR comments through the issues API. Gated by `PULLS_READ`. */
+  async listIssueComments(owner: string, repo: string, number: number): Promise<IssueCommentView[]> {
+    this.#admitOrThrow(GitHubConnectionActions.PULLS_READ, pullsResource(owner, repo));
+    const res = await fetch(new URL(`/repos/${owner}/${repo}/issues/${number}/comments`, this.#apiBaseUrl), {
+      headers: authHeader(this.#pat),
+    });
+    if (res.status === 404) {
+      throw new RepositoryAccessError(404, owner, repo, `pull request #${number} not found or outside the token's resource set`);
+    }
+    if (res.status === 403) {
+      throw new PullRequestPermissionError(owner, repo);
+    }
+    if (res.status !== 200) {
+      throw new Error(`Unexpected status ${res.status} listing comments for pull request #${number} in "${owner}/${repo}"`);
+    }
+    return parseIssueCommentViews(await res.json());
   }
 
   /**
