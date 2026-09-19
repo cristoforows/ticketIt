@@ -2,7 +2,7 @@
 
 A personal ticket tracker with board/list views and configurable AI agents that carry out work in traceable rounds.
 
-**Status:** [v1 spec #1](https://github.com/cristoforows/ticketIt/issues/1) and ten milestone issues published. [M1's](https://github.com/cristoforows/ticketIt/issues/2) bounded adapter proofs are complete (see [docs/integration-feasibility.md](docs/integration-feasibility.md) and [docs/evidence/m1/](docs/evidence/m1/README.md)), pending only the Owner's D3 decision on [#13](https://github.com/cristoforows/ticketIt/issues/13). Application implementation (M2) has not started.
+**Status:** [v1 spec #1](https://github.com/cristoforows/ticketIt/issues/1) and ten milestone issues published. [M1's](https://github.com/cristoforows/ticketIt/issues/2) bounded adapter proofs are complete (see [docs/integration-feasibility.md](docs/integration-feasibility.md) and [docs/evidence/m1/](docs/evidence/m1/README.md)); the Owner has resolved [D3](docs/decisions/d3-agent-template-compatibility.md) in favor of owner-chosen Agents without template restrictions. Application implementation (M2) has not started.
 
 ## Applications
 
@@ -26,7 +26,7 @@ Start here:
 6. [Execution interface contract](docs/contracts/execution-interface.md) — Galley/Michelin execution contract and the Swiftlet→Galley owner-command boundary.
 7. [Architectural decision records](docs/adr/) — hard-to-reverse choices restating the approved design.
 
-[M1 — Foundational decisions and integration proofs (#2)](https://github.com/cristoforows/ticketIt/issues/2) is complete, pending only the Owner's D3 decision on [#13](https://github.com/cristoforows/ticketIt/issues/13) ([PR #30](https://github.com/cristoforows/ticketIt/pull/30)); [M2 — Application foundations and persistent owner workflow (#3)](https://github.com/cristoforows/ticketIt/issues/3) is next. Each milestone spans multiple sessions and is split into implementation-sized vertical slices when work begins. Manual workflows arrive in M2–M3, controlled Agent execution in M4, and real research/coding in M7/M8. Research and coding can proceed independently after their shared M5/M6 prerequisites.
+[M1 — Foundational decisions and integration proofs (#2)](https://github.com/cristoforows/ticketIt/issues/2) has its experiment results and accepted [D3 rules](docs/decisions/d3-agent-template-compatibility.md); [M2 — Application foundations and persistent owner workflow (#3)](https://github.com/cristoforows/ticketIt/issues/3) is next. Remaining integration gates are tracked in [open decisions](docs/open-decisions.md). Each milestone spans multiple sessions and is split into implementation-sized vertical slices when work begins. Manual workflows arrive in M2–M3, controlled Agent execution in M4, and real research/coding in M7/M8. Research and coding can proceed independently after their shared M5/M6 prerequisites.
 
 [CONTEXT.md](CONTEXT.md) defines domain vocabulary. Implementation details belong in the design docs:
 

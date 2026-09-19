@@ -33,7 +33,7 @@ Sources: [v1 spec #1](https://github.com/cristoforows/ticketIt/issues/1) section
 
 ## Work claim
 
-- **Eligibility**: the Ticket is unarchived, Ready, and Agent-assigned; it has a goal and Success Criteria; capability-specific prerequisites are met (for example, a selected repository for coding work). Concrete Agent/Template compatibility rules are routed to D3.
+- **Eligibility**: the Ticket is unarchived, Ready, and Agent-assigned; it has a goal and Success Criteria; actual execution prerequisites are met (for example, a selected repository for repository-targeted coding work). [D3](../decisions/d3-agent-template-compatibility.md) permits any Agent on either Template. Validate required inputs and action authority, never a template/capability whitelist. A Round may contribute without completing the whole Ticket, whose completion condition remains unchanged.
 - **Atomic claim**: Michelin requests eligible work; Galley admits at most one claim per request in a single transaction, issuing a fencing token (claim epoch) and creating the Round record. This prevents two runners, or two claim attempts, from both starting the same Ticket.
 - **Sequential scheduling**: one active Round globally across the native and OpenCode engines. A Round that is Waiting for Input keeps its slot; it does not free capacity for another Ticket while paused. Queue ordering among otherwise-eligible Ready Tickets is an engineering decision, not fixed here.
 - **Archive-versus-claim race**: archiving and claiming are mutually exclusive under the same transactional guard. If an archive request commits first, the Ticket is no longer eligible and the pending claim is rejected. If a claim already produced an open Round, archiving is rejected until that Round ends, consistent with the requirement that any open Round end before archive.
@@ -121,4 +121,4 @@ Every row of the [v1-scope.md](../v1-scope.md) "Lifecycle" table maps to at leas
 
 - No payload schema, serialization, or transport (HTTP/gRPC/other) is chosen. See [open-decisions.md](../open-decisions.md), "Engineering decisions within the approved design."
 - No queue technology is chosen; see [ADR 0003](../adr/0003-postgresql-work-claims-before-queue.md).
-- Stranded-runner recovery authority is **D5**. Human-review/merge evidence is **D2**. Exceptional PR transitions are **D4**. Agent/Template compatibility is **D3**. Grill Mode scheduling relative to the single active-Round slot is **D6**. None of these are resolved here.
+- Stranded-runner recovery authority is **D5**. Human-review/merge evidence is **D2**. Exceptional PR transitions are **D4**. Grill Mode scheduling relative to the single active-Round slot is **D6**. None of these are resolved here. Agent/Template assignment and human workflow follow the separately accepted [D3 decision](../decisions/d3-agent-template-compatibility.md).

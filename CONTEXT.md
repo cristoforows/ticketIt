@@ -97,7 +97,7 @@ The **Status** of a **Ticket** whose **Assignee** has started work. Agent-assign
 _Avoid_: Ready, queued.
 
 **In Review**:
-The **Status** of a **Ticket** whose agent has delivered work awaiting human review and the ticket's completion condition: human acceptance or merging its reviewed pull request. Explicitly requesting rework in ticketIt returns the ticket to **Ready** for another **Round**; external review feedback alone does not.
+The **Status** of a **Ticket** whose work, delivered by a human or an **Agent**, awaits human review and the ticket's retained completion condition: human acceptance or merging its reviewed pull request. Explicitly requesting Agent rework in ticketIt returns the ticket to **Ready** for another **Round**; external review feedback alone does not.
 _Avoid_: Done, completed when the delivered work has not yet been accepted.
 
 **Done**:
@@ -105,7 +105,7 @@ The **Status** of a **Ticket** whose completion condition has been met, through 
 _Avoid_: Agent finished when referring to acceptance of the ticket's outcome.
 
 **Blocked**:
-The **Status** of a **Ticket** that cannot proceed without intervention, including one whose **Round** is **Waiting for Input**, **Interrupted**, or **Failed**. Answering a waiting round resumes it in **In Progress**; recovery after an interrupted or failed round requires a person to return the ticket to **Ready** for another round.
+The **Status** of a **Ticket** that cannot proceed without intervention, including an obstacle reported by its human **Assignee** or a **Round** that is **Waiting for Input**, **Interrupted**, or **Failed**. Answering a waiting round resumes it in **In Progress**; recovery after an interrupted or failed round requires a person to return the ticket to **Ready** for another round.
 _Avoid_: Ready when intervention is still required.
 
 **Waiting for Input**:

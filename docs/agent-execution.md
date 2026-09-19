@@ -31,6 +31,8 @@ Verify tool calling, streaming, and usage reporting for the selected model throu
 
 Include a basic editor for reusable agent configurations, starting from Researcher and Coder presets. Tickets select a saved agent.
 
+The Owner can assign any Agent to either Ticket Template under [D3](decisions/d3-agent-template-compatibility.md). Presets describe available capabilities rather than template eligibility. Agents attempt useful work within scope and authority; a research Round can contribute to a Coding Ticket before another Agent implements it. Preserve the Ticket's completion condition and all previous Round results across handoffs. Temporary unsupported paths should have an explicit implementation limitation and follow-up, not a permanent template/Agent prohibition.
+
 The configuration structure includes:
 
 - Name and instructions.
@@ -114,7 +116,7 @@ Agent configuration must accommodate skills, permissions, and model settings. Fu
 
 ## Coding deliverables
 
-Each coding ticket explicitly selects one target repository in v1. The local runner maps that repository identity to a configured local checkout. Agents remain reusable across repositories; future booths may supply repository defaults.
+Repository-targeted coding work explicitly selects one target repository in v1, regardless of Ticket Template. The local runner maps that repository identity to a configured local checkout. Provide the same repository reference on either template when needed; research on a Coding-template Ticket does not require a checkout merely because of the template. Agents remain reusable across repositories; future booths may supply repository defaults.
 
 Create a separate Git worktree and branch for each coding ticket, sharing repository history with the configured checkout. OpenCode works in that ticket's worktree rather than switching branches or mixing changes into the user's normal working directory. Reuse the worktree across subsequent rounds on the ticket.
 

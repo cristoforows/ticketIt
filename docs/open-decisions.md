@@ -1,6 +1,6 @@
 # Open decisions
 
-The [v1 scope](v1-scope.md) records approved behavior. Items below remain unresolved; recommendations are proposals, not accepted changes. Resolve each choice before implementing its affected behavior in the owning milestone rather than reopening the whole design.
+The [v1 scope](v1-scope.md) records approved behavior. Items below remain unresolved unless explicitly marked Resolved; recommendations on open items are proposals, not accepted changes. Resolve each choice before implementing its affected behavior in the owning milestone rather than reopening the whole design.
 
 Milestone references use the approved M1–M10 [implementation plan](implementation-plan.md) and its published issues. Publishing the plan did not resolve these choices. M1 establishes foundational contracts and routes later choices to their owning milestones.
 
@@ -12,7 +12,7 @@ M1's bounded adapter experiments ran 18–19 September 2026; what they learned f
 | --- | --- | --- | --- |
 | D1 | Enforceable OpenCode action boundary and disconnect behavior | Prove live admission for every enabled path. Registered-tool hooks may not cover model-only continuation, shell internals, provider tools, or direct APIs. Respect the accepted direct-host v1 scope, but do not advertise unsupported granular controls. If required behavior cannot be gated, choose an integration change or obtain an explicit requirement decision. | [M1 proofs](https://github.com/cristoforows/ticketIt/issues/2); [M8 live coding gate](https://github.com/cristoforows/ticketIt/issues/9) |
 | D2 | Human-review evidence for PR completion and agent merge authority | A personal PR may be authored through the same identity that reviews/merges it; a separate GitHub approval may not be available. Define what demonstrates owner review and ensure agent access cannot silently replace the human completion decision. Evaluate owner-controlled merge plus a clearly bounded supported action surface. | [M8 review/merge implementation](https://github.com/cristoforows/ticketIt/issues/9) |
-| D3 | Agent/template compatibility and human-assigned workflow | Templates are not work types. Define supported v1 execution capabilities, repository requirements, and manual completion/rework without deriving completion from engine. Evaluate explicit capability validation and preserving the template-derived completion condition through reassignment. | [M1 foundational contract](https://github.com/cristoforows/ticketIt/issues/2); apply in M2, M4, and M8 |
+| D3 | Agent/template compatibility and human-assigned workflow | **Resolved by Owner:** any Agent may be assigned regardless of Template; validate required inputs and actual action prerequisites, not a template/capability whitelist. Preserve completion conditions, human workflow, open-Round locks, and confirmed Stop. Temporary MVP limits must be explicit implementation limits with follow-up work. See the [accepted decision](decisions/d3-agent-template-compatibility.md) and [Owner comment](https://github.com/cristoforows/ticketIt/issues/13#issuecomment-5743245026). | Apply in M2, M4, and M8; D2/D4/D5 remain open |
 | D4 | Exceptional PR and template/repository changes | Define closed-unmerged PRs, reopening a ticket after merge, merge arrival during an open round, and changes to repository/template after delivery. Same-PR reuse is approved only until merge. Preserve prior deliveries; never infer a new PR or successful completion without a defined transition. | [M8 coding lifecycle](https://github.com/cristoforows/ticketIt/issues/9) |
 | D5 | Stranded runner and stop recovery | A lost connection does not prove execution ended, yet editing/archive require an ended round. Define evidence and owner recovery authority when a runner never returns. Evaluate explicit recovery with stale-execution fencing; no automatic duplicate execution or false stop confirmation. | [M5 controlled recovery](https://github.com/cristoforows/ticketIt/issues/6) |
 | D6 | Grill Mode configuration and scheduling | Choose its model/profile, context access, field-application review, and scheduling relative to the single active round. Preparation needs the local service but is not an execution round. Evaluate the native configuration plus persisted interview state; do not silently create a parallel execution lane. | [M7 preparation workflow](https://github.com/cristoforows/ticketIt/issues/8) |
@@ -113,13 +113,16 @@ human reviewed the change.
 
 ### D3 — Agent/template compatibility and human-assigned workflow
 
-**Status: Proposed, awaiting Owner decision on [#13](https://github.com/cristoforows/ticketIt/issues/13) / [PR #30](https://github.com/cristoforows/ticketIt/pull/30).**
-A full options-and-recommendation proposal (eligibility matrix, manual
-transition table, reassignment rules, and rejected manual status changes)
-was drafted per #13's instructions and is not merged pending the Owner's
-approval comment on #13. This gate report does not resolve D3 and does
-not merge PR #30 — that is the Owner's action, not this slice's. See PR
-#30 for the drafted options.
+**Status: Resolved by the [Owner's decision on #13](https://github.com/cristoforows/ticketIt/issues/13#issuecomment-5743245026).**
+The original proposal restricted Basic/Coder and Coding/Researcher assignment.
+The Owner rejected those restrictions and approved the human workflow and existing
+execution/field-lock rules. [The accepted D3 decision](decisions/d3-agent-template-compatibility.md)
+records all six assignment combinations as allowed by design, best-effort Agent work,
+and required-input/action validation independently of templates. Rounds may contribute
+without completing the whole Ticket; reassignment preserves completion and history.
+Temporary MVP limitations are allowed as explicit implementation limitations with
+follow-up work. D2 review evidence, D4 exceptional PR transitions, and D5 stranded
+recovery remain open. This resolution comes from the Owner, not an experiment result.
 
 ### D4 — Exceptional PR and template/repository changes
 
