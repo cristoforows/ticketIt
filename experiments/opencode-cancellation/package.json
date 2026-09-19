@@ -1,0 +1,23 @@
+{
+  "name": "opencode-cancellation",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cancellation confirmation and process-death proofs for M1.7 (issue #18): abort while running, abort while waiting, post-abort continuation, and OpenCode server process death, built on experiments/opencode-harness via file:../opencode-harness.",
+  "type": "module",
+  "engines": {
+    "node": "26.9.0"
+  },
+  "scripts": {
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@opencode-ai/sdk": "1.18.31",
+    "opencode-harness": "file:../opencode-harness"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.1",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2"
+  }
+}
