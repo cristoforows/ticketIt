@@ -1,0 +1,29 @@
+{
+  "name": "usage-persistence",
+  "version": "0.1.0",
+  "private": true,
+  "description": "M1.15 (#26) - runs the OpenRouter fixtures (#25) through the native harness (#22) with a real ChatOpenRouter adapter and PostgreSQL checkpointer, proves what survives a checkpoint reload versus what needs out-of-band raw-response capture, and a Galley ingestion substitute (UsageIngest) that normalizes usage/citation observations with dedupe, unknown-is-not-zero, and reported/estimated/unknown cost provenance rules. See docs/evidence/m1/26-usage-persistence.md.",
+  "type": "module",
+  "engines": {
+    "node": "26.9.0"
+  },
+  "scripts": {
+    "db:setup": "node --import tsx scripts/db-setup.ts",
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "native-harness": "file:../native-harness",
+    "openrouter-fidelity": "file:../openrouter-fidelity",
+    "shared": "file:../shared",
+    "@langchain/core": "1.2.11",
+    "@langchain/openrouter": "0.4.13",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.1",
+    "@types/pg": "8.23.1",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2"
+  }
+}
