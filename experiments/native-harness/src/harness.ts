@@ -38,6 +38,15 @@ export interface RunTurnOptions {
   threadId: string;
   /** The human input for this turn. */
   input: string;
+  /**
+   * Optional AbortSignal for this turn's invocation, forwarded to LangChain
+   * JS's standard `RunnableConfig.signal`. Added for M1.13 (issue #24),
+   * which needs to cancel a long-running scripted model call mid-flight
+   * (a pending-Stop scenario) through the same cancellation channel a real
+   * provider call would use. Optional and additive: existing callers that
+   * omit it are unaffected.
+   */
+  signal?: AbortSignal;
 }
 
 export interface RunTurnResult {
@@ -60,7 +69,10 @@ export async function runTurn(
 ): Promise<RunTurnResult> {
   const result = await agent.invoke(
     { messages: [new HumanMessage(options.input)] },
-    { configurable: { thread_id: options.threadId } },
+    {
+      configurable: { thread_id: options.threadId },
+      ...(options.signal !== undefined ? { signal: options.signal } : {}),
+    },
   );
   return {
     roundId: options.roundId,
