@@ -4,6 +4,8 @@ The [v1 scope](v1-scope.md) records approved behavior. Items below remain unreso
 
 Milestone references use the approved M1–M10 [implementation plan](implementation-plan.md) and its published issues. Publishing the plan did not resolve these choices. M1 establishes foundational contracts and routes later choices to their owning milestones.
 
+M1's bounded adapter experiments ran 18–19 September 2026; what they learned for each decision below is recorded under "What M1 learned," each claim linking to the evidence record that backs it (full index: [docs/evidence/m1/README.md](evidence/m1/README.md)). None of these findings resolve their decision — an M1 experiment observes and records; only the Owner (or, for D3, the Owner's approval on #13) resolves a decision. Decisions whose M1 findings show a required behavior cannot currently be gated are marked **FAILED GATE** below.
+
 ## Product and integration decisions
 
 | ID | Decision | Why it matters / recommendation to evaluate | Resolution gate |
@@ -17,6 +19,279 @@ Milestone references use the approved M1–M10 [implementation plan](implementat
 | D7 | Runtime/provider selections | Owner to choose R2 or Supabase Storage. Select application/PostgreSQL hosting, native OpenRouter model, and OpenCode model/auth source. OpenRouter is approved for native research, not automatically every OpenCode configuration. Validate tool/search support and below-$10/month hosting. | [M6 storage](https://github.com/cristoforows/ticketIt/issues/7); [M7 native model](https://github.com/cristoforows/ticketIt/issues/8); [M8 OpenCode](https://github.com/cristoforows/ticketIt/issues/9); [M10 hosting](https://github.com/cristoforows/ticketIt/issues/11) |
 | D8 | In-flight manual revocation and non-budget execution limits | Subsequent actions must observe revoked authority. Define already-dispatched handling and reasonable technical loop/time limits separately from deferred spending budgets. Cancellation cannot promise to undo completed external effects. | [M5 control rules](https://github.com/cristoforows/ticketIt/issues/6); verify in M7/M8 adapters |
 | D9 | Version and workspace retention/cleanup | Historical input/delivery preservation is approved. Define recipe/skill retirement, partial-output handling, and worktree cleanup without removing retained versions or owner work. Prefer explicit cleanup over unapproved destructive automation. | [M6 input versions](https://github.com/cristoforows/ticketIt/issues/7); [M7 Reports](https://github.com/cristoforows/ticketIt/issues/8); [M8 workspaces](https://github.com/cristoforows/ticketIt/issues/9) |
+
+## What M1 learned, per decision
+
+### D1 — Enforceable OpenCode action boundary and disconnect behavior — **FAILED GATE (partial)**
+
+M1 ran the central S2 experiment this decision asked for, against a real
+pinned OpenCode process (`opencode-ai`/`@opencode-ai/sdk` `1.18.31`) and
+against the native `createAgent` path. Record both sides fairly:
+
+- **What is enforceable.** A `tool.execute.before` plugin hook, backed by
+  an externally-owned `AdmissionLedger` reached over a loopback HTTP
+  facade, gates the shell tool and survives both of OpenCode's own known
+  permission bypass vectors: an engine-remembered **"always"** approval
+  (the hook still ran and still denied a revoked grant even though the
+  engine's own prompt was permanently suppressed for that
+  pattern — [20-opencode-admission.md](evidence/m1/20-opencode-admission.md),
+  "Critical interaction with issue #17's finding") and the **ambient
+  `OPENCODE_PERMISSION` environment variable** that independently defeats
+  OpenCode's own native permission config (the hook still denied while the
+  ambient variable silently turned the native `"ask"` into
+  `"allow"` — [21-opencode-coverage-matrix.md](evidence/m1/21-opencode-coverage-matrix.md),
+  "Priority 1"). Under `gateAllTools`, every built-in tool and a custom
+  plugin-registered tool were each independently admitted/denied by the
+  same hook with no new mechanism
+  ([21-opencode-coverage-matrix.md](evidence/m1/21-opencode-coverage-matrix.md),
+  "Priority 4"/"Priority 5"). The native path's tool and model admission
+  points show the same disconnect/expiry/revocation/Stop behavior
+  ([24-native-admission.md](evidence/m1/24-native-admission.md)).
+- **What is not enforceable.** **Model-only continuation is structurally
+  ungated at this hook position.** Three scripted text-only turns, fully
+  disconnected throughout, produced zero `admit()` calls — `tool.execute.before`/`.after`
+  fire only on tool dispatch, so a model that keeps producing assistant
+  text (including a fabricated claim of completed work) has no
+  associated event for any hook at this position to intercept. This is
+  not a bug in this bridge's implementation; it is a permanent property of
+  gating at this hook
+  ([21-opencode-coverage-matrix.md](evidence/m1/21-opencode-coverage-matrix.md),
+  "Priority 2"). **Nested shell sub-actions get a single whole-call
+  admission with no visibility inside it**: one admitted "bash" call that
+  internally ran a git commit, a git push over a fake-SSH transport, and a
+  loopback HTTP request produced exactly one `admit()`/dispatch pair for
+  all three sub-actions, each independently confirmed to have actually
+  happened via evidence outside the ledger
+  ([21-opencode-coverage-matrix.md](evidence/m1/21-opencode-coverage-matrix.md),
+  "Priority 3"). **Only the shell tool is gated under this bridge's
+  default configuration** — every other built-in tool is completely
+  ungated unless a deployment explicitly turns on `gateAllTools` or an
+  equivalent explicit list; the mechanism generalizes, but today's default
+  does not. **A local stdio MCP tool could not be made dispatchable at
+  all** on this pinned build — the connection reports "connected" and the
+  `tools/list` handshake succeeds, but a call under the tool's own name is
+  classified as the engine's internal `"invalid"` placeholder and never
+  reaches any hook, so its coverage could not be evaluated either way
+  ([21-opencode-coverage-matrix.md](evidence/m1/21-opencode-coverage-matrix.md),
+  "Priority 5").
+- **Verdict.** Live admission is enforceable for dispatched tool actions —
+  including against both of OpenCode's own permission bypass vectors — and
+  is **not** enforceable for model continuation at this integration
+  point. Per this decision's own text ("If required behavior cannot be
+  gated, choose an integration change or obtain an explicit requirement
+  decision"), the requirement cannot be met by a plugin hook alone: closing
+  the model-only-continuation gap or the nested-shell granularity gap, if
+  either is required, needs a different mechanism entirely (candidate
+  mechanisms — session/process abort on disconnect or Stop, a
+  wrapper/supervisor turn-or-time budget, a `bash`-replacement binary that
+  calls back into the ledger per sub-command, host-level network policy,
+  git hooks — are proposed only, in
+  [21-opencode-coverage-matrix.md](evidence/m1/21-opencode-coverage-matrix.md)'s
+  "Decision impacts," none built or endorsed). The MCP-tool gap is recorded
+  as an open risk, not assumed safe in either direction, and needs
+  re-verification before any coverage claim for that path.
+
+### D2 — Human-review evidence for PR completion and agent merge authority
+
+Not resolved by M1, and not expected to be — M1's github-delivery slices
+established a constraint any resolution must account for, nothing more.
+The Connected Account identity that authors commits/PRs is architecturally
+independent of the Owner's OAuth sign-in identity, and both are
+independently configured/verified in the fixtures
+([27-github-identity.md](evidence/m1/27-github-identity.md)): the same
+physical person controlling both accounts provides no automatic proof of
+*human* review versus *agent* action through the same account. Separately,
+`DeliveryModule` was built with no merge-capable method at all and
+`injectMerge` deliberately bypasses identity to simulate a human acting
+directly on GitHub — demonstrating (not deciding) one bounded
+action-surface option this decision's own text names: "owner-controlled
+merge plus a clearly bounded supported action surface"
+([28-pr-delivery-lifecycle.md](evidence/m1/28-pr-delivery-lifecycle.md)).
+An observed merge fact (`merged: true`) proves only that GitHub's state
+shows the PR merged; it proves nothing about who performed it or whether a
+human reviewed the change.
+
+### D3 — Agent/template compatibility and human-assigned workflow
+
+**Status: Proposed, awaiting Owner decision on [#13](https://github.com/cristoforows/ticketIt/issues/13) / [PR #30](https://github.com/cristoforows/ticketIt/pull/30).**
+A full options-and-recommendation proposal (eligibility matrix, manual
+transition table, reassignment rules, and rejected manual status changes)
+was drafted per #13's instructions and is not merged pending the Owner's
+approval comment on #13. This gate report does not resolve D3 and does
+not merge PR #30 — that is the Owner's action, not this slice's. See PR
+#30 for the drafted options.
+
+### D4 — Exceptional PR and template/repository changes
+
+Not resolved by M1, per the delivery-lifecycle issue's own instruction.
+Both exceptional cases this decision names were exercised with real
+observed data and recorded as explicit **undefined transitions**, never
+inferring a status change: a closed-unmerged PR (`kind: "closed-unmerged"`)
+and a merge observed while a Round is open (`kind: "merge-during-open-round"`),
+each leaving Ticket status completely unchanged and preserving the prior
+delivery
+([28-pr-delivery-lifecycle.md](evidence/m1/28-pr-delivery-lifecycle.md)).
+A future D4 resolution can consume the recorded `observed` payloads
+directly.
+
+### D5 — Stranded runner and stop recovery — process-death findings
+
+M1 ran process-death scenarios on both engines and recorded consistent
+findings neither of which resolves D5, but both of which are concrete
+inputs for the real claim-epoch/runner-report reconciliation M5 owns:
+
+- **A killed OpenCode server leaves the tool's own child process running.**
+  `SIGKILL` to the OpenCode server process does not propagate to a
+  shell tool's already-spawned child (a backgrounded `sleep` survived in
+  5/5 trials); nothing in the harness or this pinned build cleans up that
+  orphan. By contrast, a *clean* `session.abort()` reliably kills the
+  child within 0–1ms
+  ([18-opencode-cancellation.md](evidence/m1/18-opencode-cancellation.md),
+  scenario 4).
+- **History survives a restart; pending state does not.** After restarting
+  an OpenCode server against the same on-disk storage, session/message
+  history — including the interrupted tool part, permanently stuck at
+  `"running"` — is recoverable; a pending permission/question request is
+  not (in-memory only, confirmed empty after restart even though the
+  message history that raised it is intact)
+  ([18-opencode-cancellation.md](evidence/m1/18-opencode-cancellation.md),
+  scenario 4). The native path shows the checkpoint-shape analog: a
+  mid-tool-call `SIGKILL` leaves a checkpoint scheduled-but-incomplete with
+  no pending interrupt, which the application's own recovery policy
+  refuses to auto-continue — even though LangGraph itself would have
+  happily continued and re-run the pre-interrupt side effect, demonstrated
+  by a clearly labeled negative-control test
+  ([23-native-durable-input.md](evidence/m1/23-native-durable-input.md),
+  scenario 5).
+- **Abort during a wait leaves a request that accepts a reply with no
+  effect, then reports not found.** Aborting a session while a permission
+  request is pending does not clear that request; a reply afterward still
+  returns success (`{ok: true}`) but the scripted action never actually
+  runs — a caller cannot distinguish "my reply executed the action" from
+  "my reply was silently accepted into a dead turn" from the reply's
+  return value alone. A *second* reply to that same now-consumed request
+  then fails with `PermissionNotFoundError`, the identical error a genuine
+  duplicate reply produces
+  ([18-opencode-cancellation.md](evidence/m1/18-opencode-cancellation.md),
+  scenario 2).
+
+### D6 — Grill Mode configuration and scheduling
+
+Untouched by M1. No M1 evidence record exercises Grill Mode; it remains
+routed to M7 in full.
+
+### D7 — Runtime/provider selections
+
+Untouched by M1, deliberately. No M1 experiment selected a provider,
+model, hosting target, or object storage — every evidence record's
+"Decision impacts" section confirms this explicitly, and
+`experiments/README.md`'s workspace rules forbid it inside M1. The
+OpenRouter adapter-fidelity findings (S4) and the OpenCode/native
+admission mechanism findings (S2) apply to whichever choices D7 eventually
+makes, but do not lean toward any of them.
+
+### D8 — In-flight manual revocation and non-budget execution limits — in-flight and limit findings
+
+- **Already-dispatched actions complete.** Across every admission
+  substitute M1 built (the ledger itself, the OpenCode bridge, the native
+  path, the GitHub delivery gate), an action already dispatched before a
+  disconnect, expiry, or revocation is allowed to finish, and its
+  completion is recorded independent of the later state change
+  ([15-admission-ledger.md](evidence/m1/15-admission-ledger.md),
+  [20-opencode-admission.md](evidence/m1/20-opencode-admission.md) scenario
+  2, [24-native-admission.md](evidence/m1/24-native-admission.md) scenario
+  2). This is this experiment work's own chosen behavior for the "already-dispatched
+  handling" language, not a resolution: `docs/agent-execution.md` itself
+  still marks in-flight revocation handling as open.
+- **The hold-poll bound and the absence of an engine-level retry loop are
+  inputs, not resolutions.** The OpenCode admission bridge's bounded
+  hold-poll window (~4.5s default) is this experiment's own implementation
+  choice, not a specified value
+  ([20-opencode-admission.md](evidence/m1/20-opencode-admission.md)). No
+  engine-level automatic retry loop was observed after a denial at either
+  the OpenCode hook or the native admission boundary — the engine asks the
+  model again rather than re-invoking the same denied tool call — but
+  whether a *model* would itself choose to keep retrying a denied action is
+  unconstrained by anything either bridge enforces. This is exactly the
+  "reasonable technical loop/time limits" gap D8 is scoped to define, not
+  something M1 bounded.
+- **A pre-interrupt side effect repeats on resume in the native path.**
+  LangGraph restarts an interrupted node from the beginning; a side effect
+  placed before `interrupt()` in the same node observably re-runs on every
+  resume attempt of that node, confirmed directly
+  ([23-native-durable-input.md](evidence/m1/23-native-durable-input.md),
+  scenario 4). The corresponding requirement: any side effect that must
+  not repeat has to be placed after the interrupt point, or be made
+  idempotent.
+- Also relevant: an orphaned host shell process surviving a killed
+  OpenCode server (see D5 above) is itself a D8-scoped "loop/time limit"
+  gap — a host-level process can run indefinitely with no engine- or
+  supervisor-level mechanism observed to bound it
+  ([18-opencode-cancellation.md](evidence/m1/18-opencode-cancellation.md)).
+
+### D9 — Version and workspace retention/cleanup — ambient-configuration leak
+
+M1's fixed-inputs experiment found the concrete failure mode this decision
+needs to account for: an ambient `OPENCODE_CONFIG` environment variable
+left in a shared runner's environment — never set by ticketIt/Michelin
+itself, and not cleared by this harness's own isolation — has its
+`instructions` array **concatenated** into an unrelated new Round's
+request rather than replaced by the Round's own later configuration
+source, and a same-shaped `OPENCODE_PERMISSION` variable silently
+overrides a Round's own configured permission action
+([19-opencode-fixed-inputs.md](evidence/m1/19-opencode-fixed-inputs.md)).
+Both are recorded as failed gates for D1 and, per that evidence record's
+own routing, for D9: at bottom this is a version/scope-boundary question
+— content from outside any Round's own history reaching into a Round it
+has no connection to. Separately and non-failing: instructions-file
+immutability across a pause is an application-discipline property (never
+rewrite an already-open Round's path), not an engine-enforced snapshot,
+since instructions-file content is re-read fresh from disk on every
+completion request even though Skill bodies and config JSON structure are
+cached after first load. Whether a real deployment gives each Round a
+genuinely fresh isolated global-config-equivalent location, or shares one
+persistent location across Rounds/Tickets on a runner host (and if shared,
+what stops a stray write between Rounds from reaching the next Round's
+boot), remains a genuinely open production-topology question for whichever
+milestone designs the real OpenCode runner's directory layout (M7/M8).
+
+## Known robustness items from M1 (follow-ups, not decisions)
+
+These are not open product/integration decisions; they are implementation
+robustness gaps M1 observed and recorded rather than fixed, since fixing
+them was out of scope for a bounded adapter proof. Tracked here so they
+are not lost before the milestone that would fix them:
+
+- **Timing sensitivity under heavy parallel load.** The
+  `opencode-cancellation` suite (11 tests) passed 11/11 when run alone,
+  repeatedly, but failed 3 of 11 when run concurrently with heavy parallel
+  load from other work in the same environment. The suite's polling-based
+  assertions (bounded retry loops, not fixed sleeps) are not fully immune
+  to host contention. Not root-caused further within M1's scope; a future
+  milestone that runs this suite in CI alongside other concurrent work
+  should budget for this or increase timeouts/isolation.
+  ([18-opencode-cancellation.md](evidence/m1/18-opencode-cancellation.md))
+- **Unhandled rejection on ledger HTTP facade network failure.** The
+  OpenCode admission bridge's plugin has no distinct handling for a
+  fetch-level network error talking to the ledger (e.g. connection
+  refused) — every "disconnect" M1 exercised was the ledger's own
+  `setConnected(false)` flag, not a genuinely killed/unreachable HTTP
+  server. A real network failure of that facade would currently surface as
+  an unhandled rejection inside the hook rather than a clean deny.
+  ([20-opencode-admission.md](evidence/m1/20-opencode-admission.md),
+  "Observed limitations")
+- **The MCP dispatch failure is an unexplained open risk.** A local stdio
+  MCP tool connects and completes the `initialize`/`tools/list` handshake
+  correctly, but never becomes dispatchable on this pinned OpenCode build —
+  the engine classifies a call under the tool's own name as its internal
+  `"invalid"` placeholder instead of routing it to any hook. The root
+  cause (a further undiscovered protocol requirement, or a genuine gap in
+  this pinned build's local-MCP wiring) was not identified. This must not
+  be assumed either safe (never executes, nothing to gate) or unsafe (a
+  missed execution path) — it needs re-verification before any coverage
+  claim for MCP tool paths on a future pinned version.
+  ([21-opencode-coverage-matrix.md](evidence/m1/21-opencode-coverage-matrix.md),
+  "Priority 5")
 
 ## Engineering decisions within the approved design
 
