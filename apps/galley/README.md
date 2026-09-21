@@ -7,9 +7,8 @@ returns.
 
 This slice ([issue #49](https://github.com/cristoforows/ticketIt/issues/49))
 adds an independently buildable, runnable Go module that serves one
-unauthenticated application-status endpoint. There is no database, no
-authentication, and no Ticket model yet — persistence arrives in
-[#52](https://github.com/cristoforows/ticketIt/issues/52).
+unauthenticated application-status endpoint. There was no database, no
+authentication, and no Ticket model yet.
 
 [Issue #51](https://github.com/cristoforows/ticketIt/issues/51) then
 bound that endpoint to [`contracts/openapi.yaml`](../../contracts/openapi.yaml),
@@ -19,6 +18,13 @@ first convention every later slice follows, the regeneration commands,
 and the drift check. `GET /api/status`'s observable behavior is
 unchanged by that refactor.
 
+[Issue #52](https://github.com/cristoforows/ticketIt/issues/52) added
+PostgreSQL: a connection pool (`internal/postgres`), versioned
+forward-only migrations, a live database-health field on `GET
+/api/status`, and a development-only diagnostic-notes endpoint. There
+is still no domain/Ticket table — that arrives in
+[#56](https://github.com/cristoforows/ticketIt/issues/56).
+
 Galley is a standalone Go module (`go.mod` at this directory) with no
 dependency on Node or any frontend toolchain. It does have third-party
 Go dependencies as of issue #51 — the generated server types/interface
@@ -26,22 +32,33 @@ Go dependencies as of issue #51 — the generated server types/interface
 own (see below), but the code-generation tool itself
 (`oapi-codegen`, pinned via `go.mod`'s `tool` directive) and the
 contract-drift test (`kin-openapi`, an ordinary `require`) mean
-`go.sum` now exists. Neither is a Node/frontend dependency; "no Node
-required to build Galley" still holds.
+`go.sum` now exists. Issue #52 added its own real runtime dependencies
+on top of that — `pgx/v5` and `golang-migrate` — see "Database
+configuration" and "Database migrations" below. Neither issue added a
+Node/frontend dependency; "no Node required to build Galley" still
+holds.
 
 ## Requirements
 
-- Go `1.27.1` (see "Exact versions" below). No other toolchain is
-  required.
+- Go `1.27.1` (see "Exact versions" below).
+- A local PostgreSQL server (see "Local PostgreSQL setup" below). No
+  other toolchain is required.
 
 ## Build, test, run
 
-All commands run from this directory (`apps/galley`).
+All commands run from this directory (`apps/galley`). `go test ./...`
+needs a real, migrated `ticketit_test` database — see "Local
+PostgreSQL setup" and "Testing against real PostgreSQL" below; a
+one-time `createdb ticketit_test` is the only setup step, since the
+test suite applies migrations to it itself.
 
 ```sh
+createdb ticketit_dev    # one-time, see "Local PostgreSQL setup"
+createdb ticketit_test   # one-time, ditto
+DATABASE_URL=postgres://localhost:5432/ticketit_dev?sslmode=disable go run ./cmd/migrate
 go build ./...
 go test ./...
-go run ./cmd/galley
+DATABASE_URL=postgres://localhost:5432/ticketit_dev?sslmode=disable go run ./cmd/galley
 ```
 
 `go vet ./...` and `gofmt -l .` (expect no output) are also part of
@@ -50,11 +67,12 @@ this slice's definition of done.
 ### Running
 
 ```sh
-go run ./cmd/galley
+DATABASE_URL=postgres://localhost:5432/ticketit_dev?sslmode=disable go run ./cmd/galley
 ```
 
-By default this listens on `:8080` (all interfaces, port 8080) and
-serves:
+`DATABASE_URL` is required (see "Database configuration" below); every
+other setting keeps its issue #49 default. By default this listens on
+`:8080` (all interfaces, port 8080) and serves:
 
 ```sh
 curl http://localhost:8080/api/status
@@ -83,6 +101,7 @@ than starting in an unknown state.
 | `GALLEY_PORT`         | `8080`        | Integer `0`–`65535`. `0` asks the OS for an ephemeral port (used by this module's own tests). |
 | `GALLEY_ENVIRONMENT`  | `development` | Must be exactly `development` or `production`.                                           |
 | `GALLEY_VERSION`      | `dev`         | Arbitrary version string reported by `GET /api/status`.                                  |
+| `DATABASE_URL`        | *(none — required)* | PostgreSQL connection string, `postgres://user:password@host:port/dbname`. See "Database configuration" below. |
 
 Example of a configuration failure:
 
@@ -93,13 +112,126 @@ $ echo $?
 1
 ```
 
+## Database configuration
+
+`DATABASE_URL` (issue #52) is the one setting above with no default:
+there is no sensible fallback for "which database," so an unset value
+fails startup immediately, the same way an invalid `GALLEY_PORT` or
+`GALLEY_ENVIRONMENT` does:
+
+```sh
+$ go run ./cmd/galley
+configuration error: DATABASE_URL is not set: a PostgreSQL connection string is required (postgres://user:password@host:port/dbname) -- see apps/galley/README.md, "Database configuration"
+$ echo $?
+1
+```
+
+A value that does not parse as a `postgres://` or `postgresql://`
+connection string fails the same way, without ever echoing the value
+back (it may contain a password):
+
+```sh
+$ DATABASE_URL=mysql://localhost/db go run ./cmd/galley
+configuration error: invalid DATABASE_URL: must be a postgres:// or postgresql:// connection string (value withheld to avoid logging credentials)
+$ echo $?
+1
+```
+
+**A syntactically valid `DATABASE_URL` whose target is merely
+unreachable does *not* fail startup.** `internal/postgres.NewPool`
+(`pgxpool.New`) only parses and validates configuration; it does not
+connect. Reachability is instead checked live, on every `GET
+/api/status` request (`internal/postgres.CheckHealth`, see below) —
+this is what lets Galley boot and keep serving while its database is
+temporarily down, and is required by issue #52's acceptance criteria
+("reports failure honestly when the database is down").
+
+**Data access: [`pgx/v5`](https://github.com/jackc/pgx)**, via
+`pgxpool.Pool` (`internal/postgres`), used directly with hand-written
+SQL — no ORM, no query builder, no repository-per-table abstraction.
+Chosen because issue #52 recommends it, it is the de facto standard
+PostgreSQL driver for Go, and this slice adds exactly one table
+(`diagnostic_notes`, development-only); an abstraction layer has
+nothing to abstract yet and would be built ahead of the domain model
+that #56 actually introduces.
+
+**Nothing in this codebase ever logs or otherwise echoes
+`DATABASE_URL`, in whole or in part.** Configuration errors describe
+*what* is wrong (unset, wrong scheme, unparseable) without repeating
+the value; `GET /api/status`'s `database.error` and the diagnostic
+endpoints' error messages are fixed, generic strings, never derived
+from the underlying driver error text. See `internal/postgres`'s
+package doc for the full rationale.
+
+## Database migrations
+
+Versioned, **forward-only** SQL files live in `internal/migrations`
+(embedded via `go:embed`, not read from disk at runtime — see that
+package's doc). There are deliberately no `.down.sql` files: this
+slice never runs a migration backward, so it does not carry one.
+
+**Applying them is one documented command**, run against whichever
+database `DATABASE_URL` names:
+
+```sh
+DATABASE_URL=postgres://localhost:5432/ticketit_dev?sslmode=disable go run ./cmd/migrate
+```
+
+This is reproducible from a genuinely empty database (`createdb
+ticketit_dev` with nothing else done to it) — confirmed in
+[`docs/evidence/m2/52-postgresql-persistence.md`](../../docs/evidence/m2/52-postgresql-persistence.md) —
+and idempotent: running it again against an already-migrated database
+reports the same version and changes nothing
+([golang-migrate](https://github.com/golang-migrate/migrate)'s
+`ErrNoChange`).
+
+**Migrations do not run automatically at Galley's own startup
+(`cmd/galley`).** `cmd/galley/main.go` never calls
+`postgres.ApplyMigrations`; only `cmd/migrate` and the test suite's
+setup helper (`internal/postgres.NewTestPool`) do. This is a
+deliberate choice, not an oversight: applying schema changes is an
+explicit, operator-triggered action, auditable independently of
+"a process happened to restart," and avoids every Galley instance in a
+future multi-instance deployment racing to migrate the same database
+concurrently on every boot. The cost is one extra manual step before
+running Galley against a schema change for the first time — documented
+above and enforced by `GET /api/status`'s live migration-version field
+making a not-yet-migrated database immediately visible rather than
+silently wrong.
+
+**Tooling: [`golang-migrate/migrate/v4`](https://github.com/golang-migrate/migrate)**,
+used as an ordinary library dependency (`internal/postgres/migrate.go`)
+via its `pgx/v5` database driver
+(`golang-migrate/migrate/v4/database/pgx/v5`) and its `iofs` source
+driver reading the embedded `internal/migrations.FS`. Chosen over
+writing a hand-rolled migration runner because "versioned, forward-only
+files with a documented apply command and a tracked applied version"
+is exactly golang-migrate's job, it is the most widely used Go
+migration tool, and its `pgx/v5` driver keeps the whole stack on one
+PostgreSQL driver rather than introducing `lib/pq` (golang-migrate's
+older default) alongside it. Not used as its own separate CLI binary
+(the usual `migrate` command distributed via `go install`): that
+binary's included database drivers are selected by build tags at
+compile time (`-tags postgres`), which Go's `tool` directive (used
+elsewhere in this module for `oapi-codegen`, see `contracts/README.md`)
+has no way to pass through, and getting this wrong would silently
+produce a `migrate` binary with no PostgreSQL support at all. Writing
+the ~15-line `cmd/migrate` program in this repository instead sidesteps
+that pitfall entirely and needs no build tags, since it imports exactly
+the one driver it needs directly like any other Go code.
+
+`schema_migrations` (the table golang-migrate's `pgx/v5` driver
+maintains: one row, `version bigint` + `dirty boolean`) is the same
+table `GET /api/status`'s live migration-version check reads —
+`internal/postgres/health.go`, not a second, separate bookkeeping
+mechanism.
+
 ## `GET /api/status`
 
 Described in [`contracts/openapi.yaml`](../../contracts/openapi.yaml)
 and bound to it via the generated `ServerInterface`
 (`internal/httpapi/api.gen.go`, see "Generated types and the drift
-check" below). Returns `200` with exactly these five fields,
-unauthenticated and free of secrets:
+check" below). Returns `200`, unauthenticated and free of secrets:
 
 ```json
 {
@@ -107,7 +239,8 @@ unauthenticated and free of secrets:
   "status": "ok",
   "version": "dev",
   "environment": "development",
-  "startedAt": "2026-09-21T10:00:00Z"
+  "startedAt": "2026-09-21T10:00:00Z",
+  "database": { "status": "ok", "migrationVersion": 1 }
 }
 ```
 
@@ -116,11 +249,83 @@ unauthenticated and free of secrets:
 - `startedAt` is the RFC3339 UTC process start time, captured once when
   the process boots and returned unchanged on every request.
 
-**This shape is fixed.** Swiftlet's client (issue #50, open PR #63)
-validates all five fields as non-empty strings and treats a missing one
-as an error. Later slices (e.g. #52's database health) may extend this
-object **additively** with new fields; existing fields must never be
-renamed or removed.
+**These five fields' names, values, and order are fixed** — Swiftlet's
+client (issue #50) validates all five as non-empty strings and treats
+a missing one as an error. This is why `database` (issue #52) was
+appended after `startedAt` rather than inserted anywhere else, both in
+[the contract](../../contracts/openapi.yaml) and in
+`StatusResponse.MarshalJSON` (`internal/httpapi/status.go`).
+
+`database` (issue #52) is checked **live, on every request** —
+`internal/httpapi/status.go` calls `internal/postgres.CheckHealth`
+fresh each time, never a boot-time snapshot cached in memory:
+
+- `status`: `"ok"` or `"error"`. **Never `"ok"` when the database is
+  unreachable or a query against it fails** — this is
+  `CheckHealth`'s one required property, and
+  `internal/httpapi/handler_test.go:TestGetStatus_DatabaseUnreachable`
+  asserts it directly against a real pool pointed at a port nothing
+  listens on.
+- `migrationVersion`: the currently applied migration version
+  (`schema_migrations.version`), or `null` if it could not be
+  determined — either the database is unreachable (`status: "error"`)
+  or it is reachable but nothing has been migrated yet (`status:
+  "ok"`, `migrationVersion: null` — a normal state on a freshly
+  created database, not a failure).
+- `error`: present only when `status` is `"error"`. A fixed, generic
+  string (e.g. `"database unreachable"`) — never the underlying
+  driver's error text or any part of `DATABASE_URL`.
+
+Unreachable-database example (`DATABASE_URL` pointing at a closed
+local port):
+
+```json
+{
+  "application": "galley",
+  "status": "ok",
+  "version": "dev",
+  "environment": "development",
+  "startedAt": "2026-09-21T09:14:27Z",
+  "database": { "status": "error", "migrationVersion": null, "error": "database unreachable" }
+}
+```
+
+Note that the top-level `status` stays `"ok"` — that field means "the
+Galley *process* is running and answering requests," which remains
+true even while its database is down; `database.status` is where a
+database failure is reported.
+
+## Development diagnostic (issue #52)
+
+`GET`/`POST /api/dev/diagnostic-notes` persist and list a tiny
+`diagnostic_notes` row (`note`, `createdAt`) — described in
+[the contract](../../contracts/openapi.yaml), tagged `dev-diagnostic`.
+Not a domain/Ticket concept; exists solely to prove data survives a
+Galley restart against the same database
+(`docs/evidence/m2/52-postgresql-persistence.md`).
+
+```sh
+curl -X POST http://localhost:8080/api/dev/diagnostic-notes -d '{"note":"hello"}'
+curl http://localhost:8080/api/dev/diagnostic-notes
+```
+
+**Absent entirely in `GALLEY_ENVIRONMENT=production` — not merely
+unauthorized, genuinely never registered.** `internal/httpapi/handler.go`'s
+`NewHandler` registers every contract operation through the generated
+`HandlerFromMux` against a `gatedMux` in any non-development
+environment; `gatedMux.HandleFunc` silently drops registration for any
+pattern under the fixed `/api/dev/` prefix instead of forwarding it to
+the real `*http.ServeMux`. A request to either route in production
+therefore falls through to the same shared `404 not_found` handler as
+any path that was never described anywhere — proven, not just
+asserted, by
+`internal/httpapi/production_gating_test.go:TestDevDiagnosticRoutes_AbsentInProduction`,
+which compares the response byte-for-byte (modulo the path named in
+the message) against a request to a path this codebase has genuinely
+never heard of. This gating happens at the one call site where
+registration occurs, not as a check inside `diagnostic.go`'s handler
+methods — those methods have no notion of "production" at all and do
+not need one.
 
 ## Error shape
 
@@ -139,13 +344,14 @@ uses this shared JSON shape:
 ```
 
 `code` is a short, stable, snake_case machine-readable identifier;
-`message` is a human-readable, non-secret explanation. This slice
-defines two codes:
+`message` is a human-readable, non-secret explanation. Codes so far:
 
 | Situation                                   | Status | `code`               |
 | -------------------------------------------- | ------ | --------------------- |
 | No route matches the request path            | `404`  | `not_found`            |
 | Route exists, method not allowed on it       | `405`  | `method_not_allowed`   |
+| Diagnostic request body fails validation (#52) | `400`  | `invalid_request`   |
+| Diagnostic endpoint's database query failed (#52) | `503` | `database_unavailable` |
 
 A `405` response also carries an `Allow` header naming the accepted
 method(s).
@@ -253,6 +459,59 @@ released by successfully re-binding the exact same address — and
 manually with a real process and `kill -TERM`/`kill -INT` (see
 `docs/evidence/m2/49-galley-boot.md`).
 
+## Local PostgreSQL setup
+
+This repository does not provision any hosted database (see
+`AGENTS.md`, "Paid resources") — everything runs against a local
+PostgreSQL instance. One-time setup, against any local PostgreSQL
+server your user can create databases on:
+
+```sh
+createdb ticketit_dev    # for `go run ./cmd/galley`
+createdb ticketit_test   # for `go test ./...`, see below
+```
+
+Then apply migrations to `ticketit_dev` (see "Database migrations"
+above); `ticketit_test` does not need this run manually, since the
+test suite applies migrations to it itself (next section). Do not
+reuse a database another slice's evidence already occupies (for
+example any leftover M1 experiment database) — create ticketIt's own.
+
+## Testing against real PostgreSQL
+
+**`go test ./...` uses real PostgreSQL — no in-memory or fake database
+substitute, anywhere in this module.** Every test that needs a
+database calls `internal/postgres.NewTestPool(t)`, which:
+
+1. Applies every migration in `internal/migrations` to the test
+   database (idempotent — a no-op if already applied), so `go test
+   ./...` is reproducible from a genuinely empty `ticketit_test`
+   database with the one setup command above and nothing else.
+2. Connects and pings it, failing the test immediately with an
+   actionable message (naming the database it tried to reach, never
+   the full connection string) if that fails.
+
+By default this targets `postgres://localhost:5432/ticketit_test?sslmode=disable`
+(`internal/postgres.TestDatabaseURL`); override with
+`GALLEY_TEST_DATABASE_URL` for a differently-named or
+differently-hosted test database:
+
+```sh
+go test ./...
+# or, against a non-default test database:
+GALLEY_TEST_DATABASE_URL=postgres://localhost:5432/some_other_db?sslmode=disable go test ./...
+```
+
+`cmd/galley/restart_durability_test.go`'s
+`TestRestartDurability_DiagnosticNoteSurvivesFreshProcess` (issue #52's
+required restart-durability test) additionally builds the real
+`galley` binary and runs it as two separate OS processes in sequence
+against this same database — not two calls to `run()` in one test
+binary, which the issue explicitly rules out as insufficient ("not
+just a new database connection or a transaction commit"). See
+`docs/evidence/m2/52-postgresql-persistence.md` for how this was
+verified and its actual output.
+
 ## Layout
 
 ```text
@@ -262,13 +521,21 @@ apps/galley/
 ├── README.md               # this file
 ├── scripts/
 │   └── check-contract-drift.sh  # drift check part 2: regeneration produces no diff
-├── cmd/galley/             # main package: wiring, config load, graceful shutdown
+├── cmd/
+│   ├── galley/             # main package: wiring, config load, graceful shutdown
+│   │   └── restart_durability_test.go  # issue #52: real two-process restart test
+│   └── migrate/            # issue #52: the one documented migration-apply command
 └── internal/
-    ├── config/             # environment parsing and validation
+    ├── config/             # environment parsing and validation (incl. DATABASE_URL, #52)
+    ├── migrations/         # issue #52: embedded, versioned, forward-only SQL files
+    ├── postgres/           # issue #52: pgxpool wrapper, live health check, migration runner,
+    │                       #   and the real-PostgreSQL test-setup helper (NewTestPool)
     └── httpapi/            # routing, status handler, shared error shape, request logging
         ├── api.gen.go      # generated from contracts/openapi.yaml — DO NOT EDIT
         ├── generate.go     # the //go:generate directive that produces api.gen.go
-        └── contract_test.go  # drift check part 1: response validates against the contract
+        ├── contract_test.go  # drift check part 1: response validates against the contract
+        ├── diagnostic.go   # issue #52: the two development-only diagnostic-note handlers
+        └── production_gating_test.go  # issue #52: proves those routes absent in production
 ```
 
 ## Exact versions and toolchain
@@ -286,6 +553,32 @@ apps/galley/
   (`fmt`, `net/http`) — generating it added no runtime dependency to
   the actual served application, only to the tool that produces it and
   to the test that checks it.
+- `github.com/jackc/pgx/v5` `v5.11.0` (issue #52) — an ordinary
+  `require`, Galley's PostgreSQL driver and connection pool
+  (`pgxpool`), linked into the built `galley` binary.
+- `github.com/golang-migrate/migrate/v4` `v4.20.1` (issue #52) — an
+  ordinary `require`, used by `internal/postgres/migrate.go` (and thus
+  by `cmd/migrate` and by the test suite's `NewTestPool`) via its
+  `pgx/v5` database driver and `iofs` source driver. Also linked into
+  the built `galley` binary indirectly, via `internal/postgres`, even
+  though `cmd/galley` itself never calls `ApplyMigrations` (see
+  "Database migrations" above) — `go build` cannot statically prove a
+  function is never called at runtime, only that the package is
+  imported.
+- `github.com/jackc/pgerrcode` `v0.0.0-20220416144525-469b46aa5efa` (issue #52) — a small, fixed constants
+  package (SQLSTATE codes), pulled in transitively by
+  golang-migrate's `pgx/v5` driver and used directly by
+  `internal/postgres/health.go` to recognize "relation does not exist"
+  (no migrations applied yet) without hardcoding the raw SQLSTATE
+  string.
 
-See `docs/evidence/m2/49-galley-boot.md` for the full reproducible
-verification record (commands and their actual output).
+PostgreSQL server: `17.11` (Homebrew, `localhost:5432`) on the machine
+this slice's evidence was recorded on — any reasonably recent
+PostgreSQL should work; nothing here depends on a specific server
+version beyond ordinary SQL and `GENERATED ALWAYS AS IDENTITY`
+(PostgreSQL 10+).
+
+See `docs/evidence/m2/49-galley-boot.md` for issue #49's original
+verification record, and
+`docs/evidence/m2/52-postgresql-persistence.md` for this slice's full
+reproducible verification record (commands and their actual output).

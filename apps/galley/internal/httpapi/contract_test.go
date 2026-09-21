@@ -6,14 +6,17 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
+	"github.com/getkin/kin-openapi/routers"
 	"github.com/getkin/kin-openapi/routers/legacy"
 
 	"github.com/cristoforows/ticketIt/apps/galley/internal/config"
+	"github.com/cristoforows/ticketIt/apps/galley/internal/postgres"
 )
 
 // contractPath is relative to this package directory.
@@ -26,6 +29,7 @@ const contractPath = "../../../../contracts/openapi.yaml"
 // implementation compiling fine but disagreeing about values (an
 // enum/const, or a required field going absent).
 func TestGetStatus_ResponseMatchesContract(t *testing.T) {
+	pool := postgres.NewTestPool(t)
 	doc := loadContract(t)
 
 	router, err := legacy.NewRouter(doc)
@@ -35,7 +39,7 @@ func TestGetStatus_ResponseMatchesContract(t *testing.T) {
 
 	startedAt := time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC)
 	cfg := config.Config{Environment: config.EnvDevelopment, Version: "dev"}
-	handler := NewHandler(cfg, startedAt, testLogger(&bytes.Buffer{}))
+	handler := NewHandler(cfg, startedAt, pool, testLogger(&bytes.Buffer{}))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
 	rec := httptest.NewRecorder()
@@ -44,6 +48,74 @@ func TestGetStatus_ResponseMatchesContract(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
+
+	validateAgainstContract(t, router, req, rec)
+}
+
+// TestGetStatus_DatabaseUnreachableResponseMatchesContract is
+// TestGetStatus_ResponseMatchesContract's counterpart for the
+// unreachable-database path required by issue #52: the degraded
+// "database": {"status": "error", ...} shape must validate against
+// the same contract as the healthy shape does.
+func TestGetStatus_DatabaseUnreachableResponseMatchesContract(t *testing.T) {
+	pool := unreachablePool(t)
+	doc := loadContract(t)
+
+	router, err := legacy.NewRouter(doc)
+	if err != nil {
+		t.Fatalf("failed to build a router from %s: %v", contractPath, err)
+	}
+
+	cfg := config.Config{Environment: config.EnvDevelopment, Version: "dev"}
+	handler := NewHandler(cfg, time.Now(), pool, testLogger(&bytes.Buffer{}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	validateAgainstContract(t, router, req, rec)
+}
+
+// TestDiagnosticNotes_ResponseMatchesContract validates both
+// development-only diagnostic operations' real responses against the
+// contract, the same way the status endpoint above is validated.
+func TestDiagnosticNotes_ResponseMatchesContract(t *testing.T) {
+	pool := postgres.NewTestPool(t)
+	doc := loadContract(t)
+
+	router, err := legacy.NewRouter(doc)
+	if err != nil {
+		t.Fatalf("failed to build a router from %s: %v", contractPath, err)
+	}
+
+	cfg := config.Config{Environment: config.EnvDevelopment, Version: "dev"}
+	handler := NewHandler(cfg, time.Now(), pool, testLogger(&bytes.Buffer{}))
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/dev/diagnostic-notes",
+		strings.NewReader(`{"note":"contract test note"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("POST status = %d, want %d; body=%s", createRec.Code, http.StatusCreated, createRec.Body.String())
+	}
+	validateAgainstContract(t, router, createReq, createRec)
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/dev/diagnostic-notes", nil)
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want %d; body=%s", listRec.Code, http.StatusOK, listRec.Body.String())
+	}
+	validateAgainstContract(t, router, listReq, listRec)
+}
+
+func validateAgainstContract(t *testing.T, router routers.Router, req *http.Request, rec *httptest.ResponseRecorder) {
+	t.Helper()
 
 	route, pathParams, err := router.FindRoute(req)
 	if err != nil {
@@ -62,8 +134,8 @@ func TestGetStatus_ResponseMatchesContract(t *testing.T) {
 	input.SetBodyBytes(rec.Body.Bytes())
 
 	if err := openapi3filter.ValidateResponse(context.Background(), input); err != nil {
-		t.Fatalf("GET /api/status response %s does not validate against %s: %v",
-			rec.Body.String(), contractPath, err)
+		t.Fatalf("%s %s response %s does not validate against %s: %v",
+			req.Method, req.URL.Path, rec.Body.String(), contractPath, err)
 	}
 }
 
@@ -77,9 +149,11 @@ func TestErrorResponses_MatchContract(t *testing.T) {
 		t.Fatalf("contract %s has no components.schemas.ErrorBody", contractPath)
 	}
 
+	pool := postgres.NewTestPool(t)
 	handler := NewHandler(
 		config.Config{Environment: config.EnvDevelopment, Version: "dev"},
 		time.Now(),
+		pool,
 		testLogger(&bytes.Buffer{}),
 	)
 

@@ -19,6 +19,7 @@ import (
 
 	"github.com/cristoforows/ticketIt/apps/galley/internal/config"
 	"github.com/cristoforows/ticketIt/apps/galley/internal/httpapi"
+	"github.com/cristoforows/ticketIt/apps/galley/internal/postgres"
 )
 
 func main() {
@@ -45,8 +46,20 @@ func run(ctx context.Context, getenv func(string) string, stdout io.Writer, read
 	}
 
 	logger := slog.New(slog.NewJSONHandler(stdout, nil))
+
+	// NewPool only parses/validates DATABASE_URL; it does not connect,
+	// so a database that is merely unreachable never blocks Galley's
+	// own startup (issue #52) -- only a malformed DATABASE_URL does,
+	// same as any other invalid configuration value above. Reachability
+	// from here on is checked live, per request, by GET /api/status.
+	pool, err := postgres.NewPool(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("configuration error: %w", err)
+	}
+	defer pool.Close()
+
 	startedAt := time.Now().UTC()
-	handler := httpapi.NewHandler(cfg, startedAt, logger)
+	handler := httpapi.NewHandler(cfg, startedAt, pool, logger)
 
 	listener, err := net.Listen("tcp", cfg.Addr())
 	if err != nil {

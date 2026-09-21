@@ -25,6 +25,8 @@ paths:
         are constant; `version` and `environment` come from Galley's
         configuration; `startedAt` is the process start time, captured
         once. Additive-only: fields are never renamed or removed.
+        `database` was added by issue #52 and reflects a live check made
+        while handling this request, not a cached boot-time snapshot.
       responses:
         "200":
           description: Galley is running.
@@ -41,13 +43,64 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorBody"
+  /api/dev/diagnostic-notes:
+    get:
+      operationId: listDiagnosticNotes
+      summary: List development diagnostic notes
+      tags: [dev-diagnostic]
+      description: >-
+        Development-only diagnostic (issue #52): lists every persisted
+        diagnostic note, oldest first. Proves data survives a Galley
+        restart against the same database. These routes are gated at
+        route registration and do not exist when `GALLEY_ENVIRONMENT`
+        is `production` — an unmatched request there returns the same
+        `404 not_found` shape as any other unknown route.
+      responses:
+        "200":
+          description: The persisted diagnostic notes, oldest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiagnosticNoteList"
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+    post:
+      operationId: createDiagnosticNote
+      summary: Persist a development diagnostic note
+      tags: [dev-diagnostic]
+      description: >-
+        Development-only diagnostic (issue #52): persists one note.
+        Gated the same way as the GET above.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDiagnosticNoteRequest"
+      responses:
+        "201":
+          description: The persisted diagnostic note.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiagnosticNote"
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
 components:
   schemas:
     StatusResponse:
       type: object
       description: The fixed GET /api/status payload.
       additionalProperties: false
-      required: [application, status, version, environment, startedAt]
+      required: [application, status, version, environment, startedAt, database]
       properties:
         application:
           type: string
@@ -69,6 +122,70 @@ components:
           # time.Time, whose RFC3339Nano marshaling can add fractional
           # seconds and change the response bytes.
           x-go-type: string
+        database:
+          $ref: "#/components/schemas/DatabaseStatus"
+    DatabaseStatus:
+      type: object
+      description: >-
+        Added by issue #52. Reachability and applied migration version,
+        checked live on every request -- never cached from process
+        start, and never reported as "ok" when the database is
+        unreachable.
+      additionalProperties: false
+      required: [status, migrationVersion]
+      properties:
+        status:
+          type: string
+          enum: [ok, error]
+        migrationVersion:
+          type: [integer, "null"]
+          description: >-
+            The most recently applied forward-only migration version
+            (see apps/galley/internal/migrations), or null if it could
+            not be determined -- either because the database is
+            unreachable (status "error") or because no migration has
+            been applied yet on an otherwise-reachable database
+            (status "ok").
+        error:
+          type: string
+          description: >-
+            Present only when status is "error". A short, fixed,
+            non-secret explanation -- never the underlying driver error
+            text or any part of the connection string.
+    DiagnosticNote:
+      type: object
+      description: >-
+        Development-only diagnostic record (issue #52), persisted in
+        the diagnostic_notes table. Not a domain/ticket concept.
+      additionalProperties: false
+      required: [id, note, createdAt]
+      properties:
+        id:
+          type: integer
+        note:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+          description: RFC3339 UTC timestamp of when the note was persisted.
+          x-go-type: string
+    DiagnosticNoteList:
+      type: object
+      additionalProperties: false
+      required: [notes]
+      properties:
+        notes:
+          type: array
+          items:
+            $ref: "#/components/schemas/DiagnosticNote"
+    CreateDiagnosticNoteRequest:
+      type: object
+      additionalProperties: false
+      required: [note]
+      properties:
+        note:
+          type: string
+          minLength: 1
     ErrorBody:
       type: object
       description: The shared JSON error shape used by every Galley error response.

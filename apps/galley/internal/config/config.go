@@ -8,6 +8,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"strconv"
 )
 
@@ -40,6 +41,12 @@ type Config struct {
 	// Version is an arbitrary, non-empty version string reported by
 	// GET /api/status.
 	Version string
+	// DatabaseURL is the PostgreSQL connection string (issue #52). It
+	// has no default -- unlike every other setting here, an unset
+	// DATABASE_URL is a configuration error, not a value with a
+	// sensible fallback. Never logged or otherwise echoed back: see
+	// Load's validation below and internal/postgres's package doc.
+	DatabaseURL string
 }
 
 // Addr returns the "host:port" address to pass to net.Listen.
@@ -82,10 +89,34 @@ func Load(getenv func(string) string) (Config, error) {
 		version = DefaultVersion
 	}
 
+	// DATABASE_URL has no default: unlike the settings above, there is
+	// no sensible fallback for "which database." Checked last so an
+	// invalid value for one of the settings above is still reported
+	// first, unchanged from before this field existed.
+	databaseURL := getenv("DATABASE_URL")
+	if databaseURL == "" {
+		return Config{}, fmt.Errorf(
+			"DATABASE_URL is not set: a PostgreSQL connection string is required " +
+				"(postgres://user:password@host:port/dbname) -- see apps/galley/README.md, \"Database configuration\"",
+		)
+	}
+	// Validated for shape only (parses, and uses a postgres(ql):// scheme).
+	// The value itself is never included in this or any other error:
+	// some URL-parse failures echo back the offending input, which
+	// would leak credentials into whatever captures this error.
+	parsedDatabaseURL, err := url.Parse(databaseURL)
+	if err != nil || (parsedDatabaseURL.Scheme != "postgres" && parsedDatabaseURL.Scheme != "postgresql") {
+		return Config{}, fmt.Errorf(
+			"invalid DATABASE_URL: must be a postgres:// or postgresql:// connection string " +
+				"(value withheld to avoid logging credentials)",
+		)
+	}
+
 	return Config{
 		Host:        host,
 		Port:        port,
 		Environment: environment,
 		Version:     version,
+		DatabaseURL: databaseURL,
 	}, nil
 }
