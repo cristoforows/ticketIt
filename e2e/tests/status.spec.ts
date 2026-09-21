@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { signIn } from "../support/sign-in";
 
 // Set by run.sh to the real, running Galley's own address -- never
 // Swiftlet's origin (which only proxies /api/*) -- so this spec can ask
@@ -25,7 +26,10 @@ test("status page displays the values Galley actually returns", async ({ page, r
   expect(apiResponse.ok(), "Galley's GET /api/status must respond 200 before this spec can assert anything against it").toBeTruthy();
   const body = await apiResponse.json();
 
-  await page.goto("/");
+  // Since issue #55, StatusView only renders inside the authenticated
+  // shell -- GET /api/status itself stays public (apps/galley/README.md,
+  // "CORS"), but Swiftlet now only shows it once a session is confirmed.
+  await signIn(page, request);
 
   await expect(page.getByTestId("status-success")).toBeVisible();
 

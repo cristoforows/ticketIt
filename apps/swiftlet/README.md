@@ -4,8 +4,10 @@ ticketIt's frontend: React + TypeScript, built with Vite. This slice
 (issue #50, "M2.2 — Swiftlet boots and displays Galley-provided
 status") adds a single page that fetches `GET /api/status` from Galley
 and renders `application`, `status`, `version`, `environment`, and
-`startedAt` exactly as Galley returns them. There is no routing, no
-authentication, and no Tickets yet — see
+`startedAt` exactly as Galley returns them. There was no routing, no
+authentication, and no Tickets yet — [issue #55](https://github.com/cristoforows/ticketIt/issues/55)
+later added sign-in (see "Sign-in, the authenticated shell, and
+sign-out" below); there are still no Tickets. See
 [docs/deployment.md](../../docs/deployment.md) and
 [docs/adr/0001-single-authority-galley.md](../../docs/adr/0001-single-authority-galley.md):
 Swiftlet renders what Galley returns and never owns a workflow rule.
@@ -67,6 +69,16 @@ restricted to the `VITE_`-prefixed convention since it only affects the
 dev/build-time proxy, not client bundle code); `.env.local` is
 gitignored. The same variable applies to `npm run preview`.
 
+**For sign-in to work against a locally running Galley (issue #55),
+also set Galley's own `GALLEY_BASE_URL` to this dev server's origin**
+(e.g. `GALLEY_BASE_URL=http://localhost:5173`), not Galley's own
+address. The browser only ever reaches Galley through this proxy
+(`apps/galley/README.md`, "CORS"), so Galley's OAuth callback redirect
+to `/` must resolve against *this* origin to land back on the signed-in
+shell rather than on Galley's own bare API root — see
+`e2e/README.md`, "Signing in," for the same setting applied to the
+browser suite.
+
 ## Build
 
 ```sh
@@ -100,8 +112,16 @@ Tests stub `global.fetch` (`vi.stubGlobal`) and cover:
   since a value that doesn't match the documented shape must not be
   guessed at or partially rendered.
 
+`src/App.test.tsx`, `src/components/AppShell.test.tsx`, and
+`src/components/SignInPage.test.tsx` (issue #55) cover the session-aware
+shell the same way: a stubbed `fetch` routed by path (`/api/session` vs.
+`/api/status`), the loading/signed-out/signed-in/error states App.tsx
+renders, and AppShell's sign-out (success, a non-401 failure leaving the
+shell in place with an inline error, and a 401 treated as already
+signed out).
+
 No browser/end-to-end tests are included here; issue #53 establishes
-that harness.
+that harness, and issue #55 adds the authenticated specs to it.
 
 ## Regenerating types from the contract
 
@@ -147,6 +167,48 @@ that could be mistaken for backend data. Any fetch failure, non-2xx
 response, or shape mismatch renders an explicit error state
 (`role="alert"`, `data-testid="status-error"`) instead.
 
+## Sign-in, the authenticated shell, and sign-out (issue #55)
+
+`src/App.tsx` queries `GET /api/session` once on load and renders
+exactly one of: a loading state, the sign-in page
+(`src/components/SignInPage.tsx`), the authenticated shell
+(`src/components/AppShell.tsx`), or an explicit error state (any
+session-check failure other than `401`, e.g. Galley entirely
+unreachable) — never a guess, and never more than one at a time.
+
+**Swiftlet holds no OAuth secret and performs no token exchange.**
+`SignInPage`'s one action is a plain anchor to
+`/api/auth/github/start` — a real browser navigation, not a `fetch` —
+which leaves the app entirely for Galley's own authorize/callback flow
+and the (real or substitute) GitHub provider; Swiftlet's own code never
+sees a `code`, a `state`, or an access token. On success, Galley's
+callback redirects back to `/`, where `App.tsx` re-queries
+`/api/session` and renders the shell.
+
+**Non-owner rejection is not intercepted or reworded.** Galley's
+`/api/auth/github/callback` answers a rejected identity with its own
+JSON error body directly (`owner_mismatch`, `403`) on that same
+navigation — Swiftlet never receives control in between, so there is no
+Swiftlet code that could substitute a friendlier message even by
+accident. See `docs/evidence/m2/55-swiftlet-sign-in.md` for the browser
+spec that asserts Galley's exact reason appears verbatim and that no
+part of the authenticated shell renders.
+
+`AppShell` shows the signed-in Owner's login and offers sign-out
+(`src/api/session.ts`'s `signOut`, `DELETE /api/session`); on success or
+on a `401` (already signed out) it returns to the sign-in page, and on
+any other failure it shows an inline error and stays in the shell.
+`src/api/session.ts`'s `UnauthenticatedError` is the one signal every
+authenticated call in this app treats as "return to the sign-in page" —
+the same rule `App.tsx`'s own initial session check follows.
+
+Swiftlet enforces no authorization rule of its own here: it renders
+whichever of Galley's own responses it receives (`docs/adr/0001-single-authority-galley.md`).
+Every rule this depends on — restricting sign-in to the configured
+Owner, session validity, sign-out revocation — is Galley's, and is
+covered by Galley's own direct-API tests (`apps/galley/internal/httpapi`,
+issue #54); this slice added no new Galley behavior.
+
 ## Browser-to-backend suite
 
 The tests above stub `fetch`, so they never exercise the real proxy or
@@ -157,4 +219,7 @@ cd e2e && ./run.sh
 ```
 
 It builds this app and serves the production build with `vite preview`,
-proxying `/api` to a Galley it starts itself.
+proxying `/api` to a Galley it starts itself. Since issue #55 it also
+starts a real substitute GitHub provider (`apps/galley/cmd/githubfake`)
+and drives the actual sign-in/rejection/sign-out/reload/restart flows
+through a real Chromium — see `e2e/README.md`, "Signing in."

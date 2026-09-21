@@ -31,8 +31,16 @@ Owner record, GitHub OAuth authorization-code sign-in restricted to
 that one configured Owner, a PostgreSQL-persisted session, and the
 protected-route boundary (`requireSession`) later slices' routes are
 expected to use. See "Owner configuration and GitHub OAuth sign-in"
-and "Authenticated routes" below. There is still no Swiftlet sign-in
-UI — that is [#55](https://github.com/cristoforows/ticketIt/issues/55).
+and "Authenticated routes" below.
+
+[Issue #55](https://github.com/cristoforows/ticketIt/issues/55) added
+Swiftlet's own sign-in page and authenticated shell (see
+`apps/swiftlet/README.md`) and `cmd/githubfake`, a standalone,
+real-port, test/development-only substitute GitHub provider the browser
+suite signs in against — see "Owner configuration and GitHub OAuth
+sign-in" below and `e2e/README.md`, "Signing in." No Galley HTTP
+behavior changed: this slice's own new Go code is entirely the
+`internal/githubfake` refactor and `cmd/githubfake` itself.
 
 Galley is a standalone Go module (`go.mod` at this directory) with no
 dependency on Node or any frontend toolchain. It does have third-party
@@ -420,6 +428,17 @@ module. `GALLEY_OAUTH_GITHUB_BASE_URL`/`_API_BASE_URL` point at it in
 tests and at real GitHub by default otherwise. Verifying this slice
 against the real provider is an outstanding check owned by **M10**.
 
+**`cmd/githubfake` (issue #55) is the same fixtures on a real port, for
+a real browser.** `internal/githubfake.New`'s constructor takes a
+`testing.TB` and only works inside a Go test binary; a browser (the
+`e2e/` suite) needs an actual running process to navigate to, which is
+what this command provides. **It is a test/development substitute
+only** — never wired into this `cmd/galley` binary, never reachable
+from a production build, and it never talks to real github.com or holds
+a real credential. See `cmd/githubfake`'s own doc comment and
+`e2e/README.md`, "Signing in," for how `e2e/run.sh` starts and
+configures it.
+
 **Owner bootstrap, concretely:** set `GALLEY_OWNER_GITHUB_LOGIN` to the
 Owner's GitHub login, provision a real GitHub OAuth app (Owner-approved,
 out of this slice's scope — see `AGENTS.md`, "Paid resources") and set
@@ -666,7 +685,9 @@ apps/galley/
 ├── cmd/
 │   ├── galley/             # main package: wiring, config load, graceful shutdown
 │   │   └── restart_durability_test.go  # issue #52: real two-process restart test
-│   └── migrate/            # issue #52: the one documented migration-apply command
+│   ├── migrate/            # issue #52: the one documented migration-apply command
+│   └── githubfake/         # issue #55: standalone substitute GitHub provider on a
+│                           #   real port -- test/development only, never cmd/galley
 └── internal/
     ├── config/             # environment parsing and validation (incl. DATABASE_URL, #52; owner/OAuth, #54)
     ├── migrations/         # embedded, versioned, forward-only SQL files (#52, #54)
@@ -674,7 +695,9 @@ apps/galley/
     │                       #   and the real-PostgreSQL test-setup helper (NewTestPool)
     ├── auth/                # issue #54: tokens/hashing, sessions, oauth state, Owner
     │                       #   resolution, and the GitHub OAuth client -- no HTTP here
-    ├── githubfake/          # issue #54: local fake GitHub OAuth/identity server (fixtures)
+    ├── githubfake/          # issue #54: local fake GitHub OAuth/identity server (fixtures);
+    │                       #   issue #55 refactored Start (real-port, no testing.TB) out of
+    │                       #   New (Go-test cleanup wrapper) for cmd/githubfake above
     ├── authtest/            # issue #54: browser-simulating sign-in helper shared by tests
     └── httpapi/            # routing, status handler, shared error shape, request logging
         ├── api.gen.go      # generated from contracts/openapi.yaml — DO NOT EDIT
