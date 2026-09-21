@@ -25,11 +25,20 @@ const diagnosticTimeout = 5 * time.Second
 // for why registration-time gating was chosen over a check inside
 // these methods.
 //
+// Both methods also call requireSession first (issue #54): a
+// development-only route is still a non-public one, and "every
+// non-public route requires a valid session" makes no exception for
+// it. See auth.go and apps/galley/README.md, "Authenticated routes."
+//
 // This is intentionally a hand-rolled implementation against the pool,
 // not a repository/ORM layer: issue #52 adds no domain tables, and a
 // single development-only table does not justify one yet.
 
 func (s *server) ListDiagnosticNotes(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireSession(w, r); !ok {
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), diagnosticTimeout)
 	defer cancel()
 
@@ -42,6 +51,10 @@ func (s *server) ListDiagnosticNotes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) CreateDiagnosticNote(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireSession(w, r); !ok {
+		return
+	}
+
 	var req CreateDiagnosticNoteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", `request body must be JSON matching {"note": "..."}`)

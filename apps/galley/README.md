@@ -25,6 +25,15 @@ forward-only migrations, a live database-health field on `GET
 is still no domain/Ticket table — that arrives in
 [#56](https://github.com/cristoforows/ticketIt/issues/56).
 
+[Issue #54](https://github.com/cristoforows/ticketIt/issues/54) added
+Galley's only identity/security surface so far: a stable internal
+Owner record, GitHub OAuth authorization-code sign-in restricted to
+that one configured Owner, a PostgreSQL-persisted session, and the
+protected-route boundary (`requireSession`) later slices' routes are
+expected to use. See "Owner configuration and GitHub OAuth sign-in"
+and "Authenticated routes" below. There is still no Swiftlet sign-in
+UI — that is [#55](https://github.com/cristoforows/ticketIt/issues/55).
+
 Galley is a standalone Go module (`go.mod` at this directory) with no
 dependency on Node or any frontend toolchain. It does have third-party
 Go dependencies as of issue #51 — the generated server types/interface
@@ -34,9 +43,11 @@ own (see below), but the code-generation tool itself
 contract-drift test (`kin-openapi`, an ordinary `require`) mean
 `go.sum` now exists. Issue #52 added its own real runtime dependencies
 on top of that — `pgx/v5` and `golang-migrate` — see "Database
-configuration" and "Database migrations" below. Neither issue added a
-Node/frontend dependency; "no Node required to build Galley" still
-holds.
+configuration" and "Database migrations" below. Issue #54 added no new
+runtime dependency beyond `github.com/oapi-codegen/runtime` (needed
+once the contract gained query parameters) — see "Exact versions and
+toolchain" below. None of these issues added a Node/frontend
+dependency; "no Node required to build Galley" still holds.
 
 ## Requirements
 
@@ -58,8 +69,15 @@ createdb ticketit_test   # one-time, ditto
 DATABASE_URL=postgres://localhost:5432/ticketit_dev?sslmode=disable go run ./cmd/migrate
 go build ./...
 go test ./...
-DATABASE_URL=postgres://localhost:5432/ticketit_dev?sslmode=disable go run ./cmd/galley
+DATABASE_URL=postgres://localhost:5432/ticketit_dev?sslmode=disable \
+  GALLEY_OWNER_GITHUB_LOGIN=your-github-login \
+  GALLEY_OAUTH_GITHUB_CLIENT_ID=... GALLEY_OAUTH_GITHUB_CLIENT_SECRET=... \
+  go run ./cmd/galley
 ```
+
+`go test ./...` itself needs none of the OAuth variables above — every
+test either constructs `config.Config` directly or points them at
+`internal/githubfake`'s local fixture server, never at real GitHub.
 
 `go vet ./...` and `gofmt -l .` (expect no output) are also part of
 this slice's definition of done.
@@ -67,12 +85,18 @@ this slice's definition of done.
 ### Running
 
 ```sh
-DATABASE_URL=postgres://localhost:5432/ticketit_dev?sslmode=disable go run ./cmd/galley
+DATABASE_URL=postgres://localhost:5432/ticketit_dev?sslmode=disable \
+  GALLEY_OWNER_GITHUB_LOGIN=your-github-login \
+  GALLEY_OAUTH_GITHUB_CLIENT_ID=... GALLEY_OAUTH_GITHUB_CLIENT_SECRET=... \
+  go run ./cmd/galley
 ```
 
-`DATABASE_URL` is required (see "Database configuration" below); every
-other setting keeps its issue #49 default. By default this listens on
-`:8080` (all interfaces, port 8080) and serves:
+`DATABASE_URL`, `GALLEY_OWNER_GITHUB_LOGIN`,
+`GALLEY_OAUTH_GITHUB_CLIENT_ID`, and `GALLEY_OAUTH_GITHUB_CLIENT_SECRET`
+are all required (see "Database configuration" and "Owner
+configuration and GitHub OAuth sign-in" below); every other setting
+keeps its previous default. By default this listens on `:8080` (all
+interfaces, port 8080) and serves:
 
 ```sh
 curl http://localhost:8080/api/status
@@ -102,6 +126,12 @@ than starting in an unknown state.
 | `GALLEY_ENVIRONMENT`  | `development` | Must be exactly `development` or `production`.                                           |
 | `GALLEY_VERSION`      | `dev`         | Arbitrary version string reported by `GET /api/status`.                                  |
 | `DATABASE_URL`        | *(none — required)* | PostgreSQL connection string, `postgres://user:password@host:port/dbname`. See "Database configuration" below. |
+| `GALLEY_OWNER_GITHUB_LOGIN` | *(none — required)* | The configured Owner's GitHub login. See "Owner configuration and GitHub OAuth sign-in" below. |
+| `GALLEY_OAUTH_GITHUB_CLIENT_ID` | *(none — required)* | OAuth app client id. Never logged.                        |
+| `GALLEY_OAUTH_GITHUB_CLIENT_SECRET` | *(none — required)* | OAuth app client secret. Never logged.                |
+| `GALLEY_OAUTH_GITHUB_BASE_URL` | `https://github.com` | Authorize/token endpoint host. Tests point this at a local fixture. |
+| `GALLEY_OAUTH_GITHUB_API_BASE_URL` | `https://api.github.com` | Identity (`/user`) endpoint host. Tests point this at a local fixture. |
+| `GALLEY_BASE_URL`     | `http://localhost:8080` | The browser-facing origin Galley is reached at; builds the fixed OAuth `redirect_uri`. See below. |
 
 Example of a configuration failure:
 
@@ -327,6 +357,97 @@ registration occurs, not as a check inside `diagnostic.go`'s handler
 methods — those methods have no notion of "production" at all and do
 not need one.
 
+**Also requires a valid session as of issue #54.** A development-only
+route is still a non-public one, and "every non-public route requires
+a valid session" (see "Authenticated routes" below) makes no exception
+for it: sign in first (below), then pass the session cookie.
+
+## Owner configuration and GitHub OAuth sign-in (issue #54)
+
+**Owner model.** A stable internal `owners` row, independent of any
+GitHub identifier, plus exactly one linked `owner_identities` row
+(`provider`, `provider_account_id`, `login`) — enforced as a true
+one-per-deployment singleton at the database level
+(`owners_singleton_uq`, `internal/migrations/000002_...up.sql`), not
+just by application logic. `GALLEY_OWNER_GITHUB_LOGIN` is consulted
+**only at bootstrap**: the very first successful sign-in resolves that
+configured login to the identity's immutable numeric GitHub account id
+and persists the link keyed on that id. Every sign-in after that
+compares the fetched identity's id to the stored link's id, never to
+`GALLEY_OWNER_GITHUB_LOGIN` again — so the Owner can rename their
+GitHub account later without losing access, and a later edit to
+`GALLEY_OWNER_GITHUB_LOGIN` cannot silently redirect access to a
+different account once bootstrapped. See
+`internal/auth.ResolveOwner`'s doc comment for the exact rule and
+`docs/evidence/m2/54-oauth-session.md` for the reasoning.
+
+**Sign-in flow**, all under `/api/auth/github/`:
+
+1. `GET start` issues a fresh, high-entropy `state` (persisted hashed,
+   10-minute expiry), binds it to the browser via a short-lived
+   HttpOnly `state` cookie, and redirects to
+   `GALLEY_OAUTH_GITHUB_BASE_URL/login/oauth/authorize`.
+2. `GET callback?code=...&state=...` validates `state` against both
+   the cookie and the persisted record **before looking at anything
+   else** — a missing, mismatched, expired, or already-used value is
+   rejected as `invalid_oauth_state` and the state row is consumed
+   (deleted) either way, which is what defeats both replay and
+   cross-session use (an attacker's `state` was never set as *this*
+   browser's cookie). Only then does it exchange `code` for an access
+   token and fetch the identity.
+3. A non-owner identity is rejected with the stable `owner_mismatch`
+   code (`403`): **no session, Owner record, or link is created or
+   modified** on this path, whether or not an Owner already exists.
+4. On success, a new session is persisted (opaque, high-entropy,
+   stored only as its SHA-256 hash, with a fixed 30-day expiry —
+   `internal/auth.SessionTTL`, not externally configurable in this
+   slice) and delivered via an `HttpOnly`, `SameSite=Lax` cookie,
+   `Secure` when `GALLEY_ENVIRONMENT=production`. `GET /api/session`
+   returns the signed-in Owner; `DELETE /api/session` revokes it.
+
+**The GitHub access token is discarded immediately after fetching the
+identity in step 2 above — never stored, never logged, never reused
+for any further provider call.** Signing in establishes identity only;
+it is not authorization to act on the Owner's GitHub account.
+Michelin's own local PAT and connected-account authorization for
+actual GitHub actions are a separate, later concern (M8) — see
+`docs/evidence/m2/54-oauth-session.md`.
+
+**No real GitHub OAuth app exists anywhere in this repository**
+(`AGENTS.md`, "Paid resources"): `internal/githubfake` is a local fake
+provider server built from fixtures, used by every test in this
+module. `GALLEY_OAUTH_GITHUB_BASE_URL`/`_API_BASE_URL` point at it in
+tests and at real GitHub by default otherwise. Verifying this slice
+against the real provider is an outstanding check owned by **M10**.
+
+**Owner bootstrap, concretely:** set `GALLEY_OWNER_GITHUB_LOGIN` to the
+Owner's GitHub login, provision a real GitHub OAuth app (Owner-approved,
+out of this slice's scope — see `AGENTS.md`, "Paid resources") and set
+its client id/secret and `GALLEY_BASE_URL` to Galley's real
+externally-reachable origin, then sign in once through the browser.
+That first sign-in creates the one Owner row; nothing else needs
+seeding.
+
+## Authenticated routes (issue #54)
+
+**Convention every later slice adding a Galley route should follow:**
+a handler for a non-public route calls `s.requireSession(w, r)` first
+and returns immediately if it reports `false` — the `401
+unauthenticated` response has already been written in the shared error
+shape. See `internal/httpapi/auth.go`. This is a plain per-handler
+check, not a global middleware wrapping every generated operation:
+`GET /api/status` must stay public and leak no Owner or configuration
+detail, so a blanket middleware over the whole generated
+`ServerInterface` would be the wrong shape here — see
+`internal/httpapi/handler.go`'s `gatedMux` for the same
+"registration/dispatch, not implicit," philosophy applied to a
+different property (route *existence*, not route *access*).
+
+Every currently non-public route uses it: `GET`/`DELETE /api/session`
+(the whole point of those two) and, retrofitted by this slice, both
+development-only diagnostic-note operations — a development-only route
+is still non-public, and this rule makes no exception for it.
+
 ## Error shape
 
 `ErrorBody`/`ErrorDetail` are generated from
@@ -351,7 +472,12 @@ uses this shared JSON shape:
 | No route matches the request path            | `404`  | `not_found`            |
 | Route exists, method not allowed on it       | `405`  | `method_not_allowed`   |
 | Diagnostic request body fails validation (#52) | `400`  | `invalid_request`   |
-| Diagnostic endpoint's database query failed (#52) | `503` | `database_unavailable` |
+| A database query failed (#52, #54)           | `503`  | `database_unavailable` |
+| No/invalid/expired session on a protected route (#54) | `401` | `unauthenticated` |
+| OAuth `state` missing, mismatched, expired, or replayed (#54) | `400` | `invalid_oauth_state` |
+| OAuth callback missing `code` (#54)          | `400`  | `invalid_request`      |
+| Provider communication failed, or reported its own error (#54) | `502`/`400` | `oauth_provider_error` |
+| Sign-in identity is not the configured Owner (#54) | `403` | `owner_mismatch`      |
 
 A `405` response also carries an `Allow` header naming the accepted
 method(s).
@@ -504,13 +630,29 @@ GALLEY_TEST_DATABASE_URL=postgres://localhost:5432/some_other_db?sslmode=disable
 
 `cmd/galley/restart_durability_test.go`'s
 `TestRestartDurability_DiagnosticNoteSurvivesFreshProcess` (issue #52's
-required restart-durability test) additionally builds the real
-`galley` binary and runs it as two separate OS processes in sequence
-against this same database — not two calls to `run()` in one test
-binary, which the issue explicitly rules out as insufficient ("not
-just a new database connection or a transaction commit"). See
-`docs/evidence/m2/52-postgresql-persistence.md` for how this was
-verified and its actual output.
+required restart-durability test; extended by issue #54 to also sign
+in and prove `GET /api/session` resolves through the restart) builds
+the real `galley` binary and runs it as two separate OS processes in
+sequence against this same database — not two calls to `run()` in one
+test binary, which the issue explicitly rules out as insufficient
+("not just a new database connection or a transaction commit"). See
+`docs/evidence/m2/52-postgresql-persistence.md` and
+`docs/evidence/m2/54-oauth-session.md` for how each was verified and
+its actual output.
+
+**Shared Owner fixture across every test package (issue #54).** The
+Owner is a true database-level singleton
+(`owners_singleton_uq`), and every Go test package that needs a valid
+sign-in shares this one, real, persistent `ticketit_test` database —
+so `internal/githubfake.TestOwnerIdentity` is the one fixture identity
+every package's tests sign in as, rather than each inventing its own:
+whichever test process bootstraps the Owner first, every other test's
+sign-in as that same identity still succeeds by matching the existing
+link. `internal/auth.ResolveOwner` also tolerates losing that
+first-bootstrap race outright (a unique-constraint violation on
+concurrent insert), re-resolving against the winner's row instead of
+failing — needed because `go test ./...`'s packages normally run as
+concurrent OS processes against this same database.
 
 ## Layout
 
@@ -526,16 +668,22 @@ apps/galley/
 │   │   └── restart_durability_test.go  # issue #52: real two-process restart test
 │   └── migrate/            # issue #52: the one documented migration-apply command
 └── internal/
-    ├── config/             # environment parsing and validation (incl. DATABASE_URL, #52)
-    ├── migrations/         # issue #52: embedded, versioned, forward-only SQL files
+    ├── config/             # environment parsing and validation (incl. DATABASE_URL, #52; owner/OAuth, #54)
+    ├── migrations/         # embedded, versioned, forward-only SQL files (#52, #54)
     ├── postgres/           # issue #52: pgxpool wrapper, live health check, migration runner,
     │                       #   and the real-PostgreSQL test-setup helper (NewTestPool)
+    ├── auth/                # issue #54: tokens/hashing, sessions, oauth state, Owner
+    │                       #   resolution, and the GitHub OAuth client -- no HTTP here
+    ├── githubfake/          # issue #54: local fake GitHub OAuth/identity server (fixtures)
+    ├── authtest/            # issue #54: browser-simulating sign-in helper shared by tests
     └── httpapi/            # routing, status handler, shared error shape, request logging
         ├── api.gen.go      # generated from contracts/openapi.yaml — DO NOT EDIT
         ├── generate.go     # the //go:generate directive that produces api.gen.go
         ├── contract_test.go  # drift check part 1: response validates against the contract
         ├── diagnostic.go   # issue #52: the two development-only diagnostic-note handlers
-        └── production_gating_test.go  # issue #52: proves those routes absent in production
+        ├── production_gating_test.go  # issue #52: proves those routes absent in production
+        ├── auth.go         # issue #54: the four OAuth/session handlers + requireSession
+        └── cookies.go      # issue #54: session/state cookie construction
 ```
 
 ## Exact versions and toolchain
@@ -568,9 +716,21 @@ apps/galley/
 - `github.com/jackc/pgerrcode` `v0.0.0-20220416144525-469b46aa5efa` (issue #52) — a small, fixed constants
   package (SQLSTATE codes), pulled in transitively by
   golang-migrate's `pgx/v5` driver and used directly by
-  `internal/postgres/health.go` to recognize "relation does not exist"
-  (no migrations applied yet) without hardcoding the raw SQLSTATE
-  string.
+  `internal/postgres/health.go` (unreachable database) and, since
+  issue #54, `internal/auth/owner.go` (recognizing a concurrent
+  Owner-bootstrap race) to recognize specific SQLSTATE codes without
+  hardcoding the raw string.
+- `github.com/oapi-codegen/runtime` `v1.7.0` (issue #54) — an ordinary
+  `require`, added by regenerating `api.gen.go` once the contract
+  gained operations with query parameters (`code`/`state`/`error` on
+  the OAuth callback); used by the generated
+  `ServerInterfaceWrapper.CompleteGithubOAuth` to bind those parameters.
+  Pulls in `github.com/apapsch/go-jsonmerge/v2` and
+  `github.com/google/uuid` as its own indirect dependencies.
+- Issue #54 added no other runtime dependency: `internal/auth` and
+  `internal/githubfake` use only the standard library (`crypto/rand`,
+  `crypto/sha256`, `net/http`, `encoding/json`) plus `pgx/v5`, already
+  present.
 
 PostgreSQL server: `17.11` (Homebrew, `localhost:5432`) on the machine
 this slice's evidence was recorded on — any reasonably recent
@@ -579,9 +739,10 @@ version beyond ordinary SQL and `GENERATED ALWAYS AS IDENTITY`
 (PostgreSQL 10+).
 
 See `docs/evidence/m2/49-galley-boot.md` for issue #49's original
-verification record, and
-`docs/evidence/m2/52-postgresql-persistence.md` for this slice's full
-reproducible verification record (commands and their actual output).
+verification record, `docs/evidence/m2/52-postgresql-persistence.md`
+for issue #52's, and `docs/evidence/m2/54-oauth-session.md` for this
+slice's full reproducible verification record (commands and their
+actual output).
 
 ## Browser-to-backend suite
 

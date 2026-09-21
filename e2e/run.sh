@@ -99,7 +99,19 @@ log "building galley"
 (cd "$GALLEY_DIR" && go build -o "$GALLEY_BIN" ./cmd/galley)
 
 log "starting galley on $GALLEY_BASE_URL"
+# Galley refuses to boot without owner/OAuth configuration (issue #54).
+# No spec signs in yet, so these are placeholders that only have to let it
+# start -- except the two provider URLs, which point at a closed local port
+# so a sign-in attempt fails locally instead of reaching real github.com
+# (issue #53 conventions: no calls to github.com). Issue #55 replaces these
+# with a real fake-provider phase; see README.md, "Signing in".
 DATABASE_URL="$E2E_DATABASE_URL" GALLEY_HOST="$GALLEY_HOST_BIND" GALLEY_PORT="$GALLEY_PORT" \
+  GALLEY_BASE_URL="$GALLEY_BASE_URL" \
+  GALLEY_OWNER_GITHUB_LOGIN="ticketit-e2e-owner" \
+  GALLEY_OAUTH_GITHUB_CLIENT_ID="e2e-placeholder-client-id" \
+  GALLEY_OAUTH_GITHUB_CLIENT_SECRET="e2e-placeholder-client-secret" \
+  GALLEY_OAUTH_GITHUB_BASE_URL="http://127.0.0.1:1" \
+  GALLEY_OAUTH_GITHUB_API_BASE_URL="http://127.0.0.1:1" \
   "$GALLEY_BIN" >>"$GALLEY_LOG" 2>&1 &
 GALLEY_PID=$!
 

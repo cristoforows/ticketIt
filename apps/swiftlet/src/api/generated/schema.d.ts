@@ -48,10 +48,84 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/github/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Begin GitHub OAuth sign-in
+         * @description Redirects the browser to the configured GitHub OAuth provider's authorize endpoint (`GALLEY_OAUTH_GITHUB_BASE_URL`). Issues a fresh, high-entropy `state`, persists a hash of it with a short expiry, and binds it to this browser via a short-lived, HttpOnly `state` cookie -- the callback rejects any request whose `state` query parameter does not match both that cookie and the persisted record, which is what defeats replay and cross-session use. Unauthenticated by design: this is how a session is obtained in the first place.
+         */
+        get: operations["startGithubOAuth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/github/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Complete GitHub OAuth sign-in
+         * @description Validates `state` against the cookie set by the start endpoint and the persisted record -- rejecting a missing, mismatched, expired, or already-used value with `invalid_oauth_state` -- then exchanges `code` for an access token, fetches the identity from the provider, and compares it to the configured Owner. A non-owner identity is rejected with `owner_mismatch`: no session, Owner record, or link is created or modified. The access token is discarded immediately after fetching the identity: never stored, never reused for any provider API call (see docs/evidence/m2/54-oauth-session.md). On success, creates or verifies the linked Owner identity -- matching the immutable provider account id, not the login -- persists a new session, sets the session cookie, and redirects to the application root.
+         */
+        get: operations["completeGithubOAuth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The signed-in Owner
+         * @description Requires a valid session; returns `401 unauthenticated` otherwise, in the shared error shape. Unlike `/api/status`, this route is never public.
+         */
+        get: operations["getSession"];
+        put?: never;
+        post?: never;
+        /**
+         * Sign out
+         * @description Revokes the current session (deletes its persisted record) and clears the session cookie. Requires a valid session; returns `401 unauthenticated` otherwise.
+         */
+        delete: operations["signOut"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description ticketIt's stable internal Owner identity -- independent of any GitHub identifier (docs/deployment.md, "Ownership and sign-in"). `login` is the linked GitHub identity's most recently observed login, shown for display only: matching a sign-in to this Owner always uses the immutable provider account id, never this field. */
+        Owner: {
+            /** @description ticketIt's own Owner id -- not a GitHub identifier. */
+            id: number;
+            /** @description The linked GitHub account's current login, for display only. */
+            login: string;
+        };
+        SessionResponse: {
+            owner: components["schemas"]["Owner"];
+        };
         /** @description The fixed GET /api/status payload. */
         StatusResponse: {
             /** @constant */
@@ -192,6 +266,123 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["DiagnosticNote"];
                 };
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    startGithubOAuth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Redirect to the provider's authorize endpoint. Sets the `state` cookie. */
+            302: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    completeGithubOAuth: {
+        parameters: {
+            query?: {
+                code?: string;
+                state?: string;
+                /** @description Present when the provider itself reports failure (e.g. the user denied authorization). */
+                error?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sign-in succeeded. Sets the session cookie and redirects to the application root. */
+            302: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error. See `ErrorBody`. Includes `invalid_oauth_state`, `owner_mismatch`, and `oauth_provider_error` -- see apps/galley/README.md, "Error shape." */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    getSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A session is active. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionResponse"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    signOut: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session revoked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Error. See `ErrorBody`. */
             default: {

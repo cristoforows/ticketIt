@@ -20,8 +20,31 @@ func fakeGetenv(values map[string]string) func(string) string {
 // connects, so this never needs to name a real, reachable database.
 const validDatabaseURL = "postgres://localhost:5432/ticketit_dev?sslmode=disable"
 
+// validAuthEnv holds the three settings issue #54 requires with no
+// default (mirroring DATABASE_URL's own pattern) -- merged into every
+// test below that expects Load to succeed but is not itself exercising
+// owner/OAuth validation.
+var validAuthEnv = map[string]string{
+	"GALLEY_OWNER_GITHUB_LOGIN":         "cristoforows",
+	"GALLEY_OAUTH_GITHUB_CLIENT_ID":     "test-client-id",
+	"GALLEY_OAUTH_GITHUB_CLIENT_SECRET": "test-client-secret",
+}
+
+// withValidAuthEnv returns a copy of env with validAuthEnv's keys added
+// (without overwriting any key env already sets).
+func withValidAuthEnv(env map[string]string) map[string]string {
+	merged := map[string]string{}
+	for k, v := range validAuthEnv {
+		merged[k] = v
+	}
+	for k, v := range env {
+		merged[k] = v
+	}
+	return merged
+}
+
 func TestLoad_Defaults(t *testing.T) {
-	cfg, err := Load(fakeGetenv(map[string]string{"DATABASE_URL": validDatabaseURL}))
+	cfg, err := Load(fakeGetenv(withValidAuthEnv(map[string]string{"DATABASE_URL": validDatabaseURL})))
 	if err != nil {
 		t.Fatalf("Load() returned unexpected error: %v", err)
 	}
@@ -40,28 +63,49 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.DatabaseURL != validDatabaseURL {
 		t.Errorf("DatabaseURL = %q, want %q", cfg.DatabaseURL, validDatabaseURL)
 	}
+	if cfg.OwnerGitHubLogin != validAuthEnv["GALLEY_OWNER_GITHUB_LOGIN"] {
+		t.Errorf("OwnerGitHubLogin = %q, want %q", cfg.OwnerGitHubLogin, validAuthEnv["GALLEY_OWNER_GITHUB_LOGIN"])
+	}
+	if cfg.BaseURL != DefaultBaseURL {
+		t.Errorf("BaseURL = %q, want %q", cfg.BaseURL, DefaultBaseURL)
+	}
+	if cfg.OAuthGitHubBaseURL != DefaultOAuthGitHubBaseURL {
+		t.Errorf("OAuthGitHubBaseURL = %q, want %q", cfg.OAuthGitHubBaseURL, DefaultOAuthGitHubBaseURL)
+	}
+	if cfg.OAuthGitHubAPIBaseURL != DefaultOAuthGitHubAPIBaseURL {
+		t.Errorf("OAuthGitHubAPIBaseURL = %q, want %q", cfg.OAuthGitHubAPIBaseURL, DefaultOAuthGitHubAPIBaseURL)
+	}
 	if got, want := cfg.Addr(), ":8080"; got != want {
 		t.Errorf("Addr() = %q, want %q", got, want)
 	}
 }
 
 func TestLoad_ExplicitProductionSettings(t *testing.T) {
-	cfg, err := Load(fakeGetenv(map[string]string{
-		"GALLEY_HOST":        "127.0.0.1",
-		"GALLEY_PORT":        "9090",
-		"GALLEY_ENVIRONMENT": "production",
-		"GALLEY_VERSION":     "1.2.3",
-		"DATABASE_URL":       validDatabaseURL,
-	}))
+	cfg, err := Load(fakeGetenv(withValidAuthEnv(map[string]string{
+		"GALLEY_HOST":                      "127.0.0.1",
+		"GALLEY_PORT":                      "9090",
+		"GALLEY_ENVIRONMENT":               "production",
+		"GALLEY_VERSION":                   "1.2.3",
+		"DATABASE_URL":                     validDatabaseURL,
+		"GALLEY_BASE_URL":                  "https://ticketit.example.com",
+		"GALLEY_OAUTH_GITHUB_BASE_URL":     "https://github.example.com",
+		"GALLEY_OAUTH_GITHUB_API_BASE_URL": "https://api.github.example.com",
+	})))
 	if err != nil {
 		t.Fatalf("Load() returned unexpected error: %v", err)
 	}
 	want := Config{
-		Host:        "127.0.0.1",
-		Port:        "9090",
-		Environment: "production",
-		Version:     "1.2.3",
-		DatabaseURL: validDatabaseURL,
+		Host:                  "127.0.0.1",
+		Port:                  "9090",
+		Environment:           "production",
+		Version:               "1.2.3",
+		DatabaseURL:           validDatabaseURL,
+		OwnerGitHubLogin:      "cristoforows",
+		OAuthClientID:         "test-client-id",
+		OAuthClientSecret:     "test-client-secret",
+		OAuthGitHubBaseURL:    "https://github.example.com",
+		OAuthGitHubAPIBaseURL: "https://api.github.example.com",
+		BaseURL:               "https://ticketit.example.com",
 	}
 	if cfg != want {
 		t.Errorf("Load() = %+v, want %+v", cfg, want)
@@ -75,7 +119,7 @@ func TestLoad_InvalidPort(t *testing.T) {
 	cases := []string{"not-a-number", "-1", "65536", "8080.5", " "}
 	for _, port := range cases {
 		t.Run(port, func(t *testing.T) {
-			_, err := Load(fakeGetenv(map[string]string{"GALLEY_PORT": port, "DATABASE_URL": validDatabaseURL}))
+			_, err := Load(fakeGetenv(withValidAuthEnv(map[string]string{"GALLEY_PORT": port, "DATABASE_URL": validDatabaseURL})))
 			if err == nil {
 				t.Fatalf("Load() with GALLEY_PORT=%q: expected error, got nil", port)
 			}
@@ -89,7 +133,7 @@ func TestLoad_InvalidPort(t *testing.T) {
 func TestLoad_PortZeroIsValid(t *testing.T) {
 	// Port 0 asks the OS for an ephemeral port; used by tests that need
 	// a real, collision-free listening socket.
-	cfg, err := Load(fakeGetenv(map[string]string{"GALLEY_PORT": "0", "DATABASE_URL": validDatabaseURL}))
+	cfg, err := Load(fakeGetenv(withValidAuthEnv(map[string]string{"GALLEY_PORT": "0", "DATABASE_URL": validDatabaseURL})))
 	if err != nil {
 		t.Fatalf("Load() returned unexpected error: %v", err)
 	}
@@ -142,6 +186,51 @@ func TestLoad_InvalidDatabaseURL(t *testing.T) {
 			// (it could carry credentials in a real misconfiguration).
 			if strings.Contains(err.Error(), dbURL) {
 				t.Errorf("error %q echoes back the invalid DATABASE_URL value", err.Error())
+			}
+		})
+	}
+}
+
+func TestLoad_OwnerGitHubLoginUnset(t *testing.T) {
+	env := withValidAuthEnv(map[string]string{"DATABASE_URL": validDatabaseURL})
+	delete(env, "GALLEY_OWNER_GITHUB_LOGIN")
+	_, err := Load(fakeGetenv(env))
+	if err == nil {
+		t.Fatal("Load() with no GALLEY_OWNER_GITHUB_LOGIN: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "GALLEY_OWNER_GITHUB_LOGIN") {
+		t.Errorf("error %q does not mention GALLEY_OWNER_GITHUB_LOGIN", err.Error())
+	}
+}
+
+func TestLoad_OAuthClientCredentialsUnset(t *testing.T) {
+	cases := []string{"GALLEY_OAUTH_GITHUB_CLIENT_ID", "GALLEY_OAUTH_GITHUB_CLIENT_SECRET"}
+	for _, missing := range cases {
+		t.Run(missing, func(t *testing.T) {
+			env := withValidAuthEnv(map[string]string{"DATABASE_URL": validDatabaseURL})
+			delete(env, missing)
+			_, err := Load(fakeGetenv(env))
+			if err == nil {
+				t.Fatalf("Load() with no %s: expected error, got nil", missing)
+			}
+			if !strings.Contains(err.Error(), missing) {
+				t.Errorf("error %q does not mention %s", err.Error(), missing)
+			}
+		})
+	}
+}
+
+func TestLoad_InvalidProviderURLs(t *testing.T) {
+	cases := []string{"GALLEY_OAUTH_GITHUB_BASE_URL", "GALLEY_OAUTH_GITHUB_API_BASE_URL", "GALLEY_BASE_URL"}
+	for _, key := range cases {
+		t.Run(key, func(t *testing.T) {
+			env := withValidAuthEnv(map[string]string{"DATABASE_URL": validDatabaseURL, key: "not-a-url"})
+			_, err := Load(fakeGetenv(env))
+			if err == nil {
+				t.Fatalf("Load() with %s=%q: expected error, got nil", key, "not-a-url")
+			}
+			if !strings.Contains(err.Error(), key) {
+				t.Errorf("error %q does not mention %s", err.Error(), key)
 			}
 		})
 	}

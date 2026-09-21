@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/cristoforows/ticketIt/apps/galley/internal/auth"
 	"github.com/cristoforows/ticketIt/apps/galley/internal/config"
 	"github.com/cristoforows/ticketIt/apps/galley/internal/postgres"
 )
@@ -51,17 +52,20 @@ const databaseUnreachableMessage = "database unreachable"
 
 // server implements the generated ServerInterface: the fixed status
 // fields (computed once, like issue #49) plus a live database check on
-// every request, and -- only when registered, see NewHandler's gating
-// -- the development-only diagnostic-note operations.
+// every request, the development-only diagnostic-note operations
+// (only when registered, see NewHandler's gating), and issue #54's
+// OAuth sign-in/session operations (auth.go).
 type server struct {
-	fixed StatusResponse
-	pool  *pgxpool.Pool
+	fixed        StatusResponse
+	pool         *pgxpool.Pool
+	cfg          config.Config
+	githubClient *auth.GitHubClient
 }
 
 // newServer computes the fixed status fields once. startedAt is
 // captured at process start (cmd/galley/main.go). pool is used live,
-// per request, by GetStatus (and by the diagnostic operations in
-// diagnostic.go) -- never cached here.
+// per request, by GetStatus, the diagnostic operations (diagnostic.go),
+// and the auth operations (auth.go) -- never cached here.
 func newServer(cfg config.Config, startedAt time.Time, pool *pgxpool.Pool) *server {
 	return &server{
 		fixed: StatusResponse{
@@ -72,6 +76,13 @@ func newServer(cfg config.Config, startedAt time.Time, pool *pgxpool.Pool) *serv
 			StartedAt:   startedAt.UTC().Format(time.RFC3339),
 		},
 		pool: pool,
+		cfg:  cfg,
+		githubClient: &auth.GitHubClient{
+			BaseURL:      cfg.OAuthGitHubBaseURL,
+			APIBaseURL:   cfg.OAuthGitHubAPIBaseURL,
+			ClientID:     cfg.OAuthClientID,
+			ClientSecret: cfg.OAuthClientSecret,
+		},
 	}
 }
 

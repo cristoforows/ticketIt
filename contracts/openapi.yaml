@@ -94,8 +94,153 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorBody"
+  /api/auth/github/start:
+    get:
+      operationId: startGithubOAuth
+      summary: Begin GitHub OAuth sign-in
+      tags: [auth]
+      description: >-
+        Redirects the browser to the configured GitHub OAuth provider's
+        authorize endpoint (`GALLEY_OAUTH_GITHUB_BASE_URL`). Issues a
+        fresh, high-entropy `state`, persists a hash of it with a short
+        expiry, and binds it to this browser via a short-lived,
+        HttpOnly `state` cookie -- the callback rejects any request
+        whose `state` query parameter does not match both that cookie
+        and the persisted record, which is what defeats replay and
+        cross-session use. Unauthenticated by design: this is how a
+        session is obtained in the first place.
+      responses:
+        "302":
+          description: >-
+            Redirect to the provider's authorize endpoint. Sets the
+            `state` cookie.
+          headers:
+            Location:
+              schema: {type: string}
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+  /api/auth/github/callback:
+    get:
+      operationId: completeGithubOAuth
+      summary: Complete GitHub OAuth sign-in
+      tags: [auth]
+      description: >-
+        Validates `state` against the cookie set by the start endpoint
+        and the persisted record -- rejecting a missing, mismatched,
+        expired, or already-used value with `invalid_oauth_state` --
+        then exchanges `code` for an access token, fetches the identity
+        from the provider, and compares it to the configured Owner. A
+        non-owner identity is rejected with `owner_mismatch`: no
+        session, Owner record, or link is created or modified. The
+        access token is discarded immediately after fetching the
+        identity: never stored, never reused for any provider API call
+        (see docs/evidence/m2/54-oauth-session.md). On success, creates
+        or verifies the linked Owner identity -- matching the immutable
+        provider account id, not the login -- persists a new session,
+        sets the session cookie, and redirects to the application root.
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema: {type: string}
+        - name: state
+          in: query
+          required: false
+          schema: {type: string}
+        - name: error
+          in: query
+          required: false
+          description: >-
+            Present when the provider itself reports failure (e.g. the
+            user denied authorization).
+          schema: {type: string}
+      responses:
+        "302":
+          description: >-
+            Sign-in succeeded. Sets the session cookie and redirects to
+            the application root.
+          headers:
+            Location:
+              schema: {type: string}
+        default:
+          description: >-
+            Error. See `ErrorBody`. Includes `invalid_oauth_state`,
+            `owner_mismatch`, and `oauth_provider_error` -- see
+            apps/galley/README.md, "Error shape."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+  /api/session:
+    get:
+      operationId: getSession
+      summary: The signed-in Owner
+      tags: [auth]
+      description: >-
+        Requires a valid session; returns `401 unauthenticated`
+        otherwise, in the shared error shape. Unlike `/api/status`,
+        this route is never public.
+      responses:
+        "200":
+          description: A session is active.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+    delete:
+      operationId: signOut
+      summary: Sign out
+      tags: [auth]
+      description: >-
+        Revokes the current session (deletes its persisted record) and
+        clears the session cookie. Requires a valid session; returns
+        `401 unauthenticated` otherwise.
+      responses:
+        "204":
+          description: Session revoked.
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
 components:
   schemas:
+    Owner:
+      type: object
+      description: >-
+        ticketIt's stable internal Owner identity -- independent of any
+        GitHub identifier (docs/deployment.md, "Ownership and
+        sign-in"). `login` is the linked GitHub identity's most
+        recently observed login, shown for display only: matching a
+        sign-in to this Owner always uses the immutable provider
+        account id, never this field.
+      additionalProperties: false
+      required: [id, login]
+      properties:
+        id:
+          type: integer
+          description: ticketIt's own Owner id -- not a GitHub identifier.
+        login:
+          type: string
+          description: The linked GitHub account's current login, for display only.
+    SessionResponse:
+      type: object
+      additionalProperties: false
+      required: [owner]
+      properties:
+        owner:
+          $ref: "#/components/schemas/Owner"
     StatusResponse:
       type: object
       description: The fixed GET /api/status payload.

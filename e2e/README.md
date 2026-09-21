@@ -84,6 +84,14 @@ address to Galley. Whoever lands
 [#55](https://github.com/cristoforows/ticketIt/issues/55) owns writing
 that helper and documenting it here.
 
+Until then `run.sh` passes Galley placeholder owner/OAuth settings,
+because #54 made that configuration mandatory at boot. They exist only
+so Galley starts; the provider URLs point at a closed local port, so a
+sign-in attempt fails locally rather than reaching github.com. #54's
+`internal/githubfake` is not usable here as-is — its constructor takes
+a `testing.TB`, so serving it to a browser needs a small standalone
+command, which is part of #55's job.
+
 Prefer reusing one signed-in storage state over signing in per spec once
 there is more than a handful.
 

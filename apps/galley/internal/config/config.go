@@ -26,6 +26,19 @@ const (
 	DefaultPort        = "8080" // keeps Galley aligned with Swiftlet's dev proxy default (issue #50).
 	DefaultEnvironment = EnvDevelopment
 	DefaultVersion     = "dev"
+	// DefaultBaseURL matches DefaultPort, so a bare local `go run
+	// ./cmd/galley` gets a working OAuth redirect_uri with no extra
+	// configuration. Production must set GALLEY_BASE_URL explicitly to
+	// its real, externally reachable origin -- see "Owner
+	// configuration" in apps/galley/README.md.
+	DefaultBaseURL = "http://localhost:8080"
+	// DefaultOAuthGitHubBaseURL and DefaultOAuthGitHubAPIBaseURL are
+	// real GitHub's own two hosts for the OAuth authorize/token
+	// endpoints and the REST identity endpoint, respectively -- issue
+	// #54's substitute provider overrides both to a local fixture
+	// server in every test.
+	DefaultOAuthGitHubBaseURL    = "https://github.com"
+	DefaultOAuthGitHubAPIBaseURL = "https://api.github.com"
 )
 
 // Config is Galley's fully validated runtime configuration.
@@ -47,6 +60,43 @@ type Config struct {
 	// sensible fallback. Never logged or otherwise echoed back: see
 	// Load's validation below and internal/postgres's package doc.
 	DatabaseURL string
+
+	// OwnerGitHubLogin is the expected GitHub login of ticketIt's one
+	// configured Owner (issue #54). It has no default: sign-in cannot
+	// be "restricted to the configured owner" without it. Used only to
+	// bootstrap the Owner link on the very first successful sign-in --
+	// see internal/auth.ResolveOwner and "Owner configuration" in
+	// apps/galley/README.md for why every sign-in after that verifies
+	// the immutable provider account id instead, not this login.
+	OwnerGitHubLogin string
+	// OAuthClientID and OAuthClientSecret identify Galley to the OAuth
+	// provider (issue #54). Neither has a default: there is no real
+	// GitHub OAuth app in this repository (AGENTS.md, "Paid
+	// resources"), so these always name either a local fixture
+	// provider's fake credentials (tests) or an Owner-provisioned real
+	// GitHub OAuth app (production, out of this slice's scope -- see
+	// the evidence record). OAuthClientSecret is never logged.
+	OAuthClientID     string
+	OAuthClientSecret string
+	// OAuthGitHubBaseURL is the provider host for the browser-facing
+	// authorize redirect and the server-to-server code exchange
+	// (".../login/oauth/..."). OAuthGitHubAPIBaseURL is the provider
+	// host for the identity fetch (".../user") -- real GitHub splits
+	// these across github.com and api.github.com, so this slice keeps
+	// them as two independently configurable values rather than one.
+	// Both default to real GitHub; every test substitutes a local
+	// fixture server for both.
+	OAuthGitHubBaseURL    string
+	OAuthGitHubAPIBaseURL string
+	// BaseURL is the externally-visible origin the *browser* is on
+	// when it reaches Galley -- Galley's own directly, or Swiftlet's
+	// dev-server proxy origin (contracts/openapi.yaml's "servers"
+	// note) -- used to build the fixed `redirect_uri` sent to the
+	// OAuth provider. Deliberately not derived from the request's Host
+	// header: that header is client-supplied and an OAuth app's
+	// redirect_uri must be one fixed, pre-registered value, not
+	// whatever a caller claims.
+	BaseURL string
 }
 
 // Addr returns the "host:port" address to pass to net.Listen.
@@ -112,11 +162,65 @@ func Load(getenv func(string) string) (Config, error) {
 		)
 	}
 
+	// Owner/OAuth settings (issue #54), checked last, same reasoning as
+	// DATABASE_URL above: no sensible fallback, so unset fails loudly
+	// rather than silently accepting sign-in from anyone.
+	ownerGitHubLogin := getenv("GALLEY_OWNER_GITHUB_LOGIN")
+	if ownerGitHubLogin == "" {
+		return Config{}, fmt.Errorf(
+			"GALLEY_OWNER_GITHUB_LOGIN is not set: the configured owner's GitHub login is required " +
+				"to restrict sign-in -- see apps/galley/README.md, \"Owner configuration\"",
+		)
+	}
+
+	oauthClientID := getenv("GALLEY_OAUTH_GITHUB_CLIENT_ID")
+	if oauthClientID == "" {
+		return Config{}, fmt.Errorf(
+			"GALLEY_OAUTH_GITHUB_CLIENT_ID is not set -- see apps/galley/README.md, \"Owner configuration\"",
+		)
+	}
+	oauthClientSecret := getenv("GALLEY_OAUTH_GITHUB_CLIENT_SECRET")
+	if oauthClientSecret == "" {
+		return Config{}, fmt.Errorf(
+			"GALLEY_OAUTH_GITHUB_CLIENT_SECRET is not set -- see apps/galley/README.md, \"Owner configuration\"",
+		)
+	}
+
+	oauthGitHubBaseURL := getenv("GALLEY_OAUTH_GITHUB_BASE_URL")
+	if oauthGitHubBaseURL == "" {
+		oauthGitHubBaseURL = DefaultOAuthGitHubBaseURL
+	}
+	if _, err := url.ParseRequestURI(oauthGitHubBaseURL); err != nil {
+		return Config{}, fmt.Errorf("invalid GALLEY_OAUTH_GITHUB_BASE_URL %q: must be an absolute URL", oauthGitHubBaseURL)
+	}
+
+	oauthGitHubAPIBaseURL := getenv("GALLEY_OAUTH_GITHUB_API_BASE_URL")
+	if oauthGitHubAPIBaseURL == "" {
+		oauthGitHubAPIBaseURL = DefaultOAuthGitHubAPIBaseURL
+	}
+	if _, err := url.ParseRequestURI(oauthGitHubAPIBaseURL); err != nil {
+		return Config{}, fmt.Errorf("invalid GALLEY_OAUTH_GITHUB_API_BASE_URL %q: must be an absolute URL", oauthGitHubAPIBaseURL)
+	}
+
+	baseURL := getenv("GALLEY_BASE_URL")
+	if baseURL == "" {
+		baseURL = DefaultBaseURL
+	}
+	if _, err := url.ParseRequestURI(baseURL); err != nil {
+		return Config{}, fmt.Errorf("invalid GALLEY_BASE_URL %q: must be an absolute URL", baseURL)
+	}
+
 	return Config{
-		Host:        host,
-		Port:        port,
-		Environment: environment,
-		Version:     version,
-		DatabaseURL: databaseURL,
+		Host:                  host,
+		Port:                  port,
+		Environment:           environment,
+		Version:               version,
+		DatabaseURL:           databaseURL,
+		OwnerGitHubLogin:      ownerGitHubLogin,
+		OAuthClientID:         oauthClientID,
+		OAuthClientSecret:     oauthClientSecret,
+		OAuthGitHubBaseURL:    oauthGitHubBaseURL,
+		OAuthGitHubAPIBaseURL: oauthGitHubAPIBaseURL,
+		BaseURL:               baseURL,
 	}, nil
 }
