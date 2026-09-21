@@ -4,6 +4,16 @@ See [implementation-plan.md](implementation-plan.md) for the approved M1–M10 m
 
 M2 establishes Swiftlet/Galley and PostgreSQL locally; M4 connects Michelin with controlled execution. M6 selects document storage, M7/M8 add real research/coding, and M10 completes hosting, reproducible operational setup, and deployed acceptance. The hosting-comparison demonstration runs after its provisional installation exists.
 
+## Provisioning requires explicit Owner approval
+
+No agent or automated process provisions a paid resource. This covers creating, upgrading, or resuming any account, instance, database, bucket, domain, or plan that can incur a charge, at Cloudflare R2, Supabase, any application or PostgreSQL host, OpenRouter, or any other provider. It includes free tiers that require payment details or that bill automatically once an allowance is exceeded.
+
+The Owner performs these steps themselves, or gives explicit approval for a named resource at a named provider immediately beforehand. Approval for one resource is not approval for the next. Approval to research or compare providers is not approval to create an account, and a documented cost target is not standing authorization to spend against it.
+
+Until the Owner approves, run everything locally: PostgreSQL on the developer machine, local substitutes or fixtures for object storage, and controlled provider substitutes in tests. A task that cannot proceed without a paid resource is a blocked task to report, with the specific resource named, rather than a signup to perform.
+
+The selections this affects are tracked in [open-decisions.md](open-decisions.md), "Known operational selections awaiting the owner": object storage and application/PostgreSQL hosting (**D7**, reaching M6 and M10) and model-provider credentials (**D7**, reaching M7 and M8). Recording a recommendation there never resolves the decision or authorizes the spend.
+
 ## Initial split
 
 Host the ticketIt web app and its backend online. The hosted side manages ticket data, agent configurations, the work queue, round history, and the usage dashboard. Recipes and reports use Cloudflare R2 or Supabase Storage, pending the user's provider selection.

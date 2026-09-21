@@ -10,6 +10,14 @@
 - If either path already exists, inspect its contents and preserve
   existing work before reconciling the layout.
 
+## Paid resources
+
+Never provision a paid resource or create a provider account. This
+includes free tiers requiring payment details. Report the blocked task
+and name the resource instead. Only the Owner approves, per named
+resource, immediately beforehand. See `docs/deployment.md`,
+"Provisioning requires explicit Owner approval."
+
 ## Agent skills
 
 ### Issue tracker
