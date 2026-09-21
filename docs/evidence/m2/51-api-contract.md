@@ -67,11 +67,9 @@ merged before this slice began.
   style Galley already used, so no router migration was needed.
 - `internal/httpapi/generate.go` — the `//go:generate` directive.
 - `internal/httpapi/status.go` — rewritten: `newServer`/`server.GetStatus`
-  implement `ServerInterface` against the generated types; a
-  `MarshalJSON` override on the generated `StatusResponse` restores
-  the exact JSON field order issue #49 established (oapi-codegen
-  emits Go struct fields alphabetically by property name, which would
-  otherwise silently reorder the response bytes).
+  implement `ServerInterface` against the generated types, plus a
+  `MarshalJSON` override holding the JSON field order issue #49
+  established (see below).
 - `internal/httpapi/errors.go` — trimmed to the `newErrorBody`/
   `fallbackErrorJSON` helpers only; the `ErrorBody`/`ErrorDetail`
   types themselves are now generated.
@@ -194,31 +192,37 @@ test`, and `npm run build` never install or invoke anything in
 same package count as issue #50's own baseline evidence (108
 packages, unchanged).
 
-### One hand-written seam: keeping the response byte-for-byte identical
+### Keeping the response byte-for-byte identical
 
-Two accommodations were needed so that binding to generated types did
-not change `GET /api/status`'s response bytes:
+Binding to generated types needed two accommodations:
 
 1. `StatusResponse.startedAt` carries `x-go-type: string` in the
-   contract. Without it, oapi-codegen maps `format: date-time` to
-   Go's `time.Time`, whose default JSON marshaling (`RFC3339Nano`) can
+   contract. Without it, oapi-codegen maps `format: date-time` to Go's
+   `time.Time`, whose default JSON marshaling (`RFC3339Nano`) can
    include fractional seconds — different from the plain
    `startedAt.UTC().Format(time.RFC3339)` string Galley has always
    produced.
 2. oapi-codegen emits Go struct fields **alphabetically** by JSON
    property name (`Application, Environment, StartedAt, Status,
-   Version`), not in the contract's declared order
-   (`application, status, version, environment, startedAt`). Since
-   `encoding/json` serializes struct fields in declaration order, left
-   alone this would have silently reordered the response's bytes. A
-   hand-written `MarshalJSON` on the generated `StatusResponse`
-   (`apps/galley/internal/httpapi/status.go`) restores the original
-   field order.
+   Version`), not in the contract's declared order (`application,
+   status, version, environment, startedAt`). Since `encoding/json`
+   serializes in declaration order, left alone this would have silently
+   reordered the response's bytes. A hand-written `MarshalJSON` on the
+   generated `StatusResponse` (`apps/galley/internal/httpapi/status.go`)
+   restores the original order.
 
-Both are documented at the point of use (the contract's `startedAt`
-property, and `status.go`'s doc comment) so a future contributor
-regenerating the contract understands why they exist before removing
-them.
+Both are documented at the point of use, so a future contributor
+understands them before removing them.
+
+**Considered for (2) and deferred:** oapi-codegen's `x-order` extension
+orders generated struct fields from the contract itself, which would
+remove the hand-written `MarshalJSON` entirely. Deferred because it ties
+the contract to one Go generator — a different generator ignores the
+extension silently — and because key order is semantically meaningless
+in JSON, so the whole constraint is worth revisiting rather than
+re-engineering while this slice is only documenting existing APIs.
+Neither approach is covered by a test today: every test decodes the body
+before asserting, so nothing fails if the order changes.
 
 ## Exact versions and toolchain
 

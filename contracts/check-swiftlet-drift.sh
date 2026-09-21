@@ -1,14 +1,9 @@
 #!/usr/bin/env bash
-# Drift check (part 2 of 2 — see README.md): regenerates
-# apps/swiftlet/src/api/generated/schema.d.ts from openapi.yaml and
-# fails if that produces any diff against the committed file. A diff
-# here means either the contract changed without regenerating, or the
-# generated file was hand-edited — both are drift between the
-# contract and what Swiftlet actually builds against.
-#
-# Run from contracts/ (after `npm ci`). Requires a clean git working
-# tree for the generated file (uncommitted, unrelated changes to it
-# would otherwise be indistinguishable from generator drift).
+# Drift check 2 of 2 (see README.md): regenerate Swiftlet's schema.d.ts
+# and fail on any diff, which means the contract changed without
+# regenerating or the generated file was hand-edited. Run after
+# `npm ci`. Needs a clean working tree for that file, else unrelated
+# edits look like drift.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 

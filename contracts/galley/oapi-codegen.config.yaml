@@ -1,13 +1,9 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/oapi-codegen/oapi-codegen/v2.8.0/configuration-schema.json
 #
-# Pinned oapi-codegen configuration for Galley's generated types and
-# server interface. The tool version itself is pinned in
-# apps/galley/go.mod's `tool` directive; run via `go generate ./...`
-# from apps/galley (see apps/galley/README.md, "Regenerating"). The
-# `//go:generate` directive lives in
-# apps/galley/internal/httpapi/generate.go, so `go generate` runs this
-# tool with that package's directory as its working directory --
-# hence `output: api.gen.go` (not a path including internal/httpapi).
+# The tool version is pinned in apps/galley/go.mod's `tool` directive.
+# `go generate` runs oapi-codegen from the directory holding the
+# //go:generate line (apps/galley/internal/httpapi), so `output` is
+# relative to that package, not to the repository root.
 package: httpapi
 generate:
   models: true

@@ -1,38 +1,30 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/OAI/OpenAPI-Specification/main/schemas/v3.1/schema.json
 #
-# ticketIt's single source of truth for Galley's HTTP API. Both
-# generated clients (Swiftlet's TypeScript types/client) and Galley's
-# generated server types/interface come from this file. See
-# contracts/README.md for the "add to the contract first, regenerate,
-# then implement" convention every later slice follows, and for the
+# Single source of truth for Galley's HTTP API: Galley's server types
+# and Swiftlet's client types are both generated from this file. See
+# contracts/README.md for the contract-first convention and the
 # regeneration commands.
-#
-# This slice (issue #51) describes exactly what already exists:
-# GET /api/status (issue #49/#50) and the shared error shape. It adds
-# no new endpoint.
 openapi: 3.1.0
 info:
   title: ticketIt Galley API
   version: "0.1.0"
   description: >-
     Galley is the sole authority over ticketIt's authoritative records
-    (see docs/adr/0001-single-authority-galley.md). This document
-    describes the subset of its HTTP API that has shipped so far.
+    (docs/adr/0001-single-authority-galley.md). This document covers the
+    subset of its HTTP API that has shipped so far.
 servers:
   - url: /
-    description: Same-origin, relative to whatever host serves this API (Galley directly, or Swiftlet's dev-server proxy for /api/*).
+    description: Same-origin — Galley directly, or Swiftlet's dev-server proxy for /api/*.
 paths:
   /api/status:
     get:
       operationId: getStatus
       summary: Application status
       description: >-
-        Fixed, unauthenticated application-status payload. `application`
-        and `status` are constant; `version` and `environment` reflect
-        Galley's configuration; `startedAt` is the process start time,
-        captured once and returned unchanged on every request. This
-        shape is additive-only: existing fields are never renamed or
-        removed (see apps/galley/README.md).
+        Fixed, unauthenticated status payload. `application` and `status`
+        are constant; `version` and `environment` come from Galley's
+        configuration; `startedAt` is the process start time, captured
+        once. Additive-only: fields are never renamed or removed.
       responses:
         "200":
           description: Galley is running.
@@ -42,9 +34,9 @@ paths:
                 $ref: "#/components/schemas/StatusResponse"
         default:
           description: >-
-            An error occurred. Every Galley error response — including
-            ones with no operation of their own, such as an unmatched
-            route (404) or a disallowed method (405) — uses this shape.
+            Error. Every Galley error response uses this shape, including
+            ones with no operation of their own (unmatched route,
+            disallowed method).
           content:
             application/json:
               schema:
@@ -55,12 +47,7 @@ components:
       type: object
       description: The fixed GET /api/status payload.
       additionalProperties: false
-      required:
-        - application
-        - status
-        - version
-        - environment
-        - startedAt
+      required: [application, status, version, environment, startedAt]
       properties:
         application:
           type: string
@@ -73,40 +60,31 @@ components:
           description: Galley's configured version string (GALLEY_VERSION).
         environment:
           type: string
-          enum:
-            - development
-            - production
+          enum: [development, production]
         startedAt:
           type: string
           format: date-time
-          # Keeps this a plain Go string on generation, matching the
-          # exact RFC3339 formatting Galley has always produced
-          # (issue #49). Without this override, oapi-codegen maps
-          # format: date-time to time.Time, whose default JSON
-          # marshaling (RFC3339Nano) can include fractional seconds
-          # and would change the response's observable bytes. See
-          # apps/galley/README.md ("Generated types").
-          x-go-type: string
           description: RFC3339 UTC timestamp, captured once at process start.
+          # Keeps this a Go string. Left alone, date-time maps to
+          # time.Time, whose RFC3339Nano marshaling can add fractional
+          # seconds and change the response bytes.
+          x-go-type: string
     ErrorBody:
       type: object
       description: The shared JSON error shape used by every Galley error response.
       additionalProperties: false
-      required:
-        - error
+      required: [error]
       properties:
         error:
           $ref: "#/components/schemas/ErrorDetail"
     ErrorDetail:
       type: object
       additionalProperties: false
-      required:
-        - code
-        - message
+      required: [code, message]
       properties:
         code:
           type: string
-          description: Short, stable, snake_case machine-readable identifier (e.g. "not_found").
+          description: Short, stable, snake_case identifier (e.g. "not_found").
         message:
           type: string
           description: Human-readable, non-secret explanation.

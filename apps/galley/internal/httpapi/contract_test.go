@@ -16,25 +16,15 @@ import (
 	"github.com/cristoforows/ticketIt/apps/galley/internal/config"
 )
 
-// contractPath is the single source of truth both sides generate
-// from (see contracts/README.md). Path is relative to this package
-// directory (apps/galley/internal/httpapi).
+// contractPath is relative to this package directory.
 const contractPath = "../../../../contracts/openapi.yaml"
 
-// TestGetStatus_ResponseMatchesContract is Galley's drift check: it
-// sends a real request through the real, fully-wired handler (the
-// same NewHandler used by cmd/galley) and validates the actual
-// response bytes against contracts/openapi.yaml's schema for that
-// operation — the same document both oapi-codegen (this package's
-// api.gen.go) and Swiftlet's generated client are built from.
-//
-// A generated type mismatch would usually surface as a compile
-// error. This test catches the drift a compiler cannot: the contract
-// and the implementation compiling fine but disagreeing about actual
-// values (e.g. a field's enum/const, or a required field silently
-// becoming absent). See docs/evidence/m2/51-api-contract.md for this
-// test caught failing on a deliberate mismatch, and passing again
-// once reverted.
+// TestGetStatus_ResponseMatchesContract sends a real request through
+// the real handler and validates the response bytes against the
+// contract. A generated-type mismatch usually surfaces as a compile
+// error; this catches the drift a compiler cannot — contract and
+// implementation compiling fine but disagreeing about values (an
+// enum/const, or a required field going absent).
 func TestGetStatus_ResponseMatchesContract(t *testing.T) {
 	doc := loadContract(t)
 
@@ -77,10 +67,9 @@ func TestGetStatus_ResponseMatchesContract(t *testing.T) {
 	}
 }
 
-// TestErrorResponses_MatchContract validates the 404 and 405 shared
-// error responses — which have no operation of their own in the
-// contract — against the contract's ErrorBody schema directly,
-// complementing the operation-bound check above.
+// TestErrorResponses_MatchContract validates the 404 and 405 bodies
+// against the ErrorBody schema directly, since neither has an
+// operation the response validator above could bind to.
 func TestErrorResponses_MatchContract(t *testing.T) {
 	doc := loadContract(t)
 	errorSchema := doc.Components.Schemas["ErrorBody"]

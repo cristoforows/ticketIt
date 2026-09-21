@@ -1,21 +1,14 @@
 /**
- * Types generated from contracts/openapi.yaml — the single source of
- * truth for Galley's HTTP API (see contracts/README.md). Regenerate
- * `./generated/schema.d.ts` from contracts/ (`npm run
- * generate:swiftlet`, see that README) after editing the contract;
- * this file's REQUIRED_FIELDS/destructuring below is checked by the
- * TypeScript compiler against the regenerated shape, which is how a
- * contract change that this file hasn't caught up with surfaces as a
+ * `./generated/schema` comes from contracts/openapi.yaml — the single
+ * source of truth for Galley's HTTP API. Regenerate it with `npm run
+ * generate:swiftlet` from contracts/ after editing the contract; tsc
+ * then checks REQUIRED_FIELDS and the object below against the new
+ * shape, so a contract change this file has not caught up with is a
  * compile error rather than a silent runtime mismatch.
  */
 import type { components } from "./generated/schema";
 
-/**
- * The exact GET /api/status payload shape, generated from
- * contracts/openapi.yaml. Every field here, and only these fields, is
- * rendered by StatusView; nothing additional is invented on the
- * frontend.
- */
+/** The GET /api/status payload. StatusView renders these fields and no others. */
 export type GalleyStatus = components["schemas"]["StatusResponse"];
 
 const STATUS_ENDPOINT = "/api/status";
@@ -29,11 +22,9 @@ const REQUIRED_FIELDS: Array<keyof GalleyStatus> = [
 ];
 
 /**
- * Fetches Galley's status payload from the (proxied) `/api/status`
- * endpoint. Throws an Error in every failure case — network failure
- * (Galley unreachable), a non-2xx HTTP response, or a response that
- * does not match the documented shape — so callers can render an
- * explicit error state instead of a fabricated or partial value.
+ * Fetches Galley's status from the (proxied) `/api/status`. Throws on
+ * every failure — unreachable, non-2xx, or off-contract shape — so
+ * callers render an explicit error rather than a partial value.
  */
 export async function fetchGalleyStatus(): Promise<GalleyStatus> {
   let response: Pick<Response, "ok" | "status" | "statusText" | "json">;

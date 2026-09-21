@@ -13,7 +13,7 @@ export interface paths {
         };
         /**
          * Application status
-         * @description Fixed, unauthenticated application-status payload. `application` and `status` are constant; `version` and `environment` reflect Galley's configuration; `startedAt` is the process start time, captured once and returned unchanged on every request. This shape is additive-only: existing fields are never renamed or removed (see apps/galley/README.md).
+         * @description Fixed, unauthenticated status payload. `application` and `status` are constant; `version` and `environment` come from Galley's configuration; `startedAt` is the process start time, captured once. Additive-only: fields are never renamed or removed.
          */
         get: operations["getStatus"];
         put?: never;
@@ -49,7 +49,7 @@ export interface components {
             error: components["schemas"]["ErrorDetail"];
         };
         ErrorDetail: {
-            /** @description Short, stable, snake_case machine-readable identifier (e.g. "not_found"). */
+            /** @description Short, stable, snake_case identifier (e.g. "not_found"). */
             code: string;
             /** @description Human-readable, non-secret explanation. */
             message: string;
@@ -81,7 +81,7 @@ export interface operations {
                     "application/json": components["schemas"]["StatusResponse"];
                 };
             };
-            /** @description An error occurred. Every Galley error response — including ones with no operation of their own, such as an unmatched route (404) or a disallowed method (405) — uses this shape. */
+            /** @description Error. Every Galley error response uses this shape, including ones with no operation of their own (unmatched route, disallowed method). */
             default: {
                 headers: {
                     [name: string]: unknown;

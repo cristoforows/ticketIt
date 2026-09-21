@@ -104,20 +104,20 @@ directory — they only ever see the **committed** generated
 needing to coexist in the same `node_modules`, and keeps Swiftlet's
 own build exactly as independent as before this slice.
 
-### Generated Go types: one contract override
+### Generated Go types: two overrides
 
-`StatusResponse.startedAt` carries `x-go-type: string` in the
-contract. Without it, oapi-codegen maps `format: date-time` to Go's
-`time.Time`, whose default JSON marshaling (`RFC3339Nano`) can include
-fractional seconds — a byte-level change from the plain
-`startedAt.UTC().Format(time.RFC3339)` string Galley has always
-produced (issue #49). The override keeps the generated field a plain
-`string`, so this refactor changes no observable byte of the response.
-See `apps/galley/internal/httpapi/status.go`'s doc comment for the
-matching (and only) hand-written companion piece: a `MarshalJSON`
-override that fixes the generated struct's JSON field order, since
-oapi-codegen emits Go struct fields alphabetically by property name
-rather than in the contract's declared order.
+Both exist solely so binding to generated types changed no observable
+byte of `GET /api/status`:
+
+- `startedAt` carries `x-go-type: string` in the contract. Without it,
+  oapi-codegen maps `format: date-time` to `time.Time`, whose
+  `RFC3339Nano` marshaling can include fractional seconds — a byte-level
+  change from the plain `startedAt.UTC().Format(time.RFC3339)` string
+  Galley has always produced (issue #49).
+- `StatusResponse.MarshalJSON` in `apps/galley/internal/httpapi/status.go`
+  holds the JSON field order. oapi-codegen emits Go struct fields
+  alphabetically by property name, and `encoding/json` serializes in
+  declaration order, so left alone the response's keys would reorder.
 
 ## Committed generated artifacts
 

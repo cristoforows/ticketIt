@@ -1,14 +1,8 @@
 #!/usr/bin/env bash
-# Drift check (part 2 of 2 — see contracts/README.md): regenerates
-# internal/httpapi/api.gen.go from contracts/openapi.yaml and fails if
-# that produces any diff against the committed file. A diff here means
-# either the contract changed without regenerating, or the generated
-# file was hand-edited — both are drift between the contract and what
-# Galley actually builds.
-#
-# Run from apps/galley. Requires a clean git working tree for
-# internal/httpapi/api.gen.go (uncommitted, unrelated changes to that
-# file would otherwise be indistinguishable from generator drift).
+# Drift check 2 of 2 (see contracts/README.md): regenerate api.gen.go
+# and fail on any diff, which means the contract changed without
+# regenerating or the generated file was hand-edited. Needs a clean
+# working tree for that file, else unrelated edits look like drift.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 

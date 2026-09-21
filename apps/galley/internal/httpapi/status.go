@@ -8,24 +8,16 @@ import (
 	"github.com/cristoforows/ticketIt/apps/galley/internal/config"
 )
 
-// StatusResponse (defined in api.gen.go, generated from
-// contracts/openapi.yaml) is the fixed GET /api/status payload. Its
-// field set is frozen by issue #49 because Swiftlet's client (issue
-// #50, and issue #51's generated client) validates all five fields as
-// non-empty strings and treats a missing one as an error. Later
-// slices (e.g. #52's database health) extend this additively: add the
-// field to contracts/openapi.yaml first, regenerate, then implement.
-// Never rename or remove a field here.
+// StatusResponse is generated from contracts/openapi.yaml (see
+// api.gen.go). Swiftlet treats a missing field as an error, so this
+// payload is additive-only: add the field to the contract first,
+// regenerate, then implement. Never rename or remove one.
 //
-// MarshalJSON fixes the JSON field order to the order established by
-// issue #49, before StatusResponse was generated. oapi-codegen emits
-// Go struct fields in alphabetical order by JSON property name
-// (Application, Environment, StartedAt, Status, Version), and
-// encoding/json serializes struct fields in declaration order, so
-// left alone the response's byte layout would silently change on
-// this refactor. This keeps GET /api/status's response bytes
-// unchanged, per issue #51's requirement that this remain a refactor
-// behind a contract, not a behavior change.
+// MarshalJSON holds the JSON field order issue #49 shipped. oapi-codegen
+// emits struct fields alphabetically by property name and encoding/json
+// serializes in declaration order, so without this the response bytes
+// would silently reorder. A new field belongs at the end of both this
+// struct and the contract.
 func (s StatusResponse) MarshalJSON() ([]byte, error) {
 	type ordered struct {
 		Application StatusResponseApplication `json:"application"`
@@ -43,15 +35,13 @@ func (s StatusResponse) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// server implements the generated ServerInterface (api.gen.go) for
-// Galley's current API surface: GET /api/status only.
+// server implements the generated ServerInterface: GET /api/status only.
 type server struct {
 	status StatusResponse
 }
 
-// newServer builds the server with its fixed status payload computed
-// once. startedAt is captured once at process start (see
-// cmd/galley/main.go) and formatted as RFC3339 UTC on every request.
+// newServer computes the fixed status payload once. startedAt is
+// captured at process start (cmd/galley/main.go).
 func newServer(cfg config.Config, startedAt time.Time) *server {
 	return &server{
 		status: StatusResponse{
@@ -64,7 +54,6 @@ func newServer(cfg config.Config, startedAt time.Time) *server {
 	}
 }
 
-// GetStatus implements ServerInterface's "GET /api/status" handler.
 func (s *server) GetStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.status)
 }

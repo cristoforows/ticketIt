@@ -215,17 +215,15 @@ go test ./internal/httpapi/... -run Contract -v
 ./scripts/check-contract-drift.sh
 ```
 
-One hand-written detail worth knowing before touching either
-`api.gen.go` or the contract: `StatusResponse.startedAt` carries
+Two overrides exist solely to keep `GET /api/status`'s response bytes
+unchanged by the move to generated types: `startedAt` carries
 `x-go-type: string` in the contract (keeping it a plain Go `string`
-rather than oapi-codegen's default `time.Time`, whose JSON marshaling
-could add fractional seconds Galley never produced), and
-`internal/httpapi/status.go` adds a `MarshalJSON` override on the
-generated `StatusResponse` type to restore the exact field order
-issue #49 established (oapi-codegen emits Go struct fields
-alphabetically by JSON property name, not in the contract's declared
-order). Both exist solely to keep `GET /api/status`'s response bytes
-unchanged by this refactor; see that file's doc comment.
+rather than oapi-codegen's default `time.Time`, whose marshaling could
+add fractional seconds Galley never produced), and
+`internal/httpapi/status.go` defines `StatusResponse.MarshalJSON` to
+hold the field order (oapi-codegen emits struct fields alphabetically by
+property name, which `encoding/json` then serializes in that order).
+Both are commented at the point of use.
 
 ## CORS
 

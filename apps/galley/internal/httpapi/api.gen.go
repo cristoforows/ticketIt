@@ -65,7 +65,7 @@ type ErrorBody struct {
 
 // ErrorDetail defines model for ErrorDetail.
 type ErrorDetail struct {
-	// Code Short, stable, snake_case machine-readable identifier (e.g. "not_found").
+	// Code Short, stable, snake_case identifier (e.g. "not_found").
 	Code string `json:"code"`
 
 	// Message Human-readable, non-secret explanation.
