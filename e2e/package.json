@@ -1,0 +1,17 @@
+{
+  "name": "ticketit-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Browser-to-backend end-to-end suite (Playwright, Chromium only) proving a real browser, a real built Swiftlet, a real Galley, and real PostgreSQL work together. See README.md for conventions; run.sh is the one documented command that brings the whole stack up, runs the suite, and tears it down.",
+  "type": "module",
+  "engines": {
+    "node": "26.9.0"
+  },
+  "scripts": {
+    "test": "playwright test",
+    "install:browsers": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}

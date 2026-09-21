@@ -743,3 +743,16 @@ verification record, `docs/evidence/m2/52-postgresql-persistence.md`
 for issue #52's, and `docs/evidence/m2/54-oauth-session.md` for this
 slice's full reproducible verification record (commands and their
 actual output).
+
+## Browser-to-backend suite
+
+Galley's own tests stop at its HTTP boundary. The browser suite in
+[`e2e/`](../../e2e/README.md) drives a real browser against a real
+Swiftlet build proxying to a real Galley on real PostgreSQL:
+
+```sh
+cd e2e && ./run.sh
+```
+
+It builds and starts Galley itself on a free port against its own
+database; it does not use a Galley you already have running.
