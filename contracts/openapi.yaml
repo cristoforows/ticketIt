@@ -1,0 +1,90 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/OAI/OpenAPI-Specification/main/schemas/v3.1/schema.json
+#
+# Single source of truth for Galley's HTTP API: Galley's server types
+# and Swiftlet's client types are both generated from this file. See
+# contracts/README.md for the contract-first convention and the
+# regeneration commands.
+openapi: 3.1.0
+info:
+  title: ticketIt Galley API
+  version: "0.1.0"
+  description: >-
+    Galley is the sole authority over ticketIt's authoritative records
+    (docs/adr/0001-single-authority-galley.md). This document covers the
+    subset of its HTTP API that has shipped so far.
+servers:
+  - url: /
+    description: Same-origin — Galley directly, or Swiftlet's dev-server proxy for /api/*.
+paths:
+  /api/status:
+    get:
+      operationId: getStatus
+      summary: Application status
+      description: >-
+        Fixed, unauthenticated status payload. `application` and `status`
+        are constant; `version` and `environment` come from Galley's
+        configuration; `startedAt` is the process start time, captured
+        once. Additive-only: fields are never renamed or removed.
+      responses:
+        "200":
+          description: Galley is running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        default:
+          description: >-
+            Error. Every Galley error response uses this shape, including
+            ones with no operation of their own (unmatched route,
+            disallowed method).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+components:
+  schemas:
+    StatusResponse:
+      type: object
+      description: The fixed GET /api/status payload.
+      additionalProperties: false
+      required: [application, status, version, environment, startedAt]
+      properties:
+        application:
+          type: string
+          const: galley
+        status:
+          type: string
+          const: ok
+        version:
+          type: string
+          description: Galley's configured version string (GALLEY_VERSION).
+        environment:
+          type: string
+          enum: [development, production]
+        startedAt:
+          type: string
+          format: date-time
+          description: RFC3339 UTC timestamp, captured once at process start.
+          # Keeps this a Go string. Left alone, date-time maps to
+          # time.Time, whose RFC3339Nano marshaling can add fractional
+          # seconds and change the response bytes.
+          x-go-type: string
+    ErrorBody:
+      type: object
+      description: The shared JSON error shape used by every Galley error response.
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+    ErrorDetail:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Short, stable, snake_case identifier (e.g. "not_found").
+        message:
+          type: string
+          description: Human-readable, non-secret explanation.

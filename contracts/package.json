@@ -1,0 +1,15 @@
+{
+  "name": "ticketit-contracts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Codegen toolchain for openapi.yaml. Not a dependency of any application; apps/swiftlet consumes the committed output only. See README.md, \"Why a separate contracts/package.json for codegen.\"",
+  "type": "module",
+  "scripts": {
+    "generate:swiftlet": "openapi-typescript openapi.yaml -o ../apps/swiftlet/src/api/generated/schema.d.ts",
+    "check:swiftlet-drift": "bash ./check-swiftlet-drift.sh"
+  },
+  "devDependencies": {
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3"
+  }
+}

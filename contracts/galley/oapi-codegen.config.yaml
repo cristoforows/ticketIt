@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/oapi-codegen/oapi-codegen/v2.8.0/configuration-schema.json
+#
+# The tool version is pinned in apps/galley/go.mod's `tool` directive.
+# `go generate` runs oapi-codegen from the directory holding the
+# //go:generate line (apps/galley/internal/httpapi), so `output` is
+# relative to that package, not to the repository root.
+package: httpapi
+generate:
+  models: true
+  std-http-server: true
+output: api.gen.go

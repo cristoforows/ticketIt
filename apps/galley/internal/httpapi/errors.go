@@ -2,30 +2,18 @@ package httpapi
 
 import "encoding/json"
 
-// ErrorBody is the shared JSON error shape returned by every Galley
-// error response. Later slices reuse this exact shape; see
-// apps/galley/README.md ("Error shape") before introducing a different
-// one.
-type ErrorBody struct {
-	Error ErrorDetail `json:"error"`
-}
-
-// ErrorDetail carries a machine-readable code and a human-readable
-// message. Codes are short, stable, snake_case identifiers (e.g.
-// "not_found", "method_not_allowed") that callers can match on without
-// parsing the message text.
-type ErrorDetail struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
+// ErrorBody and ErrorDetail (generated from contracts/openapi.yaml) are
+// the shared shape of every Galley error response, including ones with
+// no operation of their own. Codes are short, stable, snake_case
+// identifiers callers can match on without parsing the message. See
+// README.md ("Error shape") before introducing a different one.
 
 func newErrorBody(code, message string) ErrorBody {
 	return ErrorBody{Error: ErrorDetail{Code: code, Message: message}}
 }
 
-// mustMarshalFallback is used only if json.Marshal of our own static
-// error types somehow fails; it hand-writes the same shape so a caller
-// never sees a broken response body.
+// fallbackErrorJSON covers the impossible case of json.Marshal failing
+// on our own static error types, so a caller never sees a broken body.
 func fallbackErrorJSON() []byte {
 	b, err := json.Marshal(newErrorBody("internal_error", "failed to encode error response"))
 	if err != nil {

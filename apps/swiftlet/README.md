@@ -15,6 +15,19 @@ toolchain. Galley does not exist yet (issue #49, in parallel); this app
 is built and tested against the documented `/api/status` shape with a
 stubbed `fetch`, not a live backend.
 
+[Issue #51](https://github.com/cristoforows/ticketIt/issues/51) later
+bound this app's status types to
+[`contracts/openapi.yaml`](../../contracts/openapi.yaml), ticketIt's
+single source of truth for Galley's HTTP API — see
+[`contracts/README.md`](../../contracts/README.md) for the contract-
+first convention every later slice follows, the regeneration command,
+and the drift check. `src/api/status.ts`'s runtime behavior (its
+fetch, its own shape validation, its error messages) is unchanged by
+that refactor; only its types now come from the generated schema. This
+app's own `npm ci`/`npm test`/`npm run build` still never install or
+run anything Go- or codegen-toolchain-shaped — the generated schema is
+committed (`src/api/generated/schema.d.ts`).
+
 ## Prerequisites
 
 - Node **26.9.0** (pinned in `package.json`'s `engines.node`, matching
@@ -90,10 +103,32 @@ Tests stub `global.fetch` (`vi.stubGlobal`) and cover:
 No browser/end-to-end tests are included here; issue #53 establishes
 that harness.
 
+## Regenerating types from the contract
+
+`src/api/generated/schema.d.ts` is generated from
+[`contracts/openapi.yaml`](../../contracts/openapi.yaml) and committed
+(never hand-edited). After editing the contract, regenerate it via
+`contracts`' own, separate toolchain — not this app's:
+
+```sh
+cd contracts
+npm ci
+npm run generate:swiftlet
+```
+
+See [`contracts/README.md`](../../contracts/README.md) ("Why a
+separate `contracts/package.json` for codegen") for why this isn't an
+`npm run generate` script in this `package.json`: the generator
+(`openapi-typescript`) needs a different major version of TypeScript
+than this app is pinned to, purely for its own code-generation
+internals, and isolating that in `contracts/` keeps that version
+conflict from ever touching this app's own dependency tree.
+
 ## What this app renders, and where from
 
-`src/api/status.ts` fetches `/api/status` and validates the response
-matches the documented shape:
+`src/api/status.ts` fetches `/api/status`, typed against the generated
+`components["schemas"]["StatusResponse"]` (`GalleyStatus`), and
+validates the response matches the documented shape:
 
 ```json
 {
