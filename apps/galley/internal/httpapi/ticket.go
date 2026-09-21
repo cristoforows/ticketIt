@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -72,7 +73,11 @@ func (s *server) CreateTicket(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", `"title" must be a non-empty string`)
 		return
 	}
-	if len(title) > ticketTitleMaxLength {
+	// Code points, not bytes: contracts/openapi.yaml's maxLength is a
+	// JSON Schema constraint, which counts characters. len() would
+	// reject a contract-valid CJK or emoji title at a third of the
+	// documented limit.
+	if utf8.RuneCountInString(title) > ticketTitleMaxLength {
 		writeError(w, http.StatusBadRequest, "invalid_request",
 			fmt.Sprintf(`"title" must be at most %d characters after trimming`, ticketTitleMaxLength))
 		return

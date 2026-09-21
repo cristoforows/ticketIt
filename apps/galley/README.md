@@ -503,7 +503,10 @@ staying under the title limits GitHub (256) and Jira (255) use for the
 same kind of field; enforced in `CreateTicket`, not merely documented
 in the contract's `minLength`/`maxLength` (those are hints for
 generated-client consumers, not runtime validation for this
-hand-rolled handler).
+hand-rolled handler). Length is counted in characters (code points,
+`utf8.RuneCountInString`), matching what JSON Schema's `maxLength`
+means — a byte count would reject a contract-valid CJK or emoji title
+at roughly a third of the documented limit.
 
 **Ticket ordering: newest first, `created_at DESC, id DESC`.**
 `created_at` alone is not a safe sort key — nothing prevents two rows

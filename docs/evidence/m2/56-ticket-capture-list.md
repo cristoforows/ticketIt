@@ -260,6 +260,20 @@ speculative). Extending an enum is an ordinary additive contract change
 (`contracts/README.md`'s "contract first" convention already covers
 it) — not a barrier `#60` will need to work around.
 
+**Correction applied during review (not by the implementing agent):**
+the limit was first enforced with `len(title)`, which counts bytes.
+JSON Schema's `maxLength` counts code points, so a 200-character
+Japanese title — 600 bytes, and explicitly permitted by
+`contracts/openapi.yaml` — was rejected with `400 invalid_request`
+and the message "must be at most 200 characters". Every other title
+test used ASCII, where the two counts coincide, so the suite could not
+see it. Now `utf8.RuneCountInString`, with
+`TestCreateTicket_CountsTitleLengthInCharactersNotBytes` covering the
+distinction. Swiftlet's input keeps `maxLength={200}`, which the
+browser counts in UTF-16 units; that is stricter than Galley for
+astral-plane characters such as emoji, so it fails safe and was left
+alone.
+
 **Title maximum length (200 characters, after trimming):** chosen as a
 round number comfortably longer than a real one-line title (the
 "Fix login bug on Safari" example in `docs/ticket-creation.md` is 24

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -202,6 +203,28 @@ func TestCreateTicket_AcceptsTitleAtMaxLength(t *testing.T) {
 	title := suffix + strings.Repeat("x", ticketTitleMaxLength-len(suffix))
 	if len(title) != ticketTitleMaxLength {
 		t.Fatalf("test setup error: constructed title has length %d, want %d", len(title), ticketTitleMaxLength)
+	}
+
+	created := createTicket(t, client, baseURL, title)
+	if created.Title != title {
+		t.Errorf("Title = %q, want %q", created.Title, title)
+	}
+}
+
+func TestCreateTicket_CountsTitleLengthInCharactersNotBytes(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+
+	// contracts/openapi.yaml's maxLength is a JSON Schema constraint,
+	// so it counts code points. A byte-based check would reject this
+	// contract-valid title, and every other title test is ASCII, where
+	// the two counts coincide and the difference stays invisible.
+	suffix := uniqueTitle(t)
+	title := suffix + strings.Repeat("\u65e5", ticketTitleMaxLength-utf8.RuneCountInString(suffix))
+	if got := utf8.RuneCountInString(title); got != ticketTitleMaxLength {
+		t.Fatalf("test setup error: constructed title has %d characters, want %d", got, ticketTitleMaxLength)
+	}
+	if len(title) <= ticketTitleMaxLength {
+		t.Fatalf("test setup error: constructed title has %d bytes, which does not exercise the distinction", len(title))
 	}
 
 	created := createTicket(t, client, baseURL, title)
