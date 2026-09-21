@@ -26,6 +26,14 @@ signatures, types, or control flow — if reading the code answers it,
 delete the comment. Longer reasoning belongs in the evidence record
 or an ADR.
 
+## Pull requests
+
+Title a milestone-slice PR with its issue's `Mx.y` prefix, matching the
+issue title: `M2.7 — Swiftlet sign-in, authenticated shell, and sign-out`.
+A single-commit PR squashes under the commit subject rather than the PR
+title, so give that commit the same prefix — otherwise the milestone is
+missing from `git log`.
+
 ## Agent skills
 
 ### Issue tracker
