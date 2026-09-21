@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # The one documented command for issue #53 (extended by #55 with the
-# authenticated-browser phases below): migrates a dedicated database,
-# starts a real Galley, a real substitute GitHub OAuth provider, builds
-# and serves a real Swiftlet, runs the browser suite (including the
-# failure-mode and authenticated-session specs) against them, and tears
-# everything down -- regardless of a developer's own already-running
-# servers. See e2e/README.md for the full explanation of every step and
-# every environment variable below.
+# authenticated-browser phases, and by #56 with the Ticket-capture and
+# persistence phases, below): migrates a dedicated database, starts a
+# real Galley, a real substitute GitHub OAuth provider, builds and
+# serves a real Swiftlet, runs the browser suite (including the
+# failure-mode, authenticated-session, and Ticket specs) against them,
+# and tears everything down -- regardless of a developer's own
+# already-running servers. See e2e/README.md for the full explanation
+# of every step and every environment variable below.
 #
 # Usage:
 #   ./run.sh
@@ -240,7 +241,16 @@ log "running tests/session-restart-before.spec.ts (signs in, saves storage state
   E2E_GITHUBFAKE_BASE_URL="$GITHUBFAKE_URL" E2E_STORAGE_STATE_PATH="$STORAGE_STATE_PATH" \
   npx playwright test tests/session-restart-before.spec.ts) || RESTART_BEFORE_EXIT=$?
 
-log "restarting galley (same database, same origin, new process) to prove the session survives"
+# tests/ticket-persistence-before.spec.ts (issue #56) shares the same
+# storage state and the same restart below rather than requesting a
+# second one -- README.md, "Adding a spec".
+TICKET_BEFORE_EXIT=0
+log "running tests/ticket-persistence-before.spec.ts (captures two Tickets, newest first)"
+(cd "$SCRIPT_DIR" && E2E_BASE_URL="$SWIFTLET_BASE_URL" GALLEY_BASE_URL="$GALLEY_BASE_URL" \
+  E2E_STORAGE_STATE_PATH="$STORAGE_STATE_PATH" \
+  npx playwright test tests/ticket-persistence-before.spec.ts) || TICKET_BEFORE_EXIT=$?
+
+log "restarting galley (same database, same origin, new process) to prove the session and Tickets survive"
 kill "$GALLEY_PID" 2>/dev/null || true
 wait "$GALLEY_PID" 2>/dev/null || true
 GALLEY_PID=""
@@ -251,6 +261,12 @@ log "running tests/session-restart-after.spec.ts against the restarted galley"
 (cd "$SCRIPT_DIR" && E2E_BASE_URL="$SWIFTLET_BASE_URL" GALLEY_BASE_URL="$GALLEY_BASE_URL" \
   E2E_STORAGE_STATE_PATH="$STORAGE_STATE_PATH" \
   npx playwright test tests/session-restart-after.spec.ts) || RESTART_AFTER_EXIT=$?
+
+TICKET_AFTER_EXIT=0
+log "running tests/ticket-persistence-after.spec.ts against the restarted galley"
+(cd "$SCRIPT_DIR" && E2E_BASE_URL="$SWIFTLET_BASE_URL" GALLEY_BASE_URL="$GALLEY_BASE_URL" \
+  E2E_STORAGE_STATE_PATH="$STORAGE_STATE_PATH" \
+  npx playwright test tests/ticket-persistence-after.spec.ts) || TICKET_AFTER_EXIT=$?
 
 # --- 11. Stop Galley for good, then run the failure-mode spec ---
 log "stopping galley to exercise the failure-mode spec (pid $GALLEY_PID)"
@@ -266,11 +282,14 @@ log "running tests/backend-failure.spec.ts against a stopped galley"
 log "status.spec.ts exit code: $STATUS_EXIT"
 log "auth.spec.ts exit code: $AUTH_EXIT"
 log "session-restart-before.spec.ts exit code: $RESTART_BEFORE_EXIT"
+log "ticket-persistence-before.spec.ts exit code: $TICKET_BEFORE_EXIT"
 log "session-restart-after.spec.ts exit code: $RESTART_AFTER_EXIT"
+log "ticket-persistence-after.spec.ts exit code: $TICKET_AFTER_EXIT"
 log "backend-failure.spec.ts exit code: $FAILURE_EXIT"
 
 if [ "$STATUS_EXIT" -ne 0 ] || [ "$AUTH_EXIT" -ne 0 ] || [ "$RESTART_BEFORE_EXIT" -ne 0 ] \
-  || [ "$RESTART_AFTER_EXIT" -ne 0 ] || [ "$FAILURE_EXIT" -ne 0 ]; then
+  || [ "$TICKET_BEFORE_EXIT" -ne 0 ] || [ "$RESTART_AFTER_EXIT" -ne 0 ] \
+  || [ "$TICKET_AFTER_EXIT" -ne 0 ] || [ "$FAILURE_EXIT" -ne 0 ]; then
   log "SUITE FAILED"
   exit 1
 fi

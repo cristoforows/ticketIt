@@ -81,6 +81,7 @@ describe("App", () => {
     stubFetchByPath({
       "/api/session": jsonResponse({ owner: { id: 1, login: "ticketit-test-owner" } }),
       "/api/status": jsonResponse(SAMPLE_STATUS),
+      "/api/tickets": jsonResponse({ tickets: [] }),
     });
 
     render(<App />);

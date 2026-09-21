@@ -175,6 +175,63 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorBody"
+  /api/tickets:
+    get:
+      operationId: listTickets
+      summary: List the signed-in Owner's Tickets
+      tags: [tickets]
+      description: >-
+        Returns every Ticket belonging to the signed-in Owner, newest
+        first: ordered by createdAt descending with id descending as
+        the deterministic tiebreak (createdAt alone is not unique --
+        see apps/galley/README.md, "Ticket ordering"). Requires a
+        valid session; returns `401 unauthenticated` otherwise.
+      responses:
+        "200":
+          description: The Owner's Tickets, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketList"
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+    post:
+      operationId: createTicket
+      summary: Capture a Ticket from a title alone
+      tags: [tickets]
+      description: >-
+        Creates a Ticket owned by the signed-in Owner, in Backlog
+        (issue #56: title-only quick capture --
+        docs/ticket-creation.md, "Quick capture"). `title` is required,
+        is trimmed of leading/trailing whitespace, and must be
+        non-empty and at most 200 characters after trimming;
+        violations return `invalid_request`. No work-type or category
+        is accepted or stored -- Tickets stay generic
+        (docs/ticket-creation.md, "Flexible ticket structure"). Requires
+        a valid session; returns `401 unauthenticated` otherwise.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTicketRequest"
+      responses:
+        "201":
+          description: The persisted Ticket, in Backlog.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
   /api/session:
     get:
       operationId: getSession
@@ -241,6 +298,64 @@ components:
       properties:
         owner:
           $ref: "#/components/schemas/Owner"
+    Ticket:
+      type: object
+      description: >-
+        ticketIt's first domain record (issue #56): a title captured in
+        Backlog. No work-type/category column -- see
+        docs/ticket-creation.md, "Flexible ticket structure". Owned by
+        exactly one Owner, enforced by Galley (docs/adr/0001-single-authority-galley.md).
+      additionalProperties: false
+      required: [id, title, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        status:
+          type: string
+          description: >-
+            The Ticket's lifecycle stage (CONTEXT.md, "Status"). This
+            slice only ever produces Backlog -- Ready/In Progress/In
+            Review/Done/Blocked arrive with #60's transitions.
+          enum: [Backlog]
+        createdAt:
+          type: string
+          format: date-time
+          description: RFC3339 UTC timestamp of when the Ticket was captured.
+          x-go-type: string
+        updatedAt:
+          type: string
+          format: date-time
+          description: >-
+            RFC3339 UTC timestamp of the Ticket's last change. Equal to
+            createdAt until #60 adds transitions.
+          x-go-type: string
+    TicketList:
+      type: object
+      description: >-
+        The signed-in Owner's Tickets, newest first (createdAt
+        descending, id descending as the tiebreak).
+      additionalProperties: false
+      required: [tickets]
+      properties:
+        tickets:
+          type: array
+          items:
+            $ref: "#/components/schemas/Ticket"
+    CreateTicketRequest:
+      type: object
+      additionalProperties: false
+      required: [title]
+      properties:
+        title:
+          type: string
+          description: >-
+            Trimmed of leading/trailing whitespace before validation.
+            Must be non-empty and at most 200 characters after
+            trimming.
+          minLength: 1
+          maxLength: 200
     StatusResponse:
       type: object
       description: The fixed GET /api/status payload.

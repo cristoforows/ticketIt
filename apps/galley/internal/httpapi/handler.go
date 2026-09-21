@@ -63,6 +63,7 @@ func NewHandler(cfg config.Config, startedAt time.Time, pool *pgxpool.Pool, logg
 	mux.HandleFunc("/api/auth/github/start", methodNotAllowedHandler("GET"))
 	mux.HandleFunc("/api/auth/github/callback", methodNotAllowedHandler("GET"))
 	mux.HandleFunc("/api/session", methodNotAllowedHandler("GET", "DELETE"))
+	mux.HandleFunc("/api/tickets", methodNotAllowedHandler("GET", "POST"))
 	if cfg.Environment == config.EnvDevelopment {
 		mux.HandleFunc(devOnlyPathPrefix+"diagnostic-notes", methodNotAllowedHandler("GET", "POST"))
 	}
