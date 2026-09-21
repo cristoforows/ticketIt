@@ -10,6 +10,24 @@ import (
 	"net/http"
 )
 
+// Defines values for DatabaseStatusStatus.
+const (
+	DatabaseStatusStatusError DatabaseStatusStatus = "error"
+	DatabaseStatusStatusOk    DatabaseStatusStatus = "ok"
+)
+
+// Valid indicates whether the value is a known member of the DatabaseStatusStatus enum.
+func (e DatabaseStatusStatus) Valid() bool {
+	switch e {
+	case DatabaseStatusStatusError:
+		return true
+	case DatabaseStatusStatusOk:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for StatusResponseApplication.
 const (
 	Galley StatusResponseApplication = "galley"
@@ -45,17 +63,48 @@ func (e StatusResponseEnvironment) Valid() bool {
 
 // Defines values for StatusResponseStatus.
 const (
-	Ok StatusResponseStatus = "ok"
+	StatusResponseStatusOk StatusResponseStatus = "ok"
 )
 
 // Valid indicates whether the value is a known member of the StatusResponseStatus enum.
 func (e StatusResponseStatus) Valid() bool {
 	switch e {
-	case Ok:
+	case StatusResponseStatusOk:
 		return true
 	default:
 		return false
 	}
+}
+
+// CreateDiagnosticNoteRequest defines model for CreateDiagnosticNoteRequest.
+type CreateDiagnosticNoteRequest struct {
+	Note string `json:"note"`
+}
+
+// DatabaseStatus Added by issue #52. Reachability and applied migration version, checked live on every request -- never cached from process start, and never reported as "ok" when the database is unreachable.
+type DatabaseStatus struct {
+	// Error Present only when status is "error". A short, fixed, non-secret explanation -- never the underlying driver error text or any part of the connection string.
+	Error *string `json:"error,omitempty"`
+
+	// MigrationVersion The most recently applied forward-only migration version (see apps/galley/internal/migrations), or null if it could not be determined -- either because the database is unreachable (status "error") or because no migration has been applied yet on an otherwise-reachable database (status "ok").
+	MigrationVersion *int                 `json:"migrationVersion"`
+	Status           DatabaseStatusStatus `json:"status"`
+}
+
+// DatabaseStatusStatus defines model for DatabaseStatus.Status.
+type DatabaseStatusStatus string
+
+// DiagnosticNote Development-only diagnostic record (issue #52), persisted in the diagnostic_notes table. Not a domain/ticket concept.
+type DiagnosticNote struct {
+	// CreatedAt RFC3339 UTC timestamp of when the note was persisted.
+	CreatedAt string `json:"createdAt"`
+	Id        int    `json:"id"`
+	Note      string `json:"note"`
+}
+
+// DiagnosticNoteList defines model for DiagnosticNoteList.
+type DiagnosticNoteList struct {
+	Notes []DiagnosticNote `json:"notes"`
 }
 
 // ErrorBody The shared JSON error shape used by every Galley error response.
@@ -75,6 +124,9 @@ type ErrorDetail struct {
 // StatusResponse The fixed GET /api/status payload.
 type StatusResponse struct {
 	Application StatusResponseApplication `json:"application"`
+
+	// Database Added by issue #52. Reachability and applied migration version, checked live on every request -- never cached from process start, and never reported as "ok" when the database is unreachable.
+	Database    DatabaseStatus            `json:"database"`
 	Environment StatusResponseEnvironment `json:"environment"`
 
 	// StartedAt RFC3339 UTC timestamp, captured once at process start.
@@ -94,8 +146,17 @@ type StatusResponseEnvironment string
 // StatusResponseStatus defines model for StatusResponse.Status.
 type StatusResponseStatus string
 
+// CreateDiagnosticNoteJSONRequestBody defines body for CreateDiagnosticNote for application/json ContentType.
+type CreateDiagnosticNoteJSONRequestBody = CreateDiagnosticNoteRequest
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// ListDiagnosticNotes List development diagnostic notes
+	// (GET /api/dev/diagnostic-notes)
+	ListDiagnosticNotes(w http.ResponseWriter, r *http.Request)
+	// CreateDiagnosticNote Persist a development diagnostic note
+	// (POST /api/dev/diagnostic-notes)
+	CreateDiagnosticNote(w http.ResponseWriter, r *http.Request)
 	// GetStatus Application status
 	// (GET /api/status)
 	GetStatus(w http.ResponseWriter, r *http.Request)
@@ -109,6 +170,34 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// ListDiagnosticNotes operation middleware
+func (siw *ServerInterfaceWrapper) ListDiagnosticNotes(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDiagnosticNotes(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateDiagnosticNote operation middleware
+func (siw *ServerInterfaceWrapper) CreateDiagnosticNote(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateDiagnosticNote(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // GetStatus operation middleware
 func (siw *ServerInterfaceWrapper) GetStatus(w http.ResponseWriter, r *http.Request) {
@@ -245,6 +334,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	}
 
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/status", wrapper.GetStatus)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/dev/diagnostic-notes", wrapper.ListDiagnosticNotes)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/dev/diagnostic-notes", wrapper.CreateDiagnosticNote)
 
 	return m
 }

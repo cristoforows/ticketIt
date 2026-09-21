@@ -1,11 +1,15 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/cristoforows/ticketIt/apps/galley/internal/config"
+	"github.com/cristoforows/ticketIt/apps/galley/internal/postgres"
 )
 
 // StatusResponse is generated from contracts/openapi.yaml (see
@@ -17,7 +21,8 @@ import (
 // emits struct fields alphabetically by property name and encoding/json
 // serializes in declaration order, so without this the response bytes
 // would silently reorder. A new field belongs at the end of both this
-// struct and the contract.
+// struct and the contract -- issue #52's "database" is the first such
+// addition, appended after startedAt.
 func (s StatusResponse) MarshalJSON() ([]byte, error) {
 	type ordered struct {
 		Application StatusResponseApplication `json:"application"`
@@ -25,6 +30,7 @@ func (s StatusResponse) MarshalJSON() ([]byte, error) {
 		Version     string                    `json:"version"`
 		Environment StatusResponseEnvironment `json:"environment"`
 		StartedAt   string                    `json:"startedAt"`
+		Database    DatabaseStatus            `json:"database"`
 	}
 	return json.Marshal(ordered{
 		Application: s.Application,
@@ -32,28 +38,58 @@ func (s StatusResponse) MarshalJSON() ([]byte, error) {
 		Version:     s.Version,
 		Environment: s.Environment,
 		StartedAt:   s.StartedAt,
+		Database:    s.Database,
 	})
 }
 
-// server implements the generated ServerInterface: GET /api/status only.
+// databaseUnreachableMessage is the fixed, generic, non-secret message
+// GET /api/status reports when the configured database could not be
+// reached or queried. It is deliberately not derived from the
+// underlying driver error: see internal/postgres's package doc for why
+// nothing here ever surfaces raw driver text or connection details.
+const databaseUnreachableMessage = "database unreachable"
+
+// server implements the generated ServerInterface: the fixed status
+// fields (computed once, like issue #49) plus a live database check on
+// every request, and -- only when registered, see NewHandler's gating
+// -- the development-only diagnostic-note operations.
 type server struct {
-	status StatusResponse
+	fixed StatusResponse
+	pool  *pgxpool.Pool
 }
 
-// newServer computes the fixed status payload once. startedAt is
-// captured at process start (cmd/galley/main.go).
-func newServer(cfg config.Config, startedAt time.Time) *server {
+// newServer computes the fixed status fields once. startedAt is
+// captured at process start (cmd/galley/main.go). pool is used live,
+// per request, by GetStatus (and by the diagnostic operations in
+// diagnostic.go) -- never cached here.
+func newServer(cfg config.Config, startedAt time.Time, pool *pgxpool.Pool) *server {
 	return &server{
-		status: StatusResponse{
+		fixed: StatusResponse{
 			Application: Galley,
-			Status:      Ok,
+			Status:      StatusResponseStatusOk,
 			Version:     cfg.Version,
 			Environment: StatusResponseEnvironment(cfg.Environment),
 			StartedAt:   startedAt.UTC().Format(time.RFC3339),
 		},
+		pool: pool,
 	}
 }
 
 func (s *server) GetStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.status)
+	resp := s.fixed
+	resp.Database = s.databaseStatus(r.Context())
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// databaseStatus performs a live reachability + migration-version
+// check (internal/postgres.CheckHealth) on every call -- issue #52
+// requires this never be a boot-time snapshot, and requires a database
+// failure to be visible here, never reported as "ok".
+func (s *server) databaseStatus(ctx context.Context) DatabaseStatus {
+	health := postgres.CheckHealth(ctx, s.pool)
+	if !health.Reachable {
+		msg := databaseUnreachableMessage
+		return DatabaseStatus{Status: DatabaseStatusStatusError, MigrationVersion: nil, Error: &msg}
+	}
+	return DatabaseStatus{Status: DatabaseStatusStatusOk, MigrationVersion: health.MigrationVersion}
 }

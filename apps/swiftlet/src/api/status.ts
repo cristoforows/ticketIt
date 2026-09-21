@@ -64,5 +64,12 @@ function parseGalleyStatus(payload: unknown): GalleyStatus {
     version: record.version as GalleyStatus["version"],
     environment: record.environment as GalleyStatus["environment"],
     startedAt: record.startedAt as GalleyStatus["startedAt"],
+    // Added by issue #52 (contracts/openapi.yaml's additive "database"
+    // field). Not in REQUIRED_FIELDS and not rendered by StatusView --
+    // out of scope per issue #52 ("You do not need to change
+    // StatusView.tsx; rendering the new fields is out of scope").
+    // Passed through, not validated, purely so this function's return
+    // type keeps matching the generated GalleyStatus shape.
+    database: record.database as GalleyStatus["database"],
   };
 }

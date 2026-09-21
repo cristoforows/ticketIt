@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cristoforows/ticketIt/apps/galley/internal/postgres"
 )
 
 func fakeGetenv(values map[string]string) func(string) string {
@@ -41,9 +43,12 @@ func TestRun_ConfigurationFailure(t *testing.T) {
 // socket was released by successfully re-binding the exact same
 // address.
 func TestRun_ServesStatusThenShutsDownCleanly(t *testing.T) {
+	postgres.NewTestPool(t) // ensures the real test database exists and is migrated
+
 	getenv := fakeGetenv(map[string]string{
-		"GALLEY_HOST": "127.0.0.1",
-		"GALLEY_PORT": "0",
+		"GALLEY_HOST":  "127.0.0.1",
+		"GALLEY_PORT":  "0",
+		"DATABASE_URL": postgres.TestingURL(),
 	})
 	var stdout bytes.Buffer
 	ctx, cancel := context.WithCancel(context.Background())

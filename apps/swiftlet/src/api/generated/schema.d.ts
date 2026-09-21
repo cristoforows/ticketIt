@@ -13,11 +13,35 @@ export interface paths {
         };
         /**
          * Application status
-         * @description Fixed, unauthenticated status payload. `application` and `status` are constant; `version` and `environment` come from Galley's configuration; `startedAt` is the process start time, captured once. Additive-only: fields are never renamed or removed.
+         * @description Fixed, unauthenticated status payload. `application` and `status` are constant; `version` and `environment` come from Galley's configuration; `startedAt` is the process start time, captured once. Additive-only: fields are never renamed or removed. `database` was added by issue #52 and reflects a live check made while handling this request, not a cached boot-time snapshot.
          */
         get: operations["getStatus"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/dev/diagnostic-notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List development diagnostic notes
+         * @description Development-only diagnostic (issue #52): lists every persisted diagnostic note, oldest first. Proves data survives a Galley restart against the same database. These routes are gated at route registration and do not exist when `GALLEY_ENVIRONMENT` is `production` — an unmatched request there returns the same `404 not_found` shape as any other unknown route.
+         */
+        get: operations["listDiagnosticNotes"];
+        put?: never;
+        /**
+         * Persist a development diagnostic note
+         * @description Development-only diagnostic (issue #52): persists one note. Gated the same way as the GET above.
+         */
+        post: operations["createDiagnosticNote"];
         delete?: never;
         options?: never;
         head?: never;
@@ -43,6 +67,32 @@ export interface components {
              * @description RFC3339 UTC timestamp, captured once at process start.
              */
             startedAt: string;
+            database: components["schemas"]["DatabaseStatus"];
+        };
+        /** @description Added by issue #52. Reachability and applied migration version, checked live on every request -- never cached from process start, and never reported as "ok" when the database is unreachable. */
+        DatabaseStatus: {
+            /** @enum {string} */
+            status: "ok" | "error";
+            /** @description The most recently applied forward-only migration version (see apps/galley/internal/migrations), or null if it could not be determined -- either because the database is unreachable (status "error") or because no migration has been applied yet on an otherwise-reachable database (status "ok"). */
+            migrationVersion: number | null;
+            /** @description Present only when status is "error". A short, fixed, non-secret explanation -- never the underlying driver error text or any part of the connection string. */
+            error?: string;
+        };
+        /** @description Development-only diagnostic record (issue #52), persisted in the diagnostic_notes table. Not a domain/ticket concept. */
+        DiagnosticNote: {
+            id: number;
+            note: string;
+            /**
+             * Format: date-time
+             * @description RFC3339 UTC timestamp of when the note was persisted.
+             */
+            createdAt: string;
+        };
+        DiagnosticNoteList: {
+            notes: components["schemas"]["DiagnosticNote"][];
+        };
+        CreateDiagnosticNoteRequest: {
+            note: string;
         };
         /** @description The shared JSON error shape used by every Galley error response. */
         ErrorBody: {
@@ -82,6 +132,68 @@ export interface operations {
                 };
             };
             /** @description Error. Every Galley error response uses this shape, including ones with no operation of their own (unmatched route, disallowed method). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    listDiagnosticNotes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The persisted diagnostic notes, oldest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiagnosticNoteList"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    createDiagnosticNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateDiagnosticNoteRequest"];
+            };
+        };
+        responses: {
+            /** @description The persisted diagnostic note. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiagnosticNote"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. */
             default: {
                 headers: {
                     [name: string]: unknown;
