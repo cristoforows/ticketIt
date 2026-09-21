@@ -146,3 +146,15 @@ object; there is no local fallback, default, or hardcoded status string
 that could be mistaken for backend data. Any fetch failure, non-2xx
 response, or shape mismatch renders an explicit error state
 (`role="alert"`, `data-testid="status-error"`) instead.
+
+## Browser-to-backend suite
+
+The tests above stub `fetch`, so they never exercise the real proxy or
+a real backend. The browser suite in [`e2e/`](../../e2e/README.md) does:
+
+```sh
+cd e2e && ./run.sh
+```
+
+It builds this app and serves the production build with `vite preview`,
+proxying `/api` to a Galley it starts itself.
