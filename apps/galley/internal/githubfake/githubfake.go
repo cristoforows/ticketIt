@@ -12,12 +12,20 @@
 // authorize/token request, JSON token/identity responses), so
 // internal/auth's client code is exercised exactly as it would be
 // against the real provider.
+//
+// Test/development substitute only, never real GitHub. New's
+// constructor requires a testing.TB and so only works inside a Go test
+// binary; issue #55's cmd/githubfake wraps Start (below) instead, to
+// serve these same fixtures on a real port a browser can navigate to
+// for the e2e suite. cmd/githubfake is its own standalone command --
+// this package is never imported by cmd/galley.
 package githubfake
 
 import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -68,14 +76,16 @@ type Server struct {
 	issuedToken string
 }
 
-// New starts a fake provider that will hand back identity as the
-// signed-in account once a full authorize -> exchange -> identity
-// round trip completes. Fixed, non-secret fake credentials -- there is
-// no real GitHub OAuth app anywhere in this repository (AGENTS.md,
-// "Paid resources").
-func New(tb testing.TB, identity Identity) *Server {
-	tb.Helper()
-
+// Start starts a fake provider that will hand back identity as the
+// signed-in account once a full authorize -> exchange -> identity round
+// trip completes, independent of any testing.TB -- unlike New below,
+// this can be called from a plain standalone process (cmd/githubfake),
+// which is what lets a real browser (e2e/run.sh) reach one at all. New
+// is a thin wrapper adding Go-test cleanup; every existing Go-test
+// caller keeps using New unchanged. Fixed, non-secret fake credentials
+// -- there is no real GitHub OAuth app anywhere in this repository
+// (AGENTS.md, "Paid resources").
+func Start(identity Identity) *Server {
 	s := &Server{
 		ClientID:     "githubfake-client-id",
 		ClientSecret: "githubfake-client-secret",
@@ -86,11 +96,35 @@ func New(tb testing.TB, identity Identity) *Server {
 	mux.HandleFunc("GET /login/oauth/authorize", s.handleAuthorize)
 	mux.HandleFunc("POST /login/oauth/access_token", s.handleAccessToken)
 	mux.HandleFunc("GET /user", s.handleUser)
+	// /_fake/* is this substitute's own control surface, not part of
+	// real GitHub's API: a browser-driven e2e spec has no way to call
+	// SetIdentity directly (it isn't Go code), so it switches between
+	// the shared fake-provider process's fixture identities over HTTP
+	// instead -- e.g. to exercise non-owner rejection after an owner
+	// sign-in already happened against the same running process.
+	mux.HandleFunc("GET /_fake/healthz", s.handleHealthz)
+	mux.HandleFunc("POST /_fake/identity", s.handleSetIdentity)
 
 	s.srv = httptest.NewServer(mux)
 	s.URL = s.srv.URL
-	tb.Cleanup(s.srv.Close)
 	return s
+}
+
+// New starts a fake provider for use inside a Go test: identical to
+// Start, but registers tb.Cleanup so callers never call Close
+// themselves. Every pre-existing caller of New keeps working unchanged.
+func New(tb testing.TB, identity Identity) *Server {
+	tb.Helper()
+	s := Start(identity)
+	tb.Cleanup(s.Close)
+	return s
+}
+
+// Close stops the server. Only needed by a caller that used Start
+// directly rather than New's testing.TB-based cleanup -- currently just
+// cmd/githubfake.
+func (s *Server) Close() {
+	s.srv.Close()
 }
 
 // SetIdentity changes the account New's caller configured, for a test
@@ -200,6 +234,45 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request) {
 		"id":    identity.ID,
 		"login": identity.Login,
 	})
+}
+
+// handleHealthz lets a caller that only knows this process's address
+// (not any Go API) confirm the fake provider is actually accepting
+// connections before it navigates a browser at it -- e2e/run.sh's
+// startup gate for every process it starts.
+func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleSetIdentity lets a caller outside this Go process choose which
+// fixture identity subsequent /user calls report, by name rather than
+// by numeric id/login -- e2e/run.sh's one shared fake-provider process
+// serves every browser spec, and specs needing a different identity
+// (e.g. non-owner rejection, after an owner sign-in already happened
+// against the same process) select it explicitly through this endpoint
+// instead of assuming whatever the process started with.
+func (s *Server) handleSetIdentity(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Preset string `json:"preset"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	var identity Identity
+	switch body.Preset {
+	case "owner":
+		identity = TestOwnerIdentity
+	case "non-owner":
+		identity = NonOwnerIdentity
+	default:
+		http.Error(w, fmt.Sprintf(`invalid "preset" %q: must be "owner" or "non-owner"`, body.Preset), http.StatusBadRequest)
+		return
+	}
+
+	s.SetIdentity(identity)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
