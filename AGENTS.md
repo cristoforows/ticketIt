@@ -18,6 +18,14 @@ and name the resource instead. Only the Owner approves, per named
 resource, immediately beforehand. See `docs/deployment.md`,
 "Provisioning requires explicit Owner approval."
 
+## Comments
+
+Comment only what the code cannot state: a domain rule, an external
+constraint, or why a non-obvious choice was made. Never restate
+signatures, types, or control flow — if reading the code answers it,
+delete the comment. Longer reasoning belongs in the evidence record
+or an ADR.
+
 ## Agent skills
 
 ### Issue tracker
