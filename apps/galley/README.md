@@ -22,8 +22,7 @@ unchanged by that refactor.
 PostgreSQL: a connection pool (`internal/postgres`), versioned
 forward-only migrations, a live database-health field on `GET
 /api/status`, and a development-only diagnostic-notes endpoint. There
-is still no domain/Ticket table — that arrives in
-[#56](https://github.com/cristoforows/ticketIt/issues/56).
+was still no domain/Ticket table at that point.
 
 [Issue #54](https://github.com/cristoforows/ticketIt/issues/54) added
 Galley's only identity/security surface so far: a stable internal
@@ -41,6 +40,10 @@ suite signs in against — see "Owner configuration and GitHub OAuth
 sign-in" below and `e2e/README.md`, "Signing in." No Galley HTTP
 behavior changed: this slice's own new Go code is entirely the
 `internal/githubfake` refactor and `cmd/githubfake` itself.
+
+[Issue #56](https://github.com/cristoforows/ticketIt/issues/56) added
+Galley's first domain record: the `tickets` table and the
+`GET`/`POST /api/tickets` operations. See "Tickets" below.
 
 Galley is a standalone Go module (`go.mod` at this directory) with no
 dependency on Node or any frontend toolchain. It does have third-party
@@ -466,6 +469,68 @@ Every currently non-public route uses it: `GET`/`DELETE /api/session`
 (the whole point of those two) and, retrofitted by this slice, both
 development-only diagnostic-note operations — a development-only route
 is still non-public, and this rule makes no exception for it.
+[Issue #56](https://github.com/cristoforows/ticketIt/issues/56)'s
+`GET`/`POST /api/tickets` (below) follow the same convention.
+
+## Tickets (issue #56)
+
+Galley's first domain record. `internal/httpapi/ticket.go` implements
+the generated `ListTickets`/`CreateTicket` operations against the
+`tickets` table (`internal/migrations/000003_create_tickets.up.sql`),
+hand-rolled against the pool like `diagnostic.go` — one new table does
+not yet justify a repository layer.
+
+**No work-type or category column.** Tickets stay a generic unit of
+work — see `docs/ticket-creation.md`, "Flexible ticket structure." The
+table holds only an internal id, an `owner_id` reference, `title`,
+`status`, and `created_at`/`updated_at`.
+
+**`POST /api/tickets` only ever produces Backlog.** Per
+`docs/ticket-creation.md`, "Quick capture," a title alone is sufficient
+to capture a Ticket; there is no transition endpoint yet (that is
+[#60](https://github.com/cristoforows/ticketIt/issues/60)). `status` is
+stored as plain `TEXT`, not a `CHECK`-constrained column: this slice's
+Galley code is the only writer of this table (ADR 0001) and only ever
+writes `'Backlog'`, so a `CHECK` enumerating every `CONTEXT.md` Status
+name today would duplicate that enforcement now and need its own
+migration the moment #60 adds real transitions.
+
+**Title validation:** required, trimmed of leading/trailing whitespace,
+and non-empty and at most 200 characters after trimming — violations
+return `invalid_request` in the shared error shape. 200 was chosen as a
+round number comfortably longer than a real one-line title while
+staying under the title limits GitHub (256) and Jira (255) use for the
+same kind of field; enforced in `CreateTicket`, not merely documented
+in the contract's `minLength`/`maxLength` (those are hints for
+generated-client consumers, not runtime validation for this
+hand-rolled handler).
+
+**Ticket ordering: newest first, `created_at DESC, id DESC`.**
+`created_at` alone is not a safe sort key — nothing prevents two rows
+from sharing a timestamp at whatever resolution the database clock
+offers — so `id` (monotonic via `GENERATED ALWAYS AS IDENTITY`) is the
+deterministic tiebreak, breaking any tie in the same, newest-first
+direction. `internal/httpapi/ticket_test.go`'s
+`TestListTicketsForOwner_TiebreaksOnIdWhenCreatedAtTies` forces this
+exact tie (two rows inserted directly with an identical `created_at`)
+to prove the tiebreak, since two real, sequential HTTP requests
+essentially never collide on their own.
+
+**Ownership.** Both operations call `requireSession` first: an
+unauthenticated request is rejected with `401 unauthenticated` before
+either query runs. Every Ticket is created with `owner_id` set to the
+resolved session's Owner, and `ListTickets` scopes its query to
+`WHERE owner_id = $1`. Today there can only ever be one Owner
+(`owners_singleton_uq`), so a second real Owner can never exist to
+prove that scoping against; `TestListTicketsForOwner_ScopedToOwner`
+instead queries with a synthetic owner id that can never belong to any
+real Owner (ids are small, sequential integers; this one is offset far
+outside that range) and asserts a ticket belonging to the real Owner is
+never returned for it — a regression to an unscoped `SELECT * FROM
+tickets` would fail this immediately. See that test's own comment for
+why it does not instead construct a second real Owner row (doing so
+would break `auth_test.go`'s `TestOAuthSignIn_HappyPath`, which asserts
+exactly one `owners` row exists in this same shared database).
 
 ## Error shape
 
@@ -690,7 +755,7 @@ apps/galley/
 │                           #   real port -- test/development only, never cmd/galley
 └── internal/
     ├── config/             # environment parsing and validation (incl. DATABASE_URL, #52; owner/OAuth, #54)
-    ├── migrations/         # embedded, versioned, forward-only SQL files (#52, #54)
+    ├── migrations/         # embedded, versioned, forward-only SQL files (#52, #54, #56)
     ├── postgres/           # issue #52: pgxpool wrapper, live health check, migration runner,
     │                       #   and the real-PostgreSQL test-setup helper (NewTestPool)
     ├── auth/                # issue #54: tokens/hashing, sessions, oauth state, Owner
@@ -706,7 +771,8 @@ apps/galley/
         ├── diagnostic.go   # issue #52: the two development-only diagnostic-note handlers
         ├── production_gating_test.go  # issue #52: proves those routes absent in production
         ├── auth.go         # issue #54: the four OAuth/session handlers + requireSession
-        └── cookies.go      # issue #54: session/state cookie construction
+        ├── cookies.go      # issue #54: session/state cookie construction
+        └── ticket.go       # issue #56: ListTickets/CreateTicket -- Galley's first domain record
 ```
 
 ## Exact versions and toolchain

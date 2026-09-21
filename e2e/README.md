@@ -75,6 +75,46 @@ for it.
    arranging it inside the spec — the spec cannot restart a process it
    did not start.
 
+### Creating test data: through Galley's API, never straight into Postgres
+
+[Issue #56](https://github.com/cristoforows/ticketIt/issues/56) ("M2.8")
+was the first slice to need real domain test data (Tickets), and
+establishes this suite's one convention for it, rather than leaving
+each later spec to improvise its own:
+
+- **A shared helper that calls Galley's HTTP API lives in
+  `e2e/support/`**, beside `sign-in.ts` — see
+  [`e2e/support/tickets.ts`](support/tickets.ts)'s `createTicket(page,
+  title)`. It posts through `page.request`, which shares cookie storage
+  and `baseURL` with the signed-in `page`'s own browser context, so it
+  reaches Galley exactly as that browser would, with no separate
+  sign-in and no direct database access of any kind
+  ([ADR 0001](../docs/adr/0001-single-authority-galley.md)).
+- **Use the API-direct helper for background data** — Tickets your spec
+  needs to already exist but is not itself testing the creation of.
+  **Drive the real UI instead when the spec is testing that UI** — see
+  [`tests/ticket-persistence-before.spec.ts`](tests/ticket-persistence-before.spec.ts):
+  it calls `createTicket` once for an unrelated, pre-existing Ticket
+  (so its ordering assertion proves "newest first" against a
+  non-empty list, not one that merely happens to be empty), then fills
+  and submits the real quick-capture form twice — the behavior issue
+  #56's acceptance criteria actually require proof of.
+- **A spec needing Galley in an unusual state around this data still
+  follows point 5 above.** `tests/ticket-persistence-before.spec.ts`
+  and `tests/ticket-persistence-after.spec.ts` prove Ticket persistence
+  across a Galley restart the same way
+  `tests/session-restart-before.spec.ts` /
+  `session-restart-after.spec.ts` prove it for the session: reusing one
+  signed-in storage state and one restart `run.sh` already performs,
+  split across two `playwright test` invocations, rather than either
+  spec requesting a restart of its own. The two pairs share the exact
+  same restart in `run.sh` — see its "10." phase — since nothing about
+  Ticket persistence needs a second one. The two halves duplicate their
+  two fixed Ticket titles as local constants instead of importing them
+  from one another (each half is its own OS process invocation), the
+  same way the session-restart pair each hardcodes the fixture owner's
+  login rather than sharing it.
+
 ## Signing in
 
 Every spec after sign-in needs an authenticated browser. Use the helper

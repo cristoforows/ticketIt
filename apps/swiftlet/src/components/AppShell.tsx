@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { signOut, type Owner } from "../api/session";
 import { StatusView } from "./StatusView";
+import { TicketList } from "./TicketList";
 
 interface AppShellProps {
   owner: Owner;
@@ -43,6 +44,7 @@ export function AppShell({ owner, onSignedOut }: AppShellProps) {
           {signOutError}
         </p>
       )}
+      <TicketList />
       <StatusView />
     </div>
   );

@@ -15,9 +15,10 @@ function jsonResponse(body: unknown, status = 200, statusText = ""): MockRespons
   };
 }
 
-/** AppShell also mounts StatusView, which fetches /api/status — every
- * test here stubs that alongside whatever /api/session response it's
- * exercising, so StatusView's own request never surfaces as noise. */
+/** AppShell also mounts StatusView (/api/status) and TicketList
+ * (/api/tickets) — every test here stubs both alongside whatever
+ * /api/session response it's exercising, so neither's own request
+ * surfaces as noise. */
 function stubFetchByPath(routes: Record<string, MockResponse>) {
   vi.stubGlobal(
     "fetch",
@@ -32,6 +33,8 @@ function stubFetchByPath(routes: Record<string, MockResponse>) {
   );
 }
 
+const EMPTY_TICKET_LIST = jsonResponse({ tickets: [] });
+
 describe("AppShell", () => {
   afterEach(() => {
     cleanup();
@@ -39,7 +42,7 @@ describe("AppShell", () => {
   });
 
   it("shows which Owner is signed in", () => {
-    stubFetchByPath({ "/api/status": jsonResponse({ ok: true }) });
+    stubFetchByPath({ "/api/status": jsonResponse({ ok: true }), "/api/tickets": EMPTY_TICKET_LIST });
 
     render(<AppShell owner={OWNER} onSignedOut={() => {}} />);
 
@@ -49,6 +52,7 @@ describe("AppShell", () => {
   it("revokes the session through Galley and calls onSignedOut", async () => {
     stubFetchByPath({
       "/api/status": jsonResponse({ ok: true }),
+      "/api/tickets": EMPTY_TICKET_LIST,
       "/api/session": jsonResponse(null, 204),
     });
     const onSignedOut = vi.fn();
@@ -62,6 +66,7 @@ describe("AppShell", () => {
   it("shows an inline error and stays in the shell when sign-out fails for a reason other than 401", async () => {
     stubFetchByPath({
       "/api/status": jsonResponse({ ok: true }),
+      "/api/tickets": EMPTY_TICKET_LIST,
       "/api/session": jsonResponse({ error: "boom" }, 503, "Service Unavailable"),
     });
     const onSignedOut = vi.fn();
@@ -77,6 +82,7 @@ describe("AppShell", () => {
   it("treats a 401 on sign-out as already signed out", async () => {
     stubFetchByPath({
       "/api/status": jsonResponse({ ok: true }),
+      "/api/tickets": EMPTY_TICKET_LIST,
       "/api/session": jsonResponse({ error: { code: "unauthenticated", message: "sign-in required" } }, 401),
     });
     const onSignedOut = vi.fn();

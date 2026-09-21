@@ -79,9 +79,30 @@ func (e StatusResponseStatus) Valid() bool {
 	}
 }
 
+// Defines values for TicketStatus.
+const (
+	Backlog TicketStatus = "Backlog"
+)
+
+// Valid indicates whether the value is a known member of the TicketStatus enum.
+func (e TicketStatus) Valid() bool {
+	switch e {
+	case Backlog:
+		return true
+	default:
+		return false
+	}
+}
+
 // CreateDiagnosticNoteRequest defines model for CreateDiagnosticNoteRequest.
 type CreateDiagnosticNoteRequest struct {
 	Note string `json:"note"`
+}
+
+// CreateTicketRequest defines model for CreateTicketRequest.
+type CreateTicketRequest struct {
+	// Title Trimmed of leading/trailing whitespace before validation. Must be non-empty and at most 200 characters after trimming.
+	Title string `json:"title"`
 }
 
 // DatabaseStatus Added by issue #52. Reachability and applied migration version, checked live on every request -- never cached from process start, and never reported as "ok" when the database is unreachable.
@@ -164,6 +185,28 @@ type StatusResponseEnvironment string
 // StatusResponseStatus defines model for StatusResponse.Status.
 type StatusResponseStatus string
 
+// Ticket ticketIt's first domain record (issue #56): a title captured in Backlog. No work-type/category column -- see docs/ticket-creation.md, "Flexible ticket structure". Owned by exactly one Owner, enforced by Galley (docs/adr/0001-single-authority-galley.md).
+type Ticket struct {
+	// CreatedAt RFC3339 UTC timestamp of when the Ticket was captured.
+	CreatedAt string `json:"createdAt"`
+	Id        int    `json:"id"`
+
+	// Status The Ticket's lifecycle stage (CONTEXT.md, "Status"). This slice only ever produces Backlog -- Ready/In Progress/In Review/Done/Blocked arrive with #60's transitions.
+	Status TicketStatus `json:"status"`
+	Title  string       `json:"title"`
+
+	// UpdatedAt RFC3339 UTC timestamp of the Ticket's last change. Equal to createdAt until #60 adds transitions.
+	UpdatedAt string `json:"updatedAt"`
+}
+
+// TicketStatus The Ticket's lifecycle stage (CONTEXT.md, "Status"). This slice only ever produces Backlog -- Ready/In Progress/In Review/Done/Blocked arrive with #60's transitions.
+type TicketStatus string
+
+// TicketList The signed-in Owner's Tickets, newest first (createdAt descending, id descending as the tiebreak).
+type TicketList struct {
+	Tickets []Ticket `json:"tickets"`
+}
+
 // CompleteGithubOAuthParams defines parameters for CompleteGithubOAuth.
 type CompleteGithubOAuthParams struct {
 	Code  *string `form:"code,omitempty" json:"code,omitempty"`
@@ -175,6 +218,9 @@ type CompleteGithubOAuthParams struct {
 
 // CreateDiagnosticNoteJSONRequestBody defines body for CreateDiagnosticNote for application/json ContentType.
 type CreateDiagnosticNoteJSONRequestBody = CreateDiagnosticNoteRequest
+
+// CreateTicketJSONRequestBody defines body for CreateTicket for application/json ContentType.
+type CreateTicketJSONRequestBody = CreateTicketRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -199,6 +245,12 @@ type ServerInterface interface {
 	// GetStatus Application status
 	// (GET /api/status)
 	GetStatus(w http.ResponseWriter, r *http.Request)
+	// ListTickets List the signed-in Owner's Tickets
+	// (GET /api/tickets)
+	ListTickets(w http.ResponseWriter, r *http.Request)
+	// CreateTicket Capture a Ticket from a title alone
+	// (POST /api/tickets)
+	CreateTicket(w http.ResponseWriter, r *http.Request)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -353,6 +405,34 @@ func (siw *ServerInterfaceWrapper) GetStatus(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// ListTickets operation middleware
+func (siw *ServerInterfaceWrapper) ListTickets(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListTickets(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateTicket operation middleware
+func (siw *ServerInterfaceWrapper) CreateTicket(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateTicket(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -478,6 +558,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/dev/diagnostic-notes", wrapper.CreateDiagnosticNote)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/auth/github/start", wrapper.StartGithubOAuth)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/auth/github/callback", wrapper.CompleteGithubOAuth)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/tickets", wrapper.ListTickets)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets", wrapper.CreateTicket)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/session", wrapper.SignOut)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/session", wrapper.GetSession)
 

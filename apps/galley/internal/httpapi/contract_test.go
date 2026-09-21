@@ -125,6 +125,43 @@ func TestDiagnosticNotes_ResponseMatchesContract(t *testing.T) {
 	validateAgainstContract(t, router, listReq, listRec)
 }
 
+// TestTickets_ResponseMatchesContract validates both Ticket operations'
+// real responses against the contract, the same way
+// TestDiagnosticNotes_ResponseMatchesContract does above.
+func TestTickets_ResponseMatchesContract(t *testing.T) {
+	pool := postgres.NewTestPool(t)
+	doc := loadContract(t)
+
+	router, err := legacy.NewRouter(doc)
+	if err != nil {
+		t.Fatalf("failed to build a router from %s: %v", contractPath, err)
+	}
+
+	cfg := config.Config{Environment: config.EnvDevelopment, Version: "dev"}
+	handler := NewHandler(cfg, time.Now(), pool, testLogger(&bytes.Buffer{}))
+	sessionCookie := mintTestSessionCookie(t, pool)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/tickets",
+		strings.NewReader(`{"title":"contract test ticket"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.AddCookie(sessionCookie)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("POST status = %d, want %d; body=%s", createRec.Code, http.StatusCreated, createRec.Body.String())
+	}
+	validateAgainstContract(t, router, createReq, createRec)
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/tickets", nil)
+	listReq.AddCookie(sessionCookie)
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want %d; body=%s", listRec.Code, http.StatusOK, listRec.Body.String())
+	}
+	validateAgainstContract(t, router, listReq, listRec)
+}
+
 // TestGetSession_ResponseMatchesContract validates issue #54's
 // SessionResponse shape (the 200 case) the same way the other
 // operations above are validated.

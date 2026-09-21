@@ -88,6 +88,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the signed-in Owner's Tickets
+         * @description Returns every Ticket belonging to the signed-in Owner, newest first: ordered by createdAt descending with id descending as the deterministic tiebreak (createdAt alone is not unique -- see apps/galley/README.md, "Ticket ordering"). Requires a valid session; returns `401 unauthenticated` otherwise.
+         */
+        get: operations["listTickets"];
+        put?: never;
+        /**
+         * Capture a Ticket from a title alone
+         * @description Creates a Ticket owned by the signed-in Owner, in Backlog (issue #56: title-only quick capture -- docs/ticket-creation.md, "Quick capture"). `title` is required, is trimmed of leading/trailing whitespace, and must be non-empty and at most 200 characters after trimming; violations return `invalid_request`. No work-type or category is accepted or stored -- Tickets stay generic (docs/ticket-creation.md, "Flexible ticket structure"). Requires a valid session; returns `401 unauthenticated` otherwise.
+         */
+        post: operations["createTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/session": {
         parameters: {
             query?: never;
@@ -125,6 +149,34 @@ export interface components {
         };
         SessionResponse: {
             owner: components["schemas"]["Owner"];
+        };
+        /** @description ticketIt's first domain record (issue #56): a title captured in Backlog. No work-type/category column -- see docs/ticket-creation.md, "Flexible ticket structure". Owned by exactly one Owner, enforced by Galley (docs/adr/0001-single-authority-galley.md). */
+        Ticket: {
+            id: number;
+            title: string;
+            /**
+             * @description The Ticket's lifecycle stage (CONTEXT.md, "Status"). This slice only ever produces Backlog -- Ready/In Progress/In Review/Done/Blocked arrive with #60's transitions.
+             * @enum {string}
+             */
+            status: "Backlog";
+            /**
+             * Format: date-time
+             * @description RFC3339 UTC timestamp of when the Ticket was captured.
+             */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description RFC3339 UTC timestamp of the Ticket's last change. Equal to createdAt until #60 adds transitions.
+             */
+            updatedAt: string;
+        };
+        /** @description The signed-in Owner's Tickets, newest first (createdAt descending, id descending as the tiebreak). */
+        TicketList: {
+            tickets: components["schemas"]["Ticket"][];
+        };
+        CreateTicketRequest: {
+            /** @description Trimmed of leading/trailing whitespace before validation. Must be non-empty and at most 200 characters after trimming. */
+            title: string;
         };
         /** @description The fixed GET /api/status payload. */
         StatusResponse: {
@@ -329,6 +381,68 @@ export interface operations {
                 content?: never;
             };
             /** @description Error. See `ErrorBody`. Includes `invalid_oauth_state`, `owner_mismatch`, and `oauth_provider_error` -- see apps/galley/README.md, "Error shape." */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    listTickets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Owner's Tickets, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketList"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    createTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTicketRequest"];
+            };
+        };
+        responses: {
+            /** @description The persisted Ticket, in Backlog. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ticket"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. */
             default: {
                 headers: {
                     [name: string]: unknown;

@@ -7,7 +7,9 @@ and renders `application`, `status`, `version`, `environment`, and
 `startedAt` exactly as Galley returns them. There was no routing, no
 authentication, and no Tickets yet — [issue #55](https://github.com/cristoforows/ticketIt/issues/55)
 later added sign-in (see "Sign-in, the authenticated shell, and
-sign-out" below); there are still no Tickets. See
+sign-out" below), and [issue #56](https://github.com/cristoforows/ticketIt/issues/56)
+added the first Ticket list and quick capture (see "The Ticket list and
+quick capture" below). See
 [docs/deployment.md](../../docs/deployment.md) and
 [docs/adr/0001-single-authority-galley.md](../../docs/adr/0001-single-authority-galley.md):
 Swiftlet renders what Galley returns and never owns a workflow rule.
@@ -209,6 +211,49 @@ Owner, session validity, sign-out revocation — is Galley's, and is
 covered by Galley's own direct-API tests (`apps/galley/internal/httpapi`,
 issue #54); this slice added no new Galley behavior.
 
+## The Ticket list and quick capture (issue #56)
+
+`src/components/TicketList.tsx` is the first Swiftlet view of a real
+domain record, mounted inside `AppShell` above `StatusView`. It fetches
+`GET /api/tickets` (`src/api/tickets.ts`) on mount and renders exactly
+one of: a loading state, an explicit error state
+(`data-testid="ticket-list-error"`), an empty state
+(`data-testid="ticket-list-empty"`, shown for a genuinely empty list —
+not the loading or error case), or the list itself, newest first, in
+whatever order Galley returned (this component never re-sorts). A
+one-field form above it (`data-testid="ticket-capture-form"`) is the
+whole of quick capture: a title input and a submit button, disabled
+until the trimmed title is non-empty. Capture asks for nothing else —
+no work type, no category, no AI (`docs/ticket-creation.md`, "Quick
+capture" and "Flexible ticket structure").
+
+**No manual reload after capture.** A successful `POST /api/tickets`
+(`src/api/tickets.ts`'s `createTicket`) clears the input and re-fetches
+the list; Galley alone decides where the new Ticket sorts
+(`apps/galley/README.md`, "Ticket ordering"), so this component never
+guesses at the insertion point itself. A rejected capture (Galley's
+`invalid_request`, e.g. a blank or over-length title) shows Galley's
+own message inline (`data-testid="ticket-capture-error"`) and leaves
+the list exactly as it was — no re-fetch, since nothing changed.
+
+Every Ticket call reuses `src/api/session.ts`'s `UnauthenticatedError`
+convention (a 401 is not a special "ticket" error, just the existing
+"return to the sign-in page" signal every authenticated call in this
+app already shares). Swiftlet performs no validation or ownership check
+of its own here: title trimming, the 200-character maximum, and
+scoping the list to the signed-in Owner are all enforced by Galley
+(`apps/galley/internal/httpapi/ticket.go`), proved by Galley's own
+direct-API tests, not by anything in this app
+(`docs/adr/0001-single-authority-galley.md`).
+
+Out of scope for this slice (`apps/galley` issue #56's own "Not in
+scope" list): a board, a modal, Badges, archiving (all M3); Assignee,
+Template, and Status controls
+([#59](https://github.com/cristoforows/ticketIt/issues/59),
+[#60](https://github.com/cristoforows/ticketIt/issues/60),
+[#61](https://github.com/cristoforows/ticketIt/issues/61)); any AI.
+None of these has a placeholder here.
+
 ## Browser-to-backend suite
 
 The tests above stub `fetch`, so they never exercise the real proxy or
@@ -222,4 +267,8 @@ It builds this app and serves the production build with `vite preview`,
 proxying `/api` to a Galley it starts itself. Since issue #55 it also
 starts a real substitute GitHub provider (`apps/galley/cmd/githubfake`)
 and drives the actual sign-in/rejection/sign-out/reload/restart flows
-through a real Chromium — see `e2e/README.md`, "Signing in."
+through a real Chromium — see `e2e/README.md`, "Signing in." Since
+issue #56 it also captures Tickets through the real quick-capture form
+and proves they survive a real Galley restart — see `e2e/README.md`,
+"Creating test data," and `e2e/tests/ticket-persistence-before.spec.ts`
+/ `ticket-persistence-after.spec.ts`.
