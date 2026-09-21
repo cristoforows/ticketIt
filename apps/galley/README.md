@@ -11,10 +11,23 @@ unauthenticated application-status endpoint. There is no database, no
 authentication, and no Ticket model yet — persistence arrives in
 [#52](https://github.com/cristoforows/ticketIt/issues/52).
 
+[Issue #51](https://github.com/cristoforows/ticketIt/issues/51) then
+bound that endpoint to [`contracts/openapi.yaml`](../../contracts/openapi.yaml),
+ticketIt's single source of truth for Galley's HTTP API — see
+[`contracts/README.md`](../../contracts/README.md) for the contract-
+first convention every later slice follows, the regeneration commands,
+and the drift check. `GET /api/status`'s observable behavior is
+unchanged by that refactor.
+
 Galley is a standalone Go module (`go.mod` at this directory) with no
-dependency on Node or any frontend toolchain, and no third-party Go
-dependencies (`go.sum` does not exist because there is nothing to
-resolve).
+dependency on Node or any frontend toolchain. It does have third-party
+Go dependencies as of issue #51 — the generated server types/interface
+(`internal/httpapi/api.gen.go`) pull in no runtime dependency of their
+own (see below), but the code-generation tool itself
+(`oapi-codegen`, pinned via `go.mod`'s `tool` directive) and the
+contract-drift test (`kin-openapi`, an ordinary `require`) mean
+`go.sum` now exists. Neither is a Node/frontend dependency; "no Node
+required to build Galley" still holds.
 
 ## Requirements
 
@@ -82,8 +95,11 @@ $ echo $?
 
 ## `GET /api/status`
 
-Returns `200` with exactly these five fields, unauthenticated and free
-of secrets:
+Described in [`contracts/openapi.yaml`](../../contracts/openapi.yaml)
+and bound to it via the generated `ServerInterface`
+(`internal/httpapi/api.gen.go`, see "Generated types and the drift
+check" below). Returns `200` with exactly these five fields,
+unauthenticated and free of secrets:
 
 ```json
 {
@@ -108,6 +124,8 @@ renamed or removed.
 
 ## Error shape
 
+`ErrorBody`/`ErrorDetail` are generated from
+[`contracts/openapi.yaml`](../../contracts/openapi.yaml) (see below).
 Every error response — currently unknown routes and method mismatches —
 uses this shared JSON shape:
 
@@ -162,6 +180,53 @@ needs ever outgrow this (e.g. complex path parameters, per-route
 middleware chains), revisit this choice explicitly and record the
 change here.
 
+## Generated types and the drift check
+
+`internal/httpapi/api.gen.go` is generated from
+[`contracts/openapi.yaml`](../../contracts/openapi.yaml) by
+[oapi-codegen](https://github.com/oapi-codegen/oapi-codegen) v2.8.0
+(pinned in `go.mod`'s `tool` directive), configured by
+[`contracts/galley/oapi-codegen.config.yaml`](../../contracts/galley/oapi-codegen.config.yaml)
+to emit both the schema types (`StatusResponse`, `ErrorBody`,
+`ErrorDetail`) and a `ServerInterface` for Go 1.22+'s `net/http`
+routing style — the same style this package already uses (see "Router
+choice" above), so adopting it required no router migration.
+**Do not hand-edit `api.gen.go`** — see
+[`contracts/README.md`](../../contracts/README.md) for the full
+"contract first, then implement" convention.
+
+Regenerate after editing the contract:
+
+```sh
+cd apps/galley
+go generate ./...
+```
+
+Two independent checks guard against the contract and the
+implementation disagreeing (see `contracts/README.md`, "The drift
+check", for the full explanation and for both checks caught failing on
+a deliberate mismatch):
+
+```sh
+# 1. The real handler's response validates against the contract's schema.
+go test ./internal/httpapi/... -run Contract -v
+
+# 2. Regenerating the contract produces no diff against the committed file.
+./scripts/check-contract-drift.sh
+```
+
+One hand-written detail worth knowing before touching either
+`api.gen.go` or the contract: `StatusResponse.startedAt` carries
+`x-go-type: string` in the contract (keeping it a plain Go `string`
+rather than oapi-codegen's default `time.Time`, whose JSON marshaling
+could add fractional seconds Galley never produced), and
+`internal/httpapi/status.go` adds a `MarshalJSON` override on the
+generated `StatusResponse` type to restore the exact field order
+issue #49 established (oapi-codegen emits Go struct fields
+alphabetically by JSON property name, not in the contract's declared
+order). Both exist solely to keep `GET /api/status`'s response bytes
+unchanged by this refactor; see that file's doc comment.
+
 ## CORS
 
 No CORS headers are added. The browser reaches Galley only through
@@ -195,17 +260,34 @@ manually with a real process and `kill -TERM`/`kill -INT` (see
 ```text
 apps/galley/
 ├── go.mod
+├── go.sum
 ├── README.md               # this file
+├── scripts/
+│   └── check-contract-drift.sh  # drift check part 2: regeneration produces no diff
 ├── cmd/galley/             # main package: wiring, config load, graceful shutdown
 └── internal/
     ├── config/             # environment parsing and validation
     └── httpapi/            # routing, status handler, shared error shape, request logging
+        ├── api.gen.go      # generated from contracts/openapi.yaml — DO NOT EDIT
+        ├── generate.go     # the //go:generate directive that produces api.gen.go
+        └── contract_test.go  # drift check part 1: response validates against the contract
 ```
 
 ## Exact versions and toolchain
 
 - Go: `1.27.1` (darwin/arm64), pinned in `go.mod`'s `go` directive.
-- No third-party dependencies; no `go.sum`.
+- `github.com/getkin/kin-openapi` `v0.149.0` — an ordinary `require`,
+  used only by `internal/httpapi/contract_test.go` (the drift check;
+  see "Generated types and the drift check" above).
+- `github.com/oapi-codegen/oapi-codegen/v2` `v2.8.0` — a `tool`
+  dependency (Go 1.24+'s `go.mod` `tool` directive), used only by
+  `go generate`. Its own dependency graph (several `github.com/`,
+  `golang.org/x/`, and YAML/JSON-Schema packages) is why `go.sum`
+  exists now; none of it is linked into the built `galley` binary.
+- The generated `api.gen.go` itself imports only the standard library
+  (`fmt`, `net/http`) — generating it added no runtime dependency to
+  the actual served application, only to the tool that produces it and
+  to the test that checks it.
 
 See `docs/evidence/m2/49-galley-boot.md` for the full reproducible
 verification record (commands and their actual output).

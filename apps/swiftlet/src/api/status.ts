@@ -1,15 +1,22 @@
 /**
- * The exact GET /api/status payload shape fixed by issue #50. Every
- * field here, and only these fields, is rendered by StatusView; nothing
- * additional is invented on the frontend.
+ * Types generated from contracts/openapi.yaml — the single source of
+ * truth for Galley's HTTP API (see contracts/README.md). Regenerate
+ * `./generated/schema.d.ts` from contracts/ (`npm run
+ * generate:swiftlet`, see that README) after editing the contract;
+ * this file's REQUIRED_FIELDS/destructuring below is checked by the
+ * TypeScript compiler against the regenerated shape, which is how a
+ * contract change that this file hasn't caught up with surfaces as a
+ * compile error rather than a silent runtime mismatch.
  */
-export interface GalleyStatus {
-  application: string;
-  status: string;
-  version: string;
-  environment: string;
-  startedAt: string;
-}
+import type { components } from "./generated/schema";
+
+/**
+ * The exact GET /api/status payload shape, generated from
+ * contracts/openapi.yaml. Every field here, and only these fields, is
+ * rendered by StatusView; nothing additional is invented on the
+ * frontend.
+ */
+export type GalleyStatus = components["schemas"]["StatusResponse"];
 
 const STATUS_ENDPOINT = "/api/status";
 
@@ -61,10 +68,10 @@ function parseGalleyStatus(payload: unknown): GalleyStatus {
   }
 
   return {
-    application: record.application as string,
-    status: record.status as string,
-    version: record.version as string,
-    environment: record.environment as string,
-    startedAt: record.startedAt as string,
+    application: record.application as GalleyStatus["application"],
+    status: record.status as GalleyStatus["status"],
+    version: record.version as GalleyStatus["version"],
+    environment: record.environment as GalleyStatus["environment"],
+    startedAt: record.startedAt as GalleyStatus["startedAt"],
   };
 }

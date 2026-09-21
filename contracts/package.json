@@ -1,0 +1,15 @@
+{
+  "name": "ticketit-contracts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Code-generation toolchain for contracts/openapi.yaml. Not a dependency of any application: apps/swiftlet's own build/test/install never installs or runs anything in this package (its generated output is committed to apps/swiftlet/src/api/generated/). This package exists only so a contributor regenerating Swiftlet's types does not have to reconcile this tool's own TypeScript-version requirement against apps/swiftlet's pinned TypeScript version. See README.md, \"Why a separate package.json for codegen.\"",
+  "type": "module",
+  "scripts": {
+    "generate:swiftlet": "openapi-typescript openapi.yaml -o ../apps/swiftlet/src/api/generated/schema.d.ts",
+    "check:swiftlet-drift": "bash ./check-swiftlet-drift.sh"
+  },
+  "devDependencies": {
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3"
+  }
+}
