@@ -125,6 +125,32 @@ func TestDiagnosticNotes_ResponseMatchesContract(t *testing.T) {
 	validateAgainstContract(t, router, listReq, listRec)
 }
 
+// TestGetSession_ResponseMatchesContract validates issue #54's
+// SessionResponse shape (the 200 case) the same way the other
+// operations above are validated.
+func TestGetSession_ResponseMatchesContract(t *testing.T) {
+	pool := postgres.NewTestPool(t)
+	doc := loadContract(t)
+
+	router, err := legacy.NewRouter(doc)
+	if err != nil {
+		t.Fatalf("failed to build a router from %s: %v", contractPath, err)
+	}
+
+	cfg := config.Config{Environment: config.EnvDevelopment, Version: "dev"}
+	handler := NewHandler(cfg, time.Now(), pool, testLogger(&bytes.Buffer{}))
+	sessionCookie := mintTestSessionCookie(t, pool)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/session", nil)
+	req.AddCookie(sessionCookie)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/session status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	validateAgainstContract(t, router, req, rec)
+}
+
 // mintTestSessionCookie bootstraps (or reuses -- see
 // githubfake.TestOwnerIdentity's doc comment) the one Owner directly
 // via internal/auth and returns a ready-to-attach session cookie for
@@ -213,6 +239,46 @@ func TestErrorResponses_MatchContract(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestAuthErrorResponses_MatchContract validates issue #54's new error
+// paths (unauthenticated, invalid_oauth_state, owner_mismatch) against
+// their bound operation's "default" response, the same way
+// TestGetStatus_ResponseMatchesContract validates a success response --
+// unlike TestErrorResponses_MatchContract above, each of these does
+// have an operation the router can bind to.
+func TestAuthErrorResponses_MatchContract(t *testing.T) {
+	pool := postgres.NewTestPool(t)
+	doc := loadContract(t)
+
+	router, err := legacy.NewRouter(doc)
+	if err != nil {
+		t.Fatalf("failed to build a router from %s: %v", contractPath, err)
+	}
+
+	cfg := config.Config{Environment: config.EnvDevelopment, Version: "dev"}
+	handler := NewHandler(cfg, time.Now(), pool, testLogger(&bytes.Buffer{}))
+
+	t.Run("unauthenticated", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/session", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusUnauthorized, rec.Body.String())
+		}
+		validateAgainstContract(t, router, req, rec)
+	})
+
+	t.Run("invalid_oauth_state", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/auth/github/callback?code=x&state=never-issued", nil)
+		req.AddCookie(&http.Cookie{Name: StateCookieName, Value: "never-issued"})
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+		}
+		validateAgainstContract(t, router, req, rec)
+	})
 }
 
 func loadContract(t *testing.T) *openapi3.T {
