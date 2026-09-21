@@ -6,8 +6,11 @@
 package httpapi
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+
+	"github.com/oapi-codegen/runtime"
 )
 
 // Defines values for DatabaseStatusStatus.
@@ -121,6 +124,21 @@ type ErrorDetail struct {
 	Message string `json:"message"`
 }
 
+// Owner ticketIt's stable internal Owner identity -- independent of any GitHub identifier (docs/deployment.md, "Ownership and sign-in"). `login` is the linked GitHub identity's most recently observed login, shown for display only: matching a sign-in to this Owner always uses the immutable provider account id, never this field.
+type Owner struct {
+	// Id ticketIt's own Owner id -- not a GitHub identifier.
+	Id int `json:"id"`
+
+	// Login The linked GitHub account's current login, for display only.
+	Login string `json:"login"`
+}
+
+// SessionResponse defines model for SessionResponse.
+type SessionResponse struct {
+	// Owner ticketIt's stable internal Owner identity -- independent of any GitHub identifier (docs/deployment.md, "Ownership and sign-in"). `login` is the linked GitHub identity's most recently observed login, shown for display only: matching a sign-in to this Owner always uses the immutable provider account id, never this field.
+	Owner Owner `json:"owner"`
+}
+
 // StatusResponse The fixed GET /api/status payload.
 type StatusResponse struct {
 	Application StatusResponseApplication `json:"application"`
@@ -146,17 +164,38 @@ type StatusResponseEnvironment string
 // StatusResponseStatus defines model for StatusResponse.Status.
 type StatusResponseStatus string
 
+// CompleteGithubOAuthParams defines parameters for CompleteGithubOAuth.
+type CompleteGithubOAuthParams struct {
+	Code  *string `form:"code,omitempty" json:"code,omitempty"`
+	State *string `form:"state,omitempty" json:"state,omitempty"`
+
+	// Error Present when the provider itself reports failure (e.g. the user denied authorization).
+	Error *string `form:"error,omitempty" json:"error,omitempty"`
+}
+
 // CreateDiagnosticNoteJSONRequestBody defines body for CreateDiagnosticNote for application/json ContentType.
 type CreateDiagnosticNoteJSONRequestBody = CreateDiagnosticNoteRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// CompleteGithubOAuth Complete GitHub OAuth sign-in
+	// (GET /api/auth/github/callback)
+	CompleteGithubOAuth(w http.ResponseWriter, r *http.Request, params CompleteGithubOAuthParams)
+	// StartGithubOAuth Begin GitHub OAuth sign-in
+	// (GET /api/auth/github/start)
+	StartGithubOAuth(w http.ResponseWriter, r *http.Request)
 	// ListDiagnosticNotes List development diagnostic notes
 	// (GET /api/dev/diagnostic-notes)
 	ListDiagnosticNotes(w http.ResponseWriter, r *http.Request)
 	// CreateDiagnosticNote Persist a development diagnostic note
 	// (POST /api/dev/diagnostic-notes)
 	CreateDiagnosticNote(w http.ResponseWriter, r *http.Request)
+	// SignOut Sign out
+	// (DELETE /api/session)
+	SignOut(w http.ResponseWriter, r *http.Request)
+	// GetSession The signed-in Owner
+	// (GET /api/session)
+	GetSession(w http.ResponseWriter, r *http.Request)
 	// GetStatus Application status
 	// (GET /api/status)
 	GetStatus(w http.ResponseWriter, r *http.Request)
@@ -170,6 +209,79 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// CompleteGithubOAuth operation middleware
+func (siw *ServerInterfaceWrapper) CompleteGithubOAuth(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CompleteGithubOAuthParams
+
+	// ------------- Optional query parameter "code" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "code", r.URL.Query(), &params.Code, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "code"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "code", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "state" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "state", r.URL.Query(), &params.State, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "state"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "state", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "error" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "error", r.URL.Query(), &params.Error, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "error"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "error", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CompleteGithubOAuth(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartGithubOAuth operation middleware
+func (siw *ServerInterfaceWrapper) StartGithubOAuth(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartGithubOAuth(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // ListDiagnosticNotes operation middleware
 func (siw *ServerInterfaceWrapper) ListDiagnosticNotes(w http.ResponseWriter, r *http.Request) {
@@ -190,6 +302,34 @@ func (siw *ServerInterfaceWrapper) CreateDiagnosticNote(w http.ResponseWriter, r
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateDiagnosticNote(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SignOut operation middleware
+func (siw *ServerInterfaceWrapper) SignOut(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SignOut(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSession operation middleware
+func (siw *ServerInterfaceWrapper) GetSession(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSession(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -336,6 +476,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/status", wrapper.GetStatus)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/dev/diagnostic-notes", wrapper.ListDiagnosticNotes)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/dev/diagnostic-notes", wrapper.CreateDiagnosticNote)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/auth/github/start", wrapper.StartGithubOAuth)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/auth/github/callback", wrapper.CompleteGithubOAuth)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/session", wrapper.SignOut)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/session", wrapper.GetSession)
 
 	return m
 }

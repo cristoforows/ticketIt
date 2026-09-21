@@ -14,8 +14,11 @@ import (
 	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/getkin/kin-openapi/routers"
 	"github.com/getkin/kin-openapi/routers/legacy"
+	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/cristoforows/ticketIt/apps/galley/internal/auth"
 	"github.com/cristoforows/ticketIt/apps/galley/internal/config"
+	"github.com/cristoforows/ticketIt/apps/galley/internal/githubfake"
 	"github.com/cristoforows/ticketIt/apps/galley/internal/postgres"
 )
 
@@ -83,6 +86,11 @@ func TestGetStatus_DatabaseUnreachableResponseMatchesContract(t *testing.T) {
 // TestDiagnosticNotes_ResponseMatchesContract validates both
 // development-only diagnostic operations' real responses against the
 // contract, the same way the status endpoint above is validated.
+// diagnostic-notes is a non-public route (issue #54), so this needs a
+// valid session cookie; it mints one directly via internal/auth
+// (bypassing the OAuth round trip, which is exercised in full by
+// auth_test.go) since this test is only about response-shape
+// validation, not the sign-in flow itself.
 func TestDiagnosticNotes_ResponseMatchesContract(t *testing.T) {
 	pool := postgres.NewTestPool(t)
 	doc := loadContract(t)
@@ -94,10 +102,12 @@ func TestDiagnosticNotes_ResponseMatchesContract(t *testing.T) {
 
 	cfg := config.Config{Environment: config.EnvDevelopment, Version: "dev"}
 	handler := NewHandler(cfg, time.Now(), pool, testLogger(&bytes.Buffer{}))
+	sessionCookie := mintTestSessionCookie(t, pool)
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/dev/diagnostic-notes",
 		strings.NewReader(`{"note":"contract test note"}`))
 	createReq.Header.Set("Content-Type", "application/json")
+	createReq.AddCookie(sessionCookie)
 	createRec := httptest.NewRecorder()
 	handler.ServeHTTP(createRec, createReq)
 	if createRec.Code != http.StatusCreated {
@@ -106,12 +116,33 @@ func TestDiagnosticNotes_ResponseMatchesContract(t *testing.T) {
 	validateAgainstContract(t, router, createReq, createRec)
 
 	listReq := httptest.NewRequest(http.MethodGet, "/api/dev/diagnostic-notes", nil)
+	listReq.AddCookie(sessionCookie)
 	listRec := httptest.NewRecorder()
 	handler.ServeHTTP(listRec, listReq)
 	if listRec.Code != http.StatusOK {
 		t.Fatalf("GET status = %d, want %d; body=%s", listRec.Code, http.StatusOK, listRec.Body.String())
 	}
 	validateAgainstContract(t, router, listReq, listRec)
+}
+
+// mintTestSessionCookie bootstraps (or reuses -- see
+// githubfake.TestOwnerIdentity's doc comment) the one Owner directly
+// via internal/auth and returns a ready-to-attach session cookie for
+// it, for tests that need a valid session but are not themselves
+// testing the OAuth flow.
+func mintTestSessionCookie(t *testing.T, pool *pgxpool.Pool) *http.Cookie {
+	t.Helper()
+	ctx := context.Background()
+	identity := githubfake.TestOwnerIdentity
+	ownerID, _, err := auth.ResolveOwner(ctx, pool, identity.Login, auth.ProviderIdentity{ID: identity.ID, Login: identity.Login})
+	if err != nil {
+		t.Fatalf("failed to resolve the test owner: %v", err)
+	}
+	raw, _, err := auth.CreateSession(ctx, pool, ownerID)
+	if err != nil {
+		t.Fatalf("failed to create a test session: %v", err)
+	}
+	return &http.Cookie{Name: SessionCookieName, Value: raw}
 }
 
 func validateAgainstContract(t *testing.T, router routers.Router, req *http.Request, rec *httptest.ResponseRecorder) {

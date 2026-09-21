@@ -46,9 +46,12 @@ func TestRun_ServesStatusThenShutsDownCleanly(t *testing.T) {
 	postgres.NewTestPool(t) // ensures the real test database exists and is migrated
 
 	getenv := fakeGetenv(map[string]string{
-		"GALLEY_HOST":  "127.0.0.1",
-		"GALLEY_PORT":  "0",
-		"DATABASE_URL": postgres.TestingURL(),
+		"GALLEY_HOST":                       "127.0.0.1",
+		"GALLEY_PORT":                       "0",
+		"DATABASE_URL":                      postgres.TestingURL(),
+		"GALLEY_OWNER_GITHUB_LOGIN":         "test-owner",
+		"GALLEY_OAUTH_GITHUB_CLIENT_ID":     "test-client-id",
+		"GALLEY_OAUTH_GITHUB_CLIENT_SECRET": "test-client-secret",
 	})
 	var stdout bytes.Buffer
 	ctx, cancel := context.WithCancel(context.Background())

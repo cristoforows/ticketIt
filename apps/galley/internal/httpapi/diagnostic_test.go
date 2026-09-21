@@ -5,13 +5,16 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/cristoforows/ticketIt/apps/galley/internal/authtest"
 	"github.com/cristoforows/ticketIt/apps/galley/internal/config"
+	"github.com/cristoforows/ticketIt/apps/galley/internal/githubfake"
 	"github.com/cristoforows/ticketIt/apps/galley/internal/postgres"
 )
 
@@ -36,22 +39,45 @@ func devHandler(t *testing.T) http.Handler {
 	return NewHandler(cfg, time.Now(), pool, testLogger(&bytes.Buffer{}))
 }
 
+// devServerWithSession starts a real Galley server (development
+// environment) against the real test database and signs in as the
+// configured owner against a local fake provider, returning the
+// server's base URL and a cookie-jar-backed client already carrying a
+// valid session -- since issue #54, diagnostic-notes is itself a
+// non-public route (see diagnostic.go's requireSession retrofit).
+func devServerWithSession(t *testing.T) (baseURL string, client *http.Client) {
+	t.Helper()
+	pool := postgres.NewTestPool(t)
+	fake := githubfake.New(t, githubfake.TestOwnerIdentity)
+	srv, _ := startTestGalley(t, pool, config.EnvDevelopment, fake)
+	client = authtest.NewClient()
+	authtest.SignIn(t, client, srv.URL)
+	return srv.URL, client
+}
+
 func TestDiagnosticNotes_WriteThenRead(t *testing.T) {
-	handler := devHandler(t)
+	baseURL, client := devServerWithSession(t)
 	note := uniqueNote(t)
 
-	createReq := httptest.NewRequest(http.MethodPost, "/api/dev/diagnostic-notes",
+	createReq, err := http.NewRequest(http.MethodPost, baseURL+"/api/dev/diagnostic-notes",
 		strings.NewReader(`{"note":"`+note+`"}`))
+	if err != nil {
+		t.Fatalf("failed to build request: %v", err)
+	}
 	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	handler.ServeHTTP(createRec, createReq)
+	createResp, err := client.Do(createReq)
+	if err != nil {
+		t.Fatalf("POST /api/dev/diagnostic-notes failed: %v", err)
+	}
+	defer createResp.Body.Close()
+	createBody, _ := io.ReadAll(createResp.Body)
 
-	if createRec.Code != http.StatusCreated {
-		t.Fatalf("POST status = %d, want %d; body=%s", createRec.Code, http.StatusCreated, createRec.Body.String())
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST status = %d, want %d; body=%s", createResp.StatusCode, http.StatusCreated, createBody)
 	}
 	var created DiagnosticNote
-	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
-		t.Fatalf("failed to decode create response %q: %v", createRec.Body.String(), err)
+	if err := json.Unmarshal(createBody, &created); err != nil {
+		t.Fatalf("failed to decode create response %q: %v", createBody, err)
 	}
 	if created.Note != note {
 		t.Errorf("created.Note = %q, want %q", created.Note, note)
@@ -63,16 +89,19 @@ func TestDiagnosticNotes_WriteThenRead(t *testing.T) {
 		t.Error("created.CreatedAt is empty")
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/api/dev/diagnostic-notes", nil)
-	listRec := httptest.NewRecorder()
-	handler.ServeHTTP(listRec, listReq)
+	listResp, err := client.Get(baseURL + "/api/dev/diagnostic-notes")
+	if err != nil {
+		t.Fatalf("GET /api/dev/diagnostic-notes failed: %v", err)
+	}
+	defer listResp.Body.Close()
+	listBody, _ := io.ReadAll(listResp.Body)
 
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("GET status = %d, want %d; body=%s", listRec.Code, http.StatusOK, listRec.Body.String())
+	if listResp.StatusCode != http.StatusOK {
+		t.Fatalf("GET status = %d, want %d; body=%s", listResp.StatusCode, http.StatusOK, listBody)
 	}
 	var list DiagnosticNoteList
-	if err := json.Unmarshal(listRec.Body.Bytes(), &list); err != nil {
-		t.Fatalf("failed to decode list response %q: %v", listRec.Body.String(), err)
+	if err := json.Unmarshal(listBody, &list); err != nil {
+		t.Fatalf("failed to decode list response %q: %v", listBody, err)
 	}
 
 	found := false
@@ -88,19 +117,26 @@ func TestDiagnosticNotes_WriteThenRead(t *testing.T) {
 }
 
 func TestCreateDiagnosticNote_RejectsEmptyNote(t *testing.T) {
-	handler := devHandler(t)
+	baseURL, client := devServerWithSession(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/dev/diagnostic-notes", strings.NewReader(`{"note":""}`))
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/dev/diagnostic-notes", strings.NewReader(`{"note":""}`))
+	if err != nil {
+		t.Fatalf("failed to build request: %v", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", resp.StatusCode, http.StatusBadRequest, data)
 	}
 	var body ErrorBody
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("failed to decode error body %q: %v", rec.Body.String(), err)
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatalf("failed to decode error body %q: %v", data, err)
 	}
 	if body.Error.Code != "invalid_request" {
 		t.Errorf("Error.Code = %q, want %q", body.Error.Code, "invalid_request")
@@ -108,19 +144,26 @@ func TestCreateDiagnosticNote_RejectsEmptyNote(t *testing.T) {
 }
 
 func TestCreateDiagnosticNote_RejectsMalformedJSON(t *testing.T) {
-	handler := devHandler(t)
+	baseURL, client := devServerWithSession(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/dev/diagnostic-notes", strings.NewReader(`not json`))
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/dev/diagnostic-notes", strings.NewReader(`not json`))
+	if err != nil {
+		t.Fatalf("failed to build request: %v", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", resp.StatusCode, http.StatusBadRequest, data)
 	}
 	var body ErrorBody
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("failed to decode error body %q: %v", rec.Body.String(), err)
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatalf("failed to decode error body %q: %v", data, err)
 	}
 	if body.Error.Code != "invalid_request" {
 		t.Errorf("Error.Code = %q, want %q", body.Error.Code, "invalid_request")
@@ -130,13 +173,23 @@ func TestCreateDiagnosticNote_RejectsMalformedJSON(t *testing.T) {
 // TestDiagnosticNotes_DatabaseUnavailable proves the diagnostic
 // endpoints fail clearly (the shared error shape, not a hang or a
 // panic) when the database is unreachable, same as GET /api/status.
+// requireSession's own lookup hits the same unreachable pool first
+// (issue #54's session check is itself a database read), which is why
+// this needs a session cookie attached at all -- with none, the
+// request would instead get 401 unauthenticated without ever reaching
+// the database.
 func TestDiagnosticNotes_DatabaseUnavailable(t *testing.T) {
 	pool := unreachablePool(t)
 	cfg := config.Config{Environment: config.EnvDevelopment, Version: "dev"}
 	handler := NewHandler(cfg, time.Now(), pool, testLogger(&bytes.Buffer{}))
 
+	withCookie := func(req *http.Request) *http.Request {
+		req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: "irrelevant-the-lookup-itself-fails"})
+		return req
+	}
+
 	t.Run("list", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/api/dev/diagnostic-notes", nil)
+		req := withCookie(httptest.NewRequest(http.MethodGet, "/api/dev/diagnostic-notes", nil))
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 
@@ -153,7 +206,7 @@ func TestDiagnosticNotes_DatabaseUnavailable(t *testing.T) {
 	})
 
 	t.Run("create", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/api/dev/diagnostic-notes", strings.NewReader(`{"note":"x"}`))
+		req := withCookie(httptest.NewRequest(http.MethodPost, "/api/dev/diagnostic-notes", strings.NewReader(`{"note":"x"}`)))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
