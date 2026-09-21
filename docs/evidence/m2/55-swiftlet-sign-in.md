@@ -567,6 +567,15 @@ above is that confirming run.
 - **Real-provider (github.com) verification remains out of scope**,
   unchanged from #54's own recorded limitation — **M10**, per that
   issue and `apps/galley/README.md`.
+- **`StatusView`'s own error state is no longer covered by any browser
+  spec.** Before this slice, `backend-failure.spec.ts` reached
+  `status-error` through a real stopped backend. Now the session check
+  fails first, so that spec asserts `session-error` instead and
+  `status-error` is exercised only by stubbed-fetch component tests.
+  Reaching it in a browser would need Galley up for `GET /api/session`
+  but failing `GET /api/status` — a partial-failure phase `run.sh` has
+  no way to arrange today. Worth adding when a slice gives `run.sh` a
+  reason to simulate partial backend failure; no owning issue yet.
 - **No CI wiring**, unchanged from every prior M2 slice's own recorded
   limitation. Same owner as before: [#62](https://github.com/cristoforows/ticketIt/issues/62)
   or a dedicated CI-setup slice.
