@@ -13,8 +13,20 @@ function jsonResponse(body: unknown, status = 200, statusText = ""): MockRespons
   };
 }
 
-const TICKET_A = { id: 2, title: "Second captured", status: "Backlog", createdAt: "2026-09-22T10:01:00Z", updatedAt: "2026-09-22T10:01:00Z" };
-const TICKET_B = { id: 1, title: "First captured", status: "Backlog", createdAt: "2026-09-22T10:00:00Z", updatedAt: "2026-09-22T10:00:00Z" };
+const TICKET_A = {
+  id: "22222222-2222-4222-8222-222222222222",
+  title: "Second captured",
+  status: "Backlog",
+  createdAt: "2026-09-22T10:01:00Z",
+  updatedAt: "2026-09-22T10:01:00Z",
+};
+const TICKET_B = {
+  id: "11111111-1111-4111-8111-111111111111",
+  title: "First captured",
+  status: "Backlog",
+  createdAt: "2026-09-22T10:00:00Z",
+  updatedAt: "2026-09-22T10:00:00Z",
+};
 
 /** Routes by method + path, and can be reprogrammed mid-test (via `set`)
  * so a spec can return a different list after a capture re-fetches it. */
@@ -72,6 +84,14 @@ describe("TicketList", () => {
     expect(items[1]).toHaveAttribute("data-testid", `ticket-item-${TICKET_B.id}`);
     expect(screen.getAllByTestId("ticket-title")[0]).toHaveTextContent(TICKET_A.title);
     expect(screen.getAllByTestId("ticket-status")[0]).toHaveTextContent("Backlog");
+  });
+
+  it("links each Ticket's title to its full-page detail route", async () => {
+    stubFetch({ "GET /api/tickets": jsonResponse({ tickets: [TICKET_A] }) });
+
+    render(<TicketList />);
+
+    expect(await screen.findByTestId("ticket-title")).toHaveAttribute("href", `/tickets/${TICKET_A.id}`);
   });
 
   it("renders an explicit error state when the initial fetch fails", async () => {

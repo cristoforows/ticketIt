@@ -14,6 +14,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/getkin/kin-openapi/routers"
 	"github.com/getkin/kin-openapi/routers/legacy"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/cristoforows/ticketIt/apps/galley/internal/auth"
@@ -160,6 +161,55 @@ func TestTickets_ResponseMatchesContract(t *testing.T) {
 		t.Fatalf("GET status = %d, want %d; body=%s", listRec.Code, http.StatusOK, listRec.Body.String())
 	}
 	validateAgainstContract(t, router, listReq, listRec)
+}
+
+// TestGetTicket_ResponseMatchesContract validates issue #57's new
+// operation the same way TestTickets_ResponseMatchesContract does
+// above, for both its 200 and 404 shapes.
+func TestGetTicket_ResponseMatchesContract(t *testing.T) {
+	pool := postgres.NewTestPool(t)
+	doc := loadContract(t)
+
+	router, err := legacy.NewRouter(doc)
+	if err != nil {
+		t.Fatalf("failed to build a router from %s: %v", contractPath, err)
+	}
+
+	cfg := config.Config{Environment: config.EnvDevelopment, Version: "dev"}
+	handler := NewHandler(cfg, time.Now(), pool, testLogger(&bytes.Buffer{}))
+	sessionCookie := mintTestSessionCookie(t, pool)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/tickets",
+		strings.NewReader(`{"title":"get-ticket contract test"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.AddCookie(sessionCookie)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("POST status = %d, want %d; body=%s", createRec.Code, http.StatusCreated, createRec.Body.String())
+	}
+	var created Ticket
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to decode create response %q: %v", createRec.Body.String(), err)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/tickets/"+created.Id, nil)
+	getReq.AddCookie(sessionCookie)
+	getRec := httptest.NewRecorder()
+	handler.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want %d; body=%s", getRec.Code, http.StatusOK, getRec.Body.String())
+	}
+	validateAgainstContract(t, router, getReq, getRec)
+
+	notFoundReq := httptest.NewRequest(http.MethodGet, "/api/tickets/"+uuid.NewString(), nil)
+	notFoundReq.AddCookie(sessionCookie)
+	notFoundRec := httptest.NewRecorder()
+	handler.ServeHTTP(notFoundRec, notFoundReq)
+	if notFoundRec.Code != http.StatusNotFound {
+		t.Fatalf("GET (unknown) status = %d, want %d; body=%s", notFoundRec.Code, http.StatusNotFound, notFoundRec.Body.String())
+	}
+	validateAgainstContract(t, router, notFoundReq, notFoundRec)
 }
 
 // TestGetSession_ResponseMatchesContract validates issue #54's

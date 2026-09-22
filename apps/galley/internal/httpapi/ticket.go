@@ -3,12 +3,15 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -25,14 +28,15 @@ const ticketTimeout = 5 * time.Second
 const ticketTitleMaxLength = 200
 
 // server also implements the generated ServerInterface's Ticket
-// operations (issue #56): title-only capture into Backlog and listing
-// the signed-in Owner's Tickets. Hand-rolled against the pool, no
-// repository layer, matching diagnostic.go's rationale -- this slice
-// adds exactly one domain table.
+// operations: title-only capture into Backlog and listing the
+// signed-in Owner's Tickets (issue #56), and getting one Ticket by its
+// public identifier (issue #57). Hand-rolled against the pool, no
+// repository layer, matching diagnostic.go's rationale -- one domain
+// table does not yet justify one.
 //
-// Both methods call requireSession first: every Ticket is scoped to
+// Every method calls requireSession first: every Ticket is scoped to
 // the Owner it resolves (owner_id), and a request without a valid
-// session is rejected before either query runs (apps/galley/README.md,
+// session is rejected before any query runs (apps/galley/README.md,
 // "Authenticated routes").
 
 func (s *server) ListTickets(w http.ResponseWriter, r *http.Request) {
@@ -50,6 +54,44 @@ func (s *server) ListTickets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, TicketList{Tickets: tickets})
+}
+
+// GetTicket returns one Ticket addressed by its public identifier
+// (issue #57), scoped to the signed-in Owner. A malformed identifier
+// is rejected before ever reaching the database -- both to avoid a
+// Postgres syntax error on an invalid ::uuid cast (see
+// getTicketForOwner) and, more importantly, because this endpoint's
+// own contract promises a malformed value, an unknown one, and one
+// belonging to another Owner are all indistinguishable: the same
+// 404 not_found, never revealing which case occurred.
+func (s *server) GetTicket(w http.ResponseWriter, r *http.Request, id string) {
+	owner, ok := s.requireSession(w, r)
+	if !ok {
+		return
+	}
+
+	if _, err := uuid.Parse(id); err != nil {
+		writeTicketNotFound(w)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
+	defer cancel()
+
+	ticket, found, err := getTicketForOwner(ctx, s.pool, owner.ID, id)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to read the ticket")
+		return
+	}
+	if !found {
+		writeTicketNotFound(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, ticket)
+}
+
+func writeTicketNotFound(w http.ResponseWriter) {
+	writeError(w, http.StatusNotFound, "not_found", "no ticket with that identifier")
 }
 
 func (s *server) CreateTicket(w http.ResponseWriter, r *http.Request) {
@@ -104,10 +146,15 @@ func insertTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64, title 
 		status               string
 		createdAt, updatedAt time.Time
 	)
+	// public_id is generated here, in Go, rather than left to the
+	// column's DEFAULT -- matching how every other identifier in this
+	// codebase (session tokens, OAuth state) is generated in
+	// application code. See internal/migrations/000004_....sql.
+	publicID := uuid.NewString()
 	err := pool.QueryRow(ctx,
-		`INSERT INTO tickets (owner_id, title, status) VALUES ($1, $2, $3)
-		 RETURNING id, title, status, created_at, updated_at`,
-		ownerID, title, string(Backlog),
+		`INSERT INTO tickets (owner_id, title, status, public_id) VALUES ($1, $2, $3, $4::uuid)
+		 RETURNING public_id::text, title, status, created_at, updated_at`,
+		ownerID, title, string(Backlog), publicID,
 	).Scan(&result.Id, &result.Title, &status, &createdAt, &updatedAt)
 	if err != nil {
 		return Ticket{}, err
@@ -116,6 +163,38 @@ func insertTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64, title 
 	result.CreatedAt = createdAt.UTC().Format(time.RFC3339)
 	result.UpdatedAt = updatedAt.UTC().Format(time.RFC3339)
 	return result, nil
+}
+
+// getTicketForOwner looks up one Ticket by its public identifier,
+// scoped to ownerID exactly like listTicketsForOwner -- a publicID
+// that exists but belongs to a different owner_id is indistinguishable
+// from one that does not exist at all, which is what makes the 404
+// this function's caller returns never reveal cross-owner existence.
+// publicID must already be a validated UUID string (GetTicket checks
+// this before calling in) -- an invalid one would fail the ::uuid cast
+// as a query error, not a "no rows" miss.
+func getTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, publicID string) (Ticket, bool, error) {
+	var (
+		ticket               Ticket
+		status               string
+		createdAt, updatedAt time.Time
+	)
+	err := pool.QueryRow(ctx,
+		`SELECT public_id::text, title, status, created_at, updated_at
+		   FROM tickets
+		  WHERE owner_id = $1 AND public_id = $2::uuid`,
+		ownerID, publicID,
+	).Scan(&ticket.Id, &ticket.Title, &status, &createdAt, &updatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Ticket{}, false, nil
+	}
+	if err != nil {
+		return Ticket{}, false, err
+	}
+	ticket.Status = TicketStatus(status)
+	ticket.CreatedAt = createdAt.UTC().Format(time.RFC3339)
+	ticket.UpdatedAt = updatedAt.UTC().Format(time.RFC3339)
+	return ticket, true, nil
 }
 
 // listTicketsForOwner returns ownerID's Tickets newest first: created_at
@@ -127,7 +206,7 @@ func insertTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64, title 
 // apps/galley/README.md, "Ticket ordering".
 func listTicketsForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64) ([]Ticket, error) {
 	rows, err := pool.Query(ctx,
-		`SELECT id, title, status, created_at, updated_at
+		`SELECT public_id::text, title, status, created_at, updated_at
 		   FROM tickets
 		  WHERE owner_id = $1
 		  ORDER BY created_at DESC, id DESC`,

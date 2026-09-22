@@ -7,9 +7,11 @@ and renders `application`, `status`, `version`, `environment`, and
 `startedAt` exactly as Galley returns them. There was no routing, no
 authentication, and no Tickets yet — [issue #55](https://github.com/cristoforows/ticketIt/issues/55)
 later added sign-in (see "Sign-in, the authenticated shell, and
-sign-out" below), and [issue #56](https://github.com/cristoforows/ticketIt/issues/56)
+sign-out" below), [issue #56](https://github.com/cristoforows/ticketIt/issues/56)
 added the first Ticket list and quick capture (see "The Ticket list and
-quick capture" below). See
+quick capture" below), and [issue #57](https://github.com/cristoforows/ticketIt/issues/57)
+added client-side routing and the canonical full-page Ticket detail
+view (see "Routing and the Ticket detail page" below). See
 [docs/deployment.md](../../docs/deployment.md) and
 [docs/adr/0001-single-authority-galley.md](../../docs/adr/0001-single-authority-galley.md):
 Swiftlet renders what Galley returns and never owns a workflow rule.
@@ -254,6 +256,98 @@ Template, and Status controls
 [#61](https://github.com/cristoforows/ticketIt/issues/61)); any AI.
 None of these has a placeholder here.
 
+## Routing and the Ticket detail page (issue #57)
+
+**Router choice: a hand-rolled ~50-line reader of
+`window.location.pathname` (`src/router.ts`), not a routing library.**
+No router was installed before this slice, and this slice needs exactly
+two routes — the Backlog list (`/`) and a Ticket's full-page detail
+view (`/tickets/:id`). A third-party router (`react-router`,
+`@tanstack/router`, ...) would add a dependency, its own API surface,
+and (for the data-loader-style routers) a data-fetching convention this
+app does not otherwise use, for capability the platform already
+provides for two fixed routes. This mirrors
+`apps/galley/README.md`'s own "Router choice" for the same reason at
+the same proportional scale (`net/http.ServeMux` over `chi`/`gorilla/
+mux` for "a handful of fixed routes with per-method dispatch") — revisit
+this choice explicitly, the same way that section asks Galley's own
+routing decision to be revisited, if a future milestone's routing needs
+grow past two fixed paths (nested routes, route guards, code-splitting
+per route).
+
+`useRoute()` reads `window.location.pathname` via `useSyncExternalStore`,
+subscribed to the browser's native `popstate` event; `navigate(path)`
+calls `history.pushState` and then dispatches a synthetic `popstate`
+event itself, since `pushState` alone fires no event — this is what
+lets one subscription handle both an in-app `Link` click and a real
+browser back/forward. `src/components/Link.tsx` is a real `<a href>`
+(so middle-click, ctrl/cmd-click, and "open in new tab" behave exactly
+as a plain link) that calls `navigate()` on an unmodified left click
+instead of a full page load. Any path other than exactly `/` or
+`/tickets/:id` falls back to rendering the Backlog view — only a Ticket
+identifier needs its own not-found presentation in this slice (see
+below), not an arbitrary unmapped route.
+
+**A reload of `/tickets/:id` renders the same page, not a 404** —
+confirmed directly against the production build (`vite preview`,
+`curl -i http://.../tickets/some-id` returns the built `index.html`,
+`200`) and by the browser suite's own reload assertion (see
+"Browser-to-backend suite" below). This works because Vite's default
+`appType: "spa"` (unchanged by this slice — `vite.config.ts` sets no
+`appType`) enables its HTML-fallback middleware for both the dev server
+and `vite preview`: an unmatched path that accepts `text/html` serves
+`index.html` instead of a static 404, which is what lets a client-side
+route like `/tickets/:id` exist as a real, reloadable, bookmarkable URL
+against a plain static file server. This was verified, not assumed —
+see `docs/evidence/m2/57-ticket-detail-page.md` for the exact command
+and its output, and for the deliberate, reverted `appType: "mpa"` break
+that proves the browser suite's reload spec actually depends on this.
+
+**The full page shows title, Status, and timestamps only** — no
+Rounds, Reports, PR links, or Grill Mode section, and no placeholder
+implying any of them, since none exist yet
+(`docs/ticket-views.md`, "Ticket details"). `src/components/
+TicketDetail.tsx` is the presentation: it takes an already-fetched
+`Ticket` as a prop and renders exactly those fields, with no fetching
+or routing of its own. `src/components/TicketDetailPage.tsx` is the
+container: it reads the route's `ticketId`, calls
+`fetchTicket(ticketId)` (`src/api/tickets.ts`), and renders exactly one
+of a loading state, `TicketDetail`, an explicit not-found state
+(`data-testid="ticket-detail-not-found"`, shown on Galley's `404`), or
+an explicit error state (any other failure) — never a blank screen or
+a raw error for an unknown identifier, per the issue's own acceptance
+criterion.
+
+**This container/presentation split is what issue #57 requires for
+M3's modal to reuse this content "without a second implementation."**
+M3's ticket-detail modal will need its own container (it will read the
+Ticket to show from wherever the modal was opened — a board card, a
+list row — rather than from a route parameter, and it will not need
+`Link`'s "Back to Backlog" affordance a full page needs), but it can
+render the exact same `TicketDetail` component this slice wrote, with
+the exact same `Ticket` prop shape, inside that different container.
+Nothing about `TicketDetail` itself is specific to being a full page —
+it renders no navigation, no route awareness, and no fetch of its own,
+which is precisely what makes it as usable inside a modal's chrome as
+inside `TicketDetailPage`'s `<section>`.
+
+`src/api/tickets.ts`'s `fetchTicket(id)` mirrors `fetchTickets`'s and
+`createTicket`'s existing conventions exactly: `UnauthenticatedError`
+on a `401` (the same "return to sign-in" signal every authenticated
+call in this app already shares), and a new `TicketNotFoundError` on a
+`404` — Galley's own shared not-found response for an unknown
+identifier, a malformed one, and one belonging to another Owner alike
+(`apps/galley/internal/httpapi/ticket.go`); this app performs no
+identifier validation or ownership check of its own, matching
+`docs/adr/0001-single-authority-galley.md`.
+
+**The Ticket identifier itself is Galley's opaque public UUID
+(`Ticket.id`), not the internal sequential id** — see
+`apps/galley/README.md`, "Public identifier," for the full reasoning
+and the migration. `TicketList.tsx`'s title now links to
+`/tickets/<that id>` (`data-testid="ticket-title"` is unchanged; it is
+now the `<a>` itself rather than a `<span>` wrapping plain text).
+
 ## Browser-to-backend suite
 
 The tests above stub `fetch`, so they never exercise the real proxy or
@@ -271,4 +365,8 @@ through a real Chromium — see `e2e/README.md`, "Signing in." Since
 issue #56 it also captures Tickets through the real quick-capture form
 and proves they survive a real Galley restart — see `e2e/README.md`,
 "Creating test data," and `e2e/tests/ticket-persistence-before.spec.ts`
-/ `ticket-persistence-after.spec.ts`.
+/ `ticket-persistence-after.spec.ts`. Since issue #57 it also drives
+list-to-detail navigation, a direct `/tickets/:id` URL load, a reload
+of that URL, and the not-found page for an unknown identifier, against
+the real, `vite preview`-served production build — see
+`e2e/tests/ticket-detail.spec.ts`.

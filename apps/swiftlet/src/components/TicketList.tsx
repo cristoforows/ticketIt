@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { createTicket, fetchTickets, TICKET_TITLE_MAX_LENGTH, type Ticket } from "../api/tickets";
+import { Link } from "./Link";
 
 type ListState =
   | { kind: "loading" }
@@ -93,7 +94,9 @@ export function TicketList() {
         <ul data-testid="ticket-list-items">
           {state.tickets.map((ticket) => (
             <li key={ticket.id} data-testid={`ticket-item-${ticket.id}`}>
-              <span data-testid="ticket-title">{ticket.title}</span>{" "}
+              <Link to={`/tickets/${encodeURIComponent(ticket.id)}`} data-testid="ticket-title">
+                {ticket.title}
+              </Link>{" "}
               <span data-testid="ticket-status">{ticket.status}</span>
             </li>
           ))}
