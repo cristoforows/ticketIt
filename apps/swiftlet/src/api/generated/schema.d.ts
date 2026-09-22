@@ -144,6 +144,82 @@ export interface paths {
         patch: operations["updateTicket"];
         trace?: never;
     };
+    "/api/tickets/{id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change a Ticket's Status
+         * @description Issue #60: a human-assigned lifecycle transition, implementing the accepted D3 decision's S2 table exactly (docs/decisions/d3-agent-template-compatibility.md). Galley validates the requested move against the Ticket's own persisted current Status inside a single transaction, so two concurrent conflicting requests on the same Ticket cannot both apply -- at most one succeeds; the other observes the already-changed current Status and is rejected.
+         *     `Done` is always rejected here, regardless of the current Status: it is reachable only through explicit Accept (`POST /api/tickets/{id}/accept`), never a plain status change, so completion can never happen by accident through this operation.
+         *     A transition not on D3 S2's table is rejected with `invalid_transition` -- for example `Backlog` -> `InProgress`, `Backlog` -> `Done`, `Ready` -> `InReview`, `Ready` -> `Done`, and `Blocked` -> `Ready` (only `Blocked` -> `InProgress` is allowed; D3 deliberately does not permit resuming straight to Ready).
+         *     This command never creates a Round, work request, or queue entry, and starts nothing -- M2 has no such concepts at all (AGENTS.md). Requires a valid session; returns `401 unauthenticated` otherwise. An unknown identifier, a malformed identifier, and an identifier belonging to another Owner all return the same `404 not_found`, exactly like the other `/api/tickets/{id}` operations.
+         */
+        post: operations["changeTicketStatus"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tickets/{id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept a Ticket's delivered work, completing it
+         * @description Issue #60: the one path to `Done` (D3 S2 -- "In Review -> Done (human-acceptance condition): Via explicit Accept"). Deliberately a separate command, not a Status write, per docs/contracts/execution-interface.md's Swiftlet -> Galley owner-command boundary -- a plain `POST /api/tickets/{id}/status` can never set `Done`, whatever the Ticket's retained completion condition.
+         *     Requires the Ticket's current Status to be `InReview`; otherwise rejected with `invalid_transition`, exactly like `changeTicketStatus`, and validated the same way -- against the persisted current Status inside a single transaction, so a concurrent conflicting request cannot also apply.
+         *     A Ticket whose retained completion condition is `reviewedPrMerge` cannot be completed in M2: rejected with `reviewed_pr_merge_not_implemented`, an explicit current-implementation limitation, not a silent downgrade -- D2 (review/merge evidence) is unresolved and the shared mechanism it selects is owned by M8 (docs/decisions/d3-agent-template-compatibility.md, "Completing human work that requires a reviewed PR merge"). Only a Ticket whose retained condition is `humanAcceptance` can be Accepted in M2.
+         *     This command never creates a Round, work request, or queue entry, and starts nothing. Requires a valid session; returns `401 unauthenticated` otherwise. Identifier handling matches every other `/api/tickets/{id}` operation.
+         */
+        post: operations["acceptTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tickets/{id}/assignee": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Assign the signed-in Owner as a Ticket's Assignee
+         * @description Issue #60: the only assignable Assignee in M2 is the Owner, a human -- there is no Agent Assignee or agent-assignment command anywhere in this contract (AGENTS.md, "No AI, Agents, Rounds, or Michelin in M2"). Idempotent: assigning an already-owner-assigned Ticket leaves it unchanged and still returns 200. Allowed regardless of the Ticket's current Status -- D3 places no Status precondition on human assignment, since M2 never has an open Round to lock the Assignee field. Creates no Round, work request, or queue entry, and starts nothing. Requires a valid session; returns `401 unauthenticated` otherwise. Identifier handling matches every other `/api/tickets/{id}` operation.
+         */
+        put: operations["assignTicketOwner"];
+        post?: never;
+        /**
+         * Clear a Ticket's Assignee
+         * @description Idempotent: unassigning an already-unassigned Ticket leaves it unchanged and still returns 200 -- there is no error case for "nothing to unassign," matching this contract's existing last-write-wins conventions elsewhere. Allowed regardless of the Ticket's current Status, for the same reason as `assignTicketOwner` above. Requires a valid session; returns `401 unauthenticated` otherwise. Identifier handling matches every other `/api/tickets/{id}` operation.
+         */
+        delete: operations["unassignTicket"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/session": {
         parameters: {
             query?: never;
@@ -183,6 +259,11 @@ export interface components {
             owner: components["schemas"]["Owner"];
         };
         /**
+         * @description A Ticket's lifecycle stage (CONTEXT.md, "Status"). Transitions between these values are validated by Galley against the Ticket's own persisted current Status, per the accepted D3 decision (issue #60, docs/decisions/d3-agent-template-compatibility.md S2) -- see `POST /api/tickets/{id}/status` and `POST /api/tickets/{id}/accept` below. `Done` is reachable only through explicit Accept, never through a plain status change.
+         * @enum {string}
+         */
+        TicketStatus: "Backlog" | "Ready" | "InProgress" | "Blocked" | "InReview" | "Done";
+        /**
          * @description A Ticket's built-in Template (issue #59), chosen at capture (default Basic). Under the accepted D3 decision (docs/decisions/d3-agent-template-compatibility.md), a Template supplies presentation, required information, and a *default* completion condition only -- it never restricts which Agent or execution engine may be assigned (docs/ticket-creation.md, "Flexible ticket structure"). Changing a Ticket's Template after creation is out of scope for M2: post-delivery Template/repository change is D4, owned by M8.
          * @enum {string}
          */
@@ -192,6 +273,11 @@ export interface components {
          * @enum {string}
          */
         TicketCompletionCondition: "humanAcceptance" | "reviewedPrMerge";
+        /**
+         * @description The kind of Assignee currently responsible for a Ticket (CONTEXT.md, "Assignee"; issue #60, D3 S2). "" means unassigned. In M2 the Owner (a human) is the only assignable Assignee, so "owner" is the only non-empty value -- there is no Agent Assignee anywhere yet (AGENTS.md, "No AI, Agents, Rounds, or Michelin in M2"). Always present on the wire, matching `goal`'s own "" convention. See `PUT`/`DELETE /api/tickets/{id}/assignee` below for the two commands that change it.
+         * @enum {string}
+         */
+        TicketAssigneeType: "owner" | "";
         /** @description ticketIt's first domain record (issue #56): a title captured in Backlog. No work-type/category column -- see docs/ticket-creation.md, "Flexible ticket structure". Owned by exactly one Owner, enforced by Galley (docs/adr/0001-single-authority-galley.md). Addressed by an opaque, non-sequential public identifier (issue #57) -- see `id` below. */
         Ticket: {
             /**
@@ -200,12 +286,9 @@ export interface components {
              */
             id: string;
             title: string;
-            /**
-             * @description The Ticket's lifecycle stage (CONTEXT.md, "Status"). This slice only ever produces Backlog -- Ready/In Progress/In Review/Done/Blocked arrive with #60's transitions.
-             * @enum {string}
-             */
-            status: "Backlog";
+            status: components["schemas"]["TicketStatus"];
             template: components["schemas"]["TicketTemplate"];
+            assigneeType: components["schemas"]["TicketAssigneeType"];
             completionCondition: components["schemas"]["TicketCompletionCondition"];
             /** @description Manual refinement (issue #58, docs/ticket-creation.md, "Manual guidance" -- prompt "What outcome do you want?"). Plain text, never Markdown (M7 owns report rendering). Always present on the wire; "" means never set or cleared -- read access never distinguishes those two, only PATCH's request body does (see UpdateTicketRequest). */
             goal: string;
@@ -252,6 +335,10 @@ export interface components {
             /** @description One Ticket repository reference (issue #59, D3), available on either Template. Same absent/empty/text rule as `goal`. */
             repository?: string;
             template?: components["schemas"]["TicketTemplate"];
+        };
+        /** @description Body of `POST /api/tickets/{id}/status` (issue #60). `status` names the requested target Status; Galley validates the transition against the Ticket's own persisted current Status (docs/decisions/d3-agent-template-compatibility.md S2) and rejects any move not on that table with `invalid_transition` -- including `Done`, which this operation always rejects regardless of the current Status: `Done` is reachable only through `POST /api/tickets/{id}/accept`. */
+        ChangeTicketStatusRequest: {
+            status: components["schemas"]["TicketStatus"];
         };
         /** @description The fixed GET /api/status payload. */
         StatusResponse: {
@@ -575,6 +662,134 @@ export interface operations {
         };
         responses: {
             /** @description The updated Ticket. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ticket"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    changeTicketStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeTicketStatusRequest"];
+            };
+        };
+        responses: {
+            /** @description The Ticket, with its new Status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ticket"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. Includes `invalid_transition` for a Status move not on D3 S2's table. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    acceptTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Ticket, now Done. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ticket"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. Includes `invalid_transition` (the Ticket is not In Review) and `reviewed_pr_merge_not_implemented` (D2/M8 limitation). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    assignTicketOwner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Ticket, now assigned to the Owner. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ticket"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    unassignTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Ticket, now unassigned. */
             200: {
                 headers: {
                     [name: string]: unknown;

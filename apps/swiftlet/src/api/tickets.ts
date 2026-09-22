@@ -82,6 +82,7 @@ function parseTicket(payload: unknown): Ticket {
     typeof record.status !== "string" ||
     typeof record.template !== "string" ||
     typeof record.completionCondition !== "string" ||
+    typeof record.assigneeType !== "string" ||
     typeof record.goal !== "string" ||
     typeof record.context !== "string" ||
     typeof record.successCriteria !== "string" ||
@@ -98,6 +99,7 @@ function parseTicket(payload: unknown): Ticket {
     status: record.status as Ticket["status"],
     template: record.template as Ticket["template"],
     completionCondition: record.completionCondition as Ticket["completionCondition"],
+    assigneeType: record.assigneeType as Ticket["assigneeType"],
     goal: record.goal,
     context: record.context,
     successCriteria: record.successCriteria,

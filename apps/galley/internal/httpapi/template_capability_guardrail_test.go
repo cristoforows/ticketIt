@@ -74,6 +74,13 @@ var allowedTemplateAwareFunctions = map[string]bool{
 	"scanTicketRow":              true,
 	"updateTicketForOwner":       true,
 	"defaultCompletionCondition": true,
+	// Accept reads a Ticket's already-retained completionCondition to
+	// gate a human action, rejecting reviewedPrMerge explicitly rather
+	// than downgrading it (#60, D3 S2). Not a Template->Agent mapping.
+	"AcceptTicket":          true,
+	"decideAccept":          true,
+	"applyTicketTransition": true,
+	"ChangeTicketStatus":    true, // matched only via decide's shared signature
 }
 
 // excludedTemplateGuardrailFiles are files this scan does not inspect:

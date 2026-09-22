@@ -79,15 +79,18 @@ func (e StatusResponseStatus) Valid() bool {
 	}
 }
 
-// Defines values for TicketStatus.
+// Defines values for TicketAssigneeType.
 const (
-	Backlog TicketStatus = "Backlog"
+	TicketAssigneeTypeEmpty TicketAssigneeType = ""
+	TicketAssigneeTypeOwner TicketAssigneeType = "owner"
 )
 
-// Valid indicates whether the value is a known member of the TicketStatus enum.
-func (e TicketStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the TicketAssigneeType enum.
+func (e TicketAssigneeType) Valid() bool {
 	switch e {
-	case Backlog:
+	case TicketAssigneeTypeEmpty:
+		return true
+	case TicketAssigneeTypeOwner:
 		return true
 	default:
 		return false
@@ -112,6 +115,36 @@ func (e TicketCompletionCondition) Valid() bool {
 	}
 }
 
+// Defines values for TicketStatus.
+const (
+	Backlog    TicketStatus = "Backlog"
+	Blocked    TicketStatus = "Blocked"
+	Done       TicketStatus = "Done"
+	InProgress TicketStatus = "InProgress"
+	InReview   TicketStatus = "InReview"
+	Ready      TicketStatus = "Ready"
+)
+
+// Valid indicates whether the value is a known member of the TicketStatus enum.
+func (e TicketStatus) Valid() bool {
+	switch e {
+	case Backlog:
+		return true
+	case Blocked:
+		return true
+	case Done:
+		return true
+	case InProgress:
+		return true
+	case InReview:
+		return true
+	case Ready:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TicketTemplate.
 const (
 	Basic  TicketTemplate = "Basic"
@@ -128,6 +161,12 @@ func (e TicketTemplate) Valid() bool {
 	default:
 		return false
 	}
+}
+
+// ChangeTicketStatusRequest Body of `POST /api/tickets/{id}/status` (issue #60). `status` names the requested target Status; Galley validates the transition against the Ticket's own persisted current Status (docs/decisions/d3-agent-template-compatibility.md S2) and rejects any move not on that table with `invalid_transition` -- including `Done`, which this operation always rejects regardless of the current Status: `Done` is reachable only through `POST /api/tickets/{id}/accept`.
+type ChangeTicketStatusRequest struct {
+	// Status A Ticket's lifecycle stage (CONTEXT.md, "Status"). Transitions between these values are validated by Galley against the Ticket's own persisted current Status, per the accepted D3 decision (issue #60, docs/decisions/d3-agent-template-compatibility.md S2) -- see `POST /api/tickets/{id}/status` and `POST /api/tickets/{id}/accept` below. `Done` is reachable only through explicit Accept, never through a plain status change.
+	Status TicketStatus `json:"status"`
 }
 
 // CreateDiagnosticNoteRequest defines model for CreateDiagnosticNoteRequest.
@@ -226,6 +265,9 @@ type StatusResponseStatus string
 
 // Ticket ticketIt's first domain record (issue #56): a title captured in Backlog. No work-type/category column -- see docs/ticket-creation.md, "Flexible ticket structure". Owned by exactly one Owner, enforced by Galley (docs/adr/0001-single-authority-galley.md). Addressed by an opaque, non-sequential public identifier (issue #57) -- see `id` below.
 type Ticket struct {
+	// AssigneeType The kind of Assignee currently responsible for a Ticket (CONTEXT.md, "Assignee"; issue #60, D3 S2). "" means unassigned. In M2 the Owner (a human) is the only assignable Assignee, so "owner" is the only non-empty value -- there is no Agent Assignee anywhere yet (AGENTS.md, "No AI, Agents, Rounds, or Michelin in M2"). Always present on the wire, matching `goal`'s own "" convention. See `PUT`/`DELETE /api/tickets/{id}/assignee` below for the two commands that change it.
+	AssigneeType TicketAssigneeType `json:"assigneeType"`
+
 	// CompletionCondition The condition that completes a Ticket (CONTEXT.md, "Done"): human acceptance, or merging its reviewed pull request. Derived from the Ticket's Template default exactly once, at creation (issue #59, D3) -- there is no request field or operation anywhere in this contract that sets or changes it directly. Assignment, reassignment, and editing any other field never change it.
 	CompletionCondition TicketCompletionCondition `json:"completionCondition"`
 
@@ -247,7 +289,7 @@ type Ticket struct {
 	// Repository One Ticket repository reference (issue #59, D3 S1 check 3), available on either Template -- required by nothing in M2. There is exactly one such field on a Ticket; the Coding Template surfaces it by default, but it is not a competing Basic-only concept. Plain text (e.g. an "owner/repo" name or a URL) with no format enforced yet. Always present on the wire; "" means never set or cleared -- see `goal`'s description for the same convention.
 	Repository string `json:"repository"`
 
-	// Status The Ticket's lifecycle stage (CONTEXT.md, "Status"). This slice only ever produces Backlog -- Ready/In Progress/In Review/Done/Blocked arrive with #60's transitions.
+	// Status A Ticket's lifecycle stage (CONTEXT.md, "Status"). Transitions between these values are validated by Galley against the Ticket's own persisted current Status, per the accepted D3 decision (issue #60, docs/decisions/d3-agent-template-compatibility.md S2) -- see `POST /api/tickets/{id}/status` and `POST /api/tickets/{id}/accept` below. `Done` is reachable only through explicit Accept, never through a plain status change.
 	Status TicketStatus `json:"status"`
 
 	// SuccessCriteria Manual refinement (issue #58 -- prompt "Describe observable conditions that demonstrate the outcome was achieved."). CONTEXT.md's "Success Criteria" term -- not "acceptance criteria". Plain text; see `goal`'s description for the "" convention. Agent-readiness validation of this field is M4's, not this slice's.
@@ -261,8 +303,8 @@ type Ticket struct {
 	UpdatedAt string `json:"updatedAt"`
 }
 
-// TicketStatus The Ticket's lifecycle stage (CONTEXT.md, "Status"). This slice only ever produces Backlog -- Ready/In Progress/In Review/Done/Blocked arrive with #60's transitions.
-type TicketStatus string
+// TicketAssigneeType The kind of Assignee currently responsible for a Ticket (CONTEXT.md, "Assignee"; issue #60, D3 S2). "" means unassigned. In M2 the Owner (a human) is the only assignable Assignee, so "owner" is the only non-empty value -- there is no Agent Assignee anywhere yet (AGENTS.md, "No AI, Agents, Rounds, or Michelin in M2"). Always present on the wire, matching `goal`'s own "" convention. See `PUT`/`DELETE /api/tickets/{id}/assignee` below for the two commands that change it.
+type TicketAssigneeType string
 
 // TicketCompletionCondition The condition that completes a Ticket (CONTEXT.md, "Done"): human acceptance, or merging its reviewed pull request. Derived from the Ticket's Template default exactly once, at creation (issue #59, D3) -- there is no request field or operation anywhere in this contract that sets or changes it directly. Assignment, reassignment, and editing any other field never change it.
 type TicketCompletionCondition string
@@ -271,6 +313,9 @@ type TicketCompletionCondition string
 type TicketList struct {
 	Tickets []Ticket `json:"tickets"`
 }
+
+// TicketStatus A Ticket's lifecycle stage (CONTEXT.md, "Status"). Transitions between these values are validated by Galley against the Ticket's own persisted current Status, per the accepted D3 decision (issue #60, docs/decisions/d3-agent-template-compatibility.md S2) -- see `POST /api/tickets/{id}/status` and `POST /api/tickets/{id}/accept` below. `Done` is reachable only through explicit Accept, never through a plain status change.
+type TicketStatus string
 
 // TicketTemplate A Ticket's built-in Template (issue #59), chosen at capture (default Basic). Under the accepted D3 decision (docs/decisions/d3-agent-template-compatibility.md), a Template supplies presentation, required information, and a *default* completion condition only -- it never restricts which Agent or execution engine may be assigned (docs/ticket-creation.md, "Flexible ticket structure"). Changing a Ticket's Template after creation is out of scope for M2: post-delivery Template/repository change is D4, owned by M8.
 type TicketTemplate string
@@ -317,6 +362,9 @@ type CreateTicketJSONRequestBody = CreateTicketRequest
 // UpdateTicketJSONRequestBody defines body for UpdateTicket for application/json ContentType.
 type UpdateTicketJSONRequestBody = UpdateTicketRequest
 
+// ChangeTicketStatusJSONRequestBody defines body for ChangeTicketStatus for application/json ContentType.
+type ChangeTicketStatusJSONRequestBody = ChangeTicketStatusRequest
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// CompleteGithubOAuth Complete GitHub OAuth sign-in
@@ -352,6 +400,18 @@ type ServerInterface interface {
 	// UpdateTicket Partially update a Ticket's manual refinement fields
 	// (PATCH /api/tickets/{id})
 	UpdateTicket(w http.ResponseWriter, r *http.Request, id string)
+	// AcceptTicket Accept a Ticket's delivered work, completing it
+	// (POST /api/tickets/{id}/accept)
+	AcceptTicket(w http.ResponseWriter, r *http.Request, id string)
+	// UnassignTicket Clear a Ticket's Assignee
+	// (DELETE /api/tickets/{id}/assignee)
+	UnassignTicket(w http.ResponseWriter, r *http.Request, id string)
+	// AssignTicketOwner Assign the signed-in Owner as a Ticket's Assignee
+	// (PUT /api/tickets/{id}/assignee)
+	AssignTicketOwner(w http.ResponseWriter, r *http.Request, id string)
+	// ChangeTicketStatus Change a Ticket's Status
+	// (POST /api/tickets/{id}/status)
+	ChangeTicketStatus(w http.ResponseWriter, r *http.Request, id string)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -586,6 +646,110 @@ func (siw *ServerInterfaceWrapper) UpdateTicket(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// AcceptTicket operation middleware
+func (siw *ServerInterfaceWrapper) AcceptTicket(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AcceptTicket(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UnassignTicket operation middleware
+func (siw *ServerInterfaceWrapper) UnassignTicket(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UnassignTicket(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AssignTicketOwner operation middleware
+func (siw *ServerInterfaceWrapper) AssignTicketOwner(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AssignTicketOwner(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ChangeTicketStatus operation middleware
+func (siw *ServerInterfaceWrapper) ChangeTicketStatus(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ChangeTicketStatus(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -715,6 +879,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets", wrapper.CreateTicket)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/tickets/{id}", wrapper.GetTicket)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/api/tickets/{id}", wrapper.UpdateTicket)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/status", wrapper.ChangeTicketStatus)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/accept", wrapper.AcceptTicket)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/tickets/{id}/assignee", wrapper.UnassignTicket)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/tickets/{id}/assignee", wrapper.AssignTicketOwner)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/session", wrapper.SignOut)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/session", wrapper.GetSession)
 
