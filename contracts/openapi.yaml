@@ -829,7 +829,7 @@ components:
           $ref: "#/components/schemas/TicketStatus"
     StatusResponse:
       type: object
-      description: The fixed GET /api/status payload. BREAK-CONTRACT-DRIFT
+      description: The fixed GET /api/status payload.
       additionalProperties: false
       required: [application, status, version, environment, startedAt, database]
       properties:
