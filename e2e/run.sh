@@ -2,8 +2,9 @@
 # The one documented command for issue #53 (extended by #55 with the
 # authenticated-browser phases, by #56 with the Ticket-capture and
 # persistence phases, by #57 with the Ticket detail page phase, by
-# #58 with the manual refinement phases, and by #59 with the Ticket
-# Templates phase, below): migrates a dedicated
+# #58 with the manual refinement phases, by #59 with the Ticket
+# Templates phase, and by #61 with the Status/Assignee/Accept
+# lifecycle phases, below): migrates a dedicated
 # database, starts a real Galley, a real substitute GitHub OAuth
 # provider, builds and serves a real Swiftlet, runs the browser suite
 # (including the failure-mode, authenticated-session, and Ticket specs)
@@ -261,6 +262,20 @@ log "running tests/ticket-refinement-before.spec.ts (edits title and manual refi
   E2E_STORAGE_STATE_PATH="$STORAGE_STATE_PATH" \
   npx playwright test tests/ticket-refinement-before.spec.ts) || REFINEMENT_BEFORE_EXIT=$?
 
+# tests/ticket-lifecycle-before.spec.ts (issue #61) shares the same
+# storage state and restart for the same reason ticket-refinement's pair
+# does: a Status/Assignee reached through the real controls must survive
+# a genuine backend restart, not just a page reload. Runs before
+# ticket-persistence-before.spec.ts, for the same created_at-ordering
+# reason ticket-refinement-before.spec.ts already runs there -- its own
+# capture must not sort among ticket-persistence-after.spec.ts's
+# asserted "newest two."
+LIFECYCLE_BEFORE_EXIT=0
+log "running tests/ticket-lifecycle-before.spec.ts (moves a Ticket to In Progress and assigns the Owner)"
+(cd "$SCRIPT_DIR" && E2E_BASE_URL="$SWIFTLET_BASE_URL" GALLEY_BASE_URL="$GALLEY_BASE_URL" \
+  E2E_STORAGE_STATE_PATH="$STORAGE_STATE_PATH" \
+  npx playwright test tests/ticket-lifecycle-before.spec.ts) || LIFECYCLE_BEFORE_EXIT=$?
+
 # tests/ticket-persistence-before.spec.ts (issue #56) shares the same
 # storage state and the same restart below rather than requesting a
 # second one -- README.md, "Adding a spec".
@@ -294,6 +309,12 @@ log "running tests/ticket-refinement-after.spec.ts against the restarted galley"
   E2E_STORAGE_STATE_PATH="$STORAGE_STATE_PATH" \
   npx playwright test tests/ticket-refinement-after.spec.ts) || REFINEMENT_AFTER_EXIT=$?
 
+LIFECYCLE_AFTER_EXIT=0
+log "running tests/ticket-lifecycle-after.spec.ts against the restarted galley"
+(cd "$SCRIPT_DIR" && E2E_BASE_URL="$SWIFTLET_BASE_URL" GALLEY_BASE_URL="$GALLEY_BASE_URL" \
+  E2E_STORAGE_STATE_PATH="$STORAGE_STATE_PATH" \
+  npx playwright test tests/ticket-lifecycle-after.spec.ts) || LIFECYCLE_AFTER_EXIT=$?
+
 # --- 10b. Run the Ticket detail and manual refinement specs (issues #57, #58) ---
 # Signs in fresh, like status.spec.ts/auth.spec.ts, rather than reusing
 # the restart phase's storage state: no restart is needed here, so
@@ -325,6 +346,16 @@ log "running tests/ticket-templates.spec.ts against the restarted galley"
   E2E_GITHUBFAKE_BASE_URL="$GITHUBFAKE_URL" \
   npx playwright test tests/ticket-templates.spec.ts) || TEMPLATES_EXIT=$?
 
+# tests/ticket-lifecycle.spec.ts (issue #61) signs in fresh, like the
+# three specs above -- restart persistence for Status/Assignee is
+# already covered by ticket-lifecycle-before/after.spec.ts, so this
+# spec needs no restart of its own.
+LIFECYCLE_EXIT=0
+log "running tests/ticket-lifecycle.spec.ts against the restarted galley"
+(cd "$SCRIPT_DIR" && E2E_BASE_URL="$SWIFTLET_BASE_URL" GALLEY_BASE_URL="$GALLEY_BASE_URL" \
+  E2E_GITHUBFAKE_BASE_URL="$GITHUBFAKE_URL" \
+  npx playwright test tests/ticket-lifecycle.spec.ts) || LIFECYCLE_EXIT=$?
+
 # --- 11. Stop Galley for good, then run the failure-mode spec ---
 log "stopping galley to exercise the failure-mode spec (pid $GALLEY_PID)"
 kill "$GALLEY_PID" 2>/dev/null || true
@@ -339,20 +370,24 @@ log "running tests/backend-failure.spec.ts against a stopped galley"
 log "status.spec.ts exit code: $STATUS_EXIT"
 log "auth.spec.ts exit code: $AUTH_EXIT"
 log "session-restart-before.spec.ts exit code: $RESTART_BEFORE_EXIT"
+log "ticket-lifecycle-before.spec.ts exit code: $LIFECYCLE_BEFORE_EXIT"
 log "ticket-persistence-before.spec.ts exit code: $TICKET_BEFORE_EXIT"
 log "ticket-refinement-before.spec.ts exit code: $REFINEMENT_BEFORE_EXIT"
 log "session-restart-after.spec.ts exit code: $RESTART_AFTER_EXIT"
 log "ticket-persistence-after.spec.ts exit code: $TICKET_AFTER_EXIT"
 log "ticket-refinement-after.spec.ts exit code: $REFINEMENT_AFTER_EXIT"
+log "ticket-lifecycle-after.spec.ts exit code: $LIFECYCLE_AFTER_EXIT"
 log "ticket-detail.spec.ts exit code: $TICKET_DETAIL_EXIT"
 log "ticket-refinement.spec.ts exit code: $REFINEMENT_EXIT"
 log "ticket-templates.spec.ts exit code: $TEMPLATES_EXIT"
+log "ticket-lifecycle.spec.ts exit code: $LIFECYCLE_EXIT"
 log "backend-failure.spec.ts exit code: $FAILURE_EXIT"
 
 if [ "$STATUS_EXIT" -ne 0 ] || [ "$AUTH_EXIT" -ne 0 ] || [ "$RESTART_BEFORE_EXIT" -ne 0 ] \
-  || [ "$TICKET_BEFORE_EXIT" -ne 0 ] || [ "$REFINEMENT_BEFORE_EXIT" -ne 0 ] || [ "$RESTART_AFTER_EXIT" -ne 0 ] \
-  || [ "$TICKET_AFTER_EXIT" -ne 0 ] || [ "$REFINEMENT_AFTER_EXIT" -ne 0 ] || [ "$TICKET_DETAIL_EXIT" -ne 0 ] \
-  || [ "$REFINEMENT_EXIT" -ne 0 ] || [ "$TEMPLATES_EXIT" -ne 0 ] || [ "$FAILURE_EXIT" -ne 0 ]; then
+  || [ "$LIFECYCLE_BEFORE_EXIT" -ne 0 ] || [ "$TICKET_BEFORE_EXIT" -ne 0 ] || [ "$REFINEMENT_BEFORE_EXIT" -ne 0 ] \
+  || [ "$RESTART_AFTER_EXIT" -ne 0 ] || [ "$TICKET_AFTER_EXIT" -ne 0 ] || [ "$REFINEMENT_AFTER_EXIT" -ne 0 ] \
+  || [ "$LIFECYCLE_AFTER_EXIT" -ne 0 ] || [ "$TICKET_DETAIL_EXIT" -ne 0 ] || [ "$REFINEMENT_EXIT" -ne 0 ] \
+  || [ "$TEMPLATES_EXIT" -ne 0 ] || [ "$LIFECYCLE_EXIT" -ne 0 ] || [ "$FAILURE_EXIT" -ne 0 ]; then
   log "SUITE FAILED"
   exit 1
 fi

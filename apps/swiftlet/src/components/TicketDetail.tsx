@@ -12,6 +12,19 @@ interface TicketDetailProps {
    * (issue #57's split, preserved by issue #58).
    */
   onSave: (update: TicketUpdate) => Promise<Ticket>;
+  /**
+   * The four owner-command callbacks below (issue #61) follow the same
+   * container/presentation split as onSave: each performs one real
+   * Galley request and returns the updated Ticket, or throws Galley's
+   * own rejection verbatim. Keeping them as props -- rather than this
+   * component importing src/api/tickets.ts itself -- is what lets
+   * M3's modal container supply its own and render this exact
+   * component unchanged, exactly like onSave already does.
+   */
+  onChangeStatus: (status: Ticket["status"]) => Promise<Ticket>;
+  onAccept: () => Promise<Ticket>;
+  onAssign: () => Promise<Ticket>;
+  onUnassign: () => Promise<Ticket>;
 }
 
 interface EditableFields {
@@ -46,6 +59,58 @@ function completionConditionLabel(condition: Ticket["completionCondition"]): str
 }
 
 /**
+ * The only non-empty assignee_type value M2 ever writes
+ * (apps/galley/internal/httpapi/ticket_lifecycle.go's
+ * assigneeTypeOwnerValue) -- there is no Agent Assignee kind anywhere
+ * yet (AGENTS.md, "No AI, Agents, Rounds, or Michelin in M2").
+ */
+const OWNER_ASSIGNEE_TYPE = "owner";
+
+/**
+ * D3 S2's human-assigned workflow table
+ * (docs/decisions/d3-agent-template-compatibility.md), mirrored here
+ * for presentation only: which Status buttons this component offers
+ * from the Ticket's current Status. This is a second, independent
+ * transcription of the same table Galley's own
+ * allowedSourceStatusesForTarget encodes
+ * (apps/galley/internal/httpapi/ticket_lifecycle.go) -- inverted the
+ * same direction, written without importing that map -- and it
+ * decides nothing on its own: Galley re-validates every request
+ * against the Ticket's actual persisted Status regardless of what this
+ * component offered, and a stale offer here (e.g. after a concurrent
+ * change) still surfaces Galley's own rejection rather than a
+ * fabricated success (ADR 0001; see e2e/tests/ticket-lifecycle.spec.ts's
+ * rejected-skip case). Deliberately omits Done -- Done is reachable
+ * only through the separate Accept action below, never this list.
+ */
+const presentationNextStatuses: Record<Ticket["status"], Ticket["status"][]> = {
+  Backlog: ["Ready"],
+  Ready: ["Backlog", "InProgress"],
+  InProgress: ["Ready", "Blocked", "InReview"],
+  Blocked: ["InProgress"],
+  InReview: ["InProgress"],
+  Done: ["Ready"],
+};
+
+/**
+ * Verbatim copy of Galley's own rejection message for an Accept
+ * attempt on a reviewedPrMerge Ticket
+ * (apps/galley/internal/httpapi/ticket_lifecycle.go's decideAccept,
+ * reviewedPrMergeNotImplementedCode) -- shown here without calling
+ * Accept, since the retained completionCondition already determines
+ * the outcome deterministically and Accept is described as an
+ * explicit owner action, not one this component fires on its own.
+ * e2e/tests/ticket-lifecycle.spec.ts's Coding-Template case proves
+ * this string still matches Galley's own live response, rather than
+ * trusting this copy to never drift.
+ */
+const REVIEWED_PR_MERGE_NOT_IMPLEMENTED_MESSAGE =
+  "this ticket's retained completion condition is reviewed PR merge, which cannot be completed in M2: " +
+  "D2 (review/merge evidence) is unresolved and the shared mechanism it selects is owned by M8 " +
+  '(docs/decisions/d3-agent-template-compatibility.md, "Completing human work that requires a reviewed PR merge"); ' +
+  "this is a current-implementation limitation, not a permanent rule -- the condition is never downgraded to human acceptance";
+
+/**
  * Pure presentation of one already-fetched Ticket's detail content,
  * now including manual refinement (issue #58) and Templates (issue
  * #59). View mode shows title, Status, Template, the retained
@@ -67,12 +132,14 @@ function completionConditionLabel(condition: Ticket["completionCondition"]): str
  * render this exact component with its own container, unchanged,
  * exactly as issue #57 already established for the read-only view.
  */
-export function TicketDetail({ ticket, onSave }: TicketDetailProps) {
+export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssign, onUnassign }: TicketDetailProps) {
   const [current, setCurrent] = useState(ticket);
   const [mode, setMode] = useState<"view" | "editing">("view");
   const [fields, setFields] = useState<EditableFields>(() => fieldsFrom(ticket));
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [actionPending, setActionPending] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // A new Ticket prop (e.g. the container fetched a different one)
   // always wins over any in-progress local edit -- resets back to a
@@ -82,7 +149,30 @@ export function TicketDetail({ ticket, onSave }: TicketDetailProps) {
     setFields(fieldsFrom(ticket));
     setMode("view");
     setSaveError(null);
+    setActionError(null);
   }, [ticket]);
+
+  /**
+   * Shared handling for every owner-command button below (issue #61):
+   * disables the controls while the request is in flight, replaces
+   * `current` with exactly what Galley returned on success, and on
+   * rejection shows Galley's own message without ever changing
+   * `current` -- so a rejected command leaves the last-known-good
+   * Status/Assignee on screen instead of assuming the command applied
+   * (ADR 0001; never an optimistic update).
+   */
+  async function runAction(action: () => Promise<Ticket>) {
+    setActionError(null);
+    setActionPending(true);
+    try {
+      const updated = await action();
+      setCurrent(updated);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Failed to update the ticket.");
+    } finally {
+      setActionPending(false);
+    }
+  }
 
   function startEditing() {
     setFields(fieldsFrom(current));
@@ -157,6 +247,72 @@ export function TicketDetail({ ticket, onSave }: TicketDetailProps) {
               </p>
             </section>
           )}
+          <section aria-label="Workflow" data-testid="ticket-detail-workflow">
+            <dl>
+              <dt>Assignee</dt>
+              <dd data-testid="ticket-detail-assignee">
+                {current.assigneeType === OWNER_ASSIGNEE_TYPE ? "Owner" : "Unassigned"}
+              </dd>
+            </dl>
+            {/* The only Assignee kind M2 has is the Owner -- there is no
+                Agent Assignee option anywhere (AGENTS.md, "No AI, Agents,
+                Rounds, or Michelin in M2"). */}
+            {current.assigneeType === OWNER_ASSIGNEE_TYPE ? (
+              <button
+                type="button"
+                data-testid="ticket-detail-unassign-button"
+                onClick={() => runAction(onUnassign)}
+                disabled={actionPending}
+              >
+                Unassign
+              </button>
+            ) : (
+              <button
+                type="button"
+                data-testid="ticket-detail-assign-button"
+                onClick={() => runAction(onAssign)}
+                disabled={actionPending}
+              >
+                Assign to me
+              </button>
+            )}
+
+            {presentationNextStatuses[current.status].length > 0 && (
+              <div data-testid="ticket-detail-status-actions">
+                {presentationNextStatuses[current.status].map((target) => (
+                  <button
+                    key={target}
+                    type="button"
+                    data-testid={`ticket-detail-status-button-${target}`}
+                    onClick={() => runAction(() => onChangeStatus(target))}
+                    disabled={actionPending}
+                  >
+                    {target}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {current.status === "InReview" && current.completionCondition === "humanAcceptance" && (
+              <button
+                type="button"
+                data-testid="ticket-detail-accept-button"
+                onClick={() => runAction(onAccept)}
+                disabled={actionPending}
+              >
+                Accept
+              </button>
+            )}
+            {current.status === "InReview" && current.completionCondition === "reviewedPrMerge" && (
+              <p data-testid="ticket-detail-accept-unavailable">{REVIEWED_PR_MERGE_NOT_IMPLEMENTED_MESSAGE}</p>
+            )}
+
+            {actionError && (
+              <p role="alert" data-testid="ticket-detail-action-error">
+                {actionError}
+              </p>
+            )}
+          </section>
           <button type="button" data-testid="ticket-detail-edit-button" onClick={startEditing}>
             Edit
           </button>

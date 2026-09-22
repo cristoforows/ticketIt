@@ -208,22 +208,16 @@ export async function createTicket(title: string, template: Ticket["template"] =
 }
 
 /**
- * Manual refinement (issue #58): a genuine partial update, sent
- * exactly as the caller built it -- this function trims nothing and
- * fills in no default, since only Galley owns those rules
- * (docs/adr/0001-single-authority-galley.md). On rejection this
- * surfaces Galley's own error message (e.g. an over-length field or an
- * attempt to clear the title) rather than a generic status line, the
- * same way createTicket does, since the caller is a form the Owner is
- * actively editing. Throws TicketNotFoundError on Galley's shared 404,
- * matching fetchTicket.
+ * Shared response handling for every id-scoped Ticket command below
+ * (issue #61) plus updateTicket: Galley's shared 404 becomes
+ * TicketNotFoundError, any other non-2xx becomes an Error carrying
+ * Galley's own message verbatim (never a friendlier substitute -- see
+ * docs/adr/0001-single-authority-galley.md), and success parses the
+ * returned Ticket the same way every other call in this file already
+ * does.
  */
-export async function updateTicket(id: string, update: TicketUpdate): Promise<Ticket> {
-  const response = await authenticatedFetch(`${TICKETS_ENDPOINT}/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(update),
-  });
+async function ticketCommand(path: string, init?: RequestInit): Promise<Ticket> {
+  const response = await authenticatedFetch(path, init);
   if (response.status === 404) {
     throw new TicketNotFoundError();
   }
@@ -236,4 +230,67 @@ export async function updateTicket(id: string, update: TicketUpdate): Promise<Ti
   }
   const payload: unknown = await response.json();
   return parseTicket(payload);
+}
+
+/**
+ * Manual refinement (issue #58): a genuine partial update, sent
+ * exactly as the caller built it -- this function trims nothing and
+ * fills in no default, since only Galley owns those rules
+ * (docs/adr/0001-single-authority-galley.md). On rejection this
+ * surfaces Galley's own error message (e.g. an over-length field or an
+ * attempt to clear the title) rather than a generic status line, the
+ * same way createTicket does, since the caller is a form the Owner is
+ * actively editing. Throws TicketNotFoundError on Galley's shared 404,
+ * matching fetchTicket.
+ */
+export async function updateTicket(id: string, update: TicketUpdate): Promise<Ticket> {
+  return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(update),
+  });
+}
+
+/**
+ * A human-assigned lifecycle transition (issue #61, D3 S2): a plain
+ * Status write. Galley alone decides whether (current, target) is
+ * permitted, validated against the Ticket's own persisted current
+ * Status -- this function submits the command and renders whichever
+ * outcome Galley returns; it never predicts success, retries, or
+ * substitutes its own wording for a rejection
+ * (docs/adr/0001-single-authority-galley.md).
+ */
+export async function changeTicketStatus(id: string, status: Ticket["status"]): Promise<Ticket> {
+  return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(id)}/status`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+}
+
+/**
+ * Accept (issue #61): the one path to Done, kept a separate command
+ * from changeTicketStatus per
+ * docs/contracts/execution-interface.md's owner-command boundary.
+ * Completes only a Ticket that is In Review with a retained
+ * humanAcceptance condition; every other case -- wrong Status, or a
+ * reviewedPrMerge condition -- is Galley's own rejection, shown
+ * verbatim by the caller.
+ */
+export async function acceptTicket(id: string): Promise<Ticket> {
+  return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(id)}/accept`, { method: "POST" });
+}
+
+/**
+ * Assigns the signed-in Owner as a Ticket's Assignee (issue #61) --
+ * the only Assignee kind M2 has (AGENTS.md, "No AI, Agents, Rounds, or
+ * Michelin in M2"). Idempotent, matching Galley's own PUT semantics.
+ */
+export async function assignTicketOwner(id: string): Promise<Ticket> {
+  return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(id)}/assignee`, { method: "PUT" });
+}
+
+/** Clears a Ticket's Assignee (issue #61). Idempotent, matching Galley's own DELETE semantics. */
+export async function unassignTicket(id: string): Promise<Ticket> {
+  return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(id)}/assignee`, { method: "DELETE" });
 }

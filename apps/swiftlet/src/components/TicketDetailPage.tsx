@@ -1,5 +1,15 @@
 import { useEffect, useState } from "react";
-import { fetchTicket, updateTicket, TicketNotFoundError, type Ticket, type TicketUpdate } from "../api/tickets";
+import {
+  fetchTicket,
+  updateTicket,
+  changeTicketStatus,
+  acceptTicket,
+  assignTicketOwner,
+  unassignTicket,
+  TicketNotFoundError,
+  type Ticket,
+  type TicketUpdate,
+} from "../api/tickets";
 import { Link } from "./Link";
 import { TicketDetail } from "./TicketDetail";
 
@@ -60,6 +70,27 @@ export function TicketDetailPage({ ticketId }: TicketDetailPageProps) {
     return updateTicket(ticketId, update);
   }
 
+  // The four owner-command callbacks below (issue #61) follow the same
+  // pattern as saveTicket: this container is the only place that ever
+  // calls these api/tickets.ts functions, keeping TicketDetail itself
+  // free of fetching -- which is what lets M3's modal container supply
+  // its own and render TicketDetail unchanged.
+  function changeStatus(status: Ticket["status"]): Promise<Ticket> {
+    return changeTicketStatus(ticketId, status);
+  }
+
+  function accept(): Promise<Ticket> {
+    return acceptTicket(ticketId);
+  }
+
+  function assign(): Promise<Ticket> {
+    return assignTicketOwner(ticketId);
+  }
+
+  function unassign(): Promise<Ticket> {
+    return unassignTicket(ticketId);
+  }
+
   return (
     <section data-testid="ticket-detail-page">
       <p>
@@ -83,7 +114,16 @@ export function TicketDetailPage({ ticketId }: TicketDetailPageProps) {
           <p data-testid="ticket-detail-error-message">{state.message}</p>
         </div>
       )}
-      {state.kind === "loaded" && <TicketDetail ticket={state.ticket} onSave={saveTicket} />}
+      {state.kind === "loaded" && (
+        <TicketDetail
+          ticket={state.ticket}
+          onSave={saveTicket}
+          onChangeStatus={changeStatus}
+          onAccept={accept}
+          onAssign={assign}
+          onUnassign={unassign}
+        />
+      )}
     </section>
   );
 }

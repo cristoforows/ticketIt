@@ -135,4 +135,72 @@ describe("TicketDetailPage", () => {
       }),
     );
   });
+
+  // issue #61: this container is the only place that ever calls
+  // api/tickets.ts's changeTicketStatus/acceptTicket/assignTicketOwner/
+  // unassignTicket -- these prove the wiring from TicketDetail's
+  // buttons through to the real request, not just the presentational
+  // behavior TicketDetail.test.tsx already covers.
+  it("changes Status through POST /api/tickets/:id/status and shows the updated Ticket", async () => {
+    const moved = { ...TICKET, status: "Ready" };
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(TICKET)).mockResolvedValueOnce(jsonResponse(moved));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TicketDetailPage ticketId={TICKET_ID} />);
+    await screen.findByTestId("ticket-detail-title");
+
+    fireEvent.click(screen.getByTestId("ticket-detail-status-button-Ready"));
+
+    expect(await screen.findByTestId("ticket-detail-status")).toHaveTextContent("Ready");
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `/api/tickets/${TICKET_ID}/status`,
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ status: "Ready" }) }),
+    );
+  });
+
+  it("accepts through POST /api/tickets/:id/accept and shows the Ticket as Done", async () => {
+    const inReview = { ...TICKET, status: "InReview" };
+    const done = { ...inReview, status: "Done" };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(inReview))
+      .mockResolvedValueOnce(jsonResponse(done));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TicketDetailPage ticketId={TICKET_ID} />);
+    await screen.findByTestId("ticket-detail-title");
+
+    fireEvent.click(screen.getByTestId("ticket-detail-accept-button"));
+
+    expect(await screen.findByTestId("ticket-detail-status")).toHaveTextContent("Done");
+    expect(fetchMock).toHaveBeenLastCalledWith(`/api/tickets/${TICKET_ID}/accept`, expect.objectContaining({ method: "POST" }));
+  });
+
+  it("assigns and unassigns the Owner through PUT/DELETE /api/tickets/:id/assignee", async () => {
+    const assigned = { ...TICKET, assigneeType: "owner" };
+    const unassigned = { ...TICKET, assigneeType: "" };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(TICKET))
+      .mockResolvedValueOnce(jsonResponse(assigned))
+      .mockResolvedValueOnce(jsonResponse(unassigned));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TicketDetailPage ticketId={TICKET_ID} />);
+    await screen.findByTestId("ticket-detail-title");
+
+    fireEvent.click(screen.getByTestId("ticket-detail-assign-button"));
+    expect(await screen.findByTestId("ticket-detail-assignee")).toHaveTextContent("Owner");
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `/api/tickets/${TICKET_ID}/assignee`,
+      expect.objectContaining({ method: "PUT" }),
+    );
+
+    fireEvent.click(screen.getByTestId("ticket-detail-unassign-button"));
+    expect(await screen.findByTestId("ticket-detail-assignee")).toHaveTextContent("Unassigned");
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `/api/tickets/${TICKET_ID}/assignee`,
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
 });

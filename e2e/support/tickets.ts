@@ -49,3 +49,51 @@ export async function createTicket(page: Page, title: string, template: TicketTe
   }
   return response.json();
 }
+
+export type TicketStatus = "Backlog" | "Ready" | "InProgress" | "Blocked" | "InReview" | "Done";
+
+/**
+ * The outcome of an id-scoped workflow command (issue #61), never
+ * thrown on a rejection -- unlike createTicket, callers need Galley's
+ * actual `error.code`/`error.message` on failure, both to arrange
+ * background state (a rejection there is a genuine test-setup bug) and
+ * to assert the UI shows this exact live response rather than a
+ * hardcoded literal (README.md, "Adding a spec").
+ */
+export interface TicketCommandResult {
+  ok: boolean;
+  status: number;
+  ticket?: Ticket;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+async function ticketCommand(
+  page: Page,
+  method: "POST" | "PUT" | "DELETE",
+  path: string,
+  data?: unknown,
+): Promise<TicketCommandResult> {
+  const response = await page.request.fetch(path, { method, data });
+  const body = await response.json();
+  if (response.ok()) {
+    return { ok: true, status: response.status(), ticket: body as Ticket };
+  }
+  return { ok: false, status: response.status(), errorCode: body?.error?.code, errorMessage: body?.error?.message };
+}
+
+/**
+ * Drives Galley's own POST /api/tickets/{id}/status directly (issue
+ * #61) -- for background state a spec is not itself testing (e.g.
+ * reaching In Progress before proving Blocked/resume), and for
+ * capturing Galley's own live rejection to assert the UI shows it
+ * verbatim, never a hardcoded copy of the message text.
+ */
+export async function changeTicketStatusDirect(page: Page, id: string, status: TicketStatus): Promise<TicketCommandResult> {
+  return ticketCommand(page, "POST", `/api/tickets/${id}/status`, { status });
+}
+
+/** Drives Galley's own POST /api/tickets/{id}/accept directly (issue #61) -- see changeTicketStatusDirect's own doc comment. */
+export async function acceptTicketDirect(page: Page, id: string): Promise<TicketCommandResult> {
+  return ticketCommand(page, "POST", `/api/tickets/${id}/accept`);
+}
