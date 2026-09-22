@@ -702,6 +702,37 @@ showed no orphaned process after this failed run either (`run.sh`'s
 results" above (Swiftlet's 49/49, and the full `SUITE PASSED` browser
 run, 30 specs across 12 files).
 
+## Extended during review: the guardrail missed the string-literal form
+
+The guardrail scanned for `*ast.Ident` only. `TicketTemplate` is a
+string-backed type over a `TEXT` column, so this compiles and behaves
+identically to the constant form while being an `*ast.BasicLit`:
+
+```go
+func allowedEngineForTicket(t Ticket) string {
+	if string(t.Template) == "Coding" {   // vs. `== Coding`
+		return "opencode"
+	}
+	return "native-research"
+}
+```
+
+Dropped into `internal/httpapi` as a new file, the guardrail **passed**.
+The same violation written with the generated constant failed correctly
+— which is the form both of this slice's own falsifications used, so
+the gap was invisible to them. Comparing a TEXT column's value against
+a literal is at least as natural as importing the constant, so this was
+the more likely way for a real violation to enter.
+
+The scan now also inspects string literals against the four wire values
+(`Basic`, `Coding`, `humanAcceptance`, `reviewedPrMerge`). It passes on
+the clean tree — no legitimate code outside the allowlist contains
+them — and fails on the literal form above. Reverted the probe file;
+green.
+
+The documented residual gap (a mapping smuggled inside one of the six
+allowlisted functions) is unchanged and remains an accepted trade-off.
+
 ## Implementation limitations and follow-ups
 
 - **Changing a Ticket's Template after creation is explicitly out of

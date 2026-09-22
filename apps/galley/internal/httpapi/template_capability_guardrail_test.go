@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -24,6 +25,19 @@ var templateAwareIdentifiers = map[string]bool{
 	"TicketCompletionCondition": true,
 	"HumanAcceptance":           true,
 	"ReviewedPrMerge":           true,
+}
+
+// templateAwareLiterals is the same six values as they appear on the
+// wire and in the database, because `template` is a TEXT column and
+// TicketTemplate is a string-backed type: `t.Template == "Coding"`
+// compiles and behaves identically to `t.Template == Coding` while
+// being a *ast.BasicLit rather than an *ast.Ident. Scanning only
+// identifiers let that form through -- found in review of this slice.
+var templateAwareLiterals = map[string]bool{
+	"Basic":           true,
+	"Coding":          true,
+	"humanAcceptance": true,
+	"reviewedPrMerge": true,
 }
 
 // allowedTemplateAwareFunctions is the complete, closed list of
@@ -137,9 +151,17 @@ func TestNoTemplateToCapabilityMapping(t *testing.T) {
 
 			found := false
 			ast.Inspect(decl, func(n ast.Node) bool {
-				ident, ok := n.(*ast.Ident)
-				if ok && templateAwareIdentifiers[ident.Name] {
-					found = true
+				switch node := n.(type) {
+				case *ast.Ident:
+					if templateAwareIdentifiers[node.Name] {
+						found = true
+					}
+				case *ast.BasicLit:
+					if node.Kind == token.STRING {
+						if unquoted, err := strconv.Unquote(node.Value); err == nil && templateAwareLiterals[unquoted] {
+							found = true
+						}
+					}
 				}
 				return true
 			})
