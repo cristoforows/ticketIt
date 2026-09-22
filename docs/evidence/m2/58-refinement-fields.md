@@ -697,6 +697,50 @@ than by weakening either assertion — see `e2e/run.sh`'s comment at
 that phase for the reasoning. Re-running the full suite afterward
 confirmed both specs green together (see "Observed results").
 
+## Added during review: the ordering coupling, removed rather than reordered
+
+This slice hit a real spec collision — its own restart-phase Ticket
+capture landed between `ticket-persistence-before` and
+`ticket-persistence-after`, breaking that unrelated pair's assertion —
+and fixed it by reordering the phases in `run.sh`.
+
+That fixed the symptom. The cause was that
+`ticket-persistence-after.spec.ts` asserted on **absolute list
+positions** (`titles.first()`, `titles.nth(1)`), so it depended on no
+other spec capturing a Ticket in the restart window. #59, #60, and #61
+each add specs, and each would have had to know that constraint, with
+the failure landing on a spec its author never touched.
+
+It now asserts the two Tickets' order **relative to each other**
+(`allTextContents()` plus an index comparison), which is independent of
+anything else in the list. Falsified by reversing Galley's `ORDER BY`
+to `created_at ASC, id ASC`: both persistence specs went red,
+`SUITE FAILED`; reverted, `SUITE PASSED`. The relative assertion still
+catches a genuine ordering regression — it only stopped catching
+unrelated specs.
+
+The `run.sh` phase ordering was left as this slice set it.
+
+## Found during review, not caused by this slice: unknown request properties are accepted
+
+`contracts/openapi.yaml` declares `additionalProperties: false` on
+every request schema, but Galley's hand-rolled handlers decode with a
+plain `json.Decoder`, which ignores unknown properties. Probed against
+a real server:
+
+```
+PATCH /api/tickets/{id}   {"bogusField":"x"}                -> 200
+POST  /api/tickets        {"title":"...","bogus":"x"}       -> 201
+POST  /api/dev/diagnostic-notes {"note":"...","bogus":"x"}  -> 201
+```
+
+Pre-existing since #52 and #56, so not introduced here, but PATCH
+raises the stakes: a misspelled field name (`sucessCriteria`) returns
+`200 OK` with the field silently unchanged, so the Owner believes a
+save succeeded that did not. Swiftlet always sends correct names, so
+today's exposure is limited to direct API use. Tracked separately;
+fixing it touches every handler and belongs in its own slice.
+
 ## Implementation limitations and follow-ups
 
 - **`UpdateTicket`'s Owner-scoping and 404-parity tests exercise the

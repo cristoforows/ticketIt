@@ -29,6 +29,14 @@ test("the two captured Tickets are still listed, in the same order, after a Gall
   await expect(page.getByTestId("app-shell")).toBeVisible();
 
   const titles = page.locator('[data-testid="ticket-title"]');
-  await expect(titles.first()).toHaveText(SECOND_TITLE);
-  await expect(titles.nth(1)).toHaveText(FIRST_TITLE);
+  await expect(titles.filter({ hasText: SECOND_TITLE })).toHaveCount(1);
+  await expect(titles.filter({ hasText: FIRST_TITLE })).toHaveCount(1);
+
+  // Relative order, not absolute list positions. Every spec shares one
+  // database, so asserting on the newest two entries makes this spec
+  // fail whenever an unrelated spec captures a Ticket between the
+  // before/after pair -- which already happened once when #58 added its
+  // own restart-phase spec (docs/evidence/m2/58-refinement-fields.md).
+  const rendered = await titles.allTextContents();
+  expect(rendered.indexOf(SECOND_TITLE)).toBeLessThan(rendered.indexOf(FIRST_TITLE));
 });
