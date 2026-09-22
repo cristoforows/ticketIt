@@ -104,6 +104,8 @@ export interface paths {
         /**
          * Capture a Ticket from a title alone
          * @description Creates a Ticket owned by the signed-in Owner, in Backlog (issue #56: title-only quick capture -- docs/ticket-creation.md, "Quick capture"). `title` is required, is trimmed of leading/trailing whitespace, and must be non-empty and at most 200 characters after trimming; violations return `invalid_request`. No work-type or category is accepted or stored -- Tickets stay generic (docs/ticket-creation.md, "Flexible ticket structure"). Requires a valid session; returns `401 unauthenticated` otherwise.
+         *
+         *     `template` (issue #59) is optional and defaults to `Basic` when absent; a title alone is sufficient to capture either Template. `completionCondition` is derived from the chosen Template's default exactly once, here at creation, and stored as its own field -- see `TicketCompletionCondition`.
          */
         post: operations["createTicket"];
         delete?: never;
@@ -133,8 +135,9 @@ export interface paths {
         head?: never;
         /**
          * Partially update a Ticket's manual refinement fields
-         * @description Manual refinement (issue #58, docs/ticket-creation.md, "Manual guidance"): edits title, goal, context, successCriteria, and/or constraints by hand. No AI of any kind, and this triggers nothing else. This is a genuine partial update, not a replace-whole-resource PUT: a property absent from the request body leaves the stored value unchanged; a property present and set to "" clears the stored value (title excepted -- see below); a property present with text is trimmed and stored. Every property here is therefore optional at the schema level (never listed under `required`) so "absent" and "present as an empty string" stay distinguishable on the wire, and so generated Go clients bind each one through a pointer -- see UpdateTicketRequest.
-         *     `title` cannot be cleared: a value that trims to empty is rejected with `invalid_request`, since every Ticket must keep a title. Every field here is trimmed of leading/trailing whitespace before validation or storage, exactly like CreateTicketRequest.title -- a value that trims to only whitespace is treated as an explicit empty string (i.e. it clears goal/context/successCriteria/constraints, and is rejected for title).
+         * @description Manual refinement (issue #58, docs/ticket-creation.md, "Manual guidance"): edits title, goal, context, successCriteria, constraints, and/or repository (issue #59) by hand. No AI of any kind, and this triggers nothing else. This is a genuine partial update, not a replace-whole-resource PUT: a property absent from the request body leaves the stored value unchanged; a property present and set to "" clears the stored value (title excepted -- see below); a property present with text is trimmed and stored. Every property here is therefore optional at the schema level (never listed under `required`) so "absent" and "present as an empty string" stay distinguishable on the wire, and so generated Go clients bind each one through a pointer -- see UpdateTicketRequest.
+         *     `title` cannot be cleared: a value that trims to empty is rejected with `invalid_request`, since every Ticket must keep a title. Every field here is trimmed of leading/trailing whitespace before validation or storage, exactly like CreateTicketRequest.title -- a value that trims to only whitespace is treated as an explicit empty string (i.e. it clears goal/context/successCriteria/constraints/repository, and is rejected for title).
+         *     `template` is present in this request schema only so a client request naming it can be told apart from one that does not -- it is never accepted. Changing a Ticket's Template after creation is out of scope for M2 (post-delivery Template/repository change is D4, owned by M8): a request naming `template` at all, any value included, is rejected with `invalid_request` and no field is updated. `completionCondition` has no corresponding request field anywhere in this contract -- it cannot be set or changed through this or any other operation once a Ticket is created (issue #59, D3).
          *     Concurrent-edit rule: last-write-wins, with no optimistic concurrency check (no version token, no ETag/If-Match). Two PATCH requests touching disjoint fields both apply, since each only ever touches the fields it names; two PATCH requests naming the same field apply in whichever order Galley processes them, and the later one's value silently wins -- there is no conflict detection. See apps/galley/README.md, "Manual refinement fields," for the full reasoning.
          *     Requires a valid session; returns 401 unauthenticated otherwise. An unknown identifier, a malformed identifier, and an identifier belonging to another Owner all return the same 404 not_found, exactly like GET on this same path.
          */
@@ -179,6 +182,16 @@ export interface components {
         SessionResponse: {
             owner: components["schemas"]["Owner"];
         };
+        /**
+         * @description A Ticket's built-in Template (issue #59), chosen at capture (default Basic). Under the accepted D3 decision (docs/decisions/d3-agent-template-compatibility.md), a Template supplies presentation, required information, and a *default* completion condition only -- it never restricts which Agent or execution engine may be assigned (docs/ticket-creation.md, "Flexible ticket structure"). Changing a Ticket's Template after creation is out of scope for M2: post-delivery Template/repository change is D4, owned by M8.
+         * @enum {string}
+         */
+        TicketTemplate: "Basic" | "Coding";
+        /**
+         * @description The condition that completes a Ticket (CONTEXT.md, "Done"): human acceptance, or merging its reviewed pull request. Derived from the Ticket's Template default exactly once, at creation (issue #59, D3) -- there is no request field or operation anywhere in this contract that sets or changes it directly. Assignment, reassignment, and editing any other field never change it.
+         * @enum {string}
+         */
+        TicketCompletionCondition: "humanAcceptance" | "reviewedPrMerge";
         /** @description ticketIt's first domain record (issue #56): a title captured in Backlog. No work-type/category column -- see docs/ticket-creation.md, "Flexible ticket structure". Owned by exactly one Owner, enforced by Galley (docs/adr/0001-single-authority-galley.md). Addressed by an opaque, non-sequential public identifier (issue #57) -- see `id` below. */
         Ticket: {
             /**
@@ -192,6 +205,8 @@ export interface components {
              * @enum {string}
              */
             status: "Backlog";
+            template: components["schemas"]["TicketTemplate"];
+            completionCondition: components["schemas"]["TicketCompletionCondition"];
             /** @description Manual refinement (issue #58, docs/ticket-creation.md, "Manual guidance" -- prompt "What outcome do you want?"). Plain text, never Markdown (M7 owns report rendering). Always present on the wire; "" means never set or cleared -- read access never distinguishes those two, only PATCH's request body does (see UpdateTicketRequest). */
             goal: string;
             /** @description Manual refinement (issue #58 -- prompt "Supply relevant background, links, repositories, or examples."). Plain text; see `goal`'s description for the "" convention. */
@@ -200,6 +215,8 @@ export interface components {
             successCriteria: string;
             /** @description Manual refinement (issue #58 -- prompt "State what must stay unchanged or remain out of scope."). Plain text; see `goal`'s description for the "" convention. */
             constraints: string;
+            /** @description One Ticket repository reference (issue #59, D3 S1 check 3), available on either Template -- required by nothing in M2. There is exactly one such field on a Ticket; the Coding Template surfaces it by default, but it is not a competing Basic-only concept. Plain text (e.g. an "owner/repo" name or a URL) with no format enforced yet. Always present on the wire; "" means never set or cleared -- see `goal`'s description for the same convention. */
+            repository: string;
             /**
              * Format: date-time
              * @description RFC3339 UTC timestamp of when the Ticket was captured.
@@ -218,6 +235,7 @@ export interface components {
         CreateTicketRequest: {
             /** @description Trimmed of leading/trailing whitespace before validation. Must be non-empty and at most 200 characters after trimming. */
             title: string;
+            template?: components["schemas"]["TicketTemplate"];
         };
         /** @description Manual refinement (issue #58): a genuine partial update. Every property is optional -- none are listed under `required` -- so a client can distinguish "this property was not part of the request" (leave unchanged) from "this property was sent as an empty string" (clear it, title excepted). See the `patch /api/tickets/{id}` operation above for the full rule, including why title cannot be cleared, and apps/galley/README.md, "Manual refinement fields," for the concurrent-edit (last-write-wins) rule. Trimmed of leading/trailing whitespace the same way CreateTicketRequest.title is; the maxLength values below apply after trimming and are counted in characters (code points), not bytes -- see apps/galley/README.md, "Tickets," "Title validation." */
         UpdateTicketRequest: {
@@ -231,6 +249,9 @@ export interface components {
             successCriteria?: string;
             /** @description Manual guidance: "State what must stay unchanged or remain out of scope." Same absent/empty/text rule as `goal`. */
             constraints?: string;
+            /** @description One Ticket repository reference (issue #59, D3), available on either Template. Same absent/empty/text rule as `goal`. */
+            repository?: string;
+            template?: components["schemas"]["TicketTemplate"];
         };
         /** @description The fixed GET /api/status payload. */
         StatusResponse: {

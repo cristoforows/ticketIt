@@ -18,10 +18,13 @@ const TICKET = {
   id: TICKET_ID,
   title: "Write the report",
   status: "Backlog",
+  template: "Basic",
+  completionCondition: "humanAcceptance",
   goal: "",
   context: "",
   successCriteria: "",
   constraints: "",
+  repository: "",
   createdAt: "2026-09-22T10:00:00Z",
   updatedAt: "2026-09-22T10:00:00Z",
 };
@@ -126,6 +129,7 @@ describe("TicketDetailPage", () => {
           context: "",
           successCriteria: "",
           constraints: "",
+          repository: "",
         }),
       }),
     );

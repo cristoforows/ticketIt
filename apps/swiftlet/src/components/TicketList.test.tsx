@@ -17,10 +17,13 @@ const TICKET_A = {
   id: "22222222-2222-4222-8222-222222222222",
   title: "Second captured",
   status: "Backlog",
+  template: "Basic",
+  completionCondition: "humanAcceptance",
   goal: "",
   context: "",
   successCriteria: "",
   constraints: "",
+  repository: "",
   createdAt: "2026-09-22T10:01:00Z",
   updatedAt: "2026-09-22T10:01:00Z",
 };
@@ -28,12 +31,22 @@ const TICKET_B = {
   id: "11111111-1111-4111-8111-111111111111",
   title: "First captured",
   status: "Backlog",
+  template: "Basic",
+  completionCondition: "humanAcceptance",
   goal: "",
   context: "",
   successCriteria: "",
   constraints: "",
+  repository: "",
   createdAt: "2026-09-22T10:00:00Z",
   updatedAt: "2026-09-22T10:00:00Z",
+};
+const CODING_TICKET = {
+  ...TICKET_B,
+  id: "66666666-6666-4666-8666-666666666666",
+  title: "Coding capture",
+  template: "Coding",
+  completionCondition: "reviewedPrMerge",
 };
 
 /** Routes by method + path, and can be reprogrammed mid-test (via `set`)
@@ -143,6 +156,47 @@ describe("TicketList", () => {
     expect(screen.queryByTestId("ticket-list-empty")).not.toBeInTheDocument();
     expect(screen.getByTestId("ticket-title-input")).toHaveValue("");
     expect(screen.queryByTestId("ticket-capture-error")).not.toBeInTheDocument();
+  });
+
+  it("defaults the Template selector to Basic and submits it on capture (issue #59)", async () => {
+    const routes = stubFetch({ "GET /api/tickets": jsonResponse({ tickets: [] }) });
+
+    render(<TicketList />);
+    await screen.findByTestId("ticket-list-empty");
+
+    expect(screen.getByTestId("ticket-template-select")).toHaveValue("Basic");
+
+    routes.set("POST /api/tickets", jsonResponse(TICKET_B, 201));
+    routes.set("GET /api/tickets", jsonResponse({ tickets: [TICKET_B] }));
+
+    fireEvent.change(screen.getByTestId("ticket-title-input"), { target: { value: TICKET_B.title } });
+    fireEvent.click(screen.getByTestId("ticket-capture-submit"));
+
+    await screen.findByTestId(`ticket-item-${TICKET_B.id}`);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/tickets",
+      expect.objectContaining({ body: JSON.stringify({ title: TICKET_B.title, template: "Basic" }) }),
+    );
+  });
+
+  it("submits the Owner's chosen Coding Template on capture (issue #59)", async () => {
+    const routes = stubFetch({ "GET /api/tickets": jsonResponse({ tickets: [] }) });
+
+    render(<TicketList />);
+    await screen.findByTestId("ticket-list-empty");
+
+    routes.set("POST /api/tickets", jsonResponse(CODING_TICKET, 201));
+    routes.set("GET /api/tickets", jsonResponse({ tickets: [CODING_TICKET] }));
+
+    fireEvent.change(screen.getByTestId("ticket-title-input"), { target: { value: CODING_TICKET.title } });
+    fireEvent.change(screen.getByTestId("ticket-template-select"), { target: { value: "Coding" } });
+    fireEvent.click(screen.getByTestId("ticket-capture-submit"));
+
+    expect(await screen.findByTestId(`ticket-item-${CODING_TICKET.id}`)).toHaveTextContent(CODING_TICKET.title);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/tickets",
+      expect.objectContaining({ body: JSON.stringify({ title: CODING_TICKET.title, template: "Coding" }) }),
+    );
   });
 
   it("shows Galley's own validation message and leaves the list unchanged when capture is rejected", async () => {

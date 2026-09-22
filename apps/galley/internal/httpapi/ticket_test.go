@@ -74,6 +74,36 @@ func createTicket(t *testing.T, client *http.Client, baseURL, title string) Tick
 	return created
 }
 
+// createTicketWithTemplate mirrors createTicket, additionally naming a
+// Template on the request -- issue #59's capture-time choice
+// (docs/ticket-creation.md).
+func createTicketWithTemplate(t *testing.T, client *http.Client, baseURL, title string, template TicketTemplate) Ticket {
+	t.Helper()
+	body, err := json.Marshal(CreateTicketRequest{Title: title, Template: &template})
+	if err != nil {
+		t.Fatalf("failed to marshal request: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/tickets", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("failed to build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("POST /api/tickets failed: %v", err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST /api/tickets status = %d, want %d; body=%s", resp.StatusCode, http.StatusCreated, data)
+	}
+	var created Ticket
+	if err := json.Unmarshal(data, &created); err != nil {
+		t.Fatalf("failed to decode create response %q: %v", data, err)
+	}
+	return created
+}
+
 func listTickets(t *testing.T, client *http.Client, baseURL string) []Ticket {
 	t.Helper()
 	resp, err := client.Get(baseURL + "/api/tickets")
@@ -823,6 +853,7 @@ func TestUpdateTicket_RejectsOverLengthFields(t *testing.T) {
 		{"context", UpdateTicketRequest{Context: strPtr(strings.Repeat("x", ticketContextMaxLength+1))}},
 		{"successCriteria", UpdateTicketRequest{SuccessCriteria: strPtr(strings.Repeat("x", ticketSuccessCriteriaMaxLength+1))}},
 		{"constraints", UpdateTicketRequest{Constraints: strPtr(strings.Repeat("x", ticketConstraintsMaxLength+1))}},
+		{"repository", UpdateTicketRequest{Repository: strPtr(strings.Repeat("x", ticketRepositoryMaxLength+1))}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -859,6 +890,58 @@ func TestUpdateTicket_AcceptsFieldsAtMaxLength(t *testing.T) {
 	}
 	if updated.Goal != goal {
 		t.Errorf("Goal length = %d, want %d characters accepted unchanged", len(updated.Goal), ticketGoalMaxLength)
+	}
+}
+
+// TestUpdateTicket_RepositoryFollowsRefinementFieldRules proves the one
+// Ticket repository reference (issue #59, D3 S1 check 3) follows
+// exactly the same absent/empty/text and trimming rules as the four
+// manual refinement fields, and is available regardless of Template.
+func TestUpdateTicket_RepositoryFollowsRefinementFieldRules(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+	created := createTicket(t, client, baseURL, uniqueTitle(t))
+
+	if got := getTicketAssertOK(t, client, baseURL, created.Id); got.Repository != "" {
+		t.Fatalf("Repository = %q on a freshly captured ticket, want \"\" (never set)", got.Repository)
+	}
+
+	resp, body := patchTicket(t, client, baseURL, created.Id, UpdateTicketRequest{Repository: strPtr("  owner/repo  ")})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH status = %d, want %d; body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	var updated Ticket
+	if err := json.Unmarshal(body, &updated); err != nil {
+		t.Fatalf("failed to decode response %q: %v", body, err)
+	}
+	if updated.Repository != "owner/repo" {
+		t.Errorf("Repository = %q, want trimmed %q", updated.Repository, "owner/repo")
+	}
+
+	// A PATCH naming an unrelated field must not disturb it (absent
+	// leaves it unchanged).
+	if resp, body = patchTicket(t, client, baseURL, created.Id, UpdateTicketRequest{Goal: strPtr("Ship it")}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH status = %d, want %d; body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	if got := getTicketAssertOK(t, client, baseURL, created.Id); got.Repository != "owner/repo" {
+		t.Errorf("Repository = %q after an unrelated PATCH, want unchanged %q", got.Repository, "owner/repo")
+	}
+
+	// An explicit "" clears it, same as any refinement field.
+	if resp, body = patchTicket(t, client, baseURL, created.Id, UpdateTicketRequest{Repository: strPtr("")}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH status = %d, want %d; body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	if got := getTicketAssertOK(t, client, baseURL, created.Id); got.Repository != "" {
+		t.Errorf("Repository = %q after clearing, want \"\"", got.Repository)
+	}
+
+	// Available on a Coding ticket too -- not a competing, Basic-only
+	// concept (D3 S1 check 3).
+	coding := createTicketWithTemplate(t, client, baseURL, uniqueTitle(t), Coding)
+	if resp, body = patchTicket(t, client, baseURL, coding.Id, UpdateTicketRequest{Repository: strPtr("owner/coding-repo")}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH status = %d, want %d; body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	if got := getTicketAssertOK(t, client, baseURL, coding.Id); got.Repository != "owner/coding-repo" {
+		t.Errorf("Repository = %q on a Coding ticket, want %q", got.Repository, "owner/coding-repo")
 	}
 }
 

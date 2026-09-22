@@ -80,10 +80,13 @@ function parseTicket(payload: unknown): Ticket {
     typeof record.id !== "string" ||
     typeof record.title !== "string" ||
     typeof record.status !== "string" ||
+    typeof record.template !== "string" ||
+    typeof record.completionCondition !== "string" ||
     typeof record.goal !== "string" ||
     typeof record.context !== "string" ||
     typeof record.successCriteria !== "string" ||
     typeof record.constraints !== "string" ||
+    typeof record.repository !== "string" ||
     typeof record.createdAt !== "string" ||
     typeof record.updatedAt !== "string"
   ) {
@@ -93,10 +96,13 @@ function parseTicket(payload: unknown): Ticket {
     id: record.id,
     title: record.title,
     status: record.status as Ticket["status"],
+    template: record.template as Ticket["template"],
+    completionCondition: record.completionCondition as Ticket["completionCondition"],
     goal: record.goal,
     context: record.context,
     successCriteria: record.successCriteria,
     constraints: record.constraints,
+    repository: record.repository,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };
@@ -166,18 +172,27 @@ export async function fetchTicket(id: string): Promise<Ticket> {
   return parseTicket(payload);
 }
 
+/** The two built-in Ticket Templates (issue #59, docs/ticket-creation.md). Basic is the default when none is chosen. */
+export const TICKET_TEMPLATES: Ticket["template"][] = ["Basic", "Coding"];
+
 /**
- * Captures a Ticket from a title alone. Galley owns trimming and
- * validation (apps/galley/internal/httpapi/ticket.go); this surfaces
- * Galley's own rejection message (e.g. a blank or over-length title)
- * rather than a generic status line, since the caller is a form the
- * Owner is actively filling in.
+ * Captures a Ticket from a title alone, optionally naming a Template
+ * (issue #59) -- defaulting to Basic when omitted, exactly like
+ * Galley's own CreateTicketRequest.template. A title alone remains
+ * sufficient to capture either Template (docs/ticket-creation.md,
+ * "Quick capture"); completionCondition is derived from the chosen
+ * Template's default by Galley, once, at creation, and is never sent
+ * by this app. Galley owns trimming and validation
+ * (apps/galley/internal/httpapi/ticket.go); this surfaces Galley's own
+ * rejection message (e.g. a blank or over-length title) rather than a
+ * generic status line, since the caller is a form the Owner is
+ * actively filling in.
  */
-export async function createTicket(title: string): Promise<Ticket> {
+export async function createTicket(title: string, template: Ticket["template"] = "Basic"): Promise<Ticket> {
   const response = await authenticatedFetch(TICKETS_ENDPOINT, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title }),
+    body: JSON.stringify({ title, template }),
   });
   if (!response.ok) {
     const payload: unknown = await response.json();

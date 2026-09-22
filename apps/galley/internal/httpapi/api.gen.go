@@ -94,6 +94,42 @@ func (e TicketStatus) Valid() bool {
 	}
 }
 
+// Defines values for TicketCompletionCondition.
+const (
+	HumanAcceptance TicketCompletionCondition = "humanAcceptance"
+	ReviewedPrMerge TicketCompletionCondition = "reviewedPrMerge"
+)
+
+// Valid indicates whether the value is a known member of the TicketCompletionCondition enum.
+func (e TicketCompletionCondition) Valid() bool {
+	switch e {
+	case HumanAcceptance:
+		return true
+	case ReviewedPrMerge:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TicketTemplate.
+const (
+	Basic  TicketTemplate = "Basic"
+	Coding TicketTemplate = "Coding"
+)
+
+// Valid indicates whether the value is a known member of the TicketTemplate enum.
+func (e TicketTemplate) Valid() bool {
+	switch e {
+	case Basic:
+		return true
+	case Coding:
+		return true
+	default:
+		return false
+	}
+}
+
 // CreateDiagnosticNoteRequest defines model for CreateDiagnosticNoteRequest.
 type CreateDiagnosticNoteRequest struct {
 	Note string `json:"note"`
@@ -101,6 +137,9 @@ type CreateDiagnosticNoteRequest struct {
 
 // CreateTicketRequest defines model for CreateTicketRequest.
 type CreateTicketRequest struct {
+	// Template A Ticket's built-in Template (issue #59), chosen at capture (default Basic). Under the accepted D3 decision (docs/decisions/d3-agent-template-compatibility.md), a Template supplies presentation, required information, and a *default* completion condition only -- it never restricts which Agent or execution engine may be assigned (docs/ticket-creation.md, "Flexible ticket structure"). Changing a Ticket's Template after creation is out of scope for M2: post-delivery Template/repository change is D4, owned by M8.
+	Template *TicketTemplate `json:"template,omitempty"`
+
 	// Title Trimmed of leading/trailing whitespace before validation. Must be non-empty and at most 200 characters after trimming.
 	Title string `json:"title"`
 }
@@ -187,6 +226,9 @@ type StatusResponseStatus string
 
 // Ticket ticketIt's first domain record (issue #56): a title captured in Backlog. No work-type/category column -- see docs/ticket-creation.md, "Flexible ticket structure". Owned by exactly one Owner, enforced by Galley (docs/adr/0001-single-authority-galley.md). Addressed by an opaque, non-sequential public identifier (issue #57) -- see `id` below.
 type Ticket struct {
+	// CompletionCondition The condition that completes a Ticket (CONTEXT.md, "Done"): human acceptance, or merging its reviewed pull request. Derived from the Ticket's Template default exactly once, at creation (issue #59, D3) -- there is no request field or operation anywhere in this contract that sets or changes it directly. Assignment, reassignment, and editing any other field never change it.
+	CompletionCondition TicketCompletionCondition `json:"completionCondition"`
+
 	// Constraints Manual refinement (issue #58 -- prompt "State what must stay unchanged or remain out of scope."). Plain text; see `goal`'s description for the "" convention.
 	Constraints string `json:"constraints"`
 
@@ -202,12 +244,18 @@ type Ticket struct {
 	// Id Opaque public identifier (issue #57), used in URLs and by GET /api/tickets/{id}. Non-sequential and non-guessable -- never the internal sequential database id, which no Galley endpoint exposes.
 	Id string `json:"id"`
 
+	// Repository One Ticket repository reference (issue #59, D3 S1 check 3), available on either Template -- required by nothing in M2. There is exactly one such field on a Ticket; the Coding Template surfaces it by default, but it is not a competing Basic-only concept. Plain text (e.g. an "owner/repo" name or a URL) with no format enforced yet. Always present on the wire; "" means never set or cleared -- see `goal`'s description for the same convention.
+	Repository string `json:"repository"`
+
 	// Status The Ticket's lifecycle stage (CONTEXT.md, "Status"). This slice only ever produces Backlog -- Ready/In Progress/In Review/Done/Blocked arrive with #60's transitions.
 	Status TicketStatus `json:"status"`
 
 	// SuccessCriteria Manual refinement (issue #58 -- prompt "Describe observable conditions that demonstrate the outcome was achieved."). CONTEXT.md's "Success Criteria" term -- not "acceptance criteria". Plain text; see `goal`'s description for the "" convention. Agent-readiness validation of this field is M4's, not this slice's.
 	SuccessCriteria string `json:"successCriteria"`
-	Title           string `json:"title"`
+
+	// Template A Ticket's built-in Template (issue #59), chosen at capture (default Basic). Under the accepted D3 decision (docs/decisions/d3-agent-template-compatibility.md), a Template supplies presentation, required information, and a *default* completion condition only -- it never restricts which Agent or execution engine may be assigned (docs/ticket-creation.md, "Flexible ticket structure"). Changing a Ticket's Template after creation is out of scope for M2: post-delivery Template/repository change is D4, owned by M8.
+	Template TicketTemplate `json:"template"`
+	Title    string         `json:"title"`
 
 	// UpdatedAt RFC3339 UTC timestamp of the Ticket's last change. Equal to createdAt until a transition (#60) or a refinement edit (#58) changes it.
 	UpdatedAt string `json:"updatedAt"`
@@ -216,10 +264,16 @@ type Ticket struct {
 // TicketStatus The Ticket's lifecycle stage (CONTEXT.md, "Status"). This slice only ever produces Backlog -- Ready/In Progress/In Review/Done/Blocked arrive with #60's transitions.
 type TicketStatus string
 
+// TicketCompletionCondition The condition that completes a Ticket (CONTEXT.md, "Done"): human acceptance, or merging its reviewed pull request. Derived from the Ticket's Template default exactly once, at creation (issue #59, D3) -- there is no request field or operation anywhere in this contract that sets or changes it directly. Assignment, reassignment, and editing any other field never change it.
+type TicketCompletionCondition string
+
 // TicketList The signed-in Owner's Tickets, newest first (createdAt descending, id descending as the tiebreak).
 type TicketList struct {
 	Tickets []Ticket `json:"tickets"`
 }
+
+// TicketTemplate A Ticket's built-in Template (issue #59), chosen at capture (default Basic). Under the accepted D3 decision (docs/decisions/d3-agent-template-compatibility.md), a Template supplies presentation, required information, and a *default* completion condition only -- it never restricts which Agent or execution engine may be assigned (docs/ticket-creation.md, "Flexible ticket structure"). Changing a Ticket's Template after creation is out of scope for M2: post-delivery Template/repository change is D4, owned by M8.
+type TicketTemplate string
 
 // UpdateTicketRequest Manual refinement (issue #58): a genuine partial update. Every property is optional -- none are listed under `required` -- so a client can distinguish "this property was not part of the request" (leave unchanged) from "this property was sent as an empty string" (clear it, title excepted). See the `patch /api/tickets/{id}` operation above for the full rule, including why title cannot be cleared, and apps/galley/README.md, "Manual refinement fields," for the concurrent-edit (last-write-wins) rule. Trimmed of leading/trailing whitespace the same way CreateTicketRequest.title is; the maxLength values below apply after trimming and are counted in characters (code points), not bytes -- see apps/galley/README.md, "Tickets," "Title validation."
 type UpdateTicketRequest struct {
@@ -232,8 +286,14 @@ type UpdateTicketRequest struct {
 	// Goal Manual guidance: "What outcome do you want?" (docs/ticket-creation.md). Absent leaves the stored value unchanged; present as "" (or a value that trims to "") clears it; present with text trims and stores it.
 	Goal *string `json:"goal,omitempty"`
 
+	// Repository One Ticket repository reference (issue #59, D3), available on either Template. Same absent/empty/text rule as `goal`.
+	Repository *string `json:"repository,omitempty"`
+
 	// SuccessCriteria Manual guidance: "Describe observable conditions that demonstrate the outcome was achieved." Same absent/empty/text rule as `goal`. Agent-readiness validation of this field is M4's, not this slice's.
 	SuccessCriteria *string `json:"successCriteria,omitempty"`
+
+	// Template A Ticket's built-in Template (issue #59), chosen at capture (default Basic). Under the accepted D3 decision (docs/decisions/d3-agent-template-compatibility.md), a Template supplies presentation, required information, and a *default* completion condition only -- it never restricts which Agent or execution engine may be assigned (docs/ticket-creation.md, "Flexible ticket structure"). Changing a Ticket's Template after creation is out of scope for M2: post-delivery Template/repository change is D4, owned by M8.
+	Template *TicketTemplate `json:"template,omitempty"`
 
 	// Title If present, trimmed and validated exactly like CreateTicketRequest.title. A value that trims to empty is rejected with invalid_request rather than clearing the title -- every Ticket must keep one. Absent leaves the title unchanged.
 	Title *string `json:"title,omitempty"`

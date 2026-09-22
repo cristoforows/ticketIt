@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { createTicket, fetchTickets, TICKET_TITLE_MAX_LENGTH, type Ticket } from "../api/tickets";
+import { createTicket, fetchTickets, TICKET_TEMPLATES, TICKET_TITLE_MAX_LENGTH, type Ticket } from "../api/tickets";
 import { Link } from "./Link";
 
 type ListState =
@@ -9,13 +9,16 @@ type ListState =
 
 /**
  * The Owner's Backlog: a quick-capture input above the list Galley
- * returns. A successful capture re-fetches the list (Galley, not this
- * component, decides where the new Ticket sorts -- apps/galley/README.md,
- * "Ticket ordering") so a captured Ticket appears with no manual reload.
+ * returns, plus a Template selector (issue #59) defaulting to Basic --
+ * a title alone remains sufficient to capture either Template. A
+ * successful capture re-fetches the list (Galley, not this component,
+ * decides where the new Ticket sorts -- apps/galley/README.md, "Ticket
+ * ordering") so a captured Ticket appears with no manual reload.
  */
 export function TicketList() {
   const [state, setState] = useState<ListState>({ kind: "loading" });
   const [title, setTitle] = useState("");
+  const [template, setTemplate] = useState<Ticket["template"]>("Basic");
   const [capturing, setCapturing] = useState(false);
   const [captureError, setCaptureError] = useState<string | null>(null);
 
@@ -38,7 +41,7 @@ export function TicketList() {
     setCaptureError(null);
     setCapturing(true);
     try {
-      await createTicket(title);
+      await createTicket(title, template);
       setTitle("");
       load();
     } catch (error) {
@@ -62,6 +65,20 @@ export function TicketList() {
           onChange={(event) => setTitle(event.target.value)}
           disabled={capturing}
         />
+        <label htmlFor="ticket-template-select">Template</label>
+        <select
+          id="ticket-template-select"
+          data-testid="ticket-template-select"
+          value={template}
+          onChange={(event) => setTemplate(event.target.value as Ticket["template"])}
+          disabled={capturing}
+        >
+          {TICKET_TEMPLATES.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
         <button
           type="submit"
           disabled={capturing || title.trim() === ""}

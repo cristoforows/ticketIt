@@ -20,6 +20,7 @@ interface EditableFields {
   context: string;
   successCriteria: string;
   constraints: string;
+  repository: string;
 }
 
 function fieldsFrom(ticket: Ticket): EditableFields {
@@ -29,20 +30,36 @@ function fieldsFrom(ticket: Ticket): EditableFields {
     context: ticket.context,
     successCriteria: ticket.successCriteria,
     constraints: ticket.constraints,
+    repository: ticket.repository,
   };
 }
 
 /**
+ * Display text for the Ticket's retained completion condition
+ * (issue #59, D3) -- derived from its Template's default once, at
+ * creation, and never recomputed. CONTEXT.md's "Done" defines the two
+ * underlying conditions; this only maps the wire enum to the same
+ * words for display, it does not decide or store anything.
+ */
+function completionConditionLabel(condition: Ticket["completionCondition"]): string {
+  return condition === "reviewedPrMerge" ? "Reviewed pull request merged" : "Human acceptance";
+}
+
+/**
  * Pure presentation of one already-fetched Ticket's detail content,
- * now including manual refinement (issue #58, docs/ticket-creation.md,
- * "Manual guidance"). View mode shows title, Status, timestamps, and
- * the four refinement fields (an explicit "Not set" placeholder for
- * whichever are still empty); edit mode offers title and the four
- * refinement fields as plain-text inputs -- never Markdown, and never
- * rendered as anything but plain text (M7 owns report rendering) --
- * each with its docs/ticket-creation.md guidance prompt shown
- * verbatim, plus Save and Cancel. No AI of any kind: Save submits
- * exactly what the Owner typed and triggers nothing else.
+ * now including manual refinement (issue #58) and Templates (issue
+ * #59). View mode shows title, Status, Template, the retained
+ * completion condition, timestamps, the refinement fields and
+ * repository reference (an explicit "Not set" placeholder for whichever
+ * are still empty), and -- only for a Coding-template Ticket -- a Pull
+ * Request section with an honest empty state (no PR exists until M8).
+ * Edit mode offers title, the four refinement fields, and repository as
+ * plain-text inputs -- never Markdown (M7 owns report rendering) --
+ * plus Save and Cancel. Template itself has no edit control here:
+ * changing it after creation is out of scope for M2 (D4, M8), and
+ * completionCondition has no control at all -- it is never sent in any
+ * update this component makes. No AI of any kind: Save submits exactly
+ * what the Owner typed and triggers nothing else.
  *
  * Saving delegates to the `onSave` prop rather than calling
  * updateTicket itself, so this component still neither fetches nor
@@ -90,6 +107,7 @@ export function TicketDetail({ ticket, onSave }: TicketDetailProps) {
         context: fields.context,
         successCriteria: fields.successCriteria,
         constraints: fields.constraints,
+        repository: fields.repository,
       });
       setCurrent(updated);
       setFields(fieldsFrom(updated));
@@ -111,6 +129,12 @@ export function TicketDetail({ ticket, onSave }: TicketDetailProps) {
           <dl>
             <dt>Status</dt>
             <dd data-testid="ticket-detail-status">{current.status}</dd>
+            <dt>Template</dt>
+            <dd data-testid="ticket-detail-template">{current.template}</dd>
+            <dt>Completion condition</dt>
+            <dd data-testid="ticket-detail-completion-condition">
+              {completionConditionLabel(current.completionCondition)}
+            </dd>
             <dt>Created</dt>
             <dd data-testid="ticket-detail-created-at">{current.createdAt}</dd>
             <dt>Updated</dt>
@@ -121,7 +145,18 @@ export function TicketDetail({ ticket, onSave }: TicketDetailProps) {
             <RefinementValue label="Context" testId="context" value={current.context} />
             <RefinementValue label="Success Criteria" testId="success-criteria" value={current.successCriteria} />
             <RefinementValue label="Constraints" testId="constraints" value={current.constraints} />
+            <RefinementValue label="Repository" testId="repository" value={current.repository} />
           </section>
+          {current.template === "Coding" && (
+            <section aria-label="Pull Request" data-testid="ticket-detail-pr-section">
+              <h3>Pull Request</h3>
+              {/* No PR exists until M8 -- there is nothing to fabricate a
+                  field for; this is the section's own honest state. */}
+              <p data-testid="ticket-detail-pr-empty-state">
+                PR delivery arrives with coding execution -- no pull request exists yet.
+              </p>
+            </section>
+          )}
           <button type="button" data-testid="ticket-detail-edit-button" onClick={startEditing}>
             Edit
           </button>
@@ -171,6 +206,16 @@ export function TicketDetail({ ticket, onSave }: TicketDetailProps) {
             onChange={(value) => setFields((current) => ({ ...current, constraints: value }))}
             disabled={saving}
           />
+          <div>
+            <label htmlFor="ticket-detail-input-repository">Repository</label>
+            <input
+              id="ticket-detail-input-repository"
+              data-testid="ticket-detail-input-repository"
+              value={fields.repository}
+              onChange={(event) => setFields((current) => ({ ...current, repository: event.target.value }))}
+              disabled={saving}
+            />
+          </div>
           {saveError && (
             <p role="alert" data-testid="ticket-detail-save-error">
               {saveError}

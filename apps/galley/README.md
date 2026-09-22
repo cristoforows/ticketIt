@@ -56,6 +56,13 @@ manual refinement: `goal`, `context`, `successCriteria`, and
 partial update, not a replace-whole-resource PUT. See "Manual
 refinement fields" below.
 
+[Issue #59](https://github.com/cristoforows/ticketIt/issues/59) added
+the two built-in Ticket Templates (`Basic`, `Coding`), a Ticket's own
+retained `completionCondition` (derived from the Template's default
+exactly once, at creation, per the accepted D3 decision), and one
+`repository` reference column available on either Template. See
+"Ticket Templates and the retained completion condition" below.
+
 Galley is a standalone Go module (`go.mod` at this directory) with no
 dependency on Node or any frontend toolchain. It does have third-party
 Go dependencies as of issue #51 — the generated server types/interface
@@ -744,6 +751,83 @@ with a bogus owner id that can never belong to any real Owner, since
 `owners`'s true one-row-per-deployment singleton means a second real
 Owner cannot be constructed to prove this end to end.
 
+### Ticket Templates and the retained completion condition (issue #59)
+
+Follows the accepted [D3 decision](../../docs/decisions/d3-agent-template-compatibility.md):
+a Ticket's Template supplies presentation, required information, and a
+**default** completion condition only — it never restricts which
+Agent or execution engine may be assigned. M2 has no Agent, Assignee,
+Round, or engine concept at all (`AGENTS.md`, "No AI, Agents, Rounds,
+or Michelin in M2"), so this slice's only obligation is to prove no
+such mapping exists yet, and to derive and then permanently retain a
+Ticket's completion condition.
+
+**Two new columns, one repository reference**, added by
+`internal/migrations/000006_add_ticket_template_and_completion_condition.up.sql`:
+`template` (`TEXT NOT NULL DEFAULT 'Basic'`) and `completion_condition`
+(`TEXT NOT NULL DEFAULT 'humanAcceptance'`) — backfilled correctly by
+their own `DEFAULT`, not a data migration, since every Ticket captured
+before this migration went through the Basic-only `CreateTicket` path
+with human acceptance as its completion condition. `repository`
+(nullable `TEXT`, no `DEFAULT`) is the **one** Ticket repository
+reference D3 §1 check 3 requires, available on either Template — not a
+competing Basic-only concept, and not required by anything in M2.
+None of the three carries a `CHECK` constraint, matching
+`tickets.status`'s existing rationale (this slice's Galley code is the
+only writer, ADR 0001, and enforces the two-value enums itself via the
+generated `TicketTemplate`/`TicketCompletionCondition` types' `Valid()`
+methods).
+
+**`template` is chosen at capture, `completionCondition` is derived
+from it exactly once.** `POST /api/tickets`'s optional `template`
+(`Basic` or `Coding`, defaulting to `Basic` when absent) is validated
+with the generated enum's own `Valid()` method, then passed to
+`insertTicket`, whose **one and only call anywhere in this codebase**
+to `defaultCompletionCondition` computes the stored
+`completion_condition` (`Coding` → `reviewedPrMerge`, everything else →
+`humanAcceptance`). No other function in this module ever calls
+`defaultCompletionCondition` or otherwise writes to
+`completion_condition` — `updateTicketForOwner`'s `SET` clause does not
+name that column at all, not merely leave it at its `COALESCE`
+default, which is what makes "retained independently of later edits"
+true by construction rather than by a check that could be bypassed.
+
+**Changing a Ticket's Template after creation is out of scope for M2
+(D4, owned by M8) — enforced explicitly, not by silent omission.**
+`UpdateTicketRequest.template` exists in the contract precisely so a
+request naming it can be told apart from one that does not: `UpdateTicket`
+rejects any PATCH naming `template` at all — even the Ticket's own
+current value — with `invalid_request`, before validating any other
+field or touching the database. `completionCondition` has no
+corresponding request field anywhere in this contract; there is no
+path, rejected or otherwise, that could set it directly.
+
+**The guardrail test with real teeth**
+(`internal/httpapi/template_capability_guardrail_test.go`'s
+`TestNoTemplateToCapabilityMapping`) parses every non-generated,
+non-test `.go` file in this module with `go/parser`, finds every
+syntactic reference to a Template/completion-condition identifier
+(`TicketTemplate`, `Basic`, `Coding`, `TicketCompletionCondition`,
+`HumanAcceptance`, `ReviewedPrMerge`), attributes each to its enclosing
+top-level function (or to package scope, for a reference outside any
+function), and fails unless that attribution set is exactly the
+closed, reviewed allowlist (`CreateTicket`, `UpdateTicket`,
+`insertTicket`, `scanTicketRow`, `updateTicketForOwner`,
+`defaultCompletionCondition`). A future change that makes an Agent,
+Assignee, or engine depend on a Ticket's Template — anywhere in this
+module — adds a reference this test does not already know about and
+fails immediately. See
+[`docs/evidence/m2/59-ticket-templates.md`](../../docs/evidence/m2/59-ticket-templates.md)
+for a captured run proving this (a deliberately added mapping function,
+and separately a mapping variable, both caught and reverted), and for
+the retained-completion-condition proof across a genuine Galley
+restart (`cmd/galley`'s
+`TestRestartDurability_CompletionConditionSurvivesFreshProcess`) and
+against a deliberately mismatched fixture row
+(`TestUpdateTicket_CompletionConditionNotRecomputedFromTemplate`) that
+a naive "never changes across the same-pairing tests I happen to run"
+test would not catch.
+
 ## Error shape
 
 `ErrorBody`/`ErrorDetail` are generated from
@@ -961,13 +1045,14 @@ apps/galley/
 │   └── check-contract-drift.sh  # drift check part 2: regeneration produces no diff
 ├── cmd/
 │   ├── galley/             # main package: wiring, config load, graceful shutdown
-│   │   └── restart_durability_test.go  # issue #52: real two-process restart test
+│   │   ├── restart_durability_test.go  # issue #52: real two-process restart test
+│   │   └── ticket_template_restart_test.go  # issue #59: completionCondition survives a restart
 │   ├── migrate/            # issue #52: the one documented migration-apply command
 │   └── githubfake/         # issue #55: standalone substitute GitHub provider on a
 │                           #   real port -- test/development only, never cmd/galley
 └── internal/
     ├── config/             # environment parsing and validation (incl. DATABASE_URL, #52; owner/OAuth, #54)
-    ├── migrations/         # embedded, versioned, forward-only SQL files (#52, #54, #56, #57)
+    ├── migrations/         # embedded, versioned, forward-only SQL files (#52, #54, #56, #57, #59)
     ├── postgres/           # issue #52: pgxpool wrapper, live health check, migration runner,
     │                       #   and the real-PostgreSQL test-setup helper (NewTestPool)
     ├── auth/                # issue #54: tokens/hashing, sessions, oauth state, Owner
@@ -984,8 +1069,11 @@ apps/galley/
         ├── production_gating_test.go  # issue #52: proves those routes absent in production
         ├── auth.go         # issue #54: the four OAuth/session handlers + requireSession
         ├── cookies.go      # issue #54: session/state cookie construction
-        └── ticket.go       # issue #56: ListTickets/CreateTicket; issue #57 added GetTicket;
-                            #   issue #58 added UpdateTicket (manual refinement)
+        ├── ticket.go       # issue #56: ListTickets/CreateTicket; issue #57 added GetTicket;
+        │                   #   issue #58 added UpdateTicket (manual refinement); issue #59
+        │                   #   added Templates and the retained completion condition
+        ├── ticket_template_test.go            # issue #59: Templates and completion-condition tests
+        └── template_capability_guardrail_test.go  # issue #59: the no-mapping guardrail test
 ```
 
 ## Exact versions and toolchain
@@ -1044,6 +1132,11 @@ apps/galley/
   only the standard library's `database/sql` (for `sql.NullString`,
   scanning the four newly-nullable columns) alongside the existing
   `pgx/v5` driver, which supports it directly.
+- Issue #59 added no new dependency: `ticket.go`'s Template/completion-condition
+  plumbing reuses the existing `pgx/v5`/`database/sql` pattern, and
+  `template_capability_guardrail_test.go`'s AST scan uses only the
+  standard library (`go/ast`, `go/parser`, `go/token`, `path/filepath`,
+  `sort`).
 
 PostgreSQL server: `17.11` (Homebrew, `localhost:5432`) on the machine
 this slice's evidence was recorded on — any reasonably recent
