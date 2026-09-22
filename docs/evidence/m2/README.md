@@ -195,6 +195,26 @@ re-run above (not against any older evidence record's copied output):
    selector, not a work-type enum — Tickets remain flexible per
    `docs/ticket-creation.md`.
 
+   The "independent of **assignment**" half needed a test that did not
+   exist. #59's independence test predates assignment entirely, so it
+   exercises field updates; #60's assignment tests assert `assigneeType`
+   and Status but never `completionCondition`. The behaviour was already
+   correct — `setTicketAssigneeForOwner`'s `UPDATE` sets only
+   `assignee_type` and `updated_at` — but nothing proved it, so this
+   criterion was cited against evidence that did not cover it. Added
+   `TestAssignment_NeverChangesCompletionConditionOrTemplate`, covering
+   assign/unassign/reassign for both conditions. Falsified by making
+   assignment write `completion_condition = 'humanAcceptance'`:
+
+   ```
+   Coding assign: CompletionCondition = "humanAcceptance", want "reviewedPrMerge"
+       -- assignment must never change it
+   ```
+
+   That is the regression the criterion exists to prevent: a
+   reviewedPrMerge Ticket downgraded by an unrelated command becomes
+   completable in M2, bypassing the D2/M8 mechanism. Reverted; green.
+
 **Scope items** (#3's numbered "Scope" list, 1–6, plus "Establish
 browser-to-backend tests with real PostgreSQL"): each maps one-to-one
 onto a completed slice — 1↔#49/#50, 2↔#52, 3↔#54, 4↔#56/#57,
