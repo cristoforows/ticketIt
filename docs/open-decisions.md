@@ -296,6 +296,61 @@ are not lost before the milestone that would fix them:
   ([21-opencode-coverage-matrix.md](evidence/m1/21-opencode-coverage-matrix.md),
   "Priority 5")
 
+## What M2 observed, per decision
+
+M2's application slices (#49–#61, gate-reported at
+[#62](https://github.com/cristoforows/ticketIt/issues/62)) resolve no
+open decision — the observations below are what M2's implementation
+confirmed or newly surfaced for decisions D3's acceptance already
+touches, recorded per this document's own "Updating decisions" rule.
+D1, D5, D6, D7, D8, D9 are untouched: M2 has no Agent, Round,
+execution, Grill Mode, storage, or hosting concept of any kind.
+
+### D3 — Agent/template compatibility and human-assigned workflow — implemented, not further resolved
+
+M2 is the first milestone to build against the Owner's accepted
+decision. [#59](https://github.com/cristoforows/ticketIt/issues/59)
+implements the Template/completion-condition rule (a Template supplies
+presentation, required information, and a default completion condition
+only, retained independently of later edits); [#60](https://github.com/cristoforows/ticketIt/issues/60)/[#61](https://github.com/cristoforows/ticketIt/issues/61)
+implement §2's human-assigned Status table, the explicit Accept
+command, and Owner assignment. Both are proven by tests that would fail
+if a real Template-to-Agent/engine mapping were added
+(`TestNoTemplateToCapabilityMapping`, extended to catch a
+string-literal form found during review) and if a manual command ever
+created an execution artifact
+(`TestManualLifecycleActionsCreateNoExecutionRecords`, real PostgreSQL,
+demonstrated actually failing against a phantom table name). Neither
+test result changes D3's own status — the Owner resolved it on #13
+before M2 began; M2 only exercises it.
+
+### D2 — Human-review evidence for PR completion and agent merge authority — M2 observation
+
+Unresolved, as before. M2 makes the consequence of that in a
+human-assigned world concrete: a `reviewedPrMerge` Ticket (Coding
+Template) cannot reach Done anywhere in M2, by design.
+`AcceptTicket` rejects it with a distinct `reviewed_pr_merge_not_implemented`
+code naming D2 and M8 directly in its message
+([#60](https://github.com/cristoforows/ticketIt/issues/60)), and
+Swiftlet's own Accept control shows that exact reason rather than
+hiding the control or silently downgrading the completion condition to
+`humanAcceptance` ([#61](https://github.com/cristoforows/ticketIt/issues/61)).
+No code path anywhere in Galley writes `completion_condition` outside
+Ticket creation, so this cannot be worked around by mistake before M8
+resolves D2.
+
+### D4 — Exceptional PR and template/repository changes — M2 observation
+
+Unresolved, as before. D3 §2's own transition table notes `Done →
+Ready` is allowed "subject to D4 for an already-merged PR"; M2 permits
+that transition **unconditionally**, with no PR-merge-aware
+restriction of any kind, since D4 is explicitly out of scope for
+[#60](https://github.com/cristoforows/ticketIt/issues/60) and remains
+unresolved. This is a recorded, explicit gap, not a silent narrowing —
+D4 is still owned by M8, and a future resolution can add the missing
+precondition to `ChangeTicketStatus`'s existing `Done` source-status
+entry without redesigning the transition mechanism itself.
+
 ## Engineering decisions within the approved design
 
 These need implementation design and validation, but not new user-facing scope by default:

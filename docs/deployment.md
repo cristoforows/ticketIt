@@ -1,8 +1,8 @@
 # Deployment and local execution
 
-See [implementation-plan.md](implementation-plan.md) for the approved M1–M10 milestones and [open-decisions.md](open-decisions.md) for remaining selections. Application directories below describe the planned scaffold, not implemented services.
+See [implementation-plan.md](implementation-plan.md) for the approved M1–M10 milestones and [open-decisions.md](open-decisions.md) for remaining selections. `apps/swiftlet`, `apps/galley`, `contracts/`, and `e2e/` below describe M2's actually implemented scaffold (see [docs/evidence/m2/](evidence/m2/README.md) for build/test commands and evidence); `apps/michelin` remains the planned scaffold — it does not exist until M4.
 
-M2 establishes Swiftlet/Galley and PostgreSQL locally; M4 connects Michelin with controlled execution. M6 selects document storage, M7/M8 add real research/coding, and M10 completes hosting, reproducible operational setup, and deployed acceptance. The hosting-comparison demonstration runs after its provisional installation exists.
+M2 established Swiftlet/Galley and PostgreSQL locally, running only on the developer's own machine; M4 connects Michelin with controlled execution. M6 selects document storage, M7/M8 add real research/coding, and M10 completes hosting, reproducible operational setup, and deployed acceptance. The hosting-comparison demonstration runs after its provisional installation exists.
 
 ## Provisioning requires explicit Owner approval
 
@@ -31,20 +31,21 @@ Keep the three independent applications in one repository:
 ```text
 ticketIt/
 ├── apps/
-│   ├── swiftlet/   # React frontend
-│   ├── galley/     # Go ticket-management backend
-│   └── michelin/   # TypeScript/Node.js local runner
-├── contracts/     # API schemas and client-generation configuration
+│   ├── swiftlet/   # React frontend (built, M2)
+│   ├── galley/     # Go ticket-management backend (built, M2)
+│   └── michelin/   # TypeScript/Node.js local runner (not built until M4)
+├── contracts/     # API schemas and generated-client configuration (built, M2)
+├── e2e/           # Browser-to-backend suite, Playwright/Chromium (built, M2)
 ├── docs/
 ├── CONTEXT.md
 └── AGENTS.md
 ```
 
-Use `swiftlet`, `galley`, and `michelin` as the application names. Each application retains independent dependencies, build, tests, and entry point. Swiftlet and Galley are deployed together initially; Michelin runs locally and manages OpenCode. This layout describes the planned scaffold.
+Use `swiftlet`, `galley`, and `michelin` as the application names. Each application retains independent dependencies, build, tests, and entry point — confirmed for Swiftlet and Galley by M2 (`apps/swiftlet/README.md`, `apps/galley/README.md`: a Swiftlet build needs no Go toolchain and a Galley build needs no Node). Swiftlet and Galley are deployed together initially; Michelin runs locally and manages OpenCode. `apps/michelin` and its deployment remain the planned scaffold — implementation starts at M4.
 
 ### Technology choices
 
-React is selected for the frontend, Go for the backend, and TypeScript with Node.js for the local runner. The native research harness uses LangChain TypeScript with its LangGraph foundation. Frontend build tooling and backend HTTP framework/router remain undecided.
+React is selected for the frontend, Go for the backend, and TypeScript with Node.js for the local runner. The native research harness uses LangChain TypeScript with its LangGraph foundation. M2 resolved the frontend tooling and backend router as engineering choices within the approved design, not open product decisions: Vite + TypeScript + Vitest for Swiftlet (`apps/swiftlet/README.md`, "Tooling and test-runner choice"), and the standard library's `net/http.ServeMux` for Galley, with no third-party router (`apps/galley/README.md`, "Router choice"). `contracts/openapi.yaml` (OpenAPI 3.1.0) is the API's single source of truth, bound to both applications through generated code (`oapi-codegen` for Galley, `openapi-typescript` for Swiftlet) with a two-part drift check (`contracts/README.md`).
 
 Use PostgreSQL as the application database for tickets, rounds, agent configurations, permission grants, ownership, usage records, and document metadata/associations. Recipe versions and report content remain in object storage. The PostgreSQL hosting provider is not yet selected and is independent of the object-storage provider choice.
 
@@ -62,7 +63,9 @@ The initial deployment is for limited personal use. Target combined application 
 
 Use GitHub OAuth for owner sign-in in v1, restricted to the configured owner. Request only the access needed to establish identity, then create a ticketIt session. Signing in is distinct from authorizing agent use of a connected external account.
 
-Keep the owner identity independent of GitHub-specific identifiers so additional sign-in providers can be supported later. This extensibility does not change the one-owner-per-deployment scope of v1. Owner bootstrap, session handling, and future identity-linking behavior still need implementation design.
+Keep the owner identity independent of GitHub-specific identifiers so additional sign-in providers can be supported later. This extensibility does not change the one-owner-per-deployment scope of v1.
+
+M2 implemented this as built: a database-enforced Owner singleton, keyed after bootstrap by GitHub's immutable numeric account id rather than the configured login (so a later account rename does not lose access), a hashed and TTL-bound PostgreSQL session, and the `requireSession` per-handler convention every authenticated route uses (`apps/galley/README.md`, "Owner configuration and GitHub OAuth sign-in" and "Authenticated routes"). Every test and this implementation's own manual verification used a local substitute GitHub provider (`apps/galley/internal/githubfake`, `cmd/githubfake`) — no real GitHub OAuth app was created or configured anywhere in M2, and verification against real `github.com` remains outstanding, owned by M10.
 
 ## Runner lifecycle
 

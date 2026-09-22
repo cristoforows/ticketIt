@@ -533,3 +533,47 @@ func TestChangeTicketStatus_ConcurrentConflictingTransitionsOnlyOneApplies(t *te
 		}
 	}
 }
+
+// Issue #59's independence test predates assignment, so it exercises
+// field updates rather than assign/unassign.
+func TestAssignment_NeverChangesCompletionConditionOrTemplate(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+
+	for _, tc := range []struct {
+		template  TicketTemplate
+		condition TicketCompletionCondition
+	}{
+		{Basic, HumanAcceptance},
+		{Coding, ReviewedPrMerge},
+	} {
+		created := createTicketWithTemplate(t, client, baseURL, uniqueTitle(t), tc.template)
+		if created.CompletionCondition != tc.condition {
+			t.Fatalf("test setup error: %s Ticket CompletionCondition = %q, want %q", tc.template, created.CompletionCondition, tc.condition)
+		}
+
+		for _, step := range []struct {
+			name   string
+			result lifecycleResult
+		}{
+			{"assign", assignOwnerHTTP(t, client, baseURL, created.Id)},
+			{"unassign", unassignHTTP(t, client, baseURL, created.Id)},
+			{"reassign", assignOwnerHTTP(t, client, baseURL, created.Id)},
+		} {
+			if step.result.status != http.StatusOK {
+				t.Fatalf("%s %s: status = %d, want 200", tc.template, step.name, step.result.status)
+			}
+			if step.result.ticket.CompletionCondition != tc.condition {
+				t.Errorf("%s %s: CompletionCondition = %q, want %q -- assignment must never change it",
+					tc.template, step.name, step.result.ticket.CompletionCondition, tc.condition)
+			}
+			if step.result.ticket.Template != tc.template {
+				t.Errorf("%s %s: Template = %q, want %q", tc.template, step.name, step.result.ticket.Template, tc.template)
+			}
+		}
+
+		persisted := getTicketHTTP(t, client, baseURL, created.Id)
+		if persisted.CompletionCondition != tc.condition {
+			t.Errorf("%s: persisted CompletionCondition = %q, want %q", tc.template, persisted.CompletionCondition, tc.condition)
+		}
+	}
+}
