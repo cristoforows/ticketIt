@@ -416,9 +416,43 @@ passing regardless of it.
 
 ## Implementation limitations and follow-ups
 
-None. All four request-body operations in `contracts/openapi.yaml` are
+All four request-body operations in `contracts/openapi.yaml` are
 covered; no endpoint was found that the issue's own list missed, and
-none was left with the old lenient decoding.
+none was left with the old lenient decoding. The reported defect is
+closed.
+
+**Two request-body shapes the contract forbids are still accepted**,
+found in review of this PR by probing a live server built from this
+branch rather than by reading the diff. Follow-up:
+[#84](https://github.com/cristoforows/ticketIt/issues/84).
+
+`encoding/json` matches field names case-insensitively, and
+`DisallowUnknownFields()` does not change that, so a property whose
+name differs from a declared one only by case is still accepted.
+`Decode` also reads one value and stops, so anything after the first
+JSON object is silently dropped. Probed against this branch (fresh
+database, real session, substitute OAuth provider):
+
+```
+POST /api/tickets              {"title":"probe A","bogus":"x"}  -> 400  unknown request property "bogus"
+POST /api/dev/diagnostic-notes {"note":"n","bogus":"x"}         -> 400  unknown request property "bogus"
+
+POST /api/tickets              {"TITLE":"probe upper"}          -> 201
+POST /api/tickets              {"TiTlE":"probe mixed"}          -> 201
+POST /api/dev/diagnostic-notes {"NOTE":"probe note upper"}      -> 201
+
+POST /api/tickets   {"title":"probe first"}{"title":"probe second"}
+                                                                -> 201, captured "probe first" only
+```
+
+Neither shape produces this issue's actual harm -- a caller told the
+write succeeded when nothing was written. A case-variant property
+performs the write the caller intended, and a trailing value is a body
+no ordinary client emits. Both remain contract/implementation
+disagreements of the kind this fix exists to close, and neither drift
+check can see them for the same reason it could not see the original
+defect: both compare generated code against the schema, and the
+generated code is correct.
 
 ## Outstanding checks and owning milestone
 
