@@ -54,6 +54,26 @@ test.describe("ticket detail page", () => {
     await expect(page.getByTestId("ticket-detail-error")).toHaveCount(0);
   });
 
+  // The in-app Link calls history.pushState, which fires no event of its
+  // own -- router.ts dispatches a synthetic popstate so that the browser's
+  // own back button and in-app navigation share one subscription. Nothing
+  // else in the suite exercises real browser history.
+  test("the browser back button returns to the Backlog from a Ticket's page", async ({ page }) => {
+    const title = `ticket-detail: browser back ${Date.now()}`;
+    const ticket = await createTicket(page, title);
+
+    await page.goto("/");
+    await page.getByTestId(`ticket-item-${ticket.id}`).getByRole("link").click();
+    await expect(page.getByTestId("ticket-detail-title")).toHaveText(title);
+    expect(new URL(page.url()).pathname).toBe(`/tickets/${ticket.id}`);
+
+    await page.goBack();
+
+    expect(new URL(page.url()).pathname).toBe("/");
+    await expect(page.getByTestId("ticket-list")).toBeVisible();
+    await expect(page.getByTestId("ticket-detail-title")).toHaveCount(0);
+  });
+
   test("the Backlog list still renders correctly after visiting a Ticket's page", async ({ page }) => {
     const title = `ticket-detail: back to backlog ${Date.now()}`;
     const ticket = await createTicket(page, title);

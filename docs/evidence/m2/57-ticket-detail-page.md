@@ -695,6 +695,32 @@ reverted (`diff vite.config.ts <saved pre-break copy>` showed no
 difference) and the confirming green run is the "Browser suite" section
 above.
 
+## Added during review: browser back/forward coverage
+
+The slice's original specs reached the Backlog from a Ticket only by
+clicking the in-app "back to Backlog" link, which goes through
+`router.navigate()` and its synthetic `popstate`. Nothing exercised a
+*real* browser history event, so `router.ts`'s `popstate` subscription
+— the reason `useSyncExternalStore` is there at all — was untested,
+and a hand-rolled router's most likely failure mode was unguarded.
+
+`tests/ticket-detail.spec.ts` now has "the browser back button returns
+to the Backlog from a Ticket's page" (`page.goBack()`). The behaviour
+was already correct; only the coverage was missing.
+
+Falsified by making `subscribe` listen for a custom event instead of
+`popstate` while leaving `navigate()` dispatching it — in-app links
+keep working, real history stops:
+
+```
+  ✘  4 › ticket detail page › the browser back button returns to the Backlog
+  ✓  5 › ticket detail page › the Backlog list still renders correctly
+[run.sh] SUITE FAILED
+```
+
+Exactly the new spec failed; the link-click spec stayed green. Reverted,
+`SUITE PASSED`.
+
 ## Implementation limitations and follow-ups
 
 - **`GetTicket`'s Owner-scoping and 404-parity tests exercise the
