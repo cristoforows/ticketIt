@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"time"
 
@@ -56,8 +55,7 @@ func (s *server) CreateDiagnosticNote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req CreateDiagnosticNoteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", `request body must be JSON matching {"note": "..."}`)
+	if !decodeStrictJSON(w, r, &req, `request body must be JSON matching {"note": "..."}`) {
 		return
 	}
 	if req.Note == "" {

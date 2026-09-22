@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -177,8 +176,7 @@ func (s *server) ChangeTicketStatus(w http.ResponseWriter, r *http.Request, id s
 	}
 
 	var req ChangeTicketStatusRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", `request body must be JSON matching {"status": "..."}`)
+	if !decodeStrictJSON(w, r, &req, `request body must be JSON matching {"status": "..."}`) {
 		return
 	}
 	if !req.Status.Valid() {

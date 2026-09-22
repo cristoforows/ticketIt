@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -214,6 +215,33 @@ func TestChangeTicketStatus_RejectsUnknownStatusValue(t *testing.T) {
 	}
 	if resp.errBody.Error.Code != "invalid_request" {
 		t.Errorf("Error.Code = %q, want %q", resp.errBody.Error.Code, "invalid_request")
+	}
+}
+
+// TestChangeTicketStatus_RejectsUnknownProperty is issue #75's proof
+// for this endpoint: contracts/openapi.yaml's ChangeTicketStatusRequest
+// declares additionalProperties: false, so a well-formed body naming an
+// extra property must be rejected rather than silently accepted with
+// the unknown property dropped.
+func TestChangeTicketStatus_RejectsUnknownProperty(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+	created := createTicket(t, client, baseURL, uniqueTitle(t))
+
+	resp := doLifecycleRequest(t, client, http.MethodPost, baseURL+"/api/tickets/"+created.Id+"/status",
+		map[string]any{"status": string(Ready), "bogus": "x"})
+	if resp.status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.status)
+	}
+	if resp.errBody.Error.Code != "invalid_request" {
+		t.Errorf("Error.Code = %q, want %q", resp.errBody.Error.Code, "invalid_request")
+	}
+	if !strings.Contains(resp.errBody.Error.Message, `"bogus"`) {
+		t.Errorf("Error.Message = %q, want it to name the offending property", resp.errBody.Error.Message)
+	}
+
+	persisted := getTicketHTTP(t, client, baseURL, created.Id)
+	if persisted.Status != Backlog {
+		t.Errorf("Status = %q, want unchanged %q (rejected request must not apply)", persisted.Status, Backlog)
 	}
 }
 
