@@ -160,6 +160,7 @@ var d3S2AllowedPlainTransitions = map[[2]TicketStatus]bool{
 	{Ready, InProgress}:    true,
 	{InProgress, Ready}:    true,
 	{InProgress, Blocked}:  true,
+	{Backlog, Blocked}:     true,
 	{Blocked, InProgress}:  true,
 	{InProgress, InReview}: true,
 	{InReview, InProgress}: true,

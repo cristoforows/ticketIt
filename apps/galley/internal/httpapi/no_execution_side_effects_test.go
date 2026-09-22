@@ -9,31 +9,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// knownPublicTables is every table this module's migrations create as
-// of issue #60 -- confirmed directly against a real, freshly migrated
-// database (`\dt` against ticketit_test), not merely inferred from
-// reading the migration files. M2 has no Round, work request, or queue
-// concept anywhere (AGENTS.md, "No AI, Agents, Rounds, or Michelin in
-// M2"), so this is also, today, the complete list of tables such a
-// concept would need one of.
-//
-// THIS IS THE GUARDRAIL'S TRIP WIRE: the moment a future migration
-// adds any table beyond this list -- a `rounds` table, a
-// `work_claims`/`work_queue` table, anything execution-shaped -- this
-// list no longer matches the live schema and
-// TestManualLifecycleActionsCreateNoExecutionRecords fails immediately
-// on its table-set assertion, forcing whoever adds that migration to
-// look at this test and decide deliberately whether a manual,
-// human-assigned action (this file's own ChangeTicketStatus,
-// AcceptTicket, AssignTicketOwner, UnassignTicket) is still creating
-// nothing in it. See that test's own doc comment for the second half
-// of the proof (row counts), and
-// docs/evidence/m2/60-lifecycle-transitions.md, "Proof the suite can
-// fail," for a captured red run proving this: this list was
-// deliberately mutated (a nonexistent "rounds" entry added, standing
-// in for a future migration's real table) with the live schema left
-// untouched, and the test failed immediately rather than passing
-// vacuously -- reverted afterward.
+// knownPublicTables is every table issue #60's migrations create,
+// verified against a live migrated database rather than inferred from
+// the migration files. Any new table breaks
+// TestManualLifecycleActionsCreateNoExecutionRecords' table-set
+// assertion on purpose, forcing a deliberate look at whether manual
+// lifecycle actions write to it. See
+// docs/evidence/m2/60-lifecycle-transitions.md.
 var knownPublicTables = []string{
 	"diagnostic_notes",
 	"oauth_states",
@@ -82,36 +64,14 @@ func tableRowCount(t *testing.T, pool *pgxpool.Pool, table string) int64 {
 // TestManualLifecycleActionsCreateNoExecutionRecords is issue #60's
 // guardrail for "human assignment and every manual transition create
 // no Round, no work request, and no queue entry, and start nothing."
-// A bare assertion of that sentence would be true today for the wrong
-// reason -- M2 has no Round/work-request/queue table at all, so
-// nothing could prove it -- and would keep passing silently even after
-// a future milestone added one, exactly the vacuous-negative-test
-// failure mode issue #59 found and #60 is warned to avoid.
+// Asserting that sentence directly would pass vacuously -- M2 has no
+// such table -- and would keep passing after a future milestone added
+// one, the failure mode issue #59 found and #60 is warned to avoid.
 //
-// This instead makes two falsifiable assertions against real
-// PostgreSQL, after driving every manual command this slice adds
-// (assign, every allowed Status transition including Accept) through
-// the real API on one Ticket:
-//
-//  1. The complete set of tables in the schema is still exactly
-//     knownPublicTables -- see that var's own comment for what would
-//     make this fail.
-//  2. Every known table OTHER than tickets has the exact same row
-//     count after as before. tickets itself grows by exactly one row
-//     -- the single Ticket this test creates -- proving these commands
-//     insert into tickets and nowhere else.
-//
-// What would make this fail if a future slice wired up execution:
-// either a migration adding a new table (assertion 1), or any of this
-// file's handlers inserting a row into an existing table beyond
-// tickets itself -- for example, if a future change made
-// ChangeTicketStatus or AssignTicketOwner also insert a bookkeeping
-// row somewhere when transitioning to In Progress (assertion 2). A
-// change that adds Round/queue creation in a genuinely separate
-// execution module, gated behind an Agent Assignee that cannot exist
-// in M2, would not need to touch this test at all -- which is the
-// intended scope: this guards the manual-transition commands
-// themselves, not the schema in general.
+// Instead, after driving every manual command this slice adds through
+// the real API on one Ticket: the schema's table set is still exactly
+// knownPublicTables, and every known table but tickets has an
+// unchanged row count, with tickets itself growing by exactly one.
 func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 	baseURL, client, pool, _ := devServerWithSessionAndPoolForTickets(t)
 

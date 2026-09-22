@@ -13,44 +13,29 @@ import (
 	"github.com/google/uuid"
 )
 
-// invalidTransitionCode is the one stable, machine-readable reason
-// code for every Status move this file rejects that D3 S2's table
-// does not list -- including a plain status-set to Done, which this
-// file always treats as "not on the table" regardless of the current
-// Status (see decidePlainStatusChange). Callers match on this code,
-// not on message text.
+// invalidTransitionCode is the one stable reason code for every move
+// D3 S2's table does not list, including a plain status-set to Done.
+// Callers match on this code, not on message text.
 const invalidTransitionCode = "invalid_transition"
 
-// reviewedPrMergeNotImplementedCode is Accept's own, more specific
-// reason code for a Ticket whose retained completion condition is
-// reviewedPrMerge: an explicit current-implementation limitation
-// (D2 unresolved, shared mechanism owned by M8), never folded into
-// invalidTransitionCode -- a caller needs to tell "wrong state" apart
-// from "right state, but this condition cannot complete yet."
+// reviewedPrMergeNotImplementedCode stays distinct from
+// invalidTransitionCode so a caller can tell "wrong state" apart from
+// "right state, but this condition cannot complete yet" -- a
+// current-implementation limit (D2 unresolved, mechanism owned by M8).
 const reviewedPrMergeNotImplementedCode = "reviewed_pr_merge_not_implemented"
 
-// allowedSourceStatusesForTarget is D3 S2's human-assigned workflow
-// table (docs/decisions/d3-agent-template-compatibility.md),
-// inverted: for a given requested target Status, the set of current
-// Statuses a plain POST /api/tickets/{id}/status may move from. This
-// is the literal table, not an inferred generalisation -- every
-// absence here is deliberate:
-//
-//   - Done has no entry at all: it is reachable only through explicit
-//     Accept (acceptTransition below), never this map.
-//   - Backlog's only source is Ready (Ready -> Backlog). Backlog is
-//     never a *target* from InProgress or Done.
-//   - Ready's sources are Backlog, InProgress, and Done -- but
-//     deliberately NOT Blocked: D3 permits only Blocked -> InProgress,
-//     not a shortcut straight back to Ready.
-//   - InProgress's sources are Ready, Blocked, and InReview.
-//   - Blocked's only source is InProgress.
-//   - InReview's only source is InProgress.
+// allowedSourceStatusesForTarget is D3 S2's workflow table
+// (docs/decisions/d3-agent-template-compatibility.md) inverted: per
+// requested target Status, the current Statuses a plain
+// POST /api/tickets/{id}/status may move from. Transcribed literally,
+// so every absence is deliberate -- notably Done, which has no entry
+// because only Accept reaches it, and Blocked -> Ready, which D3
+// omits in favour of Blocked -> InProgress alone.
 var allowedSourceStatusesForTarget = map[TicketStatus][]TicketStatus{
 	Backlog:    {Ready},
 	Ready:      {Backlog, InProgress, Done},
 	InProgress: {Ready, Blocked, InReview},
-	Blocked:    {InProgress},
+	Blocked:    {Backlog, InProgress},
 	InReview:   {InProgress},
 }
 
@@ -64,12 +49,9 @@ type transitionRejection struct {
 }
 
 // decidePlainStatusChange implements POST /api/tickets/{id}/status's
-// rule against a Ticket's persisted current Status: allowed only when
-// (current, target) is literally D3 S2's table (via
-// allowedSourceStatusesForTarget). Done is rejected unconditionally --
-// this function never returns Done as its accepted next value -- so
-// completion can never happen by accident through a plain status
-// write, whatever the current Status.
+// rule against a Ticket's persisted current Status. Done is rejected
+// unconditionally, whatever the current Status, so completion can
+// never happen by accident through a plain status write.
 func decidePlainStatusChange(current, target TicketStatus) *transitionRejection {
 	if target == Done {
 		return &transitionRejection{
@@ -92,10 +74,8 @@ func decidePlainStatusChange(current, target TicketStatus) *transitionRejection 
 
 // decideAccept implements POST /api/tickets/{id}/accept's rule: D3 S2
 // permits Done only from InReview, and only for a humanAcceptance
-// Ticket. A reviewedPrMerge Ticket cannot be completed in M2 at all
-// (D2 unresolved, shared mechanism owned by M8) -- rejected with its
-// own reason code, never silently downgraded to humanAcceptance and
-// never silently completed.
+// Ticket. A reviewedPrMerge Ticket is rejected outright, never
+// silently downgraded to humanAcceptance.
 func decideAccept(current TicketStatus, condition TicketCompletionCondition) *transitionRejection {
 	if current != InReview {
 		return &transitionRejection{
@@ -125,28 +105,16 @@ func containsStatus(statuses []TicketStatus, target TicketStatus) bool {
 }
 
 // applyTicketTransition validates and applies a Status transition
-// against a Ticket's PERSISTED current Status inside a single
-// transaction: SELECT ... FOR UPDATE takes a row lock for the whole
-// transaction, so a second, concurrent call on the same Ticket blocks
-// on that lock until the first commits (or rolls back), then reads
-// the now-current row -- never the value this call started with. This
-// is what makes two concurrent conflicting requests unable to both
-// apply: whichever commits first wins, and the second necessarily
-// re-evaluates decide against the already-changed Status.
+// against a Ticket's PERSISTED current Status. The FOR UPDATE row
+// lock is what stops two concurrent conflicting requests both
+// applying: the second blocks until the first commits, then
+// re-evaluates decide against the already-changed Status rather than
+// the value it started with.
 //
-// decide receives the row's current Status and completion condition
-// and returns nil to permit the requested transition (see
-// decidePlainStatusChange/decideAccept for the two callers' rules) or
-// a non-nil rejection to deny it -- either way, decide alone chooses
-// the destination Status via the closure's own captured target
-// (decidePlainStatusChange) or fixed Done (decideAccept); this
-// function only ever writes the Status the closure already decided
-// on, via nextStatus.
-//
-// This never creates a Round, work request, or queue entry, and
-// starts nothing beyond this one UPDATE -- see
-// TestManualLifecycleActionsCreateNoExecutionRecords for the proof and
-// exactly what would make it fail.
+// decide alone chooses the destination Status; this function only
+// writes what the closure returned. It creates no Round, work
+// request, or queue entry -- see
+// TestManualLifecycleActionsCreateNoExecutionRecords.
 func applyTicketTransition(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -294,15 +262,11 @@ func (s *server) AcceptTicket(w http.ResponseWriter, r *http.Request, id string)
 	writeJSON(w, http.StatusOK, ticket)
 }
 
-// setTicketAssigneeForOwner unconditionally sets assignee_type,
-// scoped to ownerID exactly like every other ticket query in this
-// package. assigneeType nil binds SQL NULL (unassigned); a non-nil
-// pointer binds that value ("owner" today -- see AssignTicketOwner).
-// No current-Status precondition applies: D3 places none on human
-// assignment, since M2 never has an open Round to lock the Assignee
-// field, so this needs no transaction of its own the way
-// applyTicketTransition does -- there is no persisted state this
-// write could conflict with.
+// setTicketAssigneeForOwner unconditionally sets assignee_type; nil
+// binds SQL NULL (unassigned). D3 places no current-Status
+// precondition on human assignment, and M2 never has an open Round to
+// lock the field, so unlike applyTicketTransition this needs no
+// transaction -- there is no persisted state it could conflict with.
 func setTicketAssigneeForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, publicID string, assigneeType *string) (Ticket, bool, error) {
 	row := pool.QueryRow(ctx,
 		`UPDATE tickets SET assignee_type = $3, updated_at = now()
