@@ -249,7 +249,7 @@ describe("TicketDetail", () => {
 
     it("offers only D3 S2's allowed next Statuses for each current Status, and never Done", () => {
       const cases: Array<[Ticket["status"], Ticket["status"][]]> = [
-        ["Backlog", ["Ready"]],
+        ["Backlog", ["Ready", "Blocked"]],
         ["Ready", ["Backlog", "InProgress"]],
         ["InProgress", ["Ready", "Blocked", "InReview"]],
         ["Blocked", ["InProgress"]],

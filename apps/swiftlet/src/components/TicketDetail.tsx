@@ -67,7 +67,7 @@ const OWNER_ASSIGNEE_TYPE = "owner";
  * Omits Done, which only Accept reaches.
  */
 const presentationNextStatuses: Record<Ticket["status"], Ticket["status"][]> = {
-  Backlog: ["Ready"],
+  Backlog: ["Ready", "Blocked"],
   Ready: ["Backlog", "InProgress"],
   InProgress: ["Ready", "Blocked", "InReview"],
   Blocked: ["InProgress"],
