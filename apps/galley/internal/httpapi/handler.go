@@ -65,6 +65,9 @@ func NewHandler(cfg config.Config, startedAt time.Time, pool *pgxpool.Pool, logg
 	mux.HandleFunc("/api/session", methodNotAllowedHandler("GET", "DELETE"))
 	mux.HandleFunc("/api/tickets", methodNotAllowedHandler("GET", "POST"))
 	mux.HandleFunc("/api/tickets/{id}", methodNotAllowedHandler("GET", "PATCH"))
+	mux.HandleFunc("/api/tickets/{id}/status", methodNotAllowedHandler("POST"))
+	mux.HandleFunc("/api/tickets/{id}/accept", methodNotAllowedHandler("POST"))
+	mux.HandleFunc("/api/tickets/{id}/assignee", methodNotAllowedHandler("PUT", "DELETE"))
 	if cfg.Environment == config.EnvDevelopment {
 		mux.HandleFunc(devOnlyPathPrefix+"diagnostic-notes", methodNotAllowedHandler("GET", "POST"))
 	}

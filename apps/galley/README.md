@@ -63,6 +63,13 @@ exactly once, at creation, per the accepted D3 decision), and one
 `repository` reference column available on either Template. See
 "Ticket Templates and the retained completion condition" below.
 
+[Issue #60](https://github.com/cristoforows/ticketIt/issues/60) added
+an Assignee (Owner-only in M2), the authoritative Status state machine
+implementing D3 S2's human-assigned workflow table, and the explicit
+Accept command -- `POST /api/tickets/{id}/status`,
+`POST /api/tickets/{id}/accept`, and `PUT`/`DELETE /api/tickets/{id}/assignee`.
+See "Human-assigned lifecycle transitions and the Assignee" below.
+
 Galley is a standalone Go module (`go.mod` at this directory) with no
 dependency on Node or any frontend toolchain. It does have third-party
 Go dependencies as of issue #51 — the generated server types/interface
@@ -828,6 +835,91 @@ against a deliberately mismatched fixture row
 a naive "never changes across the same-pairing tests I happen to run"
 test would not catch.
 
+### Human-assigned lifecycle transitions and the Assignee (issue #60)
+
+Implements the accepted [D3 decision](../../docs/decisions/d3-agent-template-compatibility.md)
+S2's human-assigned workflow table and S4's rejections: an Assignee
+(`internal/migrations/000007_add_ticket_assignee.up.sql`'s nullable
+`assignee_type TEXT` -- `"owner"` or unassigned; M2 has no Agent
+Assignee), a Status state machine
+(`internal/httpapi/ticket_lifecycle.go`), and the four commands that
+change either: `POST /api/tickets/{id}/status`,
+`POST /api/tickets/{id}/accept`, and
+`PUT`/`DELETE /api/tickets/{id}/assignee`.
+
+**The D3 S2 table is transcribed literally, inverted by target
+Status**, not inferred or generalised
+(`allowedSourceStatusesForTarget`): nine allowed (from, to) pairs,
+deliberately excluding `Blocked -> Ready` (only `Blocked -> InProgress`
+is permitted) and excluding `Done` as a target entirely -- `Done` is
+reachable only through `POST /api/tickets/{id}/accept`
+(`decideAccept`), never a plain status write, whatever the Ticket's
+current Status or retained completion condition.
+
+**Accept's two checks are ordered and separately coded.** A Ticket not
+currently `InReview` is rejected with the generic `invalid_transition`
+code, regardless of its completion condition. Only a Ticket that *is*
+`InReview` reaches the completion-condition check, which rejects
+`reviewedPrMerge` with the distinct `reviewed_pr_merge_not_implemented`
+code -- an explicit current-implementation limitation naming **D2**
+(unresolved) and **M8** (owning milestone), never a silent downgrade to
+`humanAcceptance`. Only `humanAcceptance` Tickets can complete in M2.
+
+**Concurrency: one transaction, one row lock
+(`applyTicketTransition`).** `SELECT ... FOR UPDATE` inside a single
+transaction holds a lock on the Ticket's row for the transaction's
+whole lifetime; a concurrent call against the same Ticket blocks on its
+own `SELECT ... FOR UPDATE` until the first commits, then evaluates its
+own requested transition against the now-current row. This is what
+makes two concurrent conflicting transitions unable to both apply --
+proven against real PostgreSQL by
+`TestChangeTicketStatus_ConcurrentConflictingTransitionsOnlyOneApplies`,
+including a captured red run against a deliberately un-locked,
+read-then-write version of the same function
+(`docs/evidence/m2/60-lifecycle-transitions.md`).
+
+**Assignee changes are unconditional.** D3 S1's "no open Round"
+precondition on assignment is vacuously true throughout M2 (no Round
+concept exists anywhere), so `AssignTicketOwner`/`UnassignTicket` apply
+via a plain, idempotent `UPDATE` from every Status, with no transaction
+of their own -- there is nothing for them to race against.
+`Ticket.assigneeType` is a plain, unenumerated string in the contract
+(not a closed enum, unlike `status`/`template`/`completionCondition`):
+nothing in this contract ever accepts an assignee-type value from a
+client, so a future Agent Assignee kind can be added as a purely
+additive change to this same column and contract field.
+
+**The no-execution-artifact guardrail
+(`internal/httpapi/no_execution_side_effects_test.go`) is a database-level
+trip wire, not a vacuous negative.** `TestManualLifecycleActionsCreateNoExecutionRecords`
+drives every command this slice adds through the real API, then
+asserts the complete set of tables in the schema is unchanged from a
+fixed, confirmed allowlist and that every table other than `tickets`
+has an unchanged row count. See
+[`docs/evidence/m2/60-lifecycle-transitions.md`](../../docs/evidence/m2/60-lifecycle-transitions.md),
+"Proof the suite can fail," for exactly what would make this fail (a
+future migration adding an execution-shaped table, or a future manual
+command inserting into an existing table) and a captured red run
+proving it.
+
+**Guardrail allowlist extended (issue #59's
+`TestNoTemplateToCapabilityMapping`).** `AcceptTicket`, `decideAccept`,
+`applyTicketTransition`, and `ChangeTicketStatus` all reference
+`TicketCompletionCondition` -- Accept must read a Ticket's own already-
+retained condition to decide whether it can complete at all, which is
+not a Template-to-Agent/engine mapping (the one thing D3 forbids). This
+was caught by the guardrail on the first real test run, not merely
+described afterward; see the evidence record for the captured failure
+and the deliberate allowlist extension that resolved it.
+
+**Out of scope, explicitly:** Agent Assignee, an agent-assignment
+endpoint, and Agent-readiness validation (M4); open-Round field locks
+(M4, vacuously satisfied in M2); D4's `Done -> Ready` "already-merged
+PR" caveat (unresolved, still M8); reviewed-merge evidence transport
+(D2, M8); archive and Badges (M3). See
+[`docs/evidence/m2/60-lifecycle-transitions.md`](../../docs/evidence/m2/60-lifecycle-transitions.md)
+for the full reasoning and every captured command/result.
+
 ## Error shape
 
 `ErrorBody`/`ErrorDetail` are generated from
@@ -858,6 +950,8 @@ uses this shared JSON shape:
 | OAuth callback missing `code` (#54)          | `400`  | `invalid_request`      |
 | Provider communication failed, or reported its own error (#54) | `502`/`400` | `oauth_provider_error` |
 | Sign-in identity is not the configured Owner (#54) | `403` | `owner_mismatch`      |
+| A Status transition is not on D3 S2's table (#60)  | `400` | `invalid_transition`   |
+| Accept attempted on a `reviewedPrMerge` Ticket (#60, D2/M8 limitation) | `400` | `reviewed_pr_merge_not_implemented` |
 
 A `405` response also carries an `Allow` header naming the accepted
 method(s).
@@ -1052,7 +1146,7 @@ apps/galley/
 │                           #   real port -- test/development only, never cmd/galley
 └── internal/
     ├── config/             # environment parsing and validation (incl. DATABASE_URL, #52; owner/OAuth, #54)
-    ├── migrations/         # embedded, versioned, forward-only SQL files (#52, #54, #56, #57, #59)
+    ├── migrations/         # embedded, versioned, forward-only SQL files (#52, #54, #56, #57, #59, #60)
     ├── postgres/           # issue #52: pgxpool wrapper, live health check, migration runner,
     │                       #   and the real-PostgreSQL test-setup helper (NewTestPool)
     ├── auth/                # issue #54: tokens/hashing, sessions, oauth state, Owner
@@ -1073,7 +1167,10 @@ apps/galley/
         │                   #   issue #58 added UpdateTicket (manual refinement); issue #59
         │                   #   added Templates and the retained completion condition
         ├── ticket_template_test.go            # issue #59: Templates and completion-condition tests
-        └── template_capability_guardrail_test.go  # issue #59: the no-mapping guardrail test
+        ├── template_capability_guardrail_test.go  # issue #59 (extended #60): the no-mapping guardrail test
+        ├── ticket_lifecycle.go                 # issue #60: Status transitions, Accept, Assignee
+        ├── ticket_lifecycle_test.go            # issue #60: transition-table, Accept, and concurrency tests
+        └── no_execution_side_effects_test.go   # issue #60: the no-Round/queue/work-request guardrail
 ```
 
 ## Exact versions and toolchain
@@ -1137,6 +1234,11 @@ apps/galley/
   `template_capability_guardrail_test.go`'s AST scan uses only the
   standard library (`go/ast`, `go/parser`, `go/token`, `path/filepath`,
   `sort`).
+- Issue #60 added no new dependency: `ticket_lifecycle.go`'s
+  transaction handling reuses the existing `pgx/v5` `pool.Begin`
+  pattern already established by `internal/auth/owner.go`'s
+  `bootstrapOwner`, and `no_execution_side_effects_test.go` queries
+  `information_schema.tables` directly through the existing pool.
 
 PostgreSQL server: `17.11` (Homebrew, `localhost:5432`) on the machine
 this slice's evidence was recorded on — any reasonably recent

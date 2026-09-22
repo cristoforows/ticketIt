@@ -74,6 +74,24 @@ var allowedTemplateAwareFunctions = map[string]bool{
 	"scanTicketRow":              true,
 	"updateTicketForOwner":       true,
 	"defaultCompletionCondition": true,
+	// Issue #60 (D3 S2, "Completing human work that requires a
+	// reviewed PR merge"): Accept reads a Ticket's own already-retained
+	// completionCondition to decide whether it can complete at all, and
+	// rejects reviewedPrMerge with an explicit current-implementation
+	// reason (D2/M8) rather than silently downgrading it. This reads
+	// the condition to gate a human Owner action (Accept); it does not
+	// map a Template to an Agent, engine, or capability -- the one
+	// thing D3 forbids -- so it belongs on this allowlist deliberately,
+	// not as a workaround.
+	"AcceptTicket":          true,
+	"decideAccept":          true,
+	"applyTicketTransition": true,
+	// ChangeTicketStatus's decide closure also names
+	// TicketCompletionCondition as a parameter type (unused by its own
+	// logic, which only ever branches on Status) purely to satisfy
+	// applyTicketTransition's shared decide signature -- see
+	// docs/evidence/m2/60-lifecycle-transitions.md.
+	"ChangeTicketStatus": true,
 }
 
 // excludedTemplateGuardrailFiles are files this scan does not inspect:

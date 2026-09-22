@@ -20,6 +20,7 @@ const TICKET = {
   status: "Backlog",
   template: "Basic",
   completionCondition: "humanAcceptance",
+  assigneeType: "",
   goal: "",
   context: "",
   successCriteria: "",

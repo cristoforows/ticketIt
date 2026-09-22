@@ -343,7 +343,7 @@ func defaultCompletionCondition(template TicketTemplate) TicketCompletionConditi
 // getTicketForOwner's and listTicketsForOwner's SELECT, and
 // updateTicketForOwner's RETURNING -- so the column list and
 // scanTicketRow's scan targets can never drift against each other.
-const ticketSelectColumns = `public_id::text, title, status, template, completion_condition, goal, context, success_criteria, constraints, repository, created_at, updated_at`
+const ticketSelectColumns = `public_id::text, title, status, template, completion_condition, assignee_type, goal, context, success_criteria, constraints, repository, created_at, updated_at`
 
 // ticketRowScanner is satisfied by both pgx.Row (QueryRow) and pgx.Rows
 // (Query) -- both expose Scan(dest ...any) error with this signature,
@@ -364,11 +364,12 @@ func scanTicketRow(row ticketRowScanner) (Ticket, error) {
 	var (
 		ticket                                                   Ticket
 		status, template, completionCondition                    string
+		assigneeType                                             sql.NullString
 		goal, ctxField, successCriteria, constraints, repository sql.NullString
 		createdAt, updatedAt                                     time.Time
 	)
 	if err := row.Scan(
-		&ticket.Id, &ticket.Title, &status, &template, &completionCondition,
+		&ticket.Id, &ticket.Title, &status, &template, &completionCondition, &assigneeType,
 		&goal, &ctxField, &successCriteria, &constraints, &repository,
 		&createdAt, &updatedAt,
 	); err != nil {
@@ -377,6 +378,10 @@ func scanTicketRow(row ticketRowScanner) (Ticket, error) {
 	ticket.Status = TicketStatus(status)
 	ticket.Template = TicketTemplate(template)
 	ticket.CompletionCondition = TicketCompletionCondition(completionCondition)
+	// assignee_type is NULL at storage for "never assigned" (000007_...sql),
+	// surfaced as "" on the wire -- the same convention goal/context/etc
+	// already use, not a new one.
+	ticket.AssigneeType = TicketAssigneeType(assigneeType.String)
 	ticket.Goal = goal.String
 	ticket.Context = ctxField.String
 	ticket.SuccessCriteria = successCriteria.String
