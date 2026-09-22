@@ -20,7 +20,7 @@ import (
 
 func main() {
 	if err := run(os.Getenv, os.Stdout); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+	    fmt.Fprintln(os.Stderr, err) // BREAK-GOFMT: spaces instead of a tab
 		os.Exit(1)
 	}
 }
