@@ -53,12 +53,10 @@ export async function createTicket(page: Page, title: string, template: TicketTe
 export type TicketStatus = "Backlog" | "Ready" | "InProgress" | "Blocked" | "InReview" | "Done";
 
 /**
- * The outcome of an id-scoped workflow command (issue #61), never
- * thrown on a rejection -- unlike createTicket, callers need Galley's
- * actual `error.code`/`error.message` on failure, both to arrange
- * background state (a rejection there is a genuine test-setup bug) and
- * to assert the UI shows this exact live response rather than a
- * hardcoded literal (README.md, "Adding a spec").
+ * Never throws on a rejection, unlike createTicket: callers need
+ * Galley's actual code and message to assert the UI shows that live
+ * response rather than a hardcoded literal (README.md, "Adding a
+ * spec").
  */
 export interface TicketCommandResult {
   ok: boolean;
@@ -83,17 +81,14 @@ async function ticketCommand(
 }
 
 /**
- * Drives Galley's own POST /api/tickets/{id}/status directly (issue
- * #61) -- for background state a spec is not itself testing (e.g.
- * reaching In Progress before proving Blocked/resume), and for
- * capturing Galley's own live rejection to assert the UI shows it
- * verbatim, never a hardcoded copy of the message text.
+ * For background state a spec is not itself testing, and for capturing
+ * Galley's live rejection to assert the UI shows it verbatim.
  */
 export async function changeTicketStatusDirect(page: Page, id: string, status: TicketStatus): Promise<TicketCommandResult> {
   return ticketCommand(page, "POST", `/api/tickets/${id}/status`, { status });
 }
 
-/** Drives Galley's own POST /api/tickets/{id}/accept directly (issue #61) -- see changeTicketStatusDirect's own doc comment. */
+/** Same purpose as changeTicketStatusDirect, for Accept. */
 export async function acceptTicketDirect(page: Page, id: string): Promise<TicketCommandResult> {
   return ticketCommand(page, "POST", `/api/tickets/${id}/accept`);
 }

@@ -1,16 +1,10 @@
 #!/usr/bin/env bash
-# The one documented command for issue #53 (extended by #55 with the
-# authenticated-browser phases, by #56 with the Ticket-capture and
-# persistence phases, by #57 with the Ticket detail page phase, by
-# #58 with the manual refinement phases, by #59 with the Ticket
-# Templates phase, and by #61 with the Status/Assignee/Accept
-# lifecycle phases, below): migrates a dedicated
-# database, starts a real Galley, a real substitute GitHub OAuth
-# provider, builds and serves a real Swiftlet, runs the browser suite
-# (including the failure-mode, authenticated-session, and Ticket specs)
+# The one documented command for the browser suite: migrates a
+# dedicated database, starts a real Galley, a real substitute GitHub
+# OAuth provider, builds and serves a real Swiftlet, runs the suite
 # against them, and tears everything down -- regardless of a
-# developer's own already-running servers. See e2e/README.md for the
-# full explanation of every step and every environment variable below.
+# developer's own already-running servers. See e2e/README.md for every
+# step and environment variable below.
 #
 # Usage:
 #   ./run.sh
@@ -262,14 +256,12 @@ log "running tests/ticket-refinement-before.spec.ts (edits title and manual refi
   E2E_STORAGE_STATE_PATH="$STORAGE_STATE_PATH" \
   npx playwright test tests/ticket-refinement-before.spec.ts) || REFINEMENT_BEFORE_EXIT=$?
 
-# tests/ticket-lifecycle-before.spec.ts (issue #61) shares the same
-# storage state and restart for the same reason ticket-refinement's pair
-# does: a Status/Assignee reached through the real controls must survive
-# a genuine backend restart, not just a page reload. Runs before
-# ticket-persistence-before.spec.ts, for the same created_at-ordering
-# reason ticket-refinement-before.spec.ts already runs there -- its own
-# capture must not sort among ticket-persistence-after.spec.ts's
-# asserted "newest two."
+# tests/ticket-lifecycle-before.spec.ts shares this storage state and
+# restart for the reason ticket-refinement's pair does: a Status and
+# Assignee reached through the real controls must survive a genuine
+# backend restart, not just a page reload. It runs before
+# ticket-persistence-before.spec.ts so its capture does not sort among
+# the "newest two" that spec's pair asserts on.
 LIFECYCLE_BEFORE_EXIT=0
 log "running tests/ticket-lifecycle-before.spec.ts (moves a Ticket to In Progress and assigns the Owner)"
 (cd "$SCRIPT_DIR" && E2E_BASE_URL="$SWIFTLET_BASE_URL" GALLEY_BASE_URL="$GALLEY_BASE_URL" \
@@ -346,10 +338,9 @@ log "running tests/ticket-templates.spec.ts against the restarted galley"
   E2E_GITHUBFAKE_BASE_URL="$GITHUBFAKE_URL" \
   npx playwright test tests/ticket-templates.spec.ts) || TEMPLATES_EXIT=$?
 
-# tests/ticket-lifecycle.spec.ts (issue #61) signs in fresh, like the
-# three specs above -- restart persistence for Status/Assignee is
-# already covered by ticket-lifecycle-before/after.spec.ts, so this
-# spec needs no restart of its own.
+# tests/ticket-lifecycle.spec.ts signs in fresh, like the three specs
+# above: ticket-lifecycle-before/after.spec.ts already covers restart
+# persistence, so this one needs no restart.
 LIFECYCLE_EXIT=0
 log "running tests/ticket-lifecycle.spec.ts against the restarted galley"
 (cd "$SCRIPT_DIR" && E2E_BASE_URL="$SWIFTLET_BASE_URL" GALLEY_BASE_URL="$GALLEY_BASE_URL" \

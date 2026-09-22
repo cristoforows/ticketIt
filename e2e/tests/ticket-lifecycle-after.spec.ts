@@ -1,9 +1,7 @@
 import { test, expect } from "@playwright/test";
 
-// Loads the same storage state ticket-lifecycle-before.spec.ts ran
-// with -- proving the Status and Assignee it reached are readable from
-// a genuinely restarted Galley process, the same two-file split every
-// other before/after pair in this suite uses.
+// The same storage state the "before" half ran with, so the Status and
+// Assignee it reached are read back from a genuinely restarted Galley.
 const STORAGE_STATE_PATH = process.env.E2E_STORAGE_STATE_PATH;
 test.use({ storageState: STORAGE_STATE_PATH });
 
@@ -15,19 +13,15 @@ test.beforeAll(() => {
   }
 });
 
-// Must match ticket-lifecycle-before.spec.ts's own constant exactly --
-// see that file's comment for why it is duplicated rather than
-// imported.
+// Must match ticket-lifecycle-before.spec.ts's constant exactly.
 const TITLE = "ticket-lifecycle: before restart";
 
 test("the Status and Assignee reached before a Galley restart are still there after it", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("app-shell")).toBeVisible();
 
-  // Located by title, since the Ticket's id (generated at creation time
-  // in the "before" process) cannot be shared across the two separate
-  // `playwright test` process invocations that straddle run.sh's
-  // restart.
+  // Located by title: the id was generated in the "before" process and
+  // cannot cross the two `playwright test` invocations.
   const ticketLink = page.locator('[data-testid="ticket-title"]', { hasText: TITLE });
   await expect(ticketLink).toHaveText(TITLE);
   await ticketLink.click();

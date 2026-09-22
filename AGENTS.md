@@ -20,11 +20,30 @@ resource, immediately beforehand. See `docs/deployment.md`,
 
 ## Comments
 
-Comment only what the code cannot state: a domain rule, an external
-constraint, or why a non-obvious choice was made. Never restate
-signatures, types, or control flow — if reading the code answers it,
-delete the comment. Longer reasoning belongs in the evidence record
-or an ADR.
+Default to no comment. Write one only for what the code cannot
+state — a domain rule, an external constraint, or why a non-obvious
+choice was made — and only where a reader would otherwise get it
+wrong.
+
+Never explain functionality. Signatures, types, control flow, what a
+function does, what a test asserts — all of it is in the code already.
+Name the function or test and stop; if the name cannot carry it, fix
+the name.
+
+Keep what survives dense:
+
+- One fact, stated once. Never restate it in other words, or
+  reinforce it with "never", "always", or "exactly".
+- One citation, as a bare pointer. Never summarise what the issue,
+  ADR, or doc already says.
+- No preamble, no scene-setting, no recap of the slice.
+
+Length is not capped — it follows from the non-inferable content and
+stops there. Reasoning that outgrows that belongs in an ADR or the
+evidence record.
+
+The same limits apply to `description:` in `contracts/openapi.yaml`,
+which becomes the comments in `api.gen.go`.
 
 ## Pull requests
 

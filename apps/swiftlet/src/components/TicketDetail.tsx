@@ -13,13 +13,10 @@ interface TicketDetailProps {
    */
   onSave: (update: TicketUpdate) => Promise<Ticket>;
   /**
-   * The four owner-command callbacks below (issue #61) follow the same
-   * container/presentation split as onSave: each performs one real
-   * Galley request and returns the updated Ticket, or throws Galley's
-   * own rejection verbatim. Keeping them as props -- rather than this
-   * component importing src/api/tickets.ts itself -- is what lets
-   * M3's modal container supply its own and render this exact
-   * component unchanged, exactly like onSave already does.
+   * Owner commands arrive as props, like onSave, rather than this
+   * component importing src/api/tickets.ts: that is what lets M3's
+   * modal container supply its own and render this component
+   * unchanged. Each throws Galley's rejection verbatim.
    */
   onChangeStatus: (status: Ticket["status"]) => Promise<Ticket>;
   onAccept: () => Promise<Ticket>;
@@ -58,30 +55,16 @@ function completionConditionLabel(condition: Ticket["completionCondition"]): str
   return condition === "reviewedPrMerge" ? "Reviewed pull request merged" : "Human acceptance";
 }
 
-/**
- * The only non-empty assignee_type value M2 ever writes
- * (apps/galley/internal/httpapi/ticket_lifecycle.go's
- * assigneeTypeOwnerValue) -- there is no Agent Assignee kind anywhere
- * yet (AGENTS.md, "No AI, Agents, Rounds, or Michelin in M2").
- */
+/** The only non-empty assignee_type M2 writes; there is no Agent Assignee kind yet. */
 const OWNER_ASSIGNEE_TYPE = "owner";
 
 /**
- * D3 S2's human-assigned workflow table
- * (docs/decisions/d3-agent-template-compatibility.md), mirrored here
- * for presentation only: which Status buttons this component offers
- * from the Ticket's current Status. This is a second, independent
- * transcription of the same table Galley's own
- * allowedSourceStatusesForTarget encodes
- * (apps/galley/internal/httpapi/ticket_lifecycle.go) -- inverted the
- * same direction, written without importing that map -- and it
- * decides nothing on its own: Galley re-validates every request
- * against the Ticket's actual persisted Status regardless of what this
- * component offered, and a stale offer here (e.g. after a concurrent
- * change) still surfaces Galley's own rejection rather than a
- * fabricated success (ADR 0001; see e2e/tests/ticket-lifecycle.spec.ts's
- * rejected-skip case). Deliberately omits Done -- Done is reachable
- * only through the separate Accept action below, never this list.
+ * D3 S2's workflow table
+ * (docs/decisions/d3-agent-template-compatibility.md), mirrored for
+ * presentation only. It decides nothing: Galley re-validates every
+ * request against the persisted Status, so a stale offer here surfaces
+ * Galley's rejection rather than a fabricated success (ADR 0001).
+ * Omits Done, which only Accept reaches.
  */
 const presentationNextStatuses: Record<Ticket["status"], Ticket["status"][]> = {
   Backlog: ["Ready"],
@@ -93,16 +76,10 @@ const presentationNextStatuses: Record<Ticket["status"], Ticket["status"][]> = {
 };
 
 /**
- * Verbatim copy of Galley's own rejection message for an Accept
- * attempt on a reviewedPrMerge Ticket
- * (apps/galley/internal/httpapi/ticket_lifecycle.go's decideAccept,
- * reviewedPrMergeNotImplementedCode) -- shown here without calling
- * Accept, since the retained completionCondition already determines
- * the outcome deterministically and Accept is described as an
- * explicit owner action, not one this component fires on its own.
- * e2e/tests/ticket-lifecycle.spec.ts's Coding-Template case proves
- * this string still matches Galley's own live response, rather than
- * trusting this copy to never drift.
+ * Copied from decideAccept so the limitation can be shown without
+ * firing Accept, which is an explicit owner action. Drift is caught by
+ * e2e/tests/ticket-lifecycle.spec.ts's Coding-Template case, which
+ * compares this against Galley's live response.
  */
 const REVIEWED_PR_MERGE_NOT_IMPLEMENTED_MESSAGE =
   "this ticket's retained completion condition is reviewed PR merge, which cannot be completed in M2: " +
@@ -153,13 +130,8 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
   }, [ticket]);
 
   /**
-   * Shared handling for every owner-command button below (issue #61):
-   * disables the controls while the request is in flight, replaces
-   * `current` with exactly what Galley returned on success, and on
-   * rejection shows Galley's own message without ever changing
-   * `current` -- so a rejected command leaves the last-known-good
-   * Status/Assignee on screen instead of assuming the command applied
-   * (ADR 0001; never an optimistic update).
+   * Never an optimistic update: a rejection leaves `current` alone, so
+   * the last-known-good Status and Assignee stay on screen (ADR 0001).
    */
   async function runAction(action: () => Promise<Ticket>) {
     setActionError(null);
@@ -254,9 +226,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
                 {current.assigneeType === OWNER_ASSIGNEE_TYPE ? "Owner" : "Unassigned"}
               </dd>
             </dl>
-            {/* The only Assignee kind M2 has is the Owner -- there is no
-                Agent Assignee option anywhere (AGENTS.md, "No AI, Agents,
-                Rounds, or Michelin in M2"). */}
+            {/* Owner is the only Assignee kind M2 has. */}
             {current.assigneeType === OWNER_ASSIGNEE_TYPE ? (
               <button
                 type="button"

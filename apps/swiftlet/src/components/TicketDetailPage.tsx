@@ -70,11 +70,8 @@ export function TicketDetailPage({ ticketId }: TicketDetailPageProps) {
     return updateTicket(ticketId, update);
   }
 
-  // The four owner-command callbacks below (issue #61) follow the same
-  // pattern as saveTicket: this container is the only place that ever
-  // calls these api/tickets.ts functions, keeping TicketDetail itself
-  // free of fetching -- which is what lets M3's modal container supply
-  // its own and render TicketDetail unchanged.
+  // Like saveTicket: the owner commands live here so TicketDetail
+  // stays free of fetching.
   function changeStatus(status: Ticket["status"]): Promise<Ticket> {
     return changeTicketStatus(ticketId, status);
   }

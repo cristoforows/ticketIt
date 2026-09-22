@@ -136,11 +136,9 @@ describe("TicketDetailPage", () => {
     );
   });
 
-  // issue #61: this container is the only place that ever calls
-  // api/tickets.ts's changeTicketStatus/acceptTicket/assignTicketOwner/
-  // unassignTicket -- these prove the wiring from TicketDetail's
-  // buttons through to the real request, not just the presentational
-  // behavior TicketDetail.test.tsx already covers.
+  // Proves the wiring from TicketDetail's buttons through to the real
+  // request, beyond the presentational behavior TicketDetail.test.tsx
+  // already covers.
   it("changes Status through POST /api/tickets/:id/status and shows the updated Ticket", async () => {
     const moved = { ...TICKET, status: "Ready" };
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(TICKET)).mockResolvedValueOnce(jsonResponse(moved));

@@ -35,7 +35,7 @@ const REFINED_TICKET: Ticket = {
   repository: "owner/safari-fixes",
 };
 
-/** Default no-op workflow-command props (issue #61) for tests that don't exercise them. */
+/** No-op workflow-command props for tests that don't exercise them. */
 function noopActions() {
   return {
     onChangeStatus: vi.fn<(status: Ticket["status"]) => Promise<Ticket>>(),
@@ -204,9 +204,8 @@ describe("TicketDetail", () => {
     expect(screen.getByTestId("ticket-detail-edit-form")).toBeInTheDocument();
   });
 
-  // issue #61: workflow controls (Assignee, Status transitions, Accept)
-  // live inside this same reusable, pure-presentation component -- not
-  // TicketDetailPage -- so M3's modal inherits them unchanged.
+  // The workflow controls live in this reusable component rather than
+  // TicketDetailPage, so M3's modal inherits them unchanged.
   describe("workflow controls", () => {
     it("shows Unassigned and an Assign button when the Ticket has no Assignee", () => {
       render(<TicketDetail ticket={TICKET} onSave={vi.fn()} {...noopActions()} />);
@@ -296,7 +295,7 @@ describe("TicketDetail", () => {
       expect(await screen.findByTestId("ticket-detail-action-error")).toHaveTextContent(
         "the transition Backlog -> InProgress is not permitted",
       );
-      // Still Ready -- the rejected command never touched the displayed Status.
+      // Still Ready: a rejection never touches the displayed Status.
       expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("Ready");
     });
 

@@ -163,9 +163,9 @@ func (e TicketTemplate) Valid() bool {
 	}
 }
 
-// ChangeTicketStatusRequest Body of `POST /api/tickets/{id}/status` (issue #60). `status` names the requested target Status; Galley validates the transition against the Ticket's own persisted current Status (docs/decisions/d3-agent-template-compatibility.md S2) and rejects any move not on that table with `invalid_transition` -- including `Done`, which this operation always rejects regardless of the current Status: `Done` is reachable only through `POST /api/tickets/{id}/accept`.
+// ChangeTicketStatusRequest `status` names the requested target Status, validated against the Ticket's persisted current Status per D3 S2. `Done` is always rejected here -- see `POST /api/tickets/{id}/accept`.
 type ChangeTicketStatusRequest struct {
-	// Status A Ticket's lifecycle stage (CONTEXT.md, "Status"). Transitions between these values are validated by Galley against the Ticket's own persisted current Status, per the accepted D3 decision (issue #60, docs/decisions/d3-agent-template-compatibility.md S2) -- see `POST /api/tickets/{id}/status` and `POST /api/tickets/{id}/accept` below. `Done` is reachable only through explicit Accept, never through a plain status change.
+	// Status A Ticket's lifecycle stage (CONTEXT.md, "Status"). Moves between these values are validated against the persisted current Status per D3 S2 (docs/decisions/d3-agent-template-compatibility.md). `Done` is reachable only through explicit Accept.
 	Status TicketStatus `json:"status"`
 }
 
@@ -265,7 +265,7 @@ type StatusResponseStatus string
 
 // Ticket ticketIt's first domain record (issue #56): a title captured in Backlog. No work-type/category column -- see docs/ticket-creation.md, "Flexible ticket structure". Owned by exactly one Owner, enforced by Galley (docs/adr/0001-single-authority-galley.md). Addressed by an opaque, non-sequential public identifier (issue #57) -- see `id` below.
 type Ticket struct {
-	// AssigneeType The kind of Assignee currently responsible for a Ticket (CONTEXT.md, "Assignee"; issue #60, D3 S2). "" means unassigned. In M2 the Owner (a human) is the only assignable Assignee, so "owner" is the only non-empty value -- there is no Agent Assignee anywhere yet (AGENTS.md, "No AI, Agents, Rounds, or Michelin in M2"). Always present on the wire, matching `goal`'s own "" convention. See `PUT`/`DELETE /api/tickets/{id}/assignee` below for the two commands that change it.
+	// AssigneeType The kind of Assignee responsible for a Ticket (CONTEXT.md, "Assignee"). "" means unassigned, always present on the wire, matching `goal`'s convention. `owner` is the only non-empty value in M2: there is no Agent Assignee yet.
 	AssigneeType TicketAssigneeType `json:"assigneeType"`
 
 	// CompletionCondition The condition that completes a Ticket (CONTEXT.md, "Done"): human acceptance, or merging its reviewed pull request. Derived from the Ticket's Template default exactly once, at creation (issue #59, D3) -- there is no request field or operation anywhere in this contract that sets or changes it directly. Assignment, reassignment, and editing any other field never change it.
@@ -289,7 +289,7 @@ type Ticket struct {
 	// Repository One Ticket repository reference (issue #59, D3 S1 check 3), available on either Template -- required by nothing in M2. There is exactly one such field on a Ticket; the Coding Template surfaces it by default, but it is not a competing Basic-only concept. Plain text (e.g. an "owner/repo" name or a URL) with no format enforced yet. Always present on the wire; "" means never set or cleared -- see `goal`'s description for the same convention.
 	Repository string `json:"repository"`
 
-	// Status A Ticket's lifecycle stage (CONTEXT.md, "Status"). Transitions between these values are validated by Galley against the Ticket's own persisted current Status, per the accepted D3 decision (issue #60, docs/decisions/d3-agent-template-compatibility.md S2) -- see `POST /api/tickets/{id}/status` and `POST /api/tickets/{id}/accept` below. `Done` is reachable only through explicit Accept, never through a plain status change.
+	// Status A Ticket's lifecycle stage (CONTEXT.md, "Status"). Moves between these values are validated against the persisted current Status per D3 S2 (docs/decisions/d3-agent-template-compatibility.md). `Done` is reachable only through explicit Accept.
 	Status TicketStatus `json:"status"`
 
 	// SuccessCriteria Manual refinement (issue #58 -- prompt "Describe observable conditions that demonstrate the outcome was achieved."). CONTEXT.md's "Success Criteria" term -- not "acceptance criteria". Plain text; see `goal`'s description for the "" convention. Agent-readiness validation of this field is M4's, not this slice's.
@@ -303,7 +303,7 @@ type Ticket struct {
 	UpdatedAt string `json:"updatedAt"`
 }
 
-// TicketAssigneeType The kind of Assignee currently responsible for a Ticket (CONTEXT.md, "Assignee"; issue #60, D3 S2). "" means unassigned. In M2 the Owner (a human) is the only assignable Assignee, so "owner" is the only non-empty value -- there is no Agent Assignee anywhere yet (AGENTS.md, "No AI, Agents, Rounds, or Michelin in M2"). Always present on the wire, matching `goal`'s own "" convention. See `PUT`/`DELETE /api/tickets/{id}/assignee` below for the two commands that change it.
+// TicketAssigneeType The kind of Assignee responsible for a Ticket (CONTEXT.md, "Assignee"). "" means unassigned, always present on the wire, matching `goal`'s convention. `owner` is the only non-empty value in M2: there is no Agent Assignee yet.
 type TicketAssigneeType string
 
 // TicketCompletionCondition The condition that completes a Ticket (CONTEXT.md, "Done"): human acceptance, or merging its reviewed pull request. Derived from the Ticket's Template default exactly once, at creation (issue #59, D3) -- there is no request field or operation anywhere in this contract that sets or changes it directly. Assignment, reassignment, and editing any other field never change it.
@@ -314,7 +314,7 @@ type TicketList struct {
 	Tickets []Ticket `json:"tickets"`
 }
 
-// TicketStatus A Ticket's lifecycle stage (CONTEXT.md, "Status"). Transitions between these values are validated by Galley against the Ticket's own persisted current Status, per the accepted D3 decision (issue #60, docs/decisions/d3-agent-template-compatibility.md S2) -- see `POST /api/tickets/{id}/status` and `POST /api/tickets/{id}/accept` below. `Done` is reachable only through explicit Accept, never through a plain status change.
+// TicketStatus A Ticket's lifecycle stage (CONTEXT.md, "Status"). Moves between these values are validated against the persisted current Status per D3 S2 (docs/decisions/d3-agent-template-compatibility.md). `Done` is reachable only through explicit Accept.
 type TicketStatus string
 
 // TicketTemplate A Ticket's built-in Template (issue #59), chosen at capture (default Basic). Under the accepted D3 decision (docs/decisions/d3-agent-template-compatibility.md), a Template supplies presentation, required information, and a *default* completion condition only -- it never restricts which Agent or execution engine may be assigned (docs/ticket-creation.md, "Flexible ticket structure"). Changing a Ticket's Template after creation is out of scope for M2: post-delivery Template/repository change is D4, owned by M8.

@@ -378,9 +378,8 @@ func scanTicketRow(row ticketRowScanner) (Ticket, error) {
 	ticket.Status = TicketStatus(status)
 	ticket.Template = TicketTemplate(template)
 	ticket.CompletionCondition = TicketCompletionCondition(completionCondition)
-	// assignee_type is NULL at storage for "never assigned" (000007_...sql),
-	// surfaced as "" on the wire -- the same convention goal/context/etc
-	// already use, not a new one.
+	// NULL means "never assigned", surfaced as "" on the wire -- the
+	// same convention goal/context already use.
 	ticket.AssigneeType = TicketAssigneeType(assigneeType.String)
 	ticket.Goal = goal.String
 	ticket.Context = ctxField.String

@@ -157,10 +157,10 @@ export interface paths {
         put?: never;
         /**
          * Change a Ticket's Status
-         * @description Issue #60: a human-assigned lifecycle transition, implementing the accepted D3 decision's S2 table exactly (docs/decisions/d3-agent-template-compatibility.md). Galley validates the requested move against the Ticket's own persisted current Status inside a single transaction, so two concurrent conflicting requests on the same Ticket cannot both apply -- at most one succeeds; the other observes the already-changed current Status and is rejected.
-         *     `Done` is always rejected here, regardless of the current Status: it is reachable only through explicit Accept (`POST /api/tickets/{id}/accept`), never a plain status change, so completion can never happen by accident through this operation.
-         *     A transition not on D3 S2's table is rejected with `invalid_transition` -- for example `Backlog` -> `InProgress`, `Backlog` -> `Done`, `Ready` -> `InReview`, `Ready` -> `Done`, and `Blocked` -> `Ready` (only `Blocked` -> `InProgress` is allowed; D3 deliberately does not permit resuming straight to Ready).
-         *     This command never creates a Round, work request, or queue entry, and starts nothing -- M2 has no such concepts at all (AGENTS.md). Requires a valid session; returns `401 unauthenticated` otherwise. An unknown identifier, a malformed identifier, and an identifier belonging to another Owner all return the same `404 not_found`, exactly like the other `/api/tickets/{id}` operations.
+         * @description A human-assigned lifecycle transition, implementing D3 S2's table (docs/decisions/d3-agent-template-compatibility.md). Validated against the Ticket's persisted current Status inside one transaction, so of two concurrent conflicting requests at most one applies.
+         *     `Done` is always rejected here, whatever the current Status: it is reachable only through `POST /api/tickets/{id}/accept`, so completion cannot happen by accident.
+         *     Any move off D3 S2's table is rejected with `invalid_transition`; notably `Blocked` resumes only to `InProgress`, never straight to `Ready`.
+         *     Creates no Round, work request, or queue entry. Requires a valid session; returns `401 unauthenticated` otherwise. Identifier handling matches the other `/api/tickets/{id}` operations.
          */
         post: operations["changeTicketStatus"];
         delete?: never;
@@ -182,10 +182,10 @@ export interface paths {
         put?: never;
         /**
          * Accept a Ticket's delivered work, completing it
-         * @description Issue #60: the one path to `Done` (D3 S2 -- "In Review -> Done (human-acceptance condition): Via explicit Accept"). Deliberately a separate command, not a Status write, per docs/contracts/execution-interface.md's Swiftlet -> Galley owner-command boundary -- a plain `POST /api/tickets/{id}/status` can never set `Done`, whatever the Ticket's retained completion condition.
-         *     Requires the Ticket's current Status to be `InReview`; otherwise rejected with `invalid_transition`, exactly like `changeTicketStatus`, and validated the same way -- against the persisted current Status inside a single transaction, so a concurrent conflicting request cannot also apply.
-         *     A Ticket whose retained completion condition is `reviewedPrMerge` cannot be completed in M2: rejected with `reviewed_pr_merge_not_implemented`, an explicit current-implementation limitation, not a silent downgrade -- D2 (review/merge evidence) is unresolved and the shared mechanism it selects is owned by M8 (docs/decisions/d3-agent-template-compatibility.md, "Completing human work that requires a reviewed PR merge"). Only a Ticket whose retained condition is `humanAcceptance` can be Accepted in M2.
-         *     This command never creates a Round, work request, or queue entry, and starts nothing. Requires a valid session; returns `401 unauthenticated` otherwise. Identifier handling matches every other `/api/tickets/{id}` operation.
+         * @description The one path to `Done`, kept a separate command rather than a Status write to respect the Swiftlet -> Galley owner-command boundary (docs/contracts/execution-interface.md).
+         *     Requires the Ticket to be `InReview`; otherwise `invalid_transition`, validated against the persisted Status the same way `changeTicketStatus` is.
+         *     A Ticket whose retained completion condition is `reviewedPrMerge` is rejected with `reviewed_pr_merge_not_implemented` rather than downgraded: D2 is unresolved and the mechanism it selects is owned by M8 (docs/decisions/d3-agent-template-compatibility.md, "Completing human work that requires a reviewed PR merge").
+         *     Creates no Round, work request, or queue entry. Requires a valid session; returns `401 unauthenticated` otherwise. Identifier handling matches the other `/api/tickets/{id}` operations.
          */
         post: operations["acceptTicket"];
         delete?: never;
@@ -206,13 +206,15 @@ export interface paths {
         get?: never;
         /**
          * Assign the signed-in Owner as a Ticket's Assignee
-         * @description Issue #60: the only assignable Assignee in M2 is the Owner, a human -- there is no Agent Assignee or agent-assignment command anywhere in this contract (AGENTS.md, "No AI, Agents, Rounds, or Michelin in M2"). Idempotent: assigning an already-owner-assigned Ticket leaves it unchanged and still returns 200. Allowed regardless of the Ticket's current Status -- D3 places no Status precondition on human assignment, since M2 never has an open Round to lock the Assignee field. Creates no Round, work request, or queue entry, and starts nothing. Requires a valid session; returns `401 unauthenticated` otherwise. Identifier handling matches every other `/api/tickets/{id}` operation.
+         * @description The Owner is the only assignable Assignee in M2; this contract has no Agent-assignment command. Idempotent. Allowed whatever the Ticket's current Status -- D3 places no precondition on human assignment, since M2 has no open Round to lock the Assignee field.
+         *     Creates no Round, work request, or queue entry. Requires a valid session; returns `401 unauthenticated` otherwise. Identifier handling matches the other `/api/tickets/{id}` operations.
          */
         put: operations["assignTicketOwner"];
         post?: never;
         /**
          * Clear a Ticket's Assignee
-         * @description Idempotent: unassigning an already-unassigned Ticket leaves it unchanged and still returns 200 -- there is no error case for "nothing to unassign," matching this contract's existing last-write-wins conventions elsewhere. Allowed regardless of the Ticket's current Status, for the same reason as `assignTicketOwner` above. Requires a valid session; returns `401 unauthenticated` otherwise. Identifier handling matches every other `/api/tickets/{id}` operation.
+         * @description Idempotent: unassigning an already-unassigned Ticket returns 200, matching this contract's last-write-wins conventions elsewhere. Allowed whatever the current Status, as `assignTicketOwner`.
+         *     Requires a valid session; returns `401 unauthenticated` otherwise. Identifier handling matches the other `/api/tickets/{id}` operations.
          */
         delete: operations["unassignTicket"];
         options?: never;
@@ -259,7 +261,7 @@ export interface components {
             owner: components["schemas"]["Owner"];
         };
         /**
-         * @description A Ticket's lifecycle stage (CONTEXT.md, "Status"). Transitions between these values are validated by Galley against the Ticket's own persisted current Status, per the accepted D3 decision (issue #60, docs/decisions/d3-agent-template-compatibility.md S2) -- see `POST /api/tickets/{id}/status` and `POST /api/tickets/{id}/accept` below. `Done` is reachable only through explicit Accept, never through a plain status change.
+         * @description A Ticket's lifecycle stage (CONTEXT.md, "Status"). Moves between these values are validated against the persisted current Status per D3 S2 (docs/decisions/d3-agent-template-compatibility.md). `Done` is reachable only through explicit Accept.
          * @enum {string}
          */
         TicketStatus: "Backlog" | "Ready" | "InProgress" | "Blocked" | "InReview" | "Done";
@@ -274,7 +276,7 @@ export interface components {
          */
         TicketCompletionCondition: "humanAcceptance" | "reviewedPrMerge";
         /**
-         * @description The kind of Assignee currently responsible for a Ticket (CONTEXT.md, "Assignee"; issue #60, D3 S2). "" means unassigned. In M2 the Owner (a human) is the only assignable Assignee, so "owner" is the only non-empty value -- there is no Agent Assignee anywhere yet (AGENTS.md, "No AI, Agents, Rounds, or Michelin in M2"). Always present on the wire, matching `goal`'s own "" convention. See `PUT`/`DELETE /api/tickets/{id}/assignee` below for the two commands that change it.
+         * @description The kind of Assignee responsible for a Ticket (CONTEXT.md, "Assignee"). "" means unassigned, always present on the wire, matching `goal`'s convention. `owner` is the only non-empty value in M2: there is no Agent Assignee yet.
          * @enum {string}
          */
         TicketAssigneeType: "owner" | "";
@@ -336,7 +338,7 @@ export interface components {
             repository?: string;
             template?: components["schemas"]["TicketTemplate"];
         };
-        /** @description Body of `POST /api/tickets/{id}/status` (issue #60). `status` names the requested target Status; Galley validates the transition against the Ticket's own persisted current Status (docs/decisions/d3-agent-template-compatibility.md S2) and rejects any move not on that table with `invalid_transition` -- including `Done`, which this operation always rejects regardless of the current Status: `Done` is reachable only through `POST /api/tickets/{id}/accept`. */
+        /** @description `status` names the requested target Status, validated against the Ticket's persisted current Status per D3 S2. `Done` is always rejected here -- see `POST /api/tickets/{id}/accept`. */
         ChangeTicketStatusRequest: {
             status: components["schemas"]["TicketStatus"];
         };

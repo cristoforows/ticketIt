@@ -52,9 +52,7 @@ func publicTableNames(t *testing.T, pool *pgxpool.Pool) []string {
 func tableRowCount(t *testing.T, pool *pgxpool.Pool, table string) int64 {
 	t.Helper()
 	var count int64
-	// table is always one of knownPublicTables' own fixed literals
-	// (never request-derived), so building the query this way carries
-	// no injection risk.
+	// table is always a knownPublicTables literal, never request-derived.
 	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM `+table).Scan(&count); err != nil {
 		t.Fatalf("failed to count rows in %s: %v", table, err)
 	}
@@ -81,9 +79,6 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 		before[table] = tableRowCount(t, pool, table)
 	}
 
-	// Drive every manual command this slice adds through the real API:
-	// create, assign, the full allowed forward/back chain including
-	// Blocked, Accept to Done, Done -> Ready, and unassign.
 	created := createTicketWithTemplate(t, client, baseURL, uniqueTitle(t), Basic)
 	if resp := assignOwnerHTTP(t, client, baseURL, created.Id); resp.status != http.StatusOK {
 		t.Fatalf("assign: status = %d, want 200; error=%+v", resp.status, resp.errBody)
