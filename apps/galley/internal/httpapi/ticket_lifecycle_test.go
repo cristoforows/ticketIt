@@ -534,16 +534,8 @@ func TestChangeTicketStatus_ConcurrentConflictingTransitionsOnlyOneApplies(t *te
 	}
 }
 
-// TestAssignment_NeverChangesCompletionConditionOrTemplate covers the
-// half of issue #3's sixth acceptance criterion that no other test
-// reaches: "Template-derived completion conditions remain independent
-// of assignment." D3 S2 states it directly -- "Assignment and
-// reassignment never change the Ticket's completion condition" -- and
-// #59's own independence test predates assignment existing at all, so
-// it exercises field updates rather than assign/unassign. Both
-// completion conditions are covered, because a reviewedPrMerge Ticket
-// silently downgraded to humanAcceptance by an assignment would become
-// completable in M2, which D2/M8 own.
+// Issue #59's independence test predates assignment, so it exercises
+// field updates rather than assign/unassign.
 func TestAssignment_NeverChangesCompletionConditionOrTemplate(t *testing.T) {
 	baseURL, client := devServerWithSessionForTickets(t)
 
