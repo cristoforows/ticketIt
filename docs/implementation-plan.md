@@ -1,6 +1,6 @@
 # V1 implementation plan
 
-**Status:** approved ten-milestone plan, published as issues #2–#11 against [v1 spec #1](https://github.com/cristoforows/ticketIt/issues/1). [M1's](https://github.com/cristoforows/ticketIt/issues/2) bounded adapter proofs are complete — see [integration-feasibility.md](integration-feasibility.md) and [docs/evidence/m1/](evidence/m1/README.md) — and the Owner has accepted [D3](decisions/d3-agent-template-compatibility.md). Application implementation (M2) has not started. Remaining product choices and failed integration gates stay in [open-decisions.md](open-decisions.md).
+**Status:** approved ten-milestone plan, published as issues #2–#11 against [v1 spec #1](https://github.com/cristoforows/ticketIt/issues/1). [M1's](https://github.com/cristoforows/ticketIt/issues/2) bounded adapter proofs are complete — see [integration-feasibility.md](integration-feasibility.md) and [docs/evidence/m1/](evidence/m1/README.md) — and the Owner has accepted [D3](decisions/d3-agent-template-compatibility.md). [M2's](https://github.com/cristoforows/ticketIt/issues/3) thirteen implementation slices (#49–#61) are complete and gate-reported at [#62](https://github.com/cristoforows/ticketIt/issues/62) — see [docs/evidence/m2/](evidence/m2/README.md) for the full slice index, the clean-checkout re-verification, and every acceptance criterion's evidence. M3 has not started. Remaining product choices and failed integration gates stay in [open-decisions.md](open-decisions.md).
 
 This document mirrors the published milestone scope and native blocking relationships. The linked issues hold acceptance checklists and current execution status; keep the plan and affected detail docs aligned when that scope or sequencing changes. [V1 scope](v1-scope.md) records the approved product behavior.
 
@@ -48,9 +48,11 @@ Work the frontier: a milestone can start when its blockers are complete. M5 and 
 
 **Acceptance:** reproducible commands and observed results for each experiment; foundational rules documented; unsupported required behavior remains a failed gate requiring a decision. Abort is not assumed to be resumable pause, and worktrees are not a host sandbox. This milestone does not claim that the application or its AI features exist.
 
-## M2 — Application foundations and persistent owner workflow
+## M2 — Application foundations and persistent owner workflow — complete
 
 **Output:** the Owner can sign in, capture and refine a Ticket, and manage basic human-assigned work.
+
+**Status:** all thirteen implementation slices (#49–#61) and the gate-report slice ([#62](https://github.com/cristoforows/ticketIt/issues/62)) are complete; every acceptance criterion below is met with evidence — see [docs/evidence/m2/README.md](evidence/m2/README.md) for the slice index, the clean-checkout re-verification (Galley build/vet/test, both contract-drift checks, Swiftlet build/test, and the full browser suite, all re-run from a clean database on this slice's own branch, not copied from earlier records), and each criterion's supporting evidence. M2 resolves no open decision; it is the first milestone to build against the Owner-accepted [D3](decisions/d3-agent-template-compatibility.md), and its concrete D2/D4 observations are recorded in [open-decisions.md](open-decisions.md). `apps/michelin` does not exist — there is no Agent, Round, execution, or Michelin concept anywhere in M2, by design.
 
 1. Boot Swiftlet and Galley, display backend-provided status, and establish independent builds and local startup.
 2. Establish PostgreSQL migrations and prove persistence across restart with a development-only diagnostic.
