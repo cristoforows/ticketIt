@@ -42,6 +42,12 @@ const (
 	ticketConstraintsMaxLength     = 2000
 )
 
+// ticketRepositoryMaxLength is the one Ticket repository reference's
+// documented maximum length (issue #59, D3 S1 check 3), applied after
+// trimming, in characters -- comfortably longer than an "owner/repo"
+// name or a full repository URL.
+const ticketRepositoryMaxLength = 500
+
 // server also implements the generated ServerInterface's Ticket
 // operations: title-only capture into Backlog and listing the
 // signed-in Owner's Tickets (issue #56), and getting one Ticket by its
@@ -140,7 +146,19 @@ func (s *server) UpdateTicket(w http.ResponseWriter, r *http.Request, id string)
 	var req UpdateTicketRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request",
-			`request body must be JSON matching {"title"?, "goal"?, "context"?, "successCriteria"?, "constraints"?}`)
+			`request body must be JSON matching {"title"?, "goal"?, "context"?, "successCriteria"?, "constraints"?, "repository"?}`)
+		return
+	}
+
+	// D3/D4: changing a Ticket's Template after creation is out of
+	// scope for M2 -- post-delivery Template/repository change belongs
+	// to D4, owned by M8. This request schema carries `template` only
+	// so this rejection can be explicit rather than the field being
+	// silently ignored; naming it at all, any value included, is
+	// rejected before any other validation or the database is touched.
+	if req.Template != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request",
+			`"template" cannot be changed after creation in M2 -- see D4 (docs/decisions), owned by M8`)
 		return
 	}
 
@@ -164,16 +182,26 @@ func (s *server) UpdateTicket(w http.ResponseWriter, r *http.Request, id string)
 	if !ok {
 		return
 	}
+	repository, ok := validateRefinementField(w, "repository", req.Repository, ticketRepositoryMaxLength)
+	if !ok {
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
 
+	// Note what is absent here: no template or completionCondition
+	// field. completion_condition has no write path at all beyond
+	// insertTicket -- this update never includes it, which is what
+	// makes "retained independently of later edits" true by
+	// construction rather than by a check that could be bypassed here.
 	ticket, found, err := updateTicketForOwner(ctx, s.pool, owner.ID, id, ticketUpdate{
 		title:           title,
 		goal:            goal,
 		context:         ticketContext,
 		successCriteria: successCriteria,
 		constraints:     constraints,
+		repository:      repository,
 	})
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to update the ticket")
@@ -267,6 +295,20 @@ func (s *server) CreateTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Template (issue #59, docs/ticket-creation.md): chosen at capture,
+	// defaulting to Basic when absent. A title alone remains sufficient
+	// to capture a Ticket of either Template -- no other field is
+	// required here regardless of which Template is chosen.
+	template := Basic
+	if req.Template != nil {
+		template = *req.Template
+	}
+	if !template.Valid() {
+		writeError(w, http.StatusBadRequest, "invalid_request",
+			fmt.Sprintf(`"template" must be one of %q or %q`, Basic, Coding))
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
 
@@ -274,7 +316,7 @@ func (s *server) CreateTicket(w http.ResponseWriter, r *http.Request) {
 	// TicketStatus enum) is the only Status this slice ever produces --
 	// docs/ticket-creation.md, "Quick capture": a title alone captures a
 	// Ticket in Backlog. No transition exists yet (#60).
-	ticket, err := insertTicket(ctx, s.pool, owner.ID, title)
+	ticket, err := insertTicket(ctx, s.pool, owner.ID, title, template)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to create the ticket")
 		return
@@ -282,12 +324,26 @@ func (s *server) CreateTicket(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, ticket)
 }
 
+// defaultCompletionCondition derives a newly captured Ticket's
+// completion condition from its chosen Template's default -- the ONE
+// place in this codebase that maps a Template to anything, and it runs
+// only here, at creation (insertTicket). D3 (docs/decisions/d3-agent-template-compatibility.md)
+// requires this derivation to happen exactly once: no later operation
+// (UpdateTicket, or any future assignment/reassignment endpoint) may
+// call this function or otherwise recompute the stored value.
+func defaultCompletionCondition(template TicketTemplate) TicketCompletionCondition {
+	if template == Coding {
+		return ReviewedPrMerge
+	}
+	return HumanAcceptance
+}
+
 // ticketSelectColumns is shared by every query in this file that
 // returns a full Ticket row -- insertTicket's RETURNING,
 // getTicketForOwner's and listTicketsForOwner's SELECT, and
 // updateTicketForOwner's RETURNING -- so the column list and
 // scanTicketRow's scan targets can never drift against each other.
-const ticketSelectColumns = `public_id::text, title, status, goal, context, success_criteria, constraints, created_at, updated_at`
+const ticketSelectColumns = `public_id::text, title, status, template, completion_condition, goal, context, success_criteria, constraints, repository, created_at, updated_at`
 
 // ticketRowScanner is satisfied by both pgx.Row (QueryRow) and pgx.Rows
 // (Query) -- both expose Scan(dest ...any) error with this signature,
@@ -306,40 +362,55 @@ type ticketRowScanner interface {
 // description).
 func scanTicketRow(row ticketRowScanner) (Ticket, error) {
 	var (
-		ticket                                       Ticket
-		status                                       string
-		goal, ctxField, successCriteria, constraints sql.NullString
-		createdAt, updatedAt                         time.Time
+		ticket                                                   Ticket
+		status, template, completionCondition                    string
+		goal, ctxField, successCriteria, constraints, repository sql.NullString
+		createdAt, updatedAt                                     time.Time
 	)
-	if err := row.Scan(&ticket.Id, &ticket.Title, &status, &goal, &ctxField, &successCriteria, &constraints, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(
+		&ticket.Id, &ticket.Title, &status, &template, &completionCondition,
+		&goal, &ctxField, &successCriteria, &constraints, &repository,
+		&createdAt, &updatedAt,
+	); err != nil {
 		return Ticket{}, err
 	}
 	ticket.Status = TicketStatus(status)
+	ticket.Template = TicketTemplate(template)
+	ticket.CompletionCondition = TicketCompletionCondition(completionCondition)
 	ticket.Goal = goal.String
 	ticket.Context = ctxField.String
 	ticket.SuccessCriteria = successCriteria.String
 	ticket.Constraints = constraints.String
+	ticket.Repository = repository.String
 	ticket.CreatedAt = createdAt.UTC().Format(time.RFC3339)
 	ticket.UpdatedAt = updatedAt.UTC().Format(time.RFC3339)
 	return ticket, nil
 }
 
-func insertTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64, title string) (Ticket, error) {
+// insertTicket persists a new Ticket. template must already be
+// validated (CreateTicket's template.Valid() check) -- this is the only
+// call site of defaultCompletionCondition in the entire codebase, which
+// is what makes completion_condition "derived from the Template's
+// default exactly once, at creation" (D3, issue #59) true by
+// construction: no other function ever computes or assigns this value.
+func insertTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64, title string, template TicketTemplate) (Ticket, error) {
 	// public_id is generated here, in Go, rather than left to the
 	// column's DEFAULT -- matching how every other identifier in this
 	// codebase (session tokens, OAuth state) is generated in
 	// application code. See internal/migrations/000004_....sql.
 	publicID := uuid.NewString()
-	// goal/context/success_criteria/constraints are left out of the
-	// INSERT entirely -- they have no DEFAULT (see
-	// internal/migrations/000005_...sql), so they start NULL, i.e.
-	// "never set," exactly like a title-only quick capture that has not
-	// yet been through manual refinement (issue #58, docs/ticket-creation.md,
-	// "Quick capture").
+	completionCondition := defaultCompletionCondition(template)
+	// goal/context/success_criteria/constraints/repository are left out
+	// of the INSERT entirely -- they have no DEFAULT (see
+	// internal/migrations/000005_.../000006_...sql), so they start
+	// NULL, i.e. "never set," exactly like a title-only quick capture
+	// that has not yet been through manual refinement (issue #58,
+	// docs/ticket-creation.md, "Quick capture").
 	row := pool.QueryRow(ctx,
-		`INSERT INTO tickets (owner_id, title, status, public_id) VALUES ($1, $2, $3, $4::uuid)
+		`INSERT INTO tickets (owner_id, title, status, public_id, template, completion_condition)
+		 VALUES ($1, $2, $3, $4::uuid, $5, $6)
 		 RETURNING `+ticketSelectColumns,
-		ownerID, title, string(Backlog), publicID,
+		ownerID, title, string(Backlog), publicID, string(template), string(completionCondition),
 	)
 	return scanTicketRow(row)
 }
@@ -377,7 +448,7 @@ func getTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, p
 // NULL, and COALESCE(new, existing) keeps existing precisely when new
 // is NULL.
 type ticketUpdate struct {
-	title, goal, context, successCriteria, constraints *string
+	title, goal, context, successCriteria, constraints, repository *string
 }
 
 // updateTicketForOwner applies a partial update (issue #58), scoped to
@@ -387,12 +458,20 @@ type ticketUpdate struct {
 // column) is what implements "absent leaves the value unchanged":
 // ticketUpdate's nil fields bind as SQL NULL, which COALESCE passes
 // through to the existing value; a non-nil field (even one holding "",
-// the documented "clear this field" value for the four refinement
+// the documented "clear this field" value for the refinement/repository
 // columns) is a genuine SQL value that COALESCE prefers over the
 // existing one. updated_at is bumped unconditionally, even for a PATCH
 // whose body names no field at all -- a PATCH request is still an
 // explicit Owner edit action (apps/galley/README.md, "Manual
 // refinement fields").
+//
+// template and completion_condition are deliberately absent from this
+// SET clause -- not merely left at their COALESCE-default, but never
+// named here at all. This is D3's "retained independently" guarantee
+// (issue #59) enforced structurally: there is no parameter this
+// function could be passed that would change either column, so no
+// caller of this function -- today or in the future -- can make it
+// recompute or overwrite them.
 func updateTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, publicID string, update ticketUpdate) (Ticket, bool, error) {
 	row := pool.QueryRow(ctx,
 		`UPDATE tickets
@@ -401,10 +480,11 @@ func updateTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64
 		        context = COALESCE($5, context),
 		        success_criteria = COALESCE($6, success_criteria),
 		        constraints = COALESCE($7, constraints),
+		        repository = COALESCE($8, repository),
 		        updated_at = now()
 		  WHERE owner_id = $1 AND public_id = $2::uuid
 		  RETURNING `+ticketSelectColumns,
-		ownerID, publicID, update.title, update.goal, update.context, update.successCriteria, update.constraints,
+		ownerID, publicID, update.title, update.goal, update.context, update.successCriteria, update.constraints, update.repository,
 	)
 	ticket, err := scanTicketRow(row)
 	if errors.Is(err, pgx.ErrNoRows) {

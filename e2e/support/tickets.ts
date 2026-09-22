@@ -1,15 +1,23 @@
 import type { Page } from "@playwright/test";
 
+export type TicketTemplate = "Basic" | "Coding";
+
 export interface Ticket {
   /** Opaque public identifier (issue #57) -- never the internal sequential database id. */
   id: string;
   title: string;
   status: string;
+  /** Chosen at capture (issue #59), default Basic -- see docs/ticket-creation.md. */
+  template: TicketTemplate;
+  /** Derived from template's default once, at creation, and retained thereafter (issue #59, D3). */
+  completionCondition: "humanAcceptance" | "reviewedPrMerge";
   /** Manual refinement fields (issue #58) -- "" when never set or cleared. */
   goal: string;
   context: string;
   successCriteria: string;
   constraints: string;
+  /** One Ticket repository reference (issue #59, D3), available on either Template -- "" when never set or cleared. */
+  repository: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -28,9 +36,12 @@ export interface Ticket {
  * the database. A spec that *is* testing the capture form (like
  * tests/ticket-persistence-before.spec.ts) still drives that form
  * directly instead of calling this.
+ *
+ * `template` (issue #59) defaults to Basic, mirroring Galley's own
+ * CreateTicketRequest default, when a spec does not need to name it.
  */
-export async function createTicket(page: Page, title: string): Promise<Ticket> {
-  const response = await page.request.post("/api/tickets", { data: { title } });
+export async function createTicket(page: Page, title: string, template: TicketTemplate = "Basic"): Promise<Ticket> {
+  const response = await page.request.post("/api/tickets", { data: { title, template } });
   if (!response.ok()) {
     throw new Error(
       `failed to create Ticket ${JSON.stringify(title)} via POST /api/tickets: ${response.status()} ${await response.text()}`,

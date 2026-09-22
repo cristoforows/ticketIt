@@ -7,12 +7,22 @@ const TICKET: Ticket = {
   id: "33333333-3333-4333-8333-333333333333",
   title: "Fix login bug on Safari",
   status: "Backlog",
+  template: "Basic",
+  completionCondition: "humanAcceptance",
   goal: "",
   context: "",
   successCriteria: "",
   constraints: "",
+  repository: "",
   createdAt: "2026-09-22T10:00:00Z",
   updatedAt: "2026-09-22T10:05:00Z",
+};
+
+const CODING_TICKET: Ticket = {
+  ...TICKET,
+  id: "77777777-7777-4777-8777-777777777777",
+  template: "Coding",
+  completionCondition: "reviewedPrMerge",
 };
 
 const REFINED_TICKET: Ticket = {
@@ -21,6 +31,7 @@ const REFINED_TICKET: Ticket = {
   context: "Include the affected page and reproduction steps.",
   successCriteria: "Existing users can sign in on Safari.",
   constraints: "Preserve the existing login flow.",
+  repository: "owner/safari-fixes",
 };
 
 describe("TicketDetail", () => {
@@ -28,33 +39,55 @@ describe("TicketDetail", () => {
     cleanup();
   });
 
-  it("renders the given Ticket's title, Status, and timestamps, and only those fields", () => {
+  it("renders the given Ticket's title, Status, Template, completion condition, and timestamps", () => {
     render(<TicketDetail ticket={TICKET} onSave={vi.fn()} />);
 
     expect(screen.getByTestId("ticket-detail-title")).toHaveTextContent(TICKET.title);
     expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent(TICKET.status);
+    expect(screen.getByTestId("ticket-detail-template")).toHaveTextContent("Basic");
+    expect(screen.getByTestId("ticket-detail-completion-condition")).toHaveTextContent("Human acceptance");
     expect(screen.getByTestId("ticket-detail-created-at")).toHaveTextContent(TICKET.createdAt);
     expect(screen.getByTestId("ticket-detail-updated-at")).toHaveTextContent(TICKET.updatedAt);
   });
 
-  it("renders no section for a Round, Report, PR link, or Grill Mode -- none of those exist yet", () => {
+  it("renders no section for a Round, Report, or Grill Mode -- none of those exist yet", () => {
     render(<TicketDetail ticket={TICKET} onSave={vi.fn()} />);
 
-    for (const testid of ["ticket-detail-rounds", "ticket-detail-reports", "ticket-detail-pr-links", "ticket-detail-grill-mode"]) {
+    for (const testid of ["ticket-detail-rounds", "ticket-detail-reports", "ticket-detail-grill-mode"]) {
       expect(screen.queryByTestId(testid)).not.toBeInTheDocument();
     }
   });
 
-  it("shows a placeholder for each unset refinement field in view mode", () => {
+  it("shows the reviewed-PR-merge completion condition and a Pull Request section for a Coding ticket", () => {
+    render(<TicketDetail ticket={CODING_TICKET} onSave={vi.fn()} />);
+
+    expect(screen.getByTestId("ticket-detail-template")).toHaveTextContent("Coding");
+    expect(screen.getByTestId("ticket-detail-completion-condition")).toHaveTextContent(
+      "Reviewed pull request merged",
+    );
+    expect(screen.getByTestId("ticket-detail-pr-section")).toBeInTheDocument();
+    expect(screen.getByTestId("ticket-detail-pr-empty-state")).toHaveTextContent(
+      "PR delivery arrives with coding execution",
+    );
+  });
+
+  it("renders no Pull Request section for a Basic ticket", () => {
+    render(<TicketDetail ticket={TICKET} onSave={vi.fn()} />);
+
+    expect(screen.queryByTestId("ticket-detail-pr-section")).not.toBeInTheDocument();
+  });
+
+  it("shows a placeholder for each unset refinement field and repository in view mode", () => {
     render(<TicketDetail ticket={TICKET} onSave={vi.fn()} />);
 
     expect(screen.getByTestId("ticket-detail-field-goal")).toHaveTextContent("Not set.");
     expect(screen.getByTestId("ticket-detail-field-context")).toHaveTextContent("Not set.");
     expect(screen.getByTestId("ticket-detail-field-success-criteria")).toHaveTextContent("Not set.");
     expect(screen.getByTestId("ticket-detail-field-constraints")).toHaveTextContent("Not set.");
+    expect(screen.getByTestId("ticket-detail-field-repository")).toHaveTextContent("Not set.");
   });
 
-  it("shows each refinement field's stored value in view mode when set", () => {
+  it("shows each refinement field's and repository's stored value in view mode when set", () => {
     render(<TicketDetail ticket={REFINED_TICKET} onSave={vi.fn()} />);
 
     expect(screen.getByTestId("ticket-detail-field-goal")).toHaveTextContent(REFINED_TICKET.goal);
@@ -63,6 +96,7 @@ describe("TicketDetail", () => {
       REFINED_TICKET.successCriteria,
     );
     expect(screen.getByTestId("ticket-detail-field-constraints")).toHaveTextContent(REFINED_TICKET.constraints);
+    expect(screen.getByTestId("ticket-detail-field-repository")).toHaveTextContent(REFINED_TICKET.repository);
   });
 
   it("has no edit form until Edit is clicked", () => {
@@ -101,6 +135,7 @@ describe("TicketDetail", () => {
       REFINED_TICKET.successCriteria,
     );
     expect(screen.getByTestId("ticket-detail-textarea-constraints")).toHaveValue(REFINED_TICKET.constraints);
+    expect(screen.getByTestId("ticket-detail-input-repository")).toHaveValue(REFINED_TICKET.repository);
   });
 
   it("saves the edited fields and returns to view mode showing the saved values", async () => {
@@ -118,12 +153,15 @@ describe("TicketDetail", () => {
       "Restore sign-in for existing users on Safari.",
     );
     expect(screen.queryByTestId("ticket-detail-edit-form")).not.toBeInTheDocument();
+    // template is never part of the payload -- Save never sends it, and
+    // there is no control anywhere in this component that could.
     expect(onSave).toHaveBeenCalledWith({
       title: TICKET.title,
       goal: "Restore sign-in for existing users on Safari.",
       context: "",
       successCriteria: "",
       constraints: "",
+      repository: "",
     });
   });
 

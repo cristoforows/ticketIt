@@ -15,7 +15,10 @@ view (see "Routing and the Ticket detail page" below), and
 [issue #58](https://github.com/cristoforows/ticketIt/issues/58) added
 manual refinement -- editing a Ticket's title and its four refinement
 fields by hand from that same full page (see "Manual refinement
-fields" below). See
+fields" below), and [issue #59](https://github.com/cristoforows/ticketIt/issues/59)
+added the two built-in Ticket Templates, a Template selector on quick
+capture, and the full page's Template/completion-condition/repository/
+Pull-Request presentation (see "Ticket Templates" below). See
 [docs/deployment.md](../../docs/deployment.md) and
 [docs/adr/0001-single-authority-galley.md](../../docs/adr/0001-single-authority-galley.md):
 Swiftlet renders what Galley returns and never owns a workflow rule.
@@ -418,6 +421,54 @@ own here: every rule (trimming, per-field maximum lengths, title's
 "cannot be cleared" exception, Owner scoping) is enforced and proven
 by Galley alone (`docs/adr/0001-single-authority-galley.md`).
 
+## Ticket Templates (issue #59)
+
+Follows the accepted [D3 decision](../../docs/decisions/d3-agent-template-compatibility.md):
+a Template supplies presentation, required information, and a
+**default** completion condition only. Swiftlet enforces nothing of
+its own here either — it renders exactly what Galley returns and lets
+Galley alone reject an attempted Template change
+(`docs/adr/0001-single-authority-galley.md`).
+
+**Capture (`TicketList.tsx`)** gained a Template selector
+(`data-testid="ticket-template-select"`, options from the generated
+`TICKET_TEMPLATES` constant, defaulting to `Basic`) beside the existing
+title input. A title alone remains sufficient to capture either
+Template — the selector adds one more field to the request, nothing
+that gates submission.
+
+**The full page (`TicketDetail.tsx`, still pure presentation — no
+fetching, no routing)** now also shows, in view mode: the Ticket's
+Template (`data-testid="ticket-detail-template"`), its retained
+completion condition as friendly text — "Human acceptance" or
+"Reviewed pull request merged" (`data-testid="ticket-detail-completion-condition"`) —
+and the one repository reference
+(`data-testid="ticket-detail-field-repository"`, with the same "Not
+set." placeholder convention as the four refinement fields). Edit mode
+gained a plain repository input
+(`data-testid="ticket-detail-input-repository"`) alongside the
+existing refinement fields; **Template itself has no edit control
+anywhere on this page** — changing it after creation is out of scope
+for M2 (D4, owned by M8) — and completionCondition has no control at
+all, since `TicketUpdate` never carries it and Save never sends it.
+
+**A Coding-template Ticket's page additionally shows a Pull Request
+section** (`data-testid="ticket-detail-pr-section"`) with an honest
+empty state (`data-testid="ticket-detail-pr-empty-state"`): no PR
+exists until M8, so this states that plainly rather than fabricating a
+field nothing can fill. A Basic-template Ticket renders no such
+section at all.
+
+`src/api/tickets.ts`'s `createTicket(title, template?)` sends `template`
+(defaulting to `"Basic"`) alongside `title`; `parseTicket` now also
+requires `template`, `completionCondition`, and `repository` as
+strings on every Ticket response, matching the contract's `required`
+list. `TicketUpdate` picked up the generated schema's new optional
+`repository` (sent like any other refinement field) and `template`
+(never sent by this app — there is no UI path that could construct
+one) automatically, with no hand-written change needed beyond the
+regenerated `schema.d.ts`.
+
 ## Browser-to-backend suite
 
 The tests above stub `fetch`, so they never exercise the real proxy or
@@ -445,3 +496,11 @@ fields, asserts the guidance prompts render verbatim, and proves both
 reload persistence and persistence across a genuine Galley restart —
 see `e2e/tests/ticket-refinement.spec.ts` and
 `ticket-refinement-before.spec.ts` / `ticket-refinement-after.spec.ts`.
+Since issue #59 it also drives the real Template selector to capture
+one Ticket per Template, asserts each shows its own retained
+completion condition and (for Coding) the honest Pull Request empty
+state, and sets the repository reference on both Templates — see
+`e2e/tests/ticket-templates.spec.ts`. The retained-completion-condition-
+across-a-restart guarantee is proven at the Go level instead
+(`apps/galley/README.md`, "Ticket Templates and the retained
+completion condition"), so this spec needs no restart of its own.

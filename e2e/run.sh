@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # The one documented command for issue #53 (extended by #55 with the
 # authenticated-browser phases, by #56 with the Ticket-capture and
-# persistence phases, by #57 with the Ticket detail page phase, and by
-# #58 with the manual refinement phases, below): migrates a dedicated
+# persistence phases, by #57 with the Ticket detail page phase, by
+# #58 with the manual refinement phases, and by #59 with the Ticket
+# Templates phase, below): migrates a dedicated
 # database, starts a real Galley, a real substitute GitHub OAuth
 # provider, builds and serves a real Swiftlet, runs the browser suite
 # (including the failure-mode, authenticated-session, and Ticket specs)
@@ -313,6 +314,17 @@ log "running tests/ticket-refinement.spec.ts against the restarted galley"
   E2E_GITHUBFAKE_BASE_URL="$GITHUBFAKE_URL" \
   npx playwright test tests/ticket-refinement.spec.ts) || REFINEMENT_EXIT=$?
 
+# tests/ticket-templates.spec.ts (issue #59) signs in fresh, like the
+# two specs above -- the retained-completion-condition-across-a-restart
+# guarantee is already proven at the Go level
+# (apps/galley/cmd/galley's TestRestartDurability_CompletionConditionSurvivesFreshProcess),
+# so this spec needs no restart of its own.
+TEMPLATES_EXIT=0
+log "running tests/ticket-templates.spec.ts against the restarted galley"
+(cd "$SCRIPT_DIR" && E2E_BASE_URL="$SWIFTLET_BASE_URL" GALLEY_BASE_URL="$GALLEY_BASE_URL" \
+  E2E_GITHUBFAKE_BASE_URL="$GITHUBFAKE_URL" \
+  npx playwright test tests/ticket-templates.spec.ts) || TEMPLATES_EXIT=$?
+
 # --- 11. Stop Galley for good, then run the failure-mode spec ---
 log "stopping galley to exercise the failure-mode spec (pid $GALLEY_PID)"
 kill "$GALLEY_PID" 2>/dev/null || true
@@ -334,12 +346,13 @@ log "ticket-persistence-after.spec.ts exit code: $TICKET_AFTER_EXIT"
 log "ticket-refinement-after.spec.ts exit code: $REFINEMENT_AFTER_EXIT"
 log "ticket-detail.spec.ts exit code: $TICKET_DETAIL_EXIT"
 log "ticket-refinement.spec.ts exit code: $REFINEMENT_EXIT"
+log "ticket-templates.spec.ts exit code: $TEMPLATES_EXIT"
 log "backend-failure.spec.ts exit code: $FAILURE_EXIT"
 
 if [ "$STATUS_EXIT" -ne 0 ] || [ "$AUTH_EXIT" -ne 0 ] || [ "$RESTART_BEFORE_EXIT" -ne 0 ] \
   || [ "$TICKET_BEFORE_EXIT" -ne 0 ] || [ "$REFINEMENT_BEFORE_EXIT" -ne 0 ] || [ "$RESTART_AFTER_EXIT" -ne 0 ] \
   || [ "$TICKET_AFTER_EXIT" -ne 0 ] || [ "$REFINEMENT_AFTER_EXIT" -ne 0 ] || [ "$TICKET_DETAIL_EXIT" -ne 0 ] \
-  || [ "$REFINEMENT_EXIT" -ne 0 ] || [ "$FAILURE_EXIT" -ne 0 ]; then
+  || [ "$REFINEMENT_EXIT" -ne 0 ] || [ "$TEMPLATES_EXIT" -ne 0 ] || [ "$FAILURE_EXIT" -ne 0 ]; then
   log "SUITE FAILED"
   exit 1
 fi
