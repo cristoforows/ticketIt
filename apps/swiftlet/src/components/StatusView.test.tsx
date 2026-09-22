@@ -45,8 +45,7 @@ describe("StatusView", () => {
       SAMPLE_STATUS.application,
     );
     expect(screen.getByTestId("status-status")).toHaveTextContent(SAMPLE_STATUS.status);
-    // BREAK-SWIFTLET-TEST: wrong expected value
-    expect(screen.getByTestId("status-version")).toHaveTextContent("not-the-real-version");
+    expect(screen.getByTestId("status-version")).toHaveTextContent(SAMPLE_STATUS.version);
     expect(screen.getByTestId("status-environment")).toHaveTextContent(
       SAMPLE_STATUS.environment,
     );
