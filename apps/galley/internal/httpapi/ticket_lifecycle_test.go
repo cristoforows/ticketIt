@@ -18,12 +18,9 @@ import (
 	"github.com/cristoforows/ticketIt/apps/galley/internal/postgres"
 )
 
-// devServerWithSessionAndPoolForTickets mirrors
-// devServerWithSessionForTickets (ticket_test.go), additionally
-// exposing the real pool and the resolved owner id -- this file's
-// fixtures need to force a Ticket into an arbitrary starting Status
-// directly (setTicketStatusDirect below), which the HTTP API itself
-// has no way to do (that is exactly the state machine under test).
+// Also exposes the pool and owner id, because this file's fixtures
+// must force a Ticket into an arbitrary starting Status -- something
+// the HTTP API deliberately cannot do, being the machine under test.
 func devServerWithSessionAndPoolForTickets(t *testing.T) (baseURL string, client *http.Client, pool *pgxpool.Pool, ownerID int64) {
 	t.Helper()
 	pool = postgres.NewTestPool(t)
@@ -35,11 +32,9 @@ func devServerWithSessionAndPoolForTickets(t *testing.T) (baseURL string, client
 	return srv.URL, client, pool, ownerID
 }
 
-// setTicketStatusDirect forces a Ticket's persisted Status directly,
-// bypassing every transition rule this slice adds -- the only way to
-// construct an arbitrary (fixture) starting state for the transition
-// table test below, exactly like insertTicketAt bypasses insertTicket
-// for issue #59's mismatched-fixture test.
+// Bypasses every transition rule this slice adds, the only way to
+// construct an arbitrary starting state. Same technique as
+// insertTicketAt in issue #59's mismatched-fixture test.
 func setTicketStatusDirect(t *testing.T, pool *pgxpool.Pool, ownerID int64, publicID string, status TicketStatus) {
 	t.Helper()
 	tag, err := pool.Exec(context.Background(),
@@ -54,8 +49,7 @@ func setTicketStatusDirect(t *testing.T, pool *pgxpool.Pool, ownerID int64, publ
 	}
 }
 
-// lifecycleResult is the decoded outcome of one lifecycle HTTP call:
-// either a 2xx Ticket body or a non-2xx ErrorBody, never both.
+// Either a 2xx Ticket body or a non-2xx ErrorBody, never both.
 type lifecycleResult struct {
 	status  int
 	ticket  Ticket
@@ -142,18 +136,14 @@ func getTicketHTTP(t *testing.T, client *http.Client, baseURL, id string) Ticket
 	return ticket
 }
 
-// allTicketStatuses is every TicketStatus value the contract defines,
-// used to build the exhaustive transition-grid test below.
 var allTicketStatuses = []TicketStatus{Backlog, Ready, InProgress, Blocked, InReview, Done}
 
-// d3S2AllowedPlainTransitions is D3 S2's human-assigned workflow table
+// D3 S2's human-assigned workflow table
 // (docs/decisions/d3-agent-template-compatibility.md), transcribed
-// literally and independently of allowedSourceStatusesForTarget in
-// ticket_lifecycle.go -- this is the spec the implementation is
-// checked against, not a re-statement of the implementation itself.
-// In Review -> Done is deliberately absent: D3 permits it only via
-// explicit Accept, never a plain status change (see
-// TestAcceptTicket_* below for that path).
+// independently of allowedSourceStatusesForTarget so the test checks
+// the implementation against the spec rather than against itself.
+// InReview -> Done is deliberately absent: D3 permits it only through
+// Accept.
 var d3S2AllowedPlainTransitions = map[[2]TicketStatus]bool{
 	{Backlog, Ready}:       true,
 	{Ready, Backlog}:       true,
@@ -167,15 +157,9 @@ var d3S2AllowedPlainTransitions = map[[2]TicketStatus]bool{
 	{Done, Ready}:          true,
 }
 
-// TestChangeTicketStatus_D3S2Table is the exhaustive proof for POST
-// /api/tickets/{id}/status: every one of the 6x6 = 36 (from, to) pairs
-// is exercised, each against a Ticket forced (via setTicketStatusDirect)
-// into exactly that starting Status. This subsumes every rejection the
-// issue names explicitly (Backlog -> InProgress, Backlog -> Done,
-// Ready -> InReview, Ready -> Done, a plain status-set to Done from
-// any state, and Blocked -> Ready specifically -- D3 permits only
-// Blocked -> InProgress) as one of the 27 rejected subtests below,
-// rather than duplicating them as separate hand-picked tests.
+// The exhaustive grid subsumes every rejection issue #60 names
+// individually -- Backlog -> InProgress, Ready -> Done, Blocked ->
+// Ready and the rest -- so none are duplicated as hand-picked tests.
 func TestChangeTicketStatus_D3S2Table(t *testing.T) {
 	baseURL, client, pool, ownerID := devServerWithSessionAndPoolForTickets(t)
 
@@ -218,9 +202,8 @@ func TestChangeTicketStatus_D3S2Table(t *testing.T) {
 	}
 }
 
-// TestChangeTicketStatus_RejectsUnknownStatusValue proves the request
-// schema's own validation (invalid_request) is distinct from a
-// well-formed but disallowed transition (invalid_transition).
+// invalid_request, kept distinct from a well-formed but disallowed
+// transition's invalid_transition.
 func TestChangeTicketStatus_RejectsUnknownStatusValue(t *testing.T) {
 	baseURL, client := devServerWithSessionForTickets(t)
 	created := createTicket(t, client, baseURL, uniqueTitle(t))
@@ -253,10 +236,8 @@ func TestChangeTicketStatus_UnknownAndMalformedIdentifiers404(t *testing.T) {
 	}
 }
 
-// advanceToInReview drives a freshly captured (Backlog) Ticket through
-// D3 S2's legitimate manual chain to In Review using three real HTTP
-// calls -- Backlog -> Ready -> InProgress -> InReview -- exactly the
-// sequence an Owner doing their own work would follow.
+// Uses the legitimate manual chain rather than setTicketStatusDirect,
+// so Accept is exercised from a state an Owner could really reach.
 func advanceToInReview(t *testing.T, client *http.Client, baseURL, id string) {
 	t.Helper()
 	for _, to := range []TicketStatus{Ready, InProgress, InReview} {
@@ -289,11 +270,8 @@ func TestAcceptTicket_HumanAcceptanceCompletesFromInReview(t *testing.T) {
 	}
 }
 
-// TestAcceptTicket_ReviewedPrMergeRejected is D3's central M2
-// limitation: a reviewedPrMerge Ticket cannot complete in M2 at all.
-// The rejection must name the current-implementation reason (D2/M8),
-// and completionCondition must never be silently downgraded to
-// humanAcceptance -- proven by re-fetching the ticket afterward.
+// D3's central M2 limitation. The rejection must name the D2/M8
+// reason, and completionCondition must survive un-downgraded.
 func TestAcceptTicket_ReviewedPrMergeRejected(t *testing.T) {
 	baseURL, client := devServerWithSessionForTickets(t)
 	created := createTicketWithTemplate(t, client, baseURL, uniqueTitle(t), Coding)
@@ -333,10 +311,9 @@ func containsAll(s string, substrings ...string) bool {
 	return true
 }
 
-// TestAcceptTicket_RejectsWhenNotInReview proves Accept is gated on
-// current Status first, independently of completion condition: every
-// non-InReview state is invalid_transition, never the D2/M8 message,
-// regardless of which completion condition the ticket carries.
+// Accept is gated on Status first: a non-InReview Ticket is
+// invalid_transition, never the D2/M8 message, whatever its
+// completion condition.
 func TestAcceptTicket_RejectsWhenNotInReview(t *testing.T) {
 	baseURL, client, pool, ownerID := devServerWithSessionAndPoolForTickets(t)
 
@@ -378,9 +355,6 @@ func TestAcceptTicket_UnknownAndMalformedIdentifiers404(t *testing.T) {
 	}
 }
 
-// TestAssignTicketOwner_SetsAssigneeTypeAndIsIdempotent covers assign,
-// re-assign (idempotent), unassign, and re-unassign (idempotent) -- the
-// full command surface for the only assignable Assignee in M2.
 func TestAssignTicketOwner_SetsAssigneeTypeAndIsIdempotent(t *testing.T) {
 	baseURL, client := devServerWithSessionForTickets(t)
 	created := createTicket(t, client, baseURL, uniqueTitle(t))
@@ -414,10 +388,8 @@ func TestAssignTicketOwner_SetsAssigneeTypeAndIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestAssignTicketOwner_AllowedRegardlessOfStatus proves D3 places no
-// Status precondition on human assignment (M2 never has an open Round
-// to lock the Assignee field), and that assigning never itself changes
-// Status.
+// D3 places no Status precondition on human assignment: M2 has no
+// open Round that could lock the Assignee field.
 func TestAssignTicketOwner_AllowedRegardlessOfStatus(t *testing.T) {
 	baseURL, client, pool, ownerID := devServerWithSessionAndPoolForTickets(t)
 
@@ -459,12 +431,9 @@ func TestAssignTicketOwner_UnknownAndMalformedIdentifiers404(t *testing.T) {
 	}
 }
 
-// TestApplyTicketTransition_ScopedToOwner and
-// TestSetTicketAssigneeForOwner_ScopedToOwner follow
-// TestUpdateTicket_ScopedToOwner's established technique
-// (ticket_test.go): owners is a true one-row-per-deployment singleton,
-// so a bogus owner id that can never belong to any real Owner is used
-// instead of constructing a second real Owner row.
+// owners is a one-row-per-deployment singleton, so scoping is proven
+// with a bogus owner id rather than a second real Owner row -- the
+// technique TestUpdateTicket_ScopedToOwner established.
 func TestApplyTicketTransition_ScopedToOwner(t *testing.T) {
 	pool := postgres.NewTestPool(t)
 	ctx := context.Background()
@@ -502,23 +471,12 @@ func TestSetTicketAssigneeForOwner_ScopedToOwner(t *testing.T) {
 	}
 }
 
-// TestChangeTicketStatus_ConcurrentConflictingTransitionsOnlyOneApplies
-// is the required concurrency acceptance criterion, against real
-// PostgreSQL: two genuinely concurrent HTTP requests attempt two
-// different, individually-valid transitions from the SAME persisted
-// current Status (InProgress -> Blocked and InProgress -> InReview,
-// both allowed from InProgress). applyTicketTransition's SELECT ... FOR
-// UPDATE holds a row lock for its whole transaction, so whichever
-// request's transaction commits first is the only one that can
-// observe InProgress as the current status; the other's transaction
-// necessarily starts its own SELECT only after the first commits (the
-// lock blocks it), sees the now-different persisted Status, and is
-// rejected. Exactly one request must succeed; the other must fail with
-// invalidTransitionCode; and the final persisted Status must equal
-// whichever one won -- never a corrupted or unresolved state, and
-// never both succeeding (see docs/evidence/m2/60-lifecycle-transitions.md
-// for a captured red run of this exact test against a deliberately
-// un-locked, read-then-write implementation).
+// The concurrency acceptance criterion, against real PostgreSQL: two
+// transitions each valid from the same persisted Status race one
+// another. FOR UPDATE serialises them, so the loser re-reads a Status
+// its own transition is no longer valid from. A captured red run
+// against a read-then-write implementation is in
+// docs/evidence/m2/60-lifecycle-transitions.md.
 func TestChangeTicketStatus_ConcurrentConflictingTransitionsOnlyOneApplies(t *testing.T) {
 	baseURL, client := devServerWithSessionForTickets(t)
 
@@ -539,13 +497,9 @@ func TestChangeTicketStatus_ConcurrentConflictingTransitionsOnlyOneApplies(t *te
 			wg.Add(1)
 			go func(i int, target TicketStatus) {
 				defer wg.Done()
-				// net/http.Client is documented safe for concurrent
-				// use, and both requests need only the one session
-				// already established above -- sharing it here (rather
-				// than signing in twice more against the fake OAuth
-				// fixture, which is not designed for concurrent flows)
-				// keeps the only thing these two requests actually
-				// contend on the ticket row itself.
+				// Sharing the one session keeps the ticket row the
+				// only thing these requests contend on; the fake
+				// OAuth fixture is not built for concurrent sign-ins.
 				results[i] = changeStatus(t, client, baseURL, created.Id, target)
 			}(i, target)
 		}

@@ -1,23 +1,14 @@
--- Assignee (issue #60, D3 S2: docs/decisions/d3-agent-template-compatibility.md).
--- The person or Agent responsible for a Ticket's work (CONTEXT.md,
--- "Assignee"). In M2 the only assignable Assignee is the Owner, a
--- human -- there is no Agent concept anywhere yet (AGENTS.md, "No AI,
--- Agents, Rounds, or Michelin in M2").
+-- Assignee (CONTEXT.md; D3 S2). In M2 the only assignable Assignee is
+-- the Owner, a human.
 --
--- Modeled as a nullable TEXT discriminator, exactly like
--- goal/context/etc (000005/000006): NULL at storage means "never
--- assigned", surfaced as "" on the wire -- the same convention, not a
--- new one. A future milestone can introduce an Agent Assignee kind
--- (a new discriminator value, e.g. 'agent', plus its own reference
--- column such as assignee_agent_id) as a purely additive migration,
--- without restructuring this column or any of its callers.
+-- A nullable TEXT discriminator, like goal/context (000005/000006):
+-- NULL means "never assigned", surfaced as "" on the wire. A later
+-- milestone can add an Agent kind -- a new value plus its own
+-- reference column -- as a purely additive migration.
 --
--- No CHECK constraint, matching every other enum-like column added so
--- far (status, template, completion_condition): this slice's Galley
--- code is the only writer (ADR 0001) and enforces the valid value set
--- itself.
+-- No CHECK, matching status/template/completion_condition: Galley is
+-- the only writer (ADR 0001) and enforces the value set itself.
 --
--- No backfill needed beyond the column's implicit NULL: the Assignee
--- concept did not exist before this migration, so every pre-existing
--- Ticket was, in truth, unassigned.
+-- No backfill: the Assignee concept did not exist before this
+-- migration, so every pre-existing Ticket was genuinely unassigned.
 ALTER TABLE tickets ADD COLUMN assignee_type TEXT;

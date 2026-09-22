@@ -49,3 +49,46 @@ export async function createTicket(page: Page, title: string, template: TicketTe
   }
   return response.json();
 }
+
+export type TicketStatus = "Backlog" | "Ready" | "InProgress" | "Blocked" | "InReview" | "Done";
+
+/**
+ * Never throws on a rejection, unlike createTicket: callers need
+ * Galley's actual code and message to assert the UI shows that live
+ * response rather than a hardcoded literal (README.md, "Adding a
+ * spec").
+ */
+export interface TicketCommandResult {
+  ok: boolean;
+  status: number;
+  ticket?: Ticket;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+async function ticketCommand(
+  page: Page,
+  method: "POST" | "PUT" | "DELETE",
+  path: string,
+  data?: unknown,
+): Promise<TicketCommandResult> {
+  const response = await page.request.fetch(path, { method, data });
+  const body = await response.json();
+  if (response.ok()) {
+    return { ok: true, status: response.status(), ticket: body as Ticket };
+  }
+  return { ok: false, status: response.status(), errorCode: body?.error?.code, errorMessage: body?.error?.message };
+}
+
+/**
+ * For background state a spec is not itself testing, and for capturing
+ * Galley's live rejection to assert the UI shows it verbatim.
+ */
+export async function changeTicketStatusDirect(page: Page, id: string, status: TicketStatus): Promise<TicketCommandResult> {
+  return ticketCommand(page, "POST", `/api/tickets/${id}/status`, { status });
+}
+
+/** Same purpose as changeTicketStatusDirect, for Accept. */
+export async function acceptTicketDirect(page: Page, id: string): Promise<TicketCommandResult> {
+  return ticketCommand(page, "POST", `/api/tickets/${id}/accept`);
+}

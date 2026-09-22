@@ -39,10 +39,7 @@ var allowedSourceStatusesForTarget = map[TicketStatus][]TicketStatus{
 	InReview:   {InProgress},
 }
 
-// transitionRejection carries a rejected transition's stable reason
-// code and human-readable explanation. A nil *transitionRejection
-// from decidePlainStatusChange/decideAccept means the transition is
-// permitted.
+// A nil *transitionRejection means the transition is permitted.
 type transitionRejection struct {
 	code    string
 	message string
@@ -163,17 +160,12 @@ func applyTicketTransition(
 	return ticket, true, nil, nil
 }
 
-// writeTransitionRejection reports a rejected transition in the
-// shared error shape, at 400 -- the request was well-formed, but this
-// specific move is not permitted from the ticket's current state.
+// 400: the request is well-formed, the move is not permitted from the
+// ticket's current state.
 func writeTransitionRejection(w http.ResponseWriter, rejection *transitionRejection) {
 	writeError(w, http.StatusBadRequest, rejection.code, rejection.message)
 }
 
-// ChangeTicketStatus is POST /api/tickets/{id}/status (issue #60): a
-// human-assigned lifecycle transition, implementing D3 S2's table
-// exactly. See decidePlainStatusChange and applyTicketTransition for
-// the validation/concurrency rules.
 func (s *server) ChangeTicketStatus(w http.ResponseWriter, r *http.Request, id string) {
 	owner, ok := s.requireSession(w, r)
 	if !ok {
@@ -221,11 +213,9 @@ func (s *server) ChangeTicketStatus(w http.ResponseWriter, r *http.Request, id s
 	writeJSON(w, http.StatusOK, ticket)
 }
 
-// AcceptTicket is POST /api/tickets/{id}/accept (issue #60): the one
-// path to Done, kept as its own command rather than a Status write
-// per docs/contracts/execution-interface.md's Swiftlet -> Galley
-// owner-command boundary. See decideAccept for the completion-condition
-// rule and applyTicketTransition for the concurrency guarantee.
+// The one path to Done, kept as its own command rather than a Status
+// write to respect the Swiftlet -> Galley owner-command boundary
+// (docs/contracts/execution-interface.md).
 func (s *server) AcceptTicket(w http.ResponseWriter, r *http.Request, id string) {
 	owner, ok := s.requireSession(w, r)
 	if !ok {
@@ -284,14 +274,12 @@ func setTicketAssigneeForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID 
 	return ticket, true, nil
 }
 
-// assigneeTypeOwnerValue is the one non-empty assignee_type value M2
-// ever writes -- see internal/migrations/000007_....sql's own comment
-// on why this is a plain string column rather than a closed CHECK.
+// The only non-empty assignee_type M2 writes; migration 000007 says
+// why the column is not a closed CHECK.
 const assigneeTypeOwnerValue = "owner"
 
-// AssignTicketOwner is PUT /api/tickets/{id}/assignee (issue #60):
-// the only assignable Assignee in M2 is the Owner. Idempotent, and
-// creates no Round, work request, or queue entry.
+// The Owner is the only assignable Assignee in M2, so this takes no
+// assignee in its body.
 func (s *server) AssignTicketOwner(w http.ResponseWriter, r *http.Request, id string) {
 	owner, ok := s.requireSession(w, r)
 	if !ok {
@@ -318,9 +306,6 @@ func (s *server) AssignTicketOwner(w http.ResponseWriter, r *http.Request, id st
 	writeJSON(w, http.StatusOK, ticket)
 }
 
-// UnassignTicket is DELETE /api/tickets/{id}/assignee (issue #60):
-// clears the Assignee back to unassigned. Idempotent, and creates no
-// Round, work request, or queue entry.
 func (s *server) UnassignTicket(w http.ResponseWriter, r *http.Request, id string) {
 	owner, ok := s.requireSession(w, r)
 	if !ok {
