@@ -5,6 +5,11 @@ export interface Ticket {
   id: string;
   title: string;
   status: string;
+  /** Manual refinement fields (issue #58) -- "" when never set or cleared. */
+  goal: string;
+  context: string;
+  successCriteria: string;
+  constraints: string;
   createdAt: string;
   updatedAt: string;
 }

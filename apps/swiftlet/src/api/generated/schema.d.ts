@@ -116,7 +116,9 @@ export interface paths {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                id: string;
+            };
             cookie?: never;
         };
         /**
@@ -129,7 +131,14 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Partially update a Ticket's manual refinement fields
+         * @description Manual refinement (issue #58, docs/ticket-creation.md, "Manual guidance"): edits title, goal, context, successCriteria, and/or constraints by hand. No AI of any kind, and this triggers nothing else. This is a genuine partial update, not a replace-whole-resource PUT: a property absent from the request body leaves the stored value unchanged; a property present and set to "" clears the stored value (title excepted -- see below); a property present with text is trimmed and stored. Every property here is therefore optional at the schema level (never listed under `required`) so "absent" and "present as an empty string" stay distinguishable on the wire, and so generated Go clients bind each one through a pointer -- see UpdateTicketRequest.
+         *     `title` cannot be cleared: a value that trims to empty is rejected with `invalid_request`, since every Ticket must keep a title. Every field here is trimmed of leading/trailing whitespace before validation or storage, exactly like CreateTicketRequest.title -- a value that trims to only whitespace is treated as an explicit empty string (i.e. it clears goal/context/successCriteria/constraints, and is rejected for title).
+         *     Concurrent-edit rule: last-write-wins, with no optimistic concurrency check (no version token, no ETag/If-Match). Two PATCH requests touching disjoint fields both apply, since each only ever touches the fields it names; two PATCH requests naming the same field apply in whichever order Galley processes them, and the later one's value silently wins -- there is no conflict detection. See apps/galley/README.md, "Manual refinement fields," for the full reasoning.
+         *     Requires a valid session; returns 401 unauthenticated otherwise. An unknown identifier, a malformed identifier, and an identifier belonging to another Owner all return the same 404 not_found, exactly like GET on this same path.
+         */
+        patch: operations["updateTicket"];
         trace?: never;
     };
     "/api/session": {
@@ -183,6 +192,14 @@ export interface components {
              * @enum {string}
              */
             status: "Backlog";
+            /** @description Manual refinement (issue #58, docs/ticket-creation.md, "Manual guidance" -- prompt "What outcome do you want?"). Plain text, never Markdown (M7 owns report rendering). Always present on the wire; "" means never set or cleared -- read access never distinguishes those two, only PATCH's request body does (see UpdateTicketRequest). */
+            goal: string;
+            /** @description Manual refinement (issue #58 -- prompt "Supply relevant background, links, repositories, or examples."). Plain text; see `goal`'s description for the "" convention. */
+            context: string;
+            /** @description Manual refinement (issue #58 -- prompt "Describe observable conditions that demonstrate the outcome was achieved."). CONTEXT.md's "Success Criteria" term -- not "acceptance criteria". Plain text; see `goal`'s description for the "" convention. Agent-readiness validation of this field is M4's, not this slice's. */
+            successCriteria: string;
+            /** @description Manual refinement (issue #58 -- prompt "State what must stay unchanged or remain out of scope."). Plain text; see `goal`'s description for the "" convention. */
+            constraints: string;
             /**
              * Format: date-time
              * @description RFC3339 UTC timestamp of when the Ticket was captured.
@@ -190,7 +207,7 @@ export interface components {
             createdAt: string;
             /**
              * Format: date-time
-             * @description RFC3339 UTC timestamp of the Ticket's last change. Equal to createdAt until #60 adds transitions.
+             * @description RFC3339 UTC timestamp of the Ticket's last change. Equal to createdAt until a transition (#60) or a refinement edit (#58) changes it.
              */
             updatedAt: string;
         };
@@ -201,6 +218,19 @@ export interface components {
         CreateTicketRequest: {
             /** @description Trimmed of leading/trailing whitespace before validation. Must be non-empty and at most 200 characters after trimming. */
             title: string;
+        };
+        /** @description Manual refinement (issue #58): a genuine partial update. Every property is optional -- none are listed under `required` -- so a client can distinguish "this property was not part of the request" (leave unchanged) from "this property was sent as an empty string" (clear it, title excepted). See the `patch /api/tickets/{id}` operation above for the full rule, including why title cannot be cleared, and apps/galley/README.md, "Manual refinement fields," for the concurrent-edit (last-write-wins) rule. Trimmed of leading/trailing whitespace the same way CreateTicketRequest.title is; the maxLength values below apply after trimming and are counted in characters (code points), not bytes -- see apps/galley/README.md, "Tickets," "Title validation." */
+        UpdateTicketRequest: {
+            /** @description If present, trimmed and validated exactly like CreateTicketRequest.title. A value that trims to empty is rejected with invalid_request rather than clearing the title -- every Ticket must keep one. Absent leaves the title unchanged. */
+            title?: string;
+            /** @description Manual guidance: "What outcome do you want?" (docs/ticket-creation.md). Absent leaves the stored value unchanged; present as "" (or a value that trims to "") clears it; present with text trims and stores it. */
+            goal?: string;
+            /** @description Manual guidance: "Supply relevant background, links, repositories, or examples." Same absent/empty/text rule as `goal`. */
+            context?: string;
+            /** @description Manual guidance: "Describe observable conditions that demonstrate the outcome was achieved." Same absent/empty/text rule as `goal`. Agent-readiness validation of this field is M4's, not this slice's. */
+            successCriteria?: string;
+            /** @description Manual guidance: "State what must stay unchanged or remain out of scope." Same absent/empty/text rule as `goal`. */
+            constraints?: string;
         };
         /** @description The fixed GET /api/status payload. */
         StatusResponse: {
@@ -489,6 +519,41 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description The Ticket. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ticket"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    updateTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateTicketRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated Ticket. */
             200: {
                 headers: {
                     [name: string]: unknown;

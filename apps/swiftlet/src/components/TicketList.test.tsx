@@ -17,6 +17,10 @@ const TICKET_A = {
   id: "22222222-2222-4222-8222-222222222222",
   title: "Second captured",
   status: "Backlog",
+  goal: "",
+  context: "",
+  successCriteria: "",
+  constraints: "",
   createdAt: "2026-09-22T10:01:00Z",
   updatedAt: "2026-09-22T10:01:00Z",
 };
@@ -24,6 +28,10 @@ const TICKET_B = {
   id: "11111111-1111-4111-8111-111111111111",
   title: "First captured",
   status: "Backlog",
+  goal: "",
+  context: "",
+  successCriteria: "",
+  constraints: "",
   createdAt: "2026-09-22T10:00:00Z",
   updatedAt: "2026-09-22T10:00:00Z",
 };

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchTicket, TicketNotFoundError, type Ticket } from "../api/tickets";
+import { fetchTicket, updateTicket, TicketNotFoundError, type Ticket, type TicketUpdate } from "../api/tickets";
 import { Link } from "./Link";
 import { TicketDetail } from "./TicketDetail";
 
@@ -53,6 +53,13 @@ export function TicketDetailPage({ ticketId }: TicketDetailPageProps) {
     };
   }, [ticketId]);
 
+  // Passed to TicketDetail as `onSave` -- this container is the only
+  // place that ever calls updateTicket, keeping TicketDetail itself
+  // free of fetching (issue #57's split, preserved by issue #58).
+  function saveTicket(update: TicketUpdate): Promise<Ticket> {
+    return updateTicket(ticketId, update);
+  }
+
   return (
     <section data-testid="ticket-detail-page">
       <p>
@@ -76,7 +83,7 @@ export function TicketDetailPage({ ticketId }: TicketDetailPageProps) {
           <p data-testid="ticket-detail-error-message">{state.message}</p>
         </div>
       )}
-      {state.kind === "loaded" && <TicketDetail ticket={state.ticket} />}
+      {state.kind === "loaded" && <TicketDetail ticket={state.ticket} onSave={saveTicket} />}
     </section>
   );
 }

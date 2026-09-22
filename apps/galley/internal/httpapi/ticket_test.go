@@ -582,6 +582,474 @@ func TestGetTicket_MethodNotAllowed(t *testing.T) {
 	}
 }
 
+// strPtr is UpdateTicketRequest's pointer fields' constructor: a nil
+// *string means "absent from the request body" (contracts/openapi.yaml's
+// documented partial-update rule), so every test below that wants a
+// field genuinely present -- even as "" -- must take its address
+// explicitly rather than leave the struct literal's field unset.
+func strPtr(s string) *string { return &s }
+
+func patchTicket(t *testing.T, client *http.Client, baseURL, id string, body UpdateTicketRequest) (*http.Response, []byte) {
+	t.Helper()
+	data, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("failed to marshal request: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPatch, baseURL+"/api/tickets/"+id, bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("failed to build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH /api/tickets/%s failed: %v", id, err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	return resp, respBody
+}
+
+// TestUpdateTicket_OnlyProvidedFieldsChange is issue #58's central
+// correctness requirement, proven the way the issue itself demands:
+// PATCH names only "title," and every other already-set refinement
+// field must come back exactly as it was -- not reset to "" (which a
+// bare, non-pointer Go string would silently do if title and the four
+// refinement fields shared one "was this present" signal instead of
+// each having its own nil/non-nil pointer).
+func TestUpdateTicket_OnlyProvidedFieldsChange(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+	created := createTicket(t, client, baseURL, uniqueTitle(t))
+
+	resp, body := patchTicket(t, client, baseURL, created.Id, UpdateTicketRequest{
+		Goal:            strPtr("Ship the feature"),
+		Context:         strPtr("See the linked issue"),
+		SuccessCriteria: strPtr("Tests pass"),
+		Constraints:     strPtr("Do not change the API"),
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("initial refinement PATCH status = %d, want %d; body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	newTitle := uniqueTitle(t) + "-retitled"
+	resp, body = patchTicket(t, client, baseURL, created.Id, UpdateTicketRequest{Title: strPtr(newTitle)})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("title-only PATCH status = %d, want %d; body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	var updated Ticket
+	if err := json.Unmarshal(body, &updated); err != nil {
+		t.Fatalf("failed to decode response %q: %v", body, err)
+	}
+
+	if updated.Title != newTitle {
+		t.Errorf("Title = %q, want %q", updated.Title, newTitle)
+	}
+	if updated.Goal != "Ship the feature" {
+		t.Errorf("Goal = %q, want unchanged %q -- a title-only PATCH must not touch it", updated.Goal, "Ship the feature")
+	}
+	if updated.Context != "See the linked issue" {
+		t.Errorf("Context = %q, want unchanged %q -- a title-only PATCH must not touch it", updated.Context, "See the linked issue")
+	}
+	if updated.SuccessCriteria != "Tests pass" {
+		t.Errorf("SuccessCriteria = %q, want unchanged %q -- a title-only PATCH must not touch it", updated.SuccessCriteria, "Tests pass")
+	}
+	if updated.Constraints != "Do not change the API" {
+		t.Errorf("Constraints = %q, want unchanged %q -- a title-only PATCH must not touch it", updated.Constraints, "Do not change the API")
+	}
+}
+
+// TestUpdateTicket_EmptyStringClearsField is the partial-update
+// contract's second documented case: a field present and set to ""
+// clears the stored value, distinct from leaving it absent.
+func TestUpdateTicket_EmptyStringClearsField(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+	created := createTicket(t, client, baseURL, uniqueTitle(t))
+
+	resp, body := patchTicket(t, client, baseURL, created.Id, UpdateTicketRequest{Goal: strPtr("Ship the feature")})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH status = %d, want %d; body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	resp, body = patchTicket(t, client, baseURL, created.Id, UpdateTicketRequest{Goal: strPtr("")})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("clearing PATCH status = %d, want %d; body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	var updated Ticket
+	if err := json.Unmarshal(body, &updated); err != nil {
+		t.Fatalf("failed to decode response %q: %v", body, err)
+	}
+	if updated.Goal != "" {
+		t.Errorf("Goal = %q, want \"\" (cleared)", updated.Goal)
+	}
+}
+
+// TestUpdateTicket_AbsentFieldLeavesValueUnchanged is the partial-update
+// contract's first documented case, exercised directly (a title-only
+// PATCH already proves it for the four refinement fields together --
+// see TestUpdateTicket_OnlyProvidedFieldsChange -- this covers a
+// refinement-only PATCH leaving the title itself untouched).
+func TestUpdateTicket_AbsentFieldLeavesValueUnchanged(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+	title := uniqueTitle(t)
+	created := createTicket(t, client, baseURL, title)
+
+	resp, body := patchTicket(t, client, baseURL, created.Id, UpdateTicketRequest{Constraints: strPtr("Keep it backwards compatible")})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH status = %d, want %d; body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	var updated Ticket
+	if err := json.Unmarshal(body, &updated); err != nil {
+		t.Fatalf("failed to decode response %q: %v", body, err)
+	}
+	if updated.Title != title {
+		t.Errorf("Title = %q, want unchanged %q -- title was absent from the request", updated.Title, title)
+	}
+}
+
+// TestUpdateTicket_TrimsRefinementFields mirrors
+// TestCreateTicket_TrimsTitle for every field this endpoint accepts.
+func TestUpdateTicket_TrimsRefinementFields(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+	created := createTicket(t, client, baseURL, uniqueTitle(t))
+
+	resp, body := patchTicket(t, client, baseURL, created.Id, UpdateTicketRequest{
+		Goal:            strPtr("  Ship the feature  \t"),
+		Context:         strPtr("\nSee the linked issue\n"),
+		SuccessCriteria: strPtr("  Tests pass"),
+		Constraints:     strPtr("Do not change the API   "),
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH status = %d, want %d; body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	var updated Ticket
+	if err := json.Unmarshal(body, &updated); err != nil {
+		t.Fatalf("failed to decode response %q: %v", body, err)
+	}
+	if updated.Goal != "Ship the feature" {
+		t.Errorf("Goal = %q, want trimmed %q", updated.Goal, "Ship the feature")
+	}
+	if updated.Context != "See the linked issue" {
+		t.Errorf("Context = %q, want trimmed %q", updated.Context, "See the linked issue")
+	}
+	if updated.SuccessCriteria != "Tests pass" {
+		t.Errorf("SuccessCriteria = %q, want trimmed %q", updated.SuccessCriteria, "Tests pass")
+	}
+	if updated.Constraints != "Do not change the API" {
+		t.Errorf("Constraints = %q, want trimmed %q", updated.Constraints, "Do not change the API")
+	}
+}
+
+// TestUpdateTicket_WhitespaceOnlyRefinementFieldClears documents the
+// deliberate conflation this endpoint makes for the four refinement
+// fields only (never title): a value that trims to "" is treated
+// exactly like an explicit "", i.e. it clears the field rather than
+// being rejected.
+func TestUpdateTicket_WhitespaceOnlyRefinementFieldClears(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+	created := createTicket(t, client, baseURL, uniqueTitle(t))
+	if resp, body := patchTicket(t, client, baseURL, created.Id, UpdateTicketRequest{Goal: strPtr("Ship it")}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH status = %d, want %d; body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	resp, body := patchTicket(t, client, baseURL, created.Id, UpdateTicketRequest{Goal: strPtr("   \t\n  ")})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH status = %d, want %d; body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	var updated Ticket
+	if err := json.Unmarshal(body, &updated); err != nil {
+		t.Fatalf("failed to decode response %q: %v", body, err)
+	}
+	if updated.Goal != "" {
+		t.Errorf("Goal = %q, want \"\" (whitespace-only clears, same as an explicit \"\")", updated.Goal)
+	}
+}
+
+// TestUpdateTicket_RejectsClearingTitle proves title's documented
+// exception to the shared absent/empty/text rule: clearing it is
+// rejected, not applied, and the stored title is left untouched.
+func TestUpdateTicket_RejectsClearingTitle(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+	title := uniqueTitle(t)
+	created := createTicket(t, client, baseURL, title)
+
+	cases := []string{"", "   ", "\t\n "}
+	for _, value := range cases {
+		t.Run(strings.TrimSpace("blank_"+value), func(t *testing.T) {
+			resp, body := patchTicket(t, client, baseURL, created.Id, UpdateTicketRequest{Title: strPtr(value)})
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body=%s", resp.StatusCode, http.StatusBadRequest, body)
+			}
+			var errBody ErrorBody
+			if err := json.Unmarshal(body, &errBody); err != nil {
+				t.Fatalf("failed to decode error body %q: %v", body, err)
+			}
+			if errBody.Error.Code != "invalid_request" {
+				t.Errorf("Error.Code = %q, want %q", errBody.Error.Code, "invalid_request")
+			}
+		})
+	}
+
+	got := getTicketAssertOK(t, client, baseURL, created.Id)
+	if got.Title != title {
+		t.Errorf("Title = %q after a rejected clear, want unchanged %q", got.Title, title)
+	}
+}
+
+func getTicketAssertOK(t *testing.T, client *http.Client, baseURL, id string) Ticket {
+	t.Helper()
+	resp, body := getTicket(t, client, baseURL, id)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET status = %d, want %d; body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	var ticket Ticket
+	if err := json.Unmarshal(body, &ticket); err != nil {
+		t.Fatalf("failed to decode response %q: %v", body, err)
+	}
+	return ticket
+}
+
+// TestUpdateTicket_RejectsOverLengthFields covers every field's own
+// documented maximum, mirroring
+// TestCreateTicket_RejectsTitleOverMaxLength.
+func TestUpdateTicket_RejectsOverLengthFields(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+	created := createTicket(t, client, baseURL, uniqueTitle(t))
+
+	cases := []struct {
+		name    string
+		request UpdateTicketRequest
+	}{
+		{"title", UpdateTicketRequest{Title: strPtr(strings.Repeat("x", ticketTitleMaxLength+1))}},
+		{"goal", UpdateTicketRequest{Goal: strPtr(strings.Repeat("x", ticketGoalMaxLength+1))}},
+		{"context", UpdateTicketRequest{Context: strPtr(strings.Repeat("x", ticketContextMaxLength+1))}},
+		{"successCriteria", UpdateTicketRequest{SuccessCriteria: strPtr(strings.Repeat("x", ticketSuccessCriteriaMaxLength+1))}},
+		{"constraints", UpdateTicketRequest{Constraints: strPtr(strings.Repeat("x", ticketConstraintsMaxLength+1))}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, body := patchTicket(t, client, baseURL, created.Id, tc.request)
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body=%s", resp.StatusCode, http.StatusBadRequest, body)
+			}
+			var errBody ErrorBody
+			if err := json.Unmarshal(body, &errBody); err != nil {
+				t.Fatalf("failed to decode error body %q: %v", body, err)
+			}
+			if errBody.Error.Code != "invalid_request" {
+				t.Errorf("Error.Code = %q, want %q", errBody.Error.Code, "invalid_request")
+			}
+		})
+	}
+}
+
+// TestUpdateTicket_AcceptsFieldsAtMaxLength mirrors
+// TestCreateTicket_AcceptsTitleAtMaxLength for the four refinement
+// fields, proving the boundary itself is accepted.
+func TestUpdateTicket_AcceptsFieldsAtMaxLength(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+	created := createTicket(t, client, baseURL, uniqueTitle(t))
+
+	goal := strings.Repeat("g", ticketGoalMaxLength)
+	resp, body := patchTicket(t, client, baseURL, created.Id, UpdateTicketRequest{Goal: strPtr(goal)})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH status = %d, want %d; body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	var updated Ticket
+	if err := json.Unmarshal(body, &updated); err != nil {
+		t.Fatalf("failed to decode response %q: %v", body, err)
+	}
+	if updated.Goal != goal {
+		t.Errorf("Goal length = %d, want %d characters accepted unchanged", len(updated.Goal), ticketGoalMaxLength)
+	}
+}
+
+// TestUpdateTicket_CountsFieldLengthInCharactersNotBytes is issue #58's
+// own required non-ASCII test, mirroring
+// TestCreateTicket_CountsTitleLengthInCharactersNotBytes exactly: a
+// byte-based check would reject this contract-valid title at roughly a
+// third of the documented limit.
+func TestUpdateTicket_CountsFieldLengthInCharactersNotBytes(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+	created := createTicket(t, client, baseURL, uniqueTitle(t))
+
+	goal := strings.Repeat("日", ticketGoalMaxLength)
+	if got := utf8.RuneCountInString(goal); got != ticketGoalMaxLength {
+		t.Fatalf("test setup error: constructed goal has %d characters, want %d", got, ticketGoalMaxLength)
+	}
+	if len(goal) <= ticketGoalMaxLength {
+		t.Fatalf("test setup error: constructed goal has %d bytes, which does not exercise the distinction", len(goal))
+	}
+
+	resp, body := patchTicket(t, client, baseURL, created.Id, UpdateTicketRequest{Goal: strPtr(goal)})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH status = %d, want %d; body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	var updated Ticket
+	if err := json.Unmarshal(body, &updated); err != nil {
+		t.Fatalf("failed to decode response %q: %v", body, err)
+	}
+	if updated.Goal != goal {
+		t.Errorf("Goal = %q, want %q", updated.Goal, goal)
+	}
+}
+
+func TestUpdateTicket_RejectsMalformedJSON(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+	created := createTicket(t, client, baseURL, uniqueTitle(t))
+
+	req, err := http.NewRequest(http.MethodPatch, baseURL+"/api/tickets/"+created.Id, strings.NewReader(`not json`))
+	if err != nil {
+		t.Fatalf("failed to build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", resp.StatusCode, http.StatusBadRequest, data)
+	}
+	var errBody ErrorBody
+	if err := json.Unmarshal(data, &errBody); err != nil {
+		t.Fatalf("failed to decode error body %q: %v", data, err)
+	}
+	if errBody.Error.Code != "invalid_request" {
+		t.Errorf("Error.Code = %q, want %q", errBody.Error.Code, "invalid_request")
+	}
+}
+
+// TestUpdateTicket_RequiresSession is this endpoint's own direct-API
+// proof (ADR 0001) that authentication is Galley's rule, not the UI's.
+func TestUpdateTicket_RequiresSession(t *testing.T) {
+	handler := devHandler(t)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/tickets/"+uuid.NewString(), strings.NewReader(`{"title":"x"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusUnauthorized, rec.Body.String())
+	}
+	var errBody ErrorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &errBody); err != nil {
+		t.Fatalf("failed to decode error body %q: %v", rec.Body.String(), err)
+	}
+	if errBody.Error.Code != "unauthenticated" {
+		t.Errorf("Error.Code = %q, want %q", errBody.Error.Code, "unauthenticated")
+	}
+}
+
+// TestUpdateTicket_UnknownAndMalformedIdentifiersAreIndistinguishable
+// is TestGetTicket_UnknownAndMalformedIdentifiersAreIndistinguishable's
+// counterpart for this endpoint, proven the same byte-for-byte way.
+func TestUpdateTicket_UnknownAndMalformedIdentifiersAreIndistinguishable(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+
+	unknownResp, unknownBody := patchTicket(t, client, baseURL, uuid.NewString(), UpdateTicketRequest{Title: strPtr(uniqueTitle(t))})
+	malformedResp, malformedBody := patchTicket(t, client, baseURL, "not-a-uuid-at-all", UpdateTicketRequest{Title: strPtr(uniqueTitle(t))})
+
+	if unknownResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown identifier: status = %d, want %d; body=%s", unknownResp.StatusCode, http.StatusNotFound, unknownBody)
+	}
+	if malformedResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("malformed identifier: status = %d, want %d; body=%s", malformedResp.StatusCode, http.StatusNotFound, malformedBody)
+	}
+	if string(unknownBody) != string(malformedBody) {
+		t.Errorf("unknown identifier body %s differs from malformed identifier body %s -- both must be indistinguishable", unknownBody, malformedBody)
+	}
+}
+
+// TestUpdateTicket_ScopedToOwner is TestGetTicket_ScopedToOwner's
+// counterpart for updateTicketForOwner, following the same technique
+// for the same reason (owners is a true one-row-per-deployment
+// singleton -- see that test's own comment): a bogus owner id must not
+// be able to update a Ticket it does not own.
+func TestUpdateTicket_ScopedToOwner(t *testing.T) {
+	pool := postgres.NewTestPool(t)
+	ctx := context.Background()
+	ownerID := resolveTestOwner(t, pool)
+	title := uniqueTitle(t)
+	_, publicID := insertTicketAt(t, pool, ownerID, title, time.Now().UTC())
+
+	bogusOwnerID := ownerID + 1_000_000_000
+
+	_, found, err := updateTicketForOwner(ctx, pool, bogusOwnerID, publicID, ticketUpdate{title: strPtr(uniqueTitle(t) + "-hijacked")})
+	if err != nil {
+		t.Fatalf("updateTicketForOwner() returned unexpected error: %v", err)
+	}
+	if found {
+		t.Errorf("updateTicketForOwner(bogusOwnerID, %s) updated a ticket belonging to a different owner -- owner scoping is not enforced", publicID)
+	}
+
+	ticket, found, err := getTicketForOwner(ctx, pool, ownerID, publicID)
+	if err != nil {
+		t.Fatalf("getTicketForOwner() returned unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatalf("expected the ticket to still exist under its real owner")
+	}
+	if ticket.Title != title {
+		t.Errorf("Title = %q after a rejected cross-owner update attempt, want unchanged %q", ticket.Title, title)
+	}
+}
+
+// TestUpdateTicket_BumpsUpdatedAtButNotCreatedAt proves the
+// concurrent-edit rule's own side effect: every PATCH is a write, so
+// updatedAt always advances, even for a PATCH whose body names no
+// field at all (apps/galley/README.md, "Manual refinement fields").
+// createdAt never changes -- a Ticket's capture time is immutable.
+func TestUpdateTicket_BumpsUpdatedAtButNotCreatedAt(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+	created := createTicket(t, client, baseURL, uniqueTitle(t))
+
+	// createdAt/updatedAt are formatted at second precision (RFC3339, no
+	// fractional seconds -- see insertTicket/scanTicketRow), so the
+	// sleep must clear a whole second boundary, not just be "nonzero,"
+	// to observably advance the formatted string.
+	time.Sleep(1100 * time.Millisecond)
+
+	resp, body := patchTicket(t, client, baseURL, created.Id, UpdateTicketRequest{})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("empty-body PATCH status = %d, want %d; body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	var updated Ticket
+	if err := json.Unmarshal(body, &updated); err != nil {
+		t.Fatalf("failed to decode response %q: %v", body, err)
+	}
+
+	if updated.CreatedAt != created.CreatedAt {
+		t.Errorf("CreatedAt = %q, want unchanged %q", updated.CreatedAt, created.CreatedAt)
+	}
+	if updated.UpdatedAt == created.UpdatedAt {
+		t.Errorf("UpdatedAt = %q, want it to advance past %q after a PATCH", updated.UpdatedAt, created.UpdatedAt)
+	}
+	if updated.Title != created.Title {
+		t.Errorf("Title = %q, want unchanged %q -- the PATCH body named no field", updated.Title, created.Title)
+	}
+}
+
+func TestUpdateTicket_MethodAllowedOnTicketPath(t *testing.T) {
+	// PATCH joining GET on /api/tickets/{id} is exercised implicitly by
+	// every test above; this only proves the *other* methods still
+	// reject cleanly with the updated Allow set.
+	handler := devHandler(t)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/tickets/"+uuid.NewString(), nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusMethodNotAllowed, rec.Body.String())
+	}
+	allow := rec.Header().Get("Allow")
+	if allow != "GET, PATCH" {
+		t.Errorf("Allow header = %q, want %q", allow, "GET, PATCH")
+	}
+}
+
 func TestTickets_DatabaseUnavailable(t *testing.T) {
 	pool := unreachablePool(t)
 	cfg := config.Config{Environment: config.EnvDevelopment, Version: "dev"}
@@ -615,6 +1083,17 @@ func TestTickets_DatabaseUnavailable(t *testing.T) {
 
 	t.Run("get", func(t *testing.T) {
 		req := withCookie(httptest.NewRequest(http.MethodGet, "/api/tickets/"+uuid.NewString(), nil))
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusServiceUnavailable, rec.Body.String())
+		}
+	})
+
+	t.Run("update", func(t *testing.T) {
+		req := withCookie(httptest.NewRequest(http.MethodPatch, "/api/tickets/"+uuid.NewString(), strings.NewReader(`{"title":"x"}`)))
+		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 

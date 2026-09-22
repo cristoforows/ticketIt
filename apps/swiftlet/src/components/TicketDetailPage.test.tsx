@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TicketDetailPage } from "./TicketDetailPage";
 
 type MockResponse = Pick<Response, "ok" | "status" | "statusText" | "json">;
@@ -18,6 +18,10 @@ const TICKET = {
   id: TICKET_ID,
   title: "Write the report",
   status: "Backlog",
+  goal: "",
+  context: "",
+  successCriteria: "",
+  constraints: "",
   createdAt: "2026-09-22T10:00:00Z",
   updatedAt: "2026-09-22T10:00:00Z",
 };
@@ -90,5 +94,40 @@ describe("TicketDetailPage", () => {
 
     expect(await screen.findByTestId("ticket-detail-title")).toHaveTextContent(otherTicket.title);
     expect(fetch).toHaveBeenCalledWith(`/api/tickets/${otherId}`, undefined);
+  });
+
+  it("saves an edit through PATCH /api/tickets/:id and shows the updated Ticket", async () => {
+    const updated = { ...TICKET, goal: "Ship the report on time." };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(TICKET))
+      .mockResolvedValueOnce(jsonResponse(updated));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TicketDetailPage ticketId={TICKET_ID} />);
+    await screen.findByTestId("ticket-detail-title");
+
+    fireEvent.click(screen.getByTestId("ticket-detail-edit-button"));
+    fireEvent.change(screen.getByTestId("ticket-detail-textarea-goal"), {
+      target: { value: "Ship the report on time." },
+    });
+    fireEvent.click(screen.getByTestId("ticket-detail-save-button"));
+
+    expect(await screen.findByTestId("ticket-detail-field-goal")).toHaveTextContent(
+      "Ship the report on time.",
+    );
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `/api/tickets/${TICKET_ID}`,
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          title: TICKET.title,
+          goal: "Ship the report on time.",
+          context: "",
+          successCriteria: "",
+          constraints: "",
+        }),
+      }),
+    );
   });
 });

@@ -8,6 +8,20 @@ import { UnauthenticatedError } from "./session";
 
 export type Ticket = components["schemas"]["Ticket"];
 
+/**
+ * Manual refinement (issue #58): a genuine partial update. A field
+ * absent from the object leaves Galley's stored value unchanged; a
+ * field present as "" clears it (title excepted -- Galley rejects
+ * clearing title); a field present with text is trimmed and stored.
+ * This is why every property here is optional (`?:`), not just typed
+ * `string` -- `JSON.stringify` omits an `undefined` property entirely,
+ * which is what lets this app send "leave unchanged" and "clear" as
+ * genuinely different request bodies. See
+ * apps/galley/internal/httpapi/ticket.go's UpdateTicket for the
+ * server-side half of this same rule.
+ */
+export type TicketUpdate = components["schemas"]["UpdateTicketRequest"];
+
 const TICKETS_ENDPOINT = "/api/tickets";
 
 /**
@@ -66,6 +80,10 @@ function parseTicket(payload: unknown): Ticket {
     typeof record.id !== "string" ||
     typeof record.title !== "string" ||
     typeof record.status !== "string" ||
+    typeof record.goal !== "string" ||
+    typeof record.context !== "string" ||
+    typeof record.successCriteria !== "string" ||
+    typeof record.constraints !== "string" ||
     typeof record.createdAt !== "string" ||
     typeof record.updatedAt !== "string"
   ) {
@@ -75,6 +93,10 @@ function parseTicket(payload: unknown): Ticket {
     id: record.id,
     title: record.title,
     status: record.status as Ticket["status"],
+    goal: record.goal,
+    context: record.context,
+    successCriteria: record.successCriteria,
+    constraints: record.constraints,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };
@@ -157,6 +179,37 @@ export async function createTicket(title: string): Promise<Ticket> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title }),
   });
+  if (!response.ok) {
+    const payload: unknown = await response.json();
+    throw new Error(
+      errorMessage(payload) ??
+        `Galley returned an error response: ${response.status} ${response.statusText}`.trim(),
+    );
+  }
+  const payload: unknown = await response.json();
+  return parseTicket(payload);
+}
+
+/**
+ * Manual refinement (issue #58): a genuine partial update, sent
+ * exactly as the caller built it -- this function trims nothing and
+ * fills in no default, since only Galley owns those rules
+ * (docs/adr/0001-single-authority-galley.md). On rejection this
+ * surfaces Galley's own error message (e.g. an over-length field or an
+ * attempt to clear the title) rather than a generic status line, the
+ * same way createTicket does, since the caller is a form the Owner is
+ * actively editing. Throws TicketNotFoundError on Galley's shared 404,
+ * matching fetchTicket.
+ */
+export async function updateTicket(id: string, update: TicketUpdate): Promise<Ticket> {
+  const response = await authenticatedFetch(`${TICKETS_ENDPOINT}/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(update),
+  });
+  if (response.status === 404) {
+    throw new TicketNotFoundError();
+  }
   if (!response.ok) {
     const payload: unknown = await response.json();
     throw new Error(

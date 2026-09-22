@@ -11,7 +11,11 @@ sign-out" below), [issue #56](https://github.com/cristoforows/ticketIt/issues/56
 added the first Ticket list and quick capture (see "The Ticket list and
 quick capture" below), and [issue #57](https://github.com/cristoforows/ticketIt/issues/57)
 added client-side routing and the canonical full-page Ticket detail
-view (see "Routing and the Ticket detail page" below). See
+view (see "Routing and the Ticket detail page" below), and
+[issue #58](https://github.com/cristoforows/ticketIt/issues/58) added
+manual refinement -- editing a Ticket's title and its four refinement
+fields by hand from that same full page (see "Manual refinement
+fields" below). See
 [docs/deployment.md](../../docs/deployment.md) and
 [docs/adr/0001-single-authority-galley.md](../../docs/adr/0001-single-authority-galley.md):
 Swiftlet renders what Galley returns and never owns a workflow rule.
@@ -348,6 +352,72 @@ and the migration. `TicketList.tsx`'s title now links to
 `/tickets/<that id>` (`data-testid="ticket-title"` is unchanged; it is
 now the `<a>` itself rather than a `<span>` wrapping plain text).
 
+## Manual refinement fields (issue #58)
+
+`TicketDetail.tsx` (still the same pure-presentation component issue
+#57 wrote — no fetching, no routing) gained an edit mode for a
+Ticket's `title`, `goal`, `context`, `successCriteria`, and
+`constraints` (docs/ticket-creation.md, "Manual guidance"). **No AI of
+any kind, and this triggers nothing else** — Save performs exactly one
+`PATCH /api/tickets/:id` request with what the Owner typed, and
+nothing else in this app reacts to it.
+
+**View mode** shows each refinement field's stored value, or an
+explicit "Not set." placeholder for whichever are still empty (a
+title-only capture has all four empty). **Edit mode** offers `title`
+plus the four refinement fields as plain `<input>`/`<textarea>`
+elements — **stored and rendered as plain text only; this app never
+parses or renders Markdown anywhere.** Report rendering as Markdown is
+explicitly M7's, per issue #58's own scope statement; if a future
+slice renders these fields as Markdown, that must be stated explicitly
+there and handled safely, not assumed from this slice's plain-text
+choice. Each refinement field's `<textarea>` is paired with its
+docs/ticket-creation.md guidance prompt, shown verbatim just above it
+(`data-testid="ticket-detail-guidance-goal"` etc.) — issue #58's own
+acceptance criterion requires these to match the source document
+exactly, and `TicketDetail.test.tsx` and
+`e2e/tests/ticket-refinement.spec.ts` both assert the literal text.
+
+**Saving delegates to an `onSave` prop**
+(`(update: TicketUpdate) => Promise<Ticket>`), supplied by
+`TicketDetailPage.tsx` as `(update) => updateTicket(ticketId, update)`
+— the only place in this app that calls
+`src/api/tickets.ts`'s new `updateTicket`. This keeps `TicketDetail`
+itself free of fetching, exactly like issue #57's read-only fields
+already were, which is what lets a future M3 modal container supply
+its own `onSave` and render this exact component unchanged.
+
+**Every save submits all five fields as currently shown in the edit
+form**, not a computed diff of only what changed. Galley's
+`PATCH /api/tickets/:id` genuinely supports a partial update (a field
+absent from the request leaves the stored value unchanged; present
+and `""` clears it; present with text stores it — see
+`apps/galley/README.md`, "Manual refinement fields," for the full
+rule), and that partial-update behavior is proven directly against
+Galley by its own tests (`apps/galley/internal/httpapi/ticket_test.go`,
+per ADR 0001) — this app's edit form always displaying (and thus
+submitting) every field at once is a UI choice, not a gap in what the
+contract or Galley enforces.
+
+**Galley's own rejection message is shown verbatim, never
+substituted.** `updateTicket` surfaces `error.message` from Galley's
+shared error shape exactly like `createTicket` already does (e.g. an
+over-length field, or an attempt to clear the title); a rejected save
+leaves the edit form open with the Owner's in-progress edits intact
+(`data-testid="ticket-detail-save-error"`), rather than discarding
+them or substituting a friendlier message.
+
+**Cancel discards local edits and returns to view mode without ever
+calling `onSave`** — no request is sent, and the previously-saved
+values are shown unchanged, proven directly
+(`TicketDetail.test.tsx`'s "discards edits ... without calling
+onSave").
+
+Swiftlet performs no validation, trimming, or length-checking of its
+own here: every rule (trimming, per-field maximum lengths, title's
+"cannot be cleared" exception, Owner scoping) is enforced and proven
+by Galley alone (`docs/adr/0001-single-authority-galley.md`).
+
 ## Browser-to-backend suite
 
 The tests above stub `fetch`, so they never exercise the real proxy or
@@ -369,4 +439,9 @@ and proves they survive a real Galley restart — see `e2e/README.md`,
 list-to-detail navigation, a direct `/tickets/:id` URL load, a reload
 of that URL, and the not-found page for an unknown identifier, against
 the real, `vite preview`-served production build — see
-`e2e/tests/ticket-detail.spec.ts`.
+`e2e/tests/ticket-detail.spec.ts`. Since issue #58 it also drives the
+real edit form to fill in and save the title and all four refinement
+fields, asserts the guidance prompts render verbatim, and proves both
+reload persistence and persistence across a genuine Galley restart —
+see `e2e/tests/ticket-refinement.spec.ts` and
+`ticket-refinement-before.spec.ts` / `ticket-refinement-after.spec.ts`.
