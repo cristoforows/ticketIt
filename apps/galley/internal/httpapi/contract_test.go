@@ -212,6 +212,71 @@ func TestGetTicket_ResponseMatchesContract(t *testing.T) {
 	validateAgainstContract(t, router, notFoundReq, notFoundRec)
 }
 
+// TestUpdateTicket_ResponseMatchesContract validates issue #58's new
+// operation the same way TestGetTicket_ResponseMatchesContract does
+// above, for both its 200 and 404 shapes, plus the 400 shape a
+// rejected refinement field produces.
+func TestUpdateTicket_ResponseMatchesContract(t *testing.T) {
+	pool := postgres.NewTestPool(t)
+	doc := loadContract(t)
+
+	router, err := legacy.NewRouter(doc)
+	if err != nil {
+		t.Fatalf("failed to build a router from %s: %v", contractPath, err)
+	}
+
+	cfg := config.Config{Environment: config.EnvDevelopment, Version: "dev"}
+	handler := NewHandler(cfg, time.Now(), pool, testLogger(&bytes.Buffer{}))
+	sessionCookie := mintTestSessionCookie(t, pool)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/tickets",
+		strings.NewReader(`{"title":"update-ticket contract test"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.AddCookie(sessionCookie)
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("POST status = %d, want %d; body=%s", createRec.Code, http.StatusCreated, createRec.Body.String())
+	}
+	var created Ticket
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("failed to decode create response %q: %v", createRec.Body.String(), err)
+	}
+
+	patchReq := httptest.NewRequest(http.MethodPatch, "/api/tickets/"+created.Id,
+		strings.NewReader(`{"goal":"Ship it","context":"","successCriteria":"Tests pass"}`))
+	patchReq.Header.Set("Content-Type", "application/json")
+	patchReq.AddCookie(sessionCookie)
+	patchRec := httptest.NewRecorder()
+	handler.ServeHTTP(patchRec, patchReq)
+	if patchRec.Code != http.StatusOK {
+		t.Fatalf("PATCH status = %d, want %d; body=%s", patchRec.Code, http.StatusOK, patchRec.Body.String())
+	}
+	validateAgainstContract(t, router, patchReq, patchRec)
+
+	invalidReq := httptest.NewRequest(http.MethodPatch, "/api/tickets/"+created.Id,
+		strings.NewReader(`{"title":"   "}`))
+	invalidReq.Header.Set("Content-Type", "application/json")
+	invalidReq.AddCookie(sessionCookie)
+	invalidRec := httptest.NewRecorder()
+	handler.ServeHTTP(invalidRec, invalidReq)
+	if invalidRec.Code != http.StatusBadRequest {
+		t.Fatalf("PATCH (invalid) status = %d, want %d; body=%s", invalidRec.Code, http.StatusBadRequest, invalidRec.Body.String())
+	}
+	validateAgainstContract(t, router, invalidReq, invalidRec)
+
+	notFoundReq := httptest.NewRequest(http.MethodPatch, "/api/tickets/"+uuid.NewString(),
+		strings.NewReader(`{"goal":"unreachable"}`))
+	notFoundReq.Header.Set("Content-Type", "application/json")
+	notFoundReq.AddCookie(sessionCookie)
+	notFoundRec := httptest.NewRecorder()
+	handler.ServeHTTP(notFoundRec, notFoundReq)
+	if notFoundRec.Code != http.StatusNotFound {
+		t.Fatalf("PATCH (unknown) status = %d, want %d; body=%s", notFoundRec.Code, http.StatusNotFound, notFoundRec.Body.String())
+	}
+	validateAgainstContract(t, router, notFoundReq, notFoundRec)
+}
+
 // TestGetSession_ResponseMatchesContract validates issue #54's
 // SessionResponse shape (the 200 case) the same way the other
 // operations above are validated.

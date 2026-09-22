@@ -187,17 +187,29 @@ type StatusResponseStatus string
 
 // Ticket ticketIt's first domain record (issue #56): a title captured in Backlog. No work-type/category column -- see docs/ticket-creation.md, "Flexible ticket structure". Owned by exactly one Owner, enforced by Galley (docs/adr/0001-single-authority-galley.md). Addressed by an opaque, non-sequential public identifier (issue #57) -- see `id` below.
 type Ticket struct {
+	// Constraints Manual refinement (issue #58 -- prompt "State what must stay unchanged or remain out of scope."). Plain text; see `goal`'s description for the "" convention.
+	Constraints string `json:"constraints"`
+
+	// Context Manual refinement (issue #58 -- prompt "Supply relevant background, links, repositories, or examples."). Plain text; see `goal`'s description for the "" convention.
+	Context string `json:"context"`
+
 	// CreatedAt RFC3339 UTC timestamp of when the Ticket was captured.
 	CreatedAt string `json:"createdAt"`
+
+	// Goal Manual refinement (issue #58, docs/ticket-creation.md, "Manual guidance" -- prompt "What outcome do you want?"). Plain text, never Markdown (M7 owns report rendering). Always present on the wire; "" means never set or cleared -- read access never distinguishes those two, only PATCH's request body does (see UpdateTicketRequest).
+	Goal string `json:"goal"`
 
 	// Id Opaque public identifier (issue #57), used in URLs and by GET /api/tickets/{id}. Non-sequential and non-guessable -- never the internal sequential database id, which no Galley endpoint exposes.
 	Id string `json:"id"`
 
 	// Status The Ticket's lifecycle stage (CONTEXT.md, "Status"). This slice only ever produces Backlog -- Ready/In Progress/In Review/Done/Blocked arrive with #60's transitions.
 	Status TicketStatus `json:"status"`
-	Title  string       `json:"title"`
 
-	// UpdatedAt RFC3339 UTC timestamp of the Ticket's last change. Equal to createdAt until #60 adds transitions.
+	// SuccessCriteria Manual refinement (issue #58 -- prompt "Describe observable conditions that demonstrate the outcome was achieved."). CONTEXT.md's "Success Criteria" term -- not "acceptance criteria". Plain text; see `goal`'s description for the "" convention. Agent-readiness validation of this field is M4's, not this slice's.
+	SuccessCriteria string `json:"successCriteria"`
+	Title           string `json:"title"`
+
+	// UpdatedAt RFC3339 UTC timestamp of the Ticket's last change. Equal to createdAt until a transition (#60) or a refinement edit (#58) changes it.
 	UpdatedAt string `json:"updatedAt"`
 }
 
@@ -207,6 +219,24 @@ type TicketStatus string
 // TicketList The signed-in Owner's Tickets, newest first (createdAt descending, id descending as the tiebreak).
 type TicketList struct {
 	Tickets []Ticket `json:"tickets"`
+}
+
+// UpdateTicketRequest Manual refinement (issue #58): a genuine partial update. Every property is optional -- none are listed under `required` -- so a client can distinguish "this property was not part of the request" (leave unchanged) from "this property was sent as an empty string" (clear it, title excepted). See the `patch /api/tickets/{id}` operation above for the full rule, including why title cannot be cleared, and apps/galley/README.md, "Manual refinement fields," for the concurrent-edit (last-write-wins) rule. Trimmed of leading/trailing whitespace the same way CreateTicketRequest.title is; the maxLength values below apply after trimming and are counted in characters (code points), not bytes -- see apps/galley/README.md, "Tickets," "Title validation."
+type UpdateTicketRequest struct {
+	// Constraints Manual guidance: "State what must stay unchanged or remain out of scope." Same absent/empty/text rule as `goal`.
+	Constraints *string `json:"constraints,omitempty"`
+
+	// Context Manual guidance: "Supply relevant background, links, repositories, or examples." Same absent/empty/text rule as `goal`.
+	Context *string `json:"context,omitempty"`
+
+	// Goal Manual guidance: "What outcome do you want?" (docs/ticket-creation.md). Absent leaves the stored value unchanged; present as "" (or a value that trims to "") clears it; present with text trims and stores it.
+	Goal *string `json:"goal,omitempty"`
+
+	// SuccessCriteria Manual guidance: "Describe observable conditions that demonstrate the outcome was achieved." Same absent/empty/text rule as `goal`. Agent-readiness validation of this field is M4's, not this slice's.
+	SuccessCriteria *string `json:"successCriteria,omitempty"`
+
+	// Title If present, trimmed and validated exactly like CreateTicketRequest.title. A value that trims to empty is rejected with invalid_request rather than clearing the title -- every Ticket must keep one. Absent leaves the title unchanged.
+	Title *string `json:"title,omitempty"`
 }
 
 // CompleteGithubOAuthParams defines parameters for CompleteGithubOAuth.
@@ -223,6 +253,9 @@ type CreateDiagnosticNoteJSONRequestBody = CreateDiagnosticNoteRequest
 
 // CreateTicketJSONRequestBody defines body for CreateTicket for application/json ContentType.
 type CreateTicketJSONRequestBody = CreateTicketRequest
+
+// UpdateTicketJSONRequestBody defines body for UpdateTicket for application/json ContentType.
+type UpdateTicketJSONRequestBody = UpdateTicketRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -256,6 +289,9 @@ type ServerInterface interface {
 	// GetTicket Get one Ticket by its identifier
 	// (GET /api/tickets/{id})
 	GetTicket(w http.ResponseWriter, r *http.Request, id string)
+	// UpdateTicket Partially update a Ticket's manual refinement fields
+	// (PATCH /api/tickets/{id})
+	UpdateTicket(w http.ResponseWriter, r *http.Request, id string)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -464,6 +500,32 @@ func (siw *ServerInterfaceWrapper) GetTicket(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// UpdateTicket operation middleware
+func (siw *ServerInterfaceWrapper) UpdateTicket(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateTicket(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -592,6 +654,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/tickets", wrapper.ListTickets)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets", wrapper.CreateTicket)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/tickets/{id}", wrapper.GetTicket)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/api/tickets/{id}", wrapper.UpdateTicket)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/session", wrapper.SignOut)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/session", wrapper.GetSession)
 

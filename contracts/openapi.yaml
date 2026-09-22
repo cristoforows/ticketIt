@@ -233,6 +233,20 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorBody"
   /api/tickets/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          # Kept a plain Go string (see Ticket.id's own x-go-type):
+          # the handler validates and rejects a malformed value
+          # itself, folding it into the same 404 as "not found"
+          # rather than a generated binding error in a different
+          # shape. See apps/galley/README.md, "Tickets", "Public
+          # identifier".
+          x-go-type: string
     get:
       operationId: getTicket
       summary: Get one Ticket by its identifier
@@ -246,23 +260,69 @@ paths:
         404 not_found -- this endpoint never reveals that a record
         exists but belongs to someone else. Requires a valid session;
         returns 401 unauthenticated otherwise.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-            # Kept a plain Go string (see Ticket.id's own x-go-type):
-            # the handler validates and rejects a malformed value
-            # itself, folding it into the same 404 as "not found"
-            # rather than a generated binding error in a different
-            # shape. See apps/galley/README.md, "Tickets", "Public
-            # identifier".
-            x-go-type: string
       responses:
         "200":
           description: The Ticket.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+    patch:
+      operationId: updateTicket
+      summary: Partially update a Ticket's manual refinement fields
+      tags: [tickets]
+      description: >-
+        Manual refinement (issue #58, docs/ticket-creation.md, "Manual
+        guidance"): edits title, goal, context, successCriteria, and/or
+        constraints by hand. No AI of any kind, and this triggers
+        nothing else. This is a genuine partial update, not a
+        replace-whole-resource PUT: a property absent from the request
+        body leaves the stored value unchanged; a property present and
+        set to "" clears the stored value (title excepted -- see
+        below); a property present with text is trimmed and stored.
+        Every property here is therefore optional at the schema level
+        (never listed under `required`) so "absent" and "present as an
+        empty string" stay distinguishable on the wire, and so
+        generated Go clients bind each one through a pointer -- see
+        UpdateTicketRequest.
+
+        `title` cannot be cleared: a value that trims to empty is
+        rejected with `invalid_request`, since every Ticket must keep a
+        title. Every field here is trimmed of leading/trailing
+        whitespace before validation or storage, exactly like
+        CreateTicketRequest.title -- a value that trims to only
+        whitespace is treated as an explicit empty string (i.e. it
+        clears goal/context/successCriteria/constraints, and is
+        rejected for title).
+
+        Concurrent-edit rule: last-write-wins, with no optimistic
+        concurrency check (no version token, no ETag/If-Match). Two
+        PATCH requests touching disjoint fields both apply, since each
+        only ever touches the fields it names; two PATCH requests
+        naming the same field apply in whichever order Galley processes
+        them, and the later one's value silently wins -- there is no
+        conflict detection. See apps/galley/README.md, "Manual
+        refinement fields," for the full reasoning.
+
+        Requires a valid session; returns 401 unauthenticated otherwise.
+        An unknown identifier, a malformed identifier, and an
+        identifier belonging to another Owner all return the same
+        404 not_found, exactly like GET on this same path.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTicketRequest"
+      responses:
+        "200":
+          description: The updated Ticket.
           content:
             application/json:
               schema:
@@ -349,7 +409,18 @@ components:
         Addressed by an opaque, non-sequential public identifier (issue
         #57) -- see `id` below.
       additionalProperties: false
-      required: [id, title, status, createdAt, updatedAt]
+      required:
+        [
+          id,
+          title,
+          status,
+          goal,
+          context,
+          successCriteria,
+          constraints,
+          createdAt,
+          updatedAt,
+        ]
       properties:
         id:
           type: string
@@ -375,6 +446,36 @@ components:
             slice only ever produces Backlog -- Ready/In Progress/In
             Review/Done/Blocked arrive with #60's transitions.
           enum: [Backlog]
+        goal:
+          type: string
+          description: >-
+            Manual refinement (issue #58, docs/ticket-creation.md,
+            "Manual guidance" -- prompt "What outcome do you want?").
+            Plain text, never Markdown (M7 owns report rendering).
+            Always present on the wire; "" means never set or cleared
+            -- read access never distinguishes those two, only PATCH's
+            request body does (see UpdateTicketRequest).
+        context:
+          type: string
+          description: >-
+            Manual refinement (issue #58 -- prompt "Supply relevant
+            background, links, repositories, or examples."). Plain
+            text; see `goal`'s description for the "" convention.
+        successCriteria:
+          type: string
+          description: >-
+            Manual refinement (issue #58 -- prompt "Describe observable
+            conditions that demonstrate the outcome was achieved.").
+            CONTEXT.md's "Success Criteria" term -- not "acceptance
+            criteria". Plain text; see `goal`'s description for the ""
+            convention. Agent-readiness validation of this field is
+            M4's, not this slice's.
+        constraints:
+          type: string
+          description: >-
+            Manual refinement (issue #58 -- prompt "State what must
+            stay unchanged or remain out of scope."). Plain text; see
+            `goal`'s description for the "" convention.
         createdAt:
           type: string
           format: date-time
@@ -385,7 +486,8 @@ components:
           format: date-time
           description: >-
             RFC3339 UTC timestamp of the Ticket's last change. Equal to
-            createdAt until #60 adds transitions.
+            createdAt until a transition (#60) or a refinement edit
+            (#58) changes it.
           x-go-type: string
     TicketList:
       type: object
@@ -412,6 +514,62 @@ components:
             trimming.
           minLength: 1
           maxLength: 200
+    UpdateTicketRequest:
+      type: object
+      description: >-
+        Manual refinement (issue #58): a genuine partial update. Every
+        property is optional -- none are listed under `required` -- so
+        a client can distinguish "this property was not part of the
+        request" (leave unchanged) from "this property was sent as an
+        empty string" (clear it, title excepted). See the `patch
+        /api/tickets/{id}` operation above for the full rule, including
+        why title cannot be cleared, and apps/galley/README.md, "Manual
+        refinement fields," for the concurrent-edit (last-write-wins)
+        rule. Trimmed of leading/trailing whitespace the same way
+        CreateTicketRequest.title is; the maxLength values below apply
+        after trimming and are counted in characters (code points), not
+        bytes -- see apps/galley/README.md, "Tickets," "Title
+        validation."
+      additionalProperties: false
+      properties:
+        title:
+          type: string
+          description: >-
+            If present, trimmed and validated exactly like
+            CreateTicketRequest.title. A value that trims to empty is
+            rejected with invalid_request rather than clearing the
+            title -- every Ticket must keep one. Absent leaves the
+            title unchanged.
+          maxLength: 200
+        goal:
+          type: string
+          description: >-
+            Manual guidance: "What outcome do you want?"
+            (docs/ticket-creation.md). Absent leaves the stored value
+            unchanged; present as "" (or a value that trims to "")
+            clears it; present with text trims and stores it.
+          maxLength: 2000
+        context:
+          type: string
+          description: >-
+            Manual guidance: "Supply relevant background, links,
+            repositories, or examples." Same absent/empty/text rule as
+            `goal`.
+          maxLength: 10000
+        successCriteria:
+          type: string
+          description: >-
+            Manual guidance: "Describe observable conditions that
+            demonstrate the outcome was achieved." Same
+            absent/empty/text rule as `goal`. Agent-readiness
+            validation of this field is M4's, not this slice's.
+          maxLength: 2000
+        constraints:
+          type: string
+          description: >-
+            Manual guidance: "State what must stay unchanged or remain
+            out of scope." Same absent/empty/text rule as `goal`.
+          maxLength: 2000
     StatusResponse:
       type: object
       description: The fixed GET /api/status payload.

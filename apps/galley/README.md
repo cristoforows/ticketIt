@@ -50,6 +50,12 @@ Galley's first domain record: the `tickets` table and the
 operation now returns instead of the internal sequential id. See
 "Tickets", "Public identifier" and "Getting one Ticket" below.
 
+[Issue #58](https://github.com/cristoforows/ticketIt/issues/58) added
+manual refinement: `goal`, `context`, `successCriteria`, and
+`constraints` columns, and `PATCH /api/tickets/{id}` -- a genuine
+partial update, not a replace-whole-resource PUT. See "Manual
+refinement fields" below.
+
 Galley is a standalone Go module (`go.mod` at this directory) with no
 dependency on Node or any frontend toolchain. It does have third-party
 Go dependencies as of issue #51 — the generated server types/interface
@@ -635,6 +641,109 @@ proving the same `WHERE owner_id = $1 AND public_id = $2::uuid` filter
 that also backs `ListTickets`'s scoping is what stands between any
 non-owning caller and a Ticket that exists.
 
+### Manual refinement fields (issue #58)
+
+`PATCH /api/tickets/{id}` (`internal/httpapi/ticket.go`'s
+`UpdateTicket`) edits a Ticket's `title`, `goal`, `context`,
+`successCriteria`, and `constraints` by hand
+(docs/ticket-creation.md, "Manual guidance"). The four new columns are
+added by
+`internal/migrations/000005_add_ticket_refinement_fields.up.sql`,
+nullable `TEXT`, backing every existing row with `NULL` ("never set")
+— no backfill was needed, unlike issue #57's `public_id`, since `NULL`
+is itself a valid, meaningful value here. No AI of any kind is
+involved and this triggers nothing else. Identifier handling mirrors
+`GetTicket` exactly: `requireSession` first, then `uuid.Parse`, with a
+malformed value folded into the same `404 not_found` an unknown or
+cross-owner identifier produces.
+
+**This is a genuine partial update, not a replace-whole-resource
+PUT.** Every property on `UpdateTicketRequest` is optional at the
+schema level (none are in `required`), which is what makes the three
+required cases distinguishable on the wire and in Go:
+
+1. **Absent** from the request body → `encoding/json` leaves the
+   generated Go field `nil` (`*string`, `json:"...,omitempty"`) →
+   `updateTicketForOwner`'s `SET column = COALESCE($n, column)` sees a
+   SQL `NULL` parameter and keeps the existing value.
+2. **Present, set to `""`** (or a value that trims to `""` --
+   whitespace-only is treated the same as an explicit `""`, a
+   deliberate conflation) → a non-nil pointer to `""` → `COALESCE`
+   receives a genuine non-NULL empty string, which wins, clearing the
+   field.
+3. **Present with text** → trimmed, validated against its documented
+   maximum length (below), and stored.
+
+A bare (non-pointer) `string` field cannot distinguish case 1 from
+case 2 — this is exactly the trap issue #58 itself names (a title-only
+PATCH must never wipe the other four fields), and is why
+`ticketUpdate`'s fields and `updateTicketForOwner`'s SQL are pointer-
+based end to end. See `docs/evidence/m2/58-refinement-fields.md`,
+"Decision 1," for the full reasoning and a captured red run of the
+regression this guards against.
+
+**`title` is the one exception: it can be set or left absent, but
+never cleared.** A `title` that trims to `""` is rejected with
+`invalid_request` — every Ticket must keep a title — while the same
+trimmed-to-`""` value on any of the other four fields is a valid
+"clear this field" request.
+
+**Field length limits**, applied after trimming, in characters
+(`utf8.RuneCountInString`, matching `ticketTitleMaxLength`'s existing
+rule — not bytes; see "Title validation" above for why byte-counting
+would reject a contract-valid non-ASCII value):
+
+| Field | Max length |
+| --- | --- |
+| `title` | 200 |
+| `goal` | 2000 |
+| `context` | 10000 |
+| `successCriteria` | 2000 |
+| `constraints` | 2000 |
+
+`context` gets a larger limit because docs/ticket-creation.md's own
+prompt for it ("Supply relevant background, links, repositories, or
+examples") anticipates pasted reproduction steps and multiple links,
+not a short statement. None of these columns carry a database `CHECK`
+constraint — matching `tickets.status`'s existing rationale, this
+slice's Galley code is the only writer (ADR 0001) and enforces the
+limit itself, so a `CHECK` would duplicate that enforcement and need
+its own migration if a limit ever changed.
+
+**Concurrent-edit rule: last-write-wins, with no optimistic
+concurrency check.** There is no version token, `ETag`, or `If-Match`
+precondition anywhere in this operation — `updateTicketForOwner`'s
+`UPDATE ... WHERE owner_id = $1 AND public_id = $2::uuid` always
+applies unconditionally. Two PATCH requests naming disjoint fields
+both apply (each only ever touches the columns it names via
+`COALESCE`); two PATCH requests naming the *same* field apply in
+whichever order the database serializes them, and the later one's
+value silently overwrites the earlier one's with no error or merge.
+This is deliberate and explicitly permitted by issue #58, not an
+oversight — a future milestone needing conflict detection would add a
+version column and a precondition check explicitly.
+
+**Every PATCH bumps `updated_at`, even one whose body names no field
+at all.** There is no "did anything actually change" check — a PATCH
+request is itself an explicit Owner action worth recording as "last
+touched now." `createdAt` never changes; it is a Ticket's immutable
+capture time.
+
+**Storage: plain text, never Markdown.** All four fields are stored
+and returned as plain `TEXT` with no parsing of any kind. If a future
+slice ever renders them as Markdown, that must be stated explicitly
+and handled safely at render time (Swiftlet or a later report-
+rendering surface) — Galley itself performs no interpretation beyond
+trimming and length-checking. Report rendering is M7's, per issue
+#58's own scope statement.
+
+**Owner-scoping and 404-parity proof, singleton limitation.** Same
+inherited limitation as `GetTicket`/`ListTickets` above:
+`TestUpdateTicket_ScopedToOwner` calls `updateTicketForOwner` directly
+with a bogus owner id that can never belong to any real Owner, since
+`owners`'s true one-row-per-deployment singleton means a second real
+Owner cannot be constructed to prove this end to end.
+
 ## Error shape
 
 `ErrorBody`/`ErrorDetail` are generated from
@@ -875,7 +984,8 @@ apps/galley/
         ├── production_gating_test.go  # issue #52: proves those routes absent in production
         ├── auth.go         # issue #54: the four OAuth/session handlers + requireSession
         ├── cookies.go      # issue #54: session/state cookie construction
-        └── ticket.go       # issue #56: ListTickets/CreateTicket; issue #57 added GetTicket
+        └── ticket.go       # issue #56: ListTickets/CreateTicket; issue #57 added GetTicket;
+                            #   issue #58 added UpdateTicket (manual refinement)
 ```
 
 ## Exact versions and toolchain
@@ -930,6 +1040,10 @@ apps/galley/
   directly (`uuid.NewString()`, `uuid.Parse()`) for Tickets' public
   identifier. No new module was downloaded; `go mod tidy` only moved
   the existing entry from the indirect block to the direct one.
+- Issue #58 added no new dependency: `internal/httpapi/ticket.go` uses
+  only the standard library's `database/sql` (for `sql.NullString`,
+  scanning the four newly-nullable columns) alongside the existing
+  `pgx/v5` driver, which supports it directly.
 
 PostgreSQL server: `17.11` (Homebrew, `localhost:5432`) on the machine
 this slice's evidence was recorded on — any reasonably recent

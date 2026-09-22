@@ -1,32 +1,229 @@
-import type { Ticket } from "../api/tickets";
+import { useEffect, useState } from "react";
+import type { Ticket, TicketUpdate } from "../api/tickets";
 
 interface TicketDetailProps {
   ticket: Ticket;
+  /**
+   * Performs the actual PATCH (apps/swiftlet/src/api/tickets.ts's
+   * updateTicket) and returns the updated Ticket, or throws Galley's
+   * own rejection. Supplied by whichever container renders this
+   * component -- TicketDetailPage today, M3's modal container later --
+   * so this component still neither fetches nor routes itself
+   * (issue #57's split, preserved by issue #58).
+   */
+  onSave: (update: TicketUpdate) => Promise<Ticket>;
+}
+
+interface EditableFields {
+  title: string;
+  goal: string;
+  context: string;
+  successCriteria: string;
+  constraints: string;
+}
+
+function fieldsFrom(ticket: Ticket): EditableFields {
+  return {
+    title: ticket.title,
+    goal: ticket.goal,
+    context: ticket.context,
+    successCriteria: ticket.successCriteria,
+    constraints: ticket.constraints,
+  };
 }
 
 /**
- * Pure presentation of one already-fetched Ticket's detail content:
- * title, Status, and timestamps only -- no Rounds, Reports, PR links,
- * or Grill Mode, since none of those exist yet
- * (docs/ticket-views.md, "Ticket details"). Takes a Ticket as a prop
- * and neither fetches nor routes itself, so M3's modal presentation
- * can render this exact component inside its own container without a
- * second implementation of the detail content (issue #57's acceptance
- * criterion) -- only TicketDetailPage (the full-page container) has a
- * modal-shaped counterpart to build; this component does not change.
+ * Pure presentation of one already-fetched Ticket's detail content,
+ * now including manual refinement (issue #58, docs/ticket-creation.md,
+ * "Manual guidance"). View mode shows title, Status, timestamps, and
+ * the four refinement fields (an explicit "Not set" placeholder for
+ * whichever are still empty); edit mode offers title and the four
+ * refinement fields as plain-text inputs -- never Markdown, and never
+ * rendered as anything but plain text (M7 owns report rendering) --
+ * each with its docs/ticket-creation.md guidance prompt shown
+ * verbatim, plus Save and Cancel. No AI of any kind: Save submits
+ * exactly what the Owner typed and triggers nothing else.
+ *
+ * Saving delegates to the `onSave` prop rather than calling
+ * updateTicket itself, so this component still neither fetches nor
+ * routes -- only the container does -- which is what lets M3's modal
+ * render this exact component with its own container, unchanged,
+ * exactly as issue #57 already established for the read-only view.
  */
-export function TicketDetail({ ticket }: TicketDetailProps) {
+export function TicketDetail({ ticket, onSave }: TicketDetailProps) {
+  const [current, setCurrent] = useState(ticket);
+  const [mode, setMode] = useState<"view" | "editing">("view");
+  const [fields, setFields] = useState<EditableFields>(() => fieldsFrom(ticket));
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // A new Ticket prop (e.g. the container fetched a different one)
+  // always wins over any in-progress local edit -- resets back to a
+  // clean view of whatever was just fetched.
+  useEffect(() => {
+    setCurrent(ticket);
+    setFields(fieldsFrom(ticket));
+    setMode("view");
+    setSaveError(null);
+  }, [ticket]);
+
+  function startEditing() {
+    setFields(fieldsFrom(current));
+    setSaveError(null);
+    setMode("editing");
+  }
+
+  function cancelEditing() {
+    setFields(fieldsFrom(current));
+    setSaveError(null);
+    setMode("view");
+  }
+
+  async function handleSave(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaveError(null);
+    setSaving(true);
+    try {
+      const updated = await onSave({
+        title: fields.title,
+        goal: fields.goal,
+        context: fields.context,
+        successCriteria: fields.successCriteria,
+        constraints: fields.constraints,
+      });
+      setCurrent(updated);
+      setFields(fieldsFrom(updated));
+      setMode("view");
+    } catch (error) {
+      // Galley's own message, verbatim -- not a friendlier substitute
+      // (issue #58's own requirement).
+      setSaveError(error instanceof Error ? error.message : "Failed to save the ticket.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <article data-testid="ticket-detail">
-      <h2 data-testid="ticket-detail-title">{ticket.title}</h2>
-      <dl>
-        <dt>Status</dt>
-        <dd data-testid="ticket-detail-status">{ticket.status}</dd>
-        <dt>Created</dt>
-        <dd data-testid="ticket-detail-created-at">{ticket.createdAt}</dd>
-        <dt>Updated</dt>
-        <dd data-testid="ticket-detail-updated-at">{ticket.updatedAt}</dd>
-      </dl>
+      {mode === "view" && (
+        <>
+          <h2 data-testid="ticket-detail-title">{current.title}</h2>
+          <dl>
+            <dt>Status</dt>
+            <dd data-testid="ticket-detail-status">{current.status}</dd>
+            <dt>Created</dt>
+            <dd data-testid="ticket-detail-created-at">{current.createdAt}</dd>
+            <dt>Updated</dt>
+            <dd data-testid="ticket-detail-updated-at">{current.updatedAt}</dd>
+          </dl>
+          <section aria-label="Refinement">
+            <RefinementValue label="Goal" testId="goal" value={current.goal} />
+            <RefinementValue label="Context" testId="context" value={current.context} />
+            <RefinementValue label="Success Criteria" testId="success-criteria" value={current.successCriteria} />
+            <RefinementValue label="Constraints" testId="constraints" value={current.constraints} />
+          </section>
+          <button type="button" data-testid="ticket-detail-edit-button" onClick={startEditing}>
+            Edit
+          </button>
+        </>
+      )}
+      {mode === "editing" && (
+        <form data-testid="ticket-detail-edit-form" onSubmit={handleSave}>
+          <div>
+            <label htmlFor="ticket-detail-input-title">Title</label>
+            <input
+              id="ticket-detail-input-title"
+              data-testid="ticket-detail-input-title"
+              value={fields.title}
+              onChange={(event) => setFields((current) => ({ ...current, title: event.target.value }))}
+              disabled={saving}
+            />
+          </div>
+          <RefinementInput
+            label="Goal"
+            guidance="What outcome do you want?"
+            testId="goal"
+            value={fields.goal}
+            onChange={(value) => setFields((current) => ({ ...current, goal: value }))}
+            disabled={saving}
+          />
+          <RefinementInput
+            label="Context"
+            guidance="Supply relevant background, links, repositories, or examples."
+            testId="context"
+            value={fields.context}
+            onChange={(value) => setFields((current) => ({ ...current, context: value }))}
+            disabled={saving}
+          />
+          <RefinementInput
+            label="Success Criteria"
+            guidance="Describe observable conditions that demonstrate the outcome was achieved."
+            testId="success-criteria"
+            value={fields.successCriteria}
+            onChange={(value) => setFields((current) => ({ ...current, successCriteria: value }))}
+            disabled={saving}
+          />
+          <RefinementInput
+            label="Constraints"
+            guidance="State what must stay unchanged or remain out of scope."
+            testId="constraints"
+            value={fields.constraints}
+            onChange={(value) => setFields((current) => ({ ...current, constraints: value }))}
+            disabled={saving}
+          />
+          {saveError && (
+            <p role="alert" data-testid="ticket-detail-save-error">
+              {saveError}
+            </p>
+          )}
+          <button type="submit" data-testid="ticket-detail-save-button" disabled={saving}>
+            Save
+          </button>
+          <button
+            type="button"
+            data-testid="ticket-detail-cancel-button"
+            onClick={cancelEditing}
+            disabled={saving}
+          >
+            Cancel
+          </button>
+        </form>
+      )}
     </article>
+  );
+}
+
+function RefinementValue({ label, testId, value }: { label: string; testId: string; value: string }) {
+  return (
+    <div>
+      <h3>{label}</h3>
+      <p data-testid={`ticket-detail-field-${testId}`}>{value === "" ? "Not set." : value}</p>
+    </div>
+  );
+}
+
+interface RefinementInputProps {
+  label: string;
+  guidance: string;
+  testId: string;
+  value: string;
+  onChange: (value: string) => void;
+  disabled: boolean;
+}
+
+function RefinementInput({ label, guidance, testId, value, onChange, disabled }: RefinementInputProps) {
+  const inputId = `ticket-detail-textarea-${testId}`;
+  return (
+    <div>
+      <label htmlFor={inputId}>{label}</label>
+      <p data-testid={`ticket-detail-guidance-${testId}`}>{guidance}</p>
+      <textarea
+        id={inputId}
+        data-testid={inputId}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
+      />
+    </div>
   );
 }
