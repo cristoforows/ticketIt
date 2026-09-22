@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/cristoforows/ticketIt/apps/galley/internal/auth"
@@ -103,8 +104,11 @@ func TestCreateTicket_TitleOnlyCapturesBacklog(t *testing.T) {
 	if created.Status != Backlog {
 		t.Errorf("Status = %q, want %q", created.Status, Backlog)
 	}
-	if created.Id == 0 {
-		t.Error("Id is zero, want an assigned id")
+	if created.Id == "" {
+		t.Error("Id is empty, want an assigned public identifier")
+	}
+	if _, err := uuid.Parse(created.Id); err != nil {
+		t.Errorf("Id = %q is not a valid UUID: %v", created.Id, err)
 	}
 	if created.CreatedAt == "" {
 		t.Error("CreatedAt is empty")
@@ -330,10 +334,10 @@ func TestListTickets_NewestFirstWithIdTiebreak(t *testing.T) {
 		}
 	}
 	if olderIdx == -1 || newerIdx == -1 {
-		t.Fatalf("expected both tickets (older id=%d, newer id=%d) in the list of %d tickets", older.Id, newer.Id, len(tickets))
+		t.Fatalf("expected both tickets (older id=%s, newer id=%s) in the list of %d tickets", older.Id, newer.Id, len(tickets))
 	}
 	if newerIdx >= olderIdx {
-		t.Errorf("newer ticket (id=%d) at index %d did not come before older ticket (id=%d) at index %d -- want newest first",
+		t.Errorf("newer ticket (id=%s) at index %d did not come before older ticket (id=%s) at index %d -- want newest first",
 			newer.Id, newerIdx, older.Id, olderIdx)
 	}
 }
@@ -350,8 +354,8 @@ func TestListTicketsForOwner_TiebreaksOnIdWhenCreatedAtTies(t *testing.T) {
 	ownerID := resolveTestOwner(t, pool)
 
 	tiedAt := time.Now().UTC()
-	firstID := insertTicketAt(t, pool, ownerID, uniqueTitle(t)+"-tied-first", tiedAt)
-	secondID := insertTicketAt(t, pool, ownerID, uniqueTitle(t)+"-tied-second", tiedAt)
+	firstID, firstPublicID := insertTicketAt(t, pool, ownerID, uniqueTitle(t)+"-tied-first", tiedAt)
+	secondID, secondPublicID := insertTicketAt(t, pool, ownerID, uniqueTitle(t)+"-tied-second", tiedAt)
 
 	tickets, err := listTicketsForOwner(ctx, pool, ownerID)
 	if err != nil {
@@ -360,37 +364,48 @@ func TestListTicketsForOwner_TiebreaksOnIdWhenCreatedAtTies(t *testing.T) {
 
 	firstIdx, secondIdx := -1, -1
 	for i, ticket := range tickets {
-		if int64(ticket.Id) == firstID {
+		if ticket.Id == firstPublicID {
 			firstIdx = i
 		}
-		if int64(ticket.Id) == secondID {
+		if ticket.Id == secondPublicID {
 			secondIdx = i
 		}
 	}
 	if firstIdx == -1 || secondIdx == -1 {
-		t.Fatalf("expected both tied tickets (ids %d, %d) in the list of %d tickets", firstID, secondID, len(tickets))
+		t.Fatalf("expected both tied tickets (public ids %s, %s) in the list of %d tickets", firstPublicID, secondPublicID, len(tickets))
 	}
-	// secondID > firstID (IDENTITY is monotonic), so with equal
-	// created_at the documented "id DESC" tiebreak must place it first.
+	// secondID > firstID (IDENTITY is monotonic, internal id -- never
+	// exposed by the API, but the only way to know insertion order
+	// here), so with equal created_at the documented "id DESC" tiebreak
+	// must place it first. public_id is random and carries no order of
+	// its own, which is why this test still needs the internal id.
+	if secondID <= firstID {
+		t.Fatalf("test setup error: secondID (%d) is not greater than firstID (%d)", secondID, firstID)
+	}
 	if secondIdx >= firstIdx {
-		t.Errorf("with tied created_at, higher id %d at index %d did not come before lower id %d at index %d -- want id DESC to break the tie",
-			secondID, secondIdx, firstID, firstIdx)
+		t.Errorf("with tied created_at, the ticket inserted second (public id %s) at index %d did not come before the one inserted first (public id %s) at index %d -- want id DESC to break the tie",
+			secondPublicID, secondIdx, firstPublicID, firstIdx)
 	}
 }
 
 // insertTicketAt inserts a row directly with an explicit created_at
 // (bypassing insertTicket, which always uses now()) -- the only way to
-// construct the exact-tie fixture the test above needs.
-func insertTicketAt(t *testing.T, pool *pgxpool.Pool, ownerID int64, title string, at time.Time) (id int64) {
+// construct the exact-tie fixture the test above needs. It generates
+// its own public_id (mirroring insertTicket) and returns both that and
+// the internal id -- the latter only to let a test reason about
+// insertion order (IDENTITY is monotonic); no API response ever
+// exposes it.
+func insertTicketAt(t *testing.T, pool *pgxpool.Pool, ownerID int64, title string, at time.Time) (id int64, publicID string) {
 	t.Helper()
+	publicID = uuid.NewString()
 	err := pool.QueryRow(context.Background(),
-		`INSERT INTO tickets (owner_id, title, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $4) RETURNING id`,
-		ownerID, title, string(Backlog), at,
+		`INSERT INTO tickets (owner_id, title, status, public_id, created_at, updated_at) VALUES ($1, $2, $3, $4::uuid, $5, $5) RETURNING id`,
+		ownerID, title, string(Backlog), publicID, at,
 	).Scan(&id)
 	if err != nil {
 		t.Fatalf("failed to insert fixture ticket: %v", err)
 	}
-	return id
+	return id, publicID
 }
 
 // resolveTestOwner bootstraps (or reuses) the one real Owner, the same
@@ -444,6 +459,129 @@ func TestListTicketsForOwner_ScopedToOwner(t *testing.T) {
 	}
 }
 
+func getTicket(t *testing.T, client *http.Client, baseURL, id string) (*http.Response, []byte) {
+	t.Helper()
+	resp, err := client.Get(baseURL + "/api/tickets/" + id)
+	if err != nil {
+		t.Fatalf("GET /api/tickets/%s failed: %v", id, err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	return resp, data
+}
+
+// TestGetTicket_ReturnsOwnersTicket proves the round trip end to end:
+// a created Ticket's own public id fetches back exactly that Ticket.
+func TestGetTicket_ReturnsOwnersTicket(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+	title := uniqueTitle(t)
+	created := createTicket(t, client, baseURL, title)
+
+	resp, data := getTicket(t, client, baseURL, created.Id)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", resp.StatusCode, http.StatusOK, data)
+	}
+	var got Ticket
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("failed to decode response %q: %v", data, err)
+	}
+	if got != created {
+		t.Errorf("GetTicket(%s) = %+v, want %+v", created.Id, got, created)
+	}
+}
+
+// TestGetTicket_RequiresSession is this endpoint's own direct-API proof
+// (ADR 0001) that authentication is Galley's rule, not the UI's.
+func TestGetTicket_RequiresSession(t *testing.T) {
+	handler := devHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/tickets/"+uuid.NewString(), nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusUnauthorized, rec.Body.String())
+	}
+	var errBody ErrorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &errBody); err != nil {
+		t.Fatalf("failed to decode error body %q: %v", rec.Body.String(), err)
+	}
+	if errBody.Error.Code != "unauthenticated" {
+		t.Errorf("Error.Code = %q, want %q", errBody.Error.Code, "unauthenticated")
+	}
+}
+
+// TestGetTicket_UnknownAndMalformedIdentifiersAreIndistinguishable is
+// issue #57's central privacy requirement, proven byte-for-byte: a
+// well-formed but nonexistent identifier and a malformed one (not a
+// UUID at all) must produce the exact same 404 response, so neither
+// ever reveals which case occurred -- the same technique
+// production_gating_test.go uses to prove two responses are identical,
+// not merely similar.
+func TestGetTicket_UnknownAndMalformedIdentifiersAreIndistinguishable(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+
+	unknownResp, unknownBody := getTicket(t, client, baseURL, uuid.NewString())
+	malformedResp, malformedBody := getTicket(t, client, baseURL, "not-a-uuid-at-all")
+
+	if unknownResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown identifier: status = %d, want %d; body=%s", unknownResp.StatusCode, http.StatusNotFound, unknownBody)
+	}
+	if malformedResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("malformed identifier: status = %d, want %d; body=%s", malformedResp.StatusCode, http.StatusNotFound, malformedBody)
+	}
+	if string(unknownBody) != string(malformedBody) {
+		t.Errorf("unknown identifier body %s differs from malformed identifier body %s -- both must be indistinguishable", unknownBody, malformedBody)
+	}
+}
+
+// TestGetTicket_ScopedToOwner is TestListTicketsForOwner_ScopedToOwner's
+// counterpart for GetTicket, and follows the same technique for the
+// same reason: owners is a true one-row-per-deployment singleton, so a
+// second real Owner cannot be constructed to prove "another Owner's
+// Ticket returns 404" directly. Querying getTicketForOwner with a
+// bogus owner id that can never belong to any real Owner proves the
+// same scoping mechanism both listTicketsForOwner and getTicketForOwner
+// share: a Ticket's public_id lookup is always filtered by owner_id, so
+// it is unreachable for any owner id other than the one it actually
+// belongs to -- exactly what "another Owner's identifier returns the
+// same 404" requires, without ever creating a second Owner row.
+func TestGetTicket_ScopedToOwner(t *testing.T) {
+	pool := postgres.NewTestPool(t)
+	ctx := context.Background()
+	ownerID := resolveTestOwner(t, pool)
+	_, publicID := insertTicketAt(t, pool, ownerID, uniqueTitle(t), time.Now().UTC())
+
+	bogusOwnerID := ownerID + 1_000_000_000
+
+	_, found, err := getTicketForOwner(ctx, pool, bogusOwnerID, publicID)
+	if err != nil {
+		t.Fatalf("getTicketForOwner() returned unexpected error: %v", err)
+	}
+	if found {
+		t.Errorf("getTicketForOwner(bogusOwnerID, %s) found a ticket belonging to a different owner -- owner scoping is not enforced", publicID)
+	}
+}
+
+func TestGetTicket_MethodNotAllowed(t *testing.T) {
+	handler := devHandler(t)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/tickets/"+uuid.NewString(), nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusMethodNotAllowed, rec.Body.String())
+	}
+	var errBody ErrorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &errBody); err != nil {
+		t.Fatalf("failed to decode error body %q: %v", rec.Body.String(), err)
+	}
+	if errBody.Error.Code != "method_not_allowed" {
+		t.Errorf("Error.Code = %q, want %q", errBody.Error.Code, "method_not_allowed")
+	}
+}
+
 func TestTickets_DatabaseUnavailable(t *testing.T) {
 	pool := unreachablePool(t)
 	cfg := config.Config{Environment: config.EnvDevelopment, Version: "dev"}
@@ -467,6 +605,16 @@ func TestTickets_DatabaseUnavailable(t *testing.T) {
 	t.Run("create", func(t *testing.T) {
 		req := withCookie(httptest.NewRequest(http.MethodPost, "/api/tickets", strings.NewReader(`{"title":"x"}`)))
 		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusServiceUnavailable, rec.Body.String())
+		}
+	})
+
+	t.Run("get", func(t *testing.T) {
+		req := withCookie(httptest.NewRequest(http.MethodGet, "/api/tickets/"+uuid.NewString(), nil))
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 

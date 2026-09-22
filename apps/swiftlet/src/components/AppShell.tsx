@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { signOut, type Owner } from "../api/session";
+import { useRoute } from "../router";
 import { StatusView } from "./StatusView";
+import { TicketDetailPage } from "./TicketDetailPage";
 import { TicketList } from "./TicketList";
 
 interface AppShellProps {
@@ -19,6 +21,7 @@ interface AppShellProps {
 export function AppShell({ owner, onSignedOut }: AppShellProps) {
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
+  const route = useRoute();
 
   async function handleSignOut() {
     setSigningOut(true);
@@ -44,8 +47,13 @@ export function AppShell({ owner, onSignedOut }: AppShellProps) {
           {signOutError}
         </p>
       )}
-      <TicketList />
-      <StatusView />
+      {route.name === "backlog" && (
+        <>
+          <TicketList />
+          <StatusView />
+        </>
+      )}
+      {route.name === "ticket-detail" && <TicketDetailPage ticketId={route.ticketId} />}
     </div>
   );
 }

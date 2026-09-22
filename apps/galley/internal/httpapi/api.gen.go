@@ -185,11 +185,13 @@ type StatusResponseEnvironment string
 // StatusResponseStatus defines model for StatusResponse.Status.
 type StatusResponseStatus string
 
-// Ticket ticketIt's first domain record (issue #56): a title captured in Backlog. No work-type/category column -- see docs/ticket-creation.md, "Flexible ticket structure". Owned by exactly one Owner, enforced by Galley (docs/adr/0001-single-authority-galley.md).
+// Ticket ticketIt's first domain record (issue #56): a title captured in Backlog. No work-type/category column -- see docs/ticket-creation.md, "Flexible ticket structure". Owned by exactly one Owner, enforced by Galley (docs/adr/0001-single-authority-galley.md). Addressed by an opaque, non-sequential public identifier (issue #57) -- see `id` below.
 type Ticket struct {
 	// CreatedAt RFC3339 UTC timestamp of when the Ticket was captured.
 	CreatedAt string `json:"createdAt"`
-	Id        int    `json:"id"`
+
+	// Id Opaque public identifier (issue #57), used in URLs and by GET /api/tickets/{id}. Non-sequential and non-guessable -- never the internal sequential database id, which no Galley endpoint exposes.
+	Id string `json:"id"`
 
 	// Status The Ticket's lifecycle stage (CONTEXT.md, "Status"). This slice only ever produces Backlog -- Ready/In Progress/In Review/Done/Blocked arrive with #60's transitions.
 	Status TicketStatus `json:"status"`
@@ -251,6 +253,9 @@ type ServerInterface interface {
 	// CreateTicket Capture a Ticket from a title alone
 	// (POST /api/tickets)
 	CreateTicket(w http.ResponseWriter, r *http.Request)
+	// GetTicket Get one Ticket by its identifier
+	// (GET /api/tickets/{id})
+	GetTicket(w http.ResponseWriter, r *http.Request, id string)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -433,6 +438,32 @@ func (siw *ServerInterfaceWrapper) CreateTicket(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// GetTicket operation middleware
+func (siw *ServerInterfaceWrapper) GetTicket(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetTicket(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -560,6 +591,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/auth/github/callback", wrapper.CompleteGithubOAuth)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/tickets", wrapper.ListTickets)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets", wrapper.CreateTicket)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/tickets/{id}", wrapper.GetTicket)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/session", wrapper.SignOut)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/session", wrapper.GetSession)
 

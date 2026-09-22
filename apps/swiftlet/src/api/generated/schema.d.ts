@@ -112,6 +112,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tickets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one Ticket by its identifier
+         * @description Returns one Ticket belonging to the signed-in Owner, addressed by its opaque public identifier (issue #57) -- never the internal sequential database id, which no Galley endpoint exposes. An unknown identifier, a malformed identifier, and an identifier belonging to another Owner all return the same 404 not_found -- this endpoint never reveals that a record exists but belongs to someone else. Requires a valid session; returns 401 unauthenticated otherwise.
+         */
+        get: operations["getTicket"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/session": {
         parameters: {
             query?: never;
@@ -150,9 +170,13 @@ export interface components {
         SessionResponse: {
             owner: components["schemas"]["Owner"];
         };
-        /** @description ticketIt's first domain record (issue #56): a title captured in Backlog. No work-type/category column -- see docs/ticket-creation.md, "Flexible ticket structure". Owned by exactly one Owner, enforced by Galley (docs/adr/0001-single-authority-galley.md). */
+        /** @description ticketIt's first domain record (issue #56): a title captured in Backlog. No work-type/category column -- see docs/ticket-creation.md, "Flexible ticket structure". Owned by exactly one Owner, enforced by Galley (docs/adr/0001-single-authority-galley.md). Addressed by an opaque, non-sequential public identifier (issue #57) -- see `id` below. */
         Ticket: {
-            id: number;
+            /**
+             * Format: uuid
+             * @description Opaque public identifier (issue #57), used in URLs and by GET /api/tickets/{id}. Non-sequential and non-guessable -- never the internal sequential database id, which no Galley endpoint exposes.
+             */
+            id: string;
             title: string;
             /**
              * @description The Ticket's lifecycle stage (CONTEXT.md, "Status"). This slice only ever produces Backlog -- Ready/In Progress/In Review/Done/Blocked arrive with #60's transitions.
@@ -435,6 +459,37 @@ export interface operations {
         responses: {
             /** @description The persisted Ticket, in Backlog. */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ticket"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    getTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Ticket. */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };

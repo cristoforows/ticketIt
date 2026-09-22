@@ -39,6 +39,7 @@ describe("AppShell", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    window.history.pushState({}, "", "/");
   });
 
   it("shows which Owner is signed in", () => {
@@ -77,6 +78,24 @@ describe("AppShell", () => {
     expect(await screen.findByTestId("sign-out-error")).toHaveTextContent("503");
     expect(onSignedOut).not.toHaveBeenCalled();
     expect(screen.getByTestId("app-shell")).toBeInTheDocument();
+  });
+
+  it("renders the Ticket detail page instead of the Backlog list when the route is /tickets/:id", async () => {
+    window.history.pushState({}, "", "/tickets/some-ticket-id");
+    stubFetchByPath({
+      "/api/tickets/some-ticket-id": jsonResponse({
+        id: "some-ticket-id",
+        title: "Routed ticket",
+        status: "Backlog",
+        createdAt: "2026-09-22T10:00:00Z",
+        updatedAt: "2026-09-22T10:00:00Z",
+      }),
+    });
+
+    render(<AppShell owner={OWNER} onSignedOut={() => {}} />);
+
+    expect(await screen.findByTestId("ticket-detail-page")).toBeInTheDocument();
+    expect(screen.queryByTestId("ticket-list")).not.toBeInTheDocument();
   });
 
   it("treats a 401 on sign-out as already signed out", async () => {

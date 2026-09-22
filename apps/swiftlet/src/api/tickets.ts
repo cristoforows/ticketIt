@@ -19,6 +19,22 @@ const TICKETS_ENDPOINT = "/api/tickets";
  */
 export const TICKET_TITLE_MAX_LENGTH = 200;
 
+/**
+ * Thrown by fetchTicket on a 404 (contracts/openapi.yaml's getTicket:
+ * an unknown identifier, a malformed one, and one belonging to another
+ * Owner are all this same response -- see
+ * apps/galley/internal/httpapi/ticket.go). Mirrors
+ * src/api/session.ts's UnauthenticatedError: one distinguished error
+ * type per signal a caller must render an explicit state for, rather
+ * than string-matching a generic Error's message.
+ */
+export class TicketNotFoundError extends Error {
+  constructor() {
+    super("Galley reported no ticket with that identifier.");
+    this.name = "TicketNotFoundError";
+  }
+}
+
 type FetchLike = Pick<Response, "ok" | "status" | "statusText" | "json">;
 
 /**
@@ -47,7 +63,7 @@ function parseTicket(payload: unknown): Ticket {
   }
   const record = payload as Record<string, unknown>;
   if (
-    typeof record.id !== "number" ||
+    typeof record.id !== "string" ||
     typeof record.title !== "string" ||
     typeof record.status !== "string" ||
     typeof record.createdAt !== "string" ||
@@ -104,6 +120,28 @@ export async function fetchTickets(): Promise<Ticket[]> {
   }
   const payload: unknown = await response.json();
   return parseTicketList(payload);
+}
+
+/**
+ * Fetches one Ticket by its opaque public identifier (issue #57).
+ * Throws TicketNotFoundError on Galley's shared 404 -- which covers an
+ * unknown identifier, a malformed one, and one belonging to another
+ * Owner alike, by design (docs/adr/0001-single-authority-galley.md) --
+ * and a plain Error for every other failure, matching fetchTickets's
+ * own convention.
+ */
+export async function fetchTicket(id: string): Promise<Ticket> {
+  const response = await authenticatedFetch(`${TICKETS_ENDPOINT}/${encodeURIComponent(id)}`);
+  if (response.status === 404) {
+    throw new TicketNotFoundError();
+  }
+  if (!response.ok) {
+    throw new Error(
+      `Galley returned an error response: ${response.status} ${response.statusText}`.trim(),
+    );
+  }
+  const payload: unknown = await response.json();
+  return parseTicket(payload);
 }
 
 /**

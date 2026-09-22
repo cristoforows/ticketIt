@@ -1,7 +1,8 @@
 import type { Page } from "@playwright/test";
 
 export interface Ticket {
-  id: number;
+  /** Opaque public identifier (issue #57) -- never the internal sequential database id. */
+  id: string;
   title: string;
   status: string;
   createdAt: string;

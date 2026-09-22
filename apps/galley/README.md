@@ -45,6 +45,11 @@ behavior changed: this slice's own new Go code is entirely the
 Galley's first domain record: the `tickets` table and the
 `GET`/`POST /api/tickets` operations. See "Tickets" below.
 
+[Issue #57](https://github.com/cristoforows/ticketIt/issues/57) added
+`GET /api/tickets/{id}` and the `public_id` column every Ticket
+operation now returns instead of the internal sequential id. See
+"Tickets", "Public identifier" and "Getting one Ticket" below.
+
 Galley is a standalone Go module (`go.mod` at this directory) with no
 dependency on Node or any frontend toolchain. It does have third-party
 Go dependencies as of issue #51 — the generated server types/interface
@@ -535,6 +540,101 @@ why it does not instead construct a second real Owner row (doing so
 would break `auth_test.go`'s `TestOAuthSignIn_HappyPath`, which asserts
 exactly one `owners` row exists in this same shared database).
 
+### Public identifier (issue #57)
+
+**Every Ticket operation returns `public_id` as `id` — the internal
+sequential `BIGINT` primary key is never exposed by any Galley
+endpoint, and no consumer of `id` outside this package should ever see
+it change meaning back.** Before this slice, `id` was the sequential
+database primary key; a client could enumerate every Ticket by
+incrementing an integer, and the issue's own instruction is to "prefer
+a non-guessable, non-sequential public identifier" for URLs. Two shapes
+were available: add a second, separate `publicId` field alongside the
+existing sequential `id`, or replace what `id` means everywhere. This
+slice replaces it — keeping two identifiers on the wire (one of them
+still sequential) would still let a client observe insertion order,
+which is exactly what a non-guessable identifier is meant to prevent,
+and the issue is explicit that whichever shape is chosen must be
+applied "consistently across the contract," not left exposing a
+sequential id in one response and an opaque one in another.
+
+**Column:** `internal/migrations/000004_add_ticket_public_id.up.sql`
+adds `tickets.public_id UUID NOT NULL UNIQUE`, backfilled for
+pre-existing rows via PostgreSQL's built-in `gen_random_uuid()` (core
+since PostgreSQL 13, confirmed against this deployment's 17.11 — no
+`pgcrypto` or other extension needed). Backfilling was required, not
+optional: this project's migrations are forward-only
+(`apps/galley/README.md` — this file — "Database migrations"), and
+`ticketit_dev`/`ticketit_test` already held Tickets from #56 before
+this slice ran. New rows generate their own `public_id` in Go
+(`insertTicket`'s `uuid.NewString()`, [`github.com/google/uuid`](https://github.com/google/uuid),
+already an indirect dependency via `oapi-codegen/runtime` before this
+slice promoted it to direct) rather than relying on the column's
+`DEFAULT` — matching how every other identifier in this codebase
+(session tokens, OAuth `state`) is generated in application code. The
+internal `id` column is untouched and remains every foreign key's
+target (`docs/adr/0001-single-authority-galley.md`'s single-authority
+model has nothing to do with which id a client sees); only what the
+HTTP API exposes changed.
+
+**Contract:** `Ticket.id`'s schema changed from `type: integer` to
+`type: string, format: uuid`. `format: uuid` is documentation only —
+`x-go-type: string` keeps the generated Go field (and the
+`GET /api/tickets/{id}` path parameter) a plain `string`, exactly like
+`startedAt`'s own override (see "Generated types and the drift check"
+below) and matching this contract's existing convention that a
+format/length constraint documents intent for generated-client
+consumers without oapi-codegen enforcing it at bind time
+(`CreateTicketRequest.title`'s `maxLength` is the precedent). This was
+deliberate, not a shortcut: oapi-codegen's default for `format: uuid`
+would bind through `github.com/oapi-codegen/runtime/types.UUID`
+(itself `google/uuid.UUID`), which rejects a malformed value **before**
+the handler ever runs — via the generated wrapper's own error path,
+which answers with a bare `http.Error` in a different shape than this
+contract's shared `ErrorBody`. Keeping the Go type a plain string
+means every identifier this endpoint might see (well-formed, malformed,
+unknown, or belonging to another Owner) reaches `GetTicket` itself,
+which folds all but the well-formed-and-owned case into the exact same
+`404 not_found` — see "Getting one Ticket" below.
+
+### Getting one Ticket (issue #57)
+
+`GET /api/tickets/{id}` (`internal/httpapi/ticket.go`'s `GetTicket`)
+returns one Ticket by its public identifier, scoped to the signed-in
+Owner exactly like `ListTickets`. **A malformed identifier, an unknown
+identifier, and an identifier belonging to another Owner all produce
+the exact same `404 not_found` response** — this is the issue's own
+requirement ("never reveal that a record exists but belongs to someone
+else"), proven byte-for-byte, not just asserted, by
+`TestGetTicket_UnknownAndMalformedIdentifiersAreIndistinguishable`
+(compares the two response bodies directly, the same technique
+`production_gating_test.go` uses to prove two responses are identical
+rather than merely similar).
+
+Concretely: `GetTicket` first calls `uuid.Parse(id)` — a value that
+fails to parse is rejected as `404 not_found` immediately, before ever
+reaching the database. This is not only a privacy choice; it is also
+required for correctness. `getTicketForOwner`'s query filters with
+`public_id = $2::uuid`, and PostgreSQL has **no cast at all** (checked
+directly against `pg_cast`, not assumed) from `text` to `uuid` — a
+malformed value would otherwise fail the query itself with a syntax
+error, which this handler would then have to distinguish from "no
+rows" to avoid mis-reporting a malformed identifier as
+`503 database_unavailable`. Validating first avoids that distinction
+being needed at all.
+
+**Owner-scoping proof, singleton limitation.** Exactly like
+`TestListTicketsForOwner_ScopedToOwner` (see "Ownership" above),
+`owners` being a true one-row-per-deployment singleton means a second
+real Owner cannot be constructed to prove "another Owner's Ticket
+returns 404" by actually creating one. `TestGetTicket_ScopedToOwner`
+follows the same technique: it calls `getTicketForOwner` directly with
+a bogus owner id that can never belong to any real Owner, for a Ticket
+that does exist under the real Owner, and asserts it is not found —
+proving the same `WHERE owner_id = $1 AND public_id = $2::uuid` filter
+that also backs `ListTickets`'s scoping is what stands between any
+non-owning caller and a Ticket that exists.
+
 ## Error shape
 
 `ErrorBody`/`ErrorDetail` are generated from
@@ -758,7 +858,7 @@ apps/galley/
 │                           #   real port -- test/development only, never cmd/galley
 └── internal/
     ├── config/             # environment parsing and validation (incl. DATABASE_URL, #52; owner/OAuth, #54)
-    ├── migrations/         # embedded, versioned, forward-only SQL files (#52, #54, #56)
+    ├── migrations/         # embedded, versioned, forward-only SQL files (#52, #54, #56, #57)
     ├── postgres/           # issue #52: pgxpool wrapper, live health check, migration runner,
     │                       #   and the real-PostgreSQL test-setup helper (NewTestPool)
     ├── auth/                # issue #54: tokens/hashing, sessions, oauth state, Owner
@@ -775,7 +875,7 @@ apps/galley/
         ├── production_gating_test.go  # issue #52: proves those routes absent in production
         ├── auth.go         # issue #54: the four OAuth/session handlers + requireSession
         ├── cookies.go      # issue #54: session/state cookie construction
-        └── ticket.go       # issue #56: ListTickets/CreateTicket -- Galley's first domain record
+        └── ticket.go       # issue #56: ListTickets/CreateTicket; issue #57 added GetTicket
 ```
 
 ## Exact versions and toolchain
@@ -823,6 +923,13 @@ apps/galley/
   `internal/githubfake` use only the standard library (`crypto/rand`,
   `crypto/sha256`, `net/http`, `encoding/json`) plus `pgx/v5`, already
   present.
+- `github.com/google/uuid` `v1.6.0` (issue #57) — promoted from an
+  indirect dependency (pulled in transitively by
+  `oapi-codegen/runtime` since issue #54, see above) to an ordinary
+  direct `require`: `internal/httpapi/ticket.go` now imports it
+  directly (`uuid.NewString()`, `uuid.Parse()`) for Tickets' public
+  identifier. No new module was downloaded; `go mod tidy` only moved
+  the existing entry from the indirect block to the direct one.
 
 PostgreSQL server: `17.11` (Homebrew, `localhost:5432`) on the machine
 this slice's evidence was recorded on — any reasonably recent

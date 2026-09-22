@@ -232,6 +232,47 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorBody"
+  /api/tickets/{id}:
+    get:
+      operationId: getTicket
+      summary: Get one Ticket by its identifier
+      tags: [tickets]
+      description: >-
+        Returns one Ticket belonging to the signed-in Owner, addressed
+        by its opaque public identifier (issue #57) -- never the
+        internal sequential database id, which no Galley endpoint
+        exposes. An unknown identifier, a malformed identifier, and an
+        identifier belonging to another Owner all return the same
+        404 not_found -- this endpoint never reveals that a record
+        exists but belongs to someone else. Requires a valid session;
+        returns 401 unauthenticated otherwise.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+            # Kept a plain Go string (see Ticket.id's own x-go-type):
+            # the handler validates and rejects a malformed value
+            # itself, folding it into the same 404 as "not found"
+            # rather than a generated binding error in a different
+            # shape. See apps/galley/README.md, "Tickets", "Public
+            # identifier".
+            x-go-type: string
+      responses:
+        "200":
+          description: The Ticket.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
   /api/session:
     get:
       operationId: getSession
@@ -305,11 +346,26 @@ components:
         Backlog. No work-type/category column -- see
         docs/ticket-creation.md, "Flexible ticket structure". Owned by
         exactly one Owner, enforced by Galley (docs/adr/0001-single-authority-galley.md).
+        Addressed by an opaque, non-sequential public identifier (issue
+        #57) -- see `id` below.
       additionalProperties: false
       required: [id, title, status, createdAt, updatedAt]
       properties:
         id:
-          type: integer
+          type: string
+          format: uuid
+          description: >-
+            Opaque public identifier (issue #57), used in URLs and by
+            GET /api/tickets/{id}. Non-sequential and non-guessable --
+            never the internal sequential database id, which no Galley
+            endpoint exposes.
+          # A plain Go string, not oapi-codegen's default UUID type:
+          # keeps parsing/validation (and folding a malformed value
+          # into the same 404 as "not found") in the hand-rolled
+          # handler, matching this contract's existing convention of
+          # format/length being documentation, not generated-code
+          # enforcement (see CreateTicketRequest.title's maxLength).
+          x-go-type: string
         title:
           type: string
         status:
