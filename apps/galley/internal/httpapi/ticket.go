@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -144,9 +143,8 @@ func (s *server) UpdateTicket(w http.ResponseWriter, r *http.Request, id string)
 	}
 
 	var req UpdateTicketRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request",
-			`request body must be JSON matching {"title"?, "goal"?, "context"?, "successCriteria"?, "constraints"?, "repository"?}`)
+	if !decodeStrictJSON(w, r, &req,
+		`request body must be JSON matching {"title"?, "goal"?, "context"?, "successCriteria"?, "constraints"?, "repository"?}`) {
 		return
 	}
 
@@ -271,8 +269,7 @@ func (s *server) CreateTicket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req CreateTicketRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", `request body must be JSON matching {"title": "..."}`)
+	if !decodeStrictJSON(w, r, &req, `request body must be JSON matching {"title": "..."}`) {
 		return
 	}
 

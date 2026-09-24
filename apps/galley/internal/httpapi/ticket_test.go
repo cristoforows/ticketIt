@@ -294,6 +294,42 @@ func TestCreateTicket_RejectsMalformedJSON(t *testing.T) {
 	}
 }
 
+// TestCreateTicket_RejectsUnknownProperty is issue #75's proof for this
+// endpoint: contracts/openapi.yaml's CreateTicketRequest declares
+// additionalProperties: false, so a well-formed body naming an extra
+// property must be rejected rather than silently accepted with the
+// unknown property dropped.
+func TestCreateTicket_RejectsUnknownProperty(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/tickets",
+		strings.NewReader(`{"title":"`+uniqueTitle(t)+`","bogus":"x"}`))
+	if err != nil {
+		t.Fatalf("failed to build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", resp.StatusCode, http.StatusBadRequest, data)
+	}
+	var errBody ErrorBody
+	if err := json.Unmarshal(data, &errBody); err != nil {
+		t.Fatalf("failed to decode error body %q: %v", data, err)
+	}
+	if errBody.Error.Code != "invalid_request" {
+		t.Errorf("Error.Code = %q, want %q", errBody.Error.Code, "invalid_request")
+	}
+	if !strings.Contains(errBody.Error.Message, `"bogus"`) {
+		t.Errorf("Error.Message = %q, want it to name the offending property", errBody.Error.Message)
+	}
+}
+
 // TestCreateTicket_RequiresSession and TestListTickets_RequiresSession
 // are this slice's direct-API proof (ADR 0001, issue #56's acceptance
 // criterion 4) that ownership/validation is Galley's rule, not the
@@ -1000,6 +1036,49 @@ func TestUpdateTicket_RejectsMalformedJSON(t *testing.T) {
 	}
 	if errBody.Error.Code != "invalid_request" {
 		t.Errorf("Error.Code = %q, want %q", errBody.Error.Code, "invalid_request")
+	}
+}
+
+// TestUpdateTicket_RejectsUnknownProperty is issue #75's proof for this
+// endpoint, and the one the issue itself calls out as the defect that
+// bites: contracts/openapi.yaml's UpdateTicketRequest declares
+// additionalProperties: false, so a misspelled field name (e.g.
+// "sucessCriteria" for "successCriteria") must be rejected rather than
+// answered 200 with nothing written.
+func TestUpdateTicket_RejectsUnknownProperty(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+	created := createTicket(t, client, baseURL, uniqueTitle(t))
+
+	req, err := http.NewRequest(http.MethodPatch, baseURL+"/api/tickets/"+created.Id,
+		strings.NewReader(`{"sucessCriteria":"typo'd field name"}`))
+	if err != nil {
+		t.Fatalf("failed to build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", resp.StatusCode, http.StatusBadRequest, data)
+	}
+	var errBody ErrorBody
+	if err := json.Unmarshal(data, &errBody); err != nil {
+		t.Fatalf("failed to decode error body %q: %v", data, err)
+	}
+	if errBody.Error.Code != "invalid_request" {
+		t.Errorf("Error.Code = %q, want %q", errBody.Error.Code, "invalid_request")
+	}
+	if !strings.Contains(errBody.Error.Message, `"sucessCriteria"`) {
+		t.Errorf("Error.Message = %q, want it to name the offending property", errBody.Error.Message)
+	}
+
+	persisted := getTicketHTTP(t, client, baseURL, created.Id)
+	if persisted.SuccessCriteria != "" {
+		t.Errorf("SuccessCriteria = %q, want unchanged (rejected request must not write anything)", persisted.SuccessCriteria)
 	}
 }
 

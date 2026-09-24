@@ -170,6 +170,45 @@ func TestCreateDiagnosticNote_RejectsMalformedJSON(t *testing.T) {
 	}
 }
 
+// TestCreateDiagnosticNote_RejectsUnknownProperty is issue #75's proof
+// for this endpoint: contracts/openapi.yaml's CreateDiagnosticNoteRequest
+// declares additionalProperties: false, so a well-formed body naming an
+// extra property must be rejected rather than silently accepted with
+// the unknown property dropped.
+func TestCreateDiagnosticNote_RejectsUnknownProperty(t *testing.T) {
+	baseURL, client := devServerWithSession(t)
+
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/dev/diagnostic-notes",
+		strings.NewReader(`{"note":"`+uniqueNote(t)+`","bogus":"x"}`))
+	if err != nil {
+		t.Fatalf("failed to build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", resp.StatusCode, http.StatusBadRequest, data)
+	}
+	var body ErrorBody
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatalf("failed to decode error body %q: %v", data, err)
+	}
+	if body.Error.Code != "invalid_request" {
+		t.Errorf("Error.Code = %q, want %q", body.Error.Code, "invalid_request")
+	}
+	if !strings.Contains(body.Error.Message, `"bogus"`) {
+		t.Errorf("Error.Message = %q, want it to name the offending property", body.Error.Message)
+	}
+	if strings.Contains(body.Error.Message, "json:") {
+		t.Errorf("Error.Message = %q, leaks encoding/json's raw error text", body.Error.Message)
+	}
+}
+
 // TestDiagnosticNotes_DatabaseUnavailable proves the diagnostic
 // endpoints fail clearly (the shared error shape, not a hang or a
 // panic) when the database is unreachable, same as GET /api/status.
