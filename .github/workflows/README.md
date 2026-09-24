@@ -1,7 +1,10 @@
 # CI
 
 `ci.yml` runs three independent jobs on every pull request and on push
-to `main`. Each reproduces locally exactly as follows.
+to `main`. Each runs the same commands as below, with one difference:
+CI's `gofmt` step fails on any output; plain `gofmt -l .` exits 0 and
+relies on you noticing (see `apps/galley/README.md`, "expect no
+output").
 
 ## Galley
 
