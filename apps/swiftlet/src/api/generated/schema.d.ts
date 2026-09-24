@@ -345,7 +345,7 @@ export interface components {
         /** @description The fixed GET /api/status payload. */
         StatusResponse: {
             /** @constant */
-            application: "galley-HAND-EDITED";
+            application: "galley";
             /** @constant */
             status: "ok";
             /** @description Galley's configured version string (GALLEY_VERSION). */
