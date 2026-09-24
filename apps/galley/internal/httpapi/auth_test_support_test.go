@@ -30,6 +30,11 @@ var testOwnerLogin = githubfake.TestOwnerIdentity.Login
 // httptest.NewRecorder cannot follow.
 func startTestGalley(t *testing.T, pool *pgxpool.Pool, environment string, fake *githubfake.Server) (*httptest.Server, config.Config) {
 	t.Helper()
+	return startTestGalleyWithSessionTTL(t, pool, environment, fake, config.DefaultSessionTTL)
+}
+
+func startTestGalleyWithSessionTTL(t *testing.T, pool *pgxpool.Pool, environment string, fake *githubfake.Server, sessionTTL time.Duration) (*httptest.Server, config.Config) {
+	t.Helper()
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -45,6 +50,7 @@ func startTestGalley(t *testing.T, pool *pgxpool.Pool, environment string, fake 
 		OAuthGitHubBaseURL:    fake.URL,
 		OAuthGitHubAPIBaseURL: fake.URL,
 		BaseURL:               "http://" + ln.Addr().String(),
+		SessionTTL:            sessionTTL,
 	}
 	handler := NewHandler(cfg, time.Now(), pool, testLogger(&bytes.Buffer{}))
 

@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/url"
 	"strconv"
+	"time"
 )
 
 // Environment names accepted by GALLEY_ENVIRONMENT. Keep this list in
@@ -39,6 +40,7 @@ const (
 	// server in every test.
 	DefaultOAuthGitHubBaseURL    = "https://github.com"
 	DefaultOAuthGitHubAPIBaseURL = "https://api.github.com"
+	DefaultSessionTTL            = 30 * 24 * time.Hour
 )
 
 // Config is Galley's fully validated runtime configuration.
@@ -96,7 +98,8 @@ type Config struct {
 	// header: that header is client-supplied and an OAuth app's
 	// redirect_uri must be one fixed, pre-registered value, not
 	// whatever a caller claims.
-	BaseURL string
+	BaseURL    string
+	SessionTTL time.Duration
 }
 
 // Addr returns the "host:port" address to pass to net.Listen.
@@ -210,6 +213,14 @@ func Load(getenv func(string) string) (Config, error) {
 		return Config{}, fmt.Errorf("invalid GALLEY_BASE_URL %q: must be an absolute URL", baseURL)
 	}
 
+	sessionTTL := DefaultSessionTTL
+	if raw := getenv("GALLEY_SESSION_TTL"); raw != "" {
+		sessionTTL, err = time.ParseDuration(raw)
+		if err != nil || sessionTTL <= 0 {
+			return Config{}, fmt.Errorf("invalid GALLEY_SESSION_TTL %q: must be a positive Go duration such as \"720h\"", raw)
+		}
+	}
+
 	return Config{
 		Host:                  host,
 		Port:                  port,
@@ -222,5 +233,6 @@ func Load(getenv func(string) string) (Config, error) {
 		OAuthGitHubBaseURL:    oauthGitHubBaseURL,
 		OAuthGitHubAPIBaseURL: oauthGitHubAPIBaseURL,
 		BaseURL:               baseURL,
+		SessionTTL:            sessionTTL,
 	}, nil
 }

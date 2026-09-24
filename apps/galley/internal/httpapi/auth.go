@@ -111,7 +111,7 @@ func (s *server) CompleteGithubOAuth(w http.ResponseWriter, r *http.Request, par
 		return
 	}
 
-	rawSession, expiresAt, err := auth.CreateSession(ctx, s.pool, ownerID)
+	rawSession, expiresAt, err := auth.CreateSession(ctx, s.pool, ownerID, s.cfg.SessionTTL)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to create the session")
 		return

@@ -16,6 +16,9 @@ import (
 // docs/evidence/m2/54-oauth-session.md for the full replay/cross-session
 // mitigation this and ConsumeState together implement.
 func CreateState(ctx context.Context, pool *pgxpool.Pool) (raw string, err error) {
+	if err := deleteExpiredStates(ctx, pool); err != nil {
+		return "", err
+	}
 	raw, err = generateOpaqueToken()
 	if err != nil {
 		return "", err
@@ -52,4 +55,11 @@ func ConsumeState(ctx context.Context, pool *pgxpool.Pool, raw string) (ok bool,
 	default:
 		return false, fmt.Errorf("failed to consume oauth state: %w", err)
 	}
+}
+
+func deleteExpiredStates(ctx context.Context, pool *pgxpool.Pool) error {
+	if _, err := pool.Exec(ctx, `DELETE FROM oauth_states WHERE expires_at <= now()`); err != nil {
+		return fmt.Errorf("failed to delete expired oauth states: %w", err)
+	}
+	return nil
 }

@@ -157,6 +157,47 @@ func performOAuthCallback(t *testing.T, client *http.Client, baseURL string) *ht
 	return resp3
 }
 
+func TestOAuthSignIn_SessionExpiresAfterConfiguredTTL(t *testing.T) {
+	pool := postgres.NewTestPool(t)
+	fake := githubfake.New(t, githubfake.TestOwnerIdentity)
+	const ttl = 2 * time.Hour
+	srv, _ := startTestGalleyWithSessionTTL(t, pool, config.EnvDevelopment, fake, ttl)
+	client := authtest.NewClient()
+
+	before := time.Now()
+	resp := performOAuthCallback(t, client, srv.URL)
+	resp.Body.Close()
+	after := time.Now()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("callback status = %d, want %d", resp.StatusCode, http.StatusFound)
+	}
+
+	var cookie *http.Cookie
+	for _, c := range resp.Cookies() {
+		if c.Name == SessionCookieName {
+			cookie = c
+		}
+	}
+	if cookie == nil {
+		t.Fatal("callback set no session cookie")
+	}
+	earliest := before.Add(ttl).Truncate(time.Second)
+	latest := after.Add(ttl)
+	if cookie.Expires.Before(earliest) || cookie.Expires.After(latest) {
+		t.Errorf("session cookie Expires = %v, want between %v and %v", cookie.Expires, earliest, latest)
+	}
+
+	var expiresAt time.Time
+	if err := pool.QueryRow(context.Background(),
+		`SELECT expires_at FROM sessions WHERE token_hash = sha256($1::bytea)`, cookie.Value,
+	).Scan(&expiresAt); err != nil {
+		t.Fatalf("failed to read the persisted session: %v", err)
+	}
+	if expiresAt.Before(before.Add(ttl)) || expiresAt.After(latest) {
+		t.Errorf("persisted expires_at = %v, want between %v and %v", expiresAt, before.Add(ttl), latest)
+	}
+}
+
 // ownerIdentitySnapshot is a comparable projection of the one
 // owner_identities row (issue #54's "one Owner per deployment"), used
 // to assert nothing changed across a rejected sign-in attempt.
@@ -276,8 +317,8 @@ func TestOAuthCallback_ReplayedState(t *testing.T) {
 // TestSession_Expired is issue #54's required expired-session test.
 // The session is manufactured directly via internal/auth with an
 // already-past expiry -- production never takes this path, only
-// CreateSession's fixed SessionTTL does -- so the test does not need
-// to wait out a real TTL.
+// CreateSession's configured TTL does -- so the test does not need to
+// wait out a real TTL.
 func TestSession_Expired(t *testing.T) {
 	pool := postgres.NewTestPool(t)
 	handler := NewHandler(config.Config{Environment: config.EnvDevelopment, Version: "dev"}, time.Now(), pool, testLogger(&bytes.Buffer{}))

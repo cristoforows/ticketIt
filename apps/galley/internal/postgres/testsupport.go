@@ -2,10 +2,14 @@ package postgres
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"net/url"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -56,6 +60,67 @@ func NewTestPool(tb testing.TB) *pgxpool.Pool {
 			redactedURL(databaseURL), err)
 	}
 
+	tb.Cleanup(pool.Close)
+	return pool
+}
+
+// NewEmptyTestDatabase is for tests that need a database with no
+// migrations and no rows, which the shared, never-reset TestingURL()
+// database cannot provide.
+func NewEmptyTestDatabase(tb testing.TB) (databaseURL string) {
+	tb.Helper()
+
+	suffix := make([]byte, 8)
+	if _, err := rand.Read(suffix); err != nil {
+		tb.Fatalf("failed to generate a database name: %v", err)
+	}
+	name := "ticketit_test_" + hex.EncodeToString(suffix)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	admin, err := pgx.Connect(ctx, TestingURL())
+	if err != nil {
+		tb.Fatalf("failed to connect to the test database server at %s: %v", redactedURL(TestingURL()), err)
+	}
+	defer admin.Close(context.Background())
+	if _, err := admin.Exec(ctx, `CREATE DATABASE `+pgx.Identifier{name}.Sanitize()); err != nil {
+		tb.Fatalf("failed to create database %s: %v", name, err)
+	}
+	tb.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		admin, err := pgx.Connect(ctx, TestingURL())
+		if err != nil {
+			tb.Errorf("failed to connect to drop database %s: %v", name, err)
+			return
+		}
+		defer admin.Close(context.Background())
+		if _, err := admin.Exec(ctx, `DROP DATABASE IF EXISTS `+pgx.Identifier{name}.Sanitize()+` WITH (FORCE)`); err != nil {
+			tb.Errorf("failed to drop database %s: %v", name, err)
+		}
+	})
+
+	u, err := url.Parse(TestingURL())
+	if err != nil {
+		tb.Fatalf("failed to parse the test database URL: %s", redactedURL(TestingURL()))
+	}
+	u.Path = "/" + name
+	return u.String()
+}
+
+func NewEmptyMigratedTestPool(tb testing.TB) *pgxpool.Pool {
+	tb.Helper()
+
+	databaseURL := NewEmptyTestDatabase(tb)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, _, err := ApplyMigrations(ctx, databaseURL); err != nil {
+		tb.Fatalf("failed to apply migrations to a fresh test database: %v", err)
+	}
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		tb.Fatalf("failed to construct a connection pool for a fresh test database: %v", err)
+	}
 	tb.Cleanup(pool.Close)
 	return pool
 }

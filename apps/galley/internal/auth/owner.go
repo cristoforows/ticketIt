@@ -29,6 +29,10 @@ type ProviderIdentity struct {
 
 const githubProvider = "github"
 
+// afterEmptyOwnerLookup lets TestResolveOwner_ConcurrentBootstrapRace
+// hold both sign-ins between the empty lookup and bootstrapOwner.
+var afterEmptyOwnerLookup func()
+
 // ResolveOwner implements issue #54's Owner-matching rule for a single
 // successful provider identity fetch:
 //
@@ -92,6 +96,9 @@ func resolveOwner(ctx context.Context, pool *pgxpool.Pool, configuredLogin strin
 	case errors.Is(err, pgx.ErrNoRows):
 		if !strings.EqualFold(identity.Login, configuredLogin) {
 			return 0, false, ErrOwnerMismatch
+		}
+		if afterEmptyOwnerLookup != nil {
+			afterEmptyOwnerLookup()
 		}
 		newOwnerID, bootstrapErr := bootstrapOwner(ctx, pool, identity)
 		if bootstrapErr != nil {

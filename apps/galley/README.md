@@ -168,6 +168,7 @@ than starting in an unknown state.
 | `GALLEY_OAUTH_GITHUB_BASE_URL` | `https://github.com` | Authorize/token endpoint host. Tests point this at a local fixture. |
 | `GALLEY_OAUTH_GITHUB_API_BASE_URL` | `https://api.github.com` | Identity (`/user`) endpoint host. Tests point this at a local fixture. |
 | `GALLEY_BASE_URL`     | `http://localhost:8080` | The browser-facing origin Galley is reached at; builds the fixed OAuth `redirect_uri`. See below. |
+| `GALLEY_SESSION_TTL`  | `720h`        | Session lifetime (database expiry and cookie `Expires`), a positive Go duration (`time.ParseDuration`, e.g. `12h`, `168h`). |
 
 Example of a configuration failure:
 
@@ -435,11 +436,14 @@ different account once bootstrapped. See
    code (`403`): **no session, Owner record, or link is created or
    modified** on this path, whether or not an Owner already exists.
 4. On success, a new session is persisted (opaque, high-entropy,
-   stored only as its SHA-256 hash, with a fixed 30-day expiry —
-   `internal/auth.SessionTTL`, not externally configurable in this
-   slice) and delivered via an `HttpOnly`, `SameSite=Lax` cookie,
+   stored only as its SHA-256 hash, expiring after `GALLEY_SESSION_TTL`,
+   default 30 days) and delivered via an `HttpOnly`, `SameSite=Lax` cookie,
    `Secure` when `GALLEY_ENVIRONMENT=production`. `GET /api/session`
    returns the signed-in Owner; `DELETE /api/session` revokes it.
+
+Expired rows are garbage-collected opportunistically, with no
+background job: step 1 deletes every expired `oauth_states` row, and
+step 4 every expired `sessions` row, before inserting its own.
 
 **The GitHub access token is discarded immediately after fetching the
 identity in step 2 above — never stored, never logged, never reused
@@ -1101,6 +1105,13 @@ go test ./...
 # or, against a non-default test database:
 GALLEY_TEST_DATABASE_URL=postgres://localhost:5432/some_other_db?sslmode=disable go test ./...
 ```
+
+Tests that need an empty database (the concurrent-migration and
+concurrent-Owner-bootstrap races, #79) call
+`internal/postgres.NewEmptyTestDatabase(t)` or `NewEmptyMigratedTestPool(t)`
+instead, which create a uniquely named `ticketit_test_<hex>` database on
+the same server and drop it when the test ends — so the test database's
+role needs `CREATEDB`.
 
 `cmd/galley/restart_durability_test.go`'s
 `TestRestartDurability_DiagnosticNoteSurvivesFreshProcess` (issue #52's
