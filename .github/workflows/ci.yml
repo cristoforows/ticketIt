@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  galley:
+    name: Galley
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: ticketit_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        # The first step can otherwise race a server not yet accepting connections.
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    defaults:
+      run:
+        working-directory: apps/galley
+    env:
+      # apps/galley/internal/postgres/testsupport.go: go test reads this.
+      GALLEY_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/ticketit_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.27.1"
+          cache: false # actions/setup-go defaults this to true
+      - name: Apply migrations
+        run: go run ./cmd/migrate
+        env:
+          DATABASE_URL: ${{ env.GALLEY_TEST_DATABASE_URL }}
+      - name: gofmt
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then
+            echo "$out"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: go build
+        run: go build ./...
+      - name: go test
+        run: go test ./...
+
+  swiftlet:
+    name: Swiftlet
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/swiftlet
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "26.9.0"
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  contracts:
+    name: Contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.27.1"
+          cache: false # actions/setup-go defaults this to true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "26.9.0"
+      - name: Galley contract drift
+        working-directory: apps/galley
+        run: ./scripts/check-contract-drift.sh
+      - name: Swiftlet contract drift
+        working-directory: contracts
+        run: |
+          npm ci
+          ./check-swiftlet-drift.sh
