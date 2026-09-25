@@ -23,12 +23,6 @@ import (
 // order of magnitude widely used for bearer tokens/session ids.
 const tokenBytes = 32
 
-// SessionTTL is how long a session remains valid after creation. Not
-// externally configurable in this slice -- see
-// docs/evidence/m2/54-oauth-session.md for why a fixed default was
-// chosen over adding another environment variable.
-const SessionTTL = 30 * 24 * time.Hour
-
 // StateTTL is how long an OAuth `state` value remains valid: long
 // enough for a real user to complete the provider's consent screen,
 // short enough to keep a stolen-but-unused value's window small.

@@ -316,7 +316,7 @@ func mintTestSessionCookie(t *testing.T, pool *pgxpool.Pool) *http.Cookie {
 	if err != nil {
 		t.Fatalf("failed to resolve the test owner: %v", err)
 	}
-	raw, _, err := auth.CreateSession(ctx, pool, ownerID)
+	raw, _, err := auth.CreateSession(ctx, pool, ownerID, config.DefaultSessionTTL)
 	if err != nil {
 		t.Fatalf("failed to create a test session: %v", err)
 	}

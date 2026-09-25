@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeGetenv builds a getenv func backed by a fixed map, so tests never
@@ -75,6 +76,9 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.OAuthGitHubAPIBaseURL != DefaultOAuthGitHubAPIBaseURL {
 		t.Errorf("OAuthGitHubAPIBaseURL = %q, want %q", cfg.OAuthGitHubAPIBaseURL, DefaultOAuthGitHubAPIBaseURL)
 	}
+	if cfg.SessionTTL != 720*time.Hour {
+		t.Errorf("SessionTTL = %v, want %v", cfg.SessionTTL, 720*time.Hour)
+	}
 	if got, want := cfg.Addr(), ":8080"; got != want {
 		t.Errorf("Addr() = %q, want %q", got, want)
 	}
@@ -90,6 +94,7 @@ func TestLoad_ExplicitProductionSettings(t *testing.T) {
 		"GALLEY_BASE_URL":                  "https://ticketit.example.com",
 		"GALLEY_OAUTH_GITHUB_BASE_URL":     "https://github.example.com",
 		"GALLEY_OAUTH_GITHUB_API_BASE_URL": "https://api.github.example.com",
+		"GALLEY_SESSION_TTL":               "12h30m",
 	})))
 	if err != nil {
 		t.Fatalf("Load() returned unexpected error: %v", err)
@@ -106,6 +111,7 @@ func TestLoad_ExplicitProductionSettings(t *testing.T) {
 		OAuthGitHubBaseURL:    "https://github.example.com",
 		OAuthGitHubAPIBaseURL: "https://api.github.example.com",
 		BaseURL:               "https://ticketit.example.com",
+		SessionTTL:            12*time.Hour + 30*time.Minute,
 	}
 	if cfg != want {
 		t.Errorf("Load() = %+v, want %+v", cfg, want)
@@ -231,6 +237,22 @@ func TestLoad_InvalidProviderURLs(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), key) {
 				t.Errorf("error %q does not mention %s", err.Error(), key)
+			}
+		})
+	}
+}
+
+func TestLoad_InvalidSessionTTL(t *testing.T) {
+	cases := []string{"30", "thirty days", "30d", "0", "0s", "-1h"}
+	for _, ttl := range cases {
+		t.Run(ttl, func(t *testing.T) {
+			env := withValidAuthEnv(map[string]string{"DATABASE_URL": validDatabaseURL, "GALLEY_SESSION_TTL": ttl})
+			_, err := Load(fakeGetenv(env))
+			if err == nil {
+				t.Fatalf("Load() with GALLEY_SESSION_TTL=%q: expected error, got nil", ttl)
+			}
+			if !strings.Contains(err.Error(), "GALLEY_SESSION_TTL") {
+				t.Errorf("error %q does not mention GALLEY_SESSION_TTL", err.Error())
 			}
 		})
 	}

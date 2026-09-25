@@ -20,16 +20,19 @@ type OwnerView struct {
 }
 
 // CreateSession persists a new session for ownerID, expiring after
-// SessionTTL, and returns the raw token the caller delivers in the
-// session cookie -- only its hash is ever persisted (see auth.go).
-func CreateSession(ctx context.Context, pool *pgxpool.Pool, ownerID int64) (raw string, expiresAt time.Time, err error) {
-	return CreateSessionWithExpiry(ctx, pool, ownerID, time.Now().Add(SessionTTL))
+// ttl, and returns the raw token the caller delivers in the session
+// cookie -- only its hash is ever persisted (see auth.go).
+func CreateSession(ctx context.Context, pool *pgxpool.Pool, ownerID int64, ttl time.Duration) (raw string, expiresAt time.Time, err error) {
+	if err := deleteExpiredSessions(ctx, pool); err != nil {
+		return "", time.Time{}, err
+	}
+	return CreateSessionWithExpiry(ctx, pool, ownerID, time.Now().Add(ttl))
 }
 
 // CreateSessionWithExpiry is CreateSession with an explicit expiry,
 // factored out so tests can manufacture an already-expired session
-// without waiting SessionTTL or reaching through a second code path
-// that production never uses.
+// without waiting out a real TTL or reaching through a second code
+// path that production never uses.
 func CreateSessionWithExpiry(ctx context.Context, pool *pgxpool.Pool, ownerID int64, expiresAt time.Time) (raw string, expiry time.Time, err error) {
 	raw, err = generateOpaqueToken()
 	if err != nil {
@@ -85,6 +88,13 @@ func DeleteSession(ctx context.Context, pool *pgxpool.Pool, raw string) error {
 	}
 	if _, err := pool.Exec(ctx, `DELETE FROM sessions WHERE token_hash = $1`, hashToken(raw)); err != nil {
 		return fmt.Errorf("failed to revoke session: %w", err)
+	}
+	return nil
+}
+
+func deleteExpiredSessions(ctx context.Context, pool *pgxpool.Pool) error {
+	if _, err := pool.Exec(ctx, `DELETE FROM sessions WHERE expires_at <= now()`); err != nil {
+		return fmt.Errorf("failed to delete expired sessions: %w", err)
 	}
 	return nil
 }
