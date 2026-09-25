@@ -198,6 +198,15 @@ conditions, it is asserting nothing. See
 [docs/evidence/m2/53-browser-harness.md](../docs/evidence/m2/53-browser-harness.md)
 for a captured red run.
 
+With Galley stopped, the session check fails first, so that spec
+reaches App.tsx's `session-error`, never `StatusView`'s `status-error`.
+`tests/status-failure.spec.ts` covers the latter: it signs in against
+the live Galley, then fails only the browser's `GET /api/status` with
+`page.route` (a 503, and a refused connection). It runs in its own
+`run.sh` phase while Galley is still up. See
+[docs/evidence/m2/80-statusview-browser-error.md](../docs/evidence/m2/80-statusview-browser-error.md)
+for why this is interception rather than a Galley failure mode.
+
 ## Tool choice and disk footprint
 
 Playwright, Chromium only, and only its **headless shell**
