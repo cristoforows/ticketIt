@@ -97,3 +97,61 @@ func TestDecodeStrictJSON_AllowsTrailingWhitespace(t *testing.T) {
 		t.Errorf("Title = %q, want ok", dst.Title)
 	}
 }
+
+func TestDecodeStrictJSON_RejectsNull(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		dst  any
+	}{
+		{"top-level", `null`, &UpdateTicketRequest{}},
+		{"create title", `{"title":null}`, &CreateTicketRequest{}},
+		{"create template", `{"title":"ok","template":null}`, &CreateTicketRequest{}},
+		{"patch title", `{"title":null}`, &UpdateTicketRequest{}},
+		{"patch template", `{"template":null}`, &UpdateTicketRequest{}},
+		{"patch optional field", `{"goal":null}`, &UpdateTicketRequest{}},
+		{"duplicate property", `{"title":null,"title":"ok"}`, &UpdateTicketRequest{}},
+		{"spaced null", `{"title": null }`, &UpdateTicketRequest{}},
+		{"status", `{"status":null}`, &ChangeTicketStatusRequest{}},
+		{"diagnostic note", `{"note":null}`, &CreateDiagnosticNoteRequest{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tc.body))
+			rec := httptest.NewRecorder()
+			if decodeStrictJSON(rec, req, tc.dst, "invalid body") {
+				t.Fatal("accepted null body/property")
+			}
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", rec.Code)
+			}
+			var result ErrorBody
+			if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil || result.Error.Code != "invalid_request" {
+				t.Fatalf("response = %s, decode error = %v", rec.Body.String(), err)
+			}
+		})
+	}
+}
+
+func TestDecodeStrictJSON_AllowsEmptyObject(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPatch, "/api/tickets/id", strings.NewReader(" \n{} \t"))
+	rec := httptest.NewRecorder()
+	var dst UpdateTicketRequest
+	if !decodeStrictJSON(rec, req, &dst, "invalid body") {
+		t.Fatalf("empty object rejected: %s", rec.Body.String())
+	}
+}
+
+func TestUpdateTicket_RejectsNullTemplateAndTitleOverHTTP(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+	created := createTicket(t, client, baseURL, uniqueTitle(t))
+	for _, body := range []string{`{"template":null}`, `{"title":null}`} {
+		t.Run(body, func(t *testing.T) {
+			assertInvalidRequestBody(t, client, requestBodyCase{method: http.MethodPatch, url: baseURL + "/api/tickets/" + created.Id}, body, "")
+		})
+	}
+	got := getTicketAssertOK(t, client, baseURL, created.Id)
+	if got.Title != created.Title || got.Template != created.Template {
+		t.Errorf("ticket changed after rejected PATCH: %+v", got)
+	}
+}

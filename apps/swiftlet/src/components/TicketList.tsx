@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { UnauthenticatedError } from "../api/session";
 import { createTicket, fetchTickets, TICKET_TEMPLATES, TICKET_TITLE_MAX_LENGTH, type Ticket } from "../api/tickets";
 import { Link } from "./Link";
 
@@ -15,25 +16,40 @@ type ListState =
  * decides where the new Ticket sorts -- apps/galley/README.md, "Ticket
  * ordering") so a captured Ticket appears with no manual reload.
  */
-export function TicketList() {
+export function TicketList({ onUnauthenticated }: { onUnauthenticated: () => void }) {
   const [state, setState] = useState<ListState>({ kind: "loading" });
   const [title, setTitle] = useState("");
   const [template, setTemplate] = useState<Ticket["template"]>("Basic");
   const [capturing, setCapturing] = useState(false);
   const [captureError, setCaptureError] = useState<string | null>(null);
+  const requestId = useRef(0);
+  const mounted = useRef(false);
 
   const load = useCallback(() => {
+    const id = ++requestId.current;
     setState({ kind: "loading" });
     fetchTickets()
-      .then((tickets) => setState({ kind: "loaded", tickets }))
+      .then((tickets) => {
+        if (id === requestId.current) setState({ kind: "loaded", tickets });
+      })
       .catch((error: unknown) => {
+        if (error instanceof UnauthenticatedError) {
+          if (mounted.current) onUnauthenticated();
+          return;
+        }
+        if (id !== requestId.current) return;
         const message = error instanceof Error ? error.message : "Unknown error loading tickets.";
         setState({ kind: "error", message });
       });
-  }, []);
+  }, [onUnauthenticated]);
 
   useEffect(() => {
+    mounted.current = true;
     load();
+    return () => {
+      mounted.current = false;
+      requestId.current += 1;
+    };
   }, [load]);
 
   async function handleCapture(event: React.FormEvent<HTMLFormElement>) {
@@ -45,6 +61,10 @@ export function TicketList() {
       setTitle("");
       load();
     } catch (error) {
+      if (error instanceof UnauthenticatedError) {
+        onUnauthenticated();
+        return;
+      }
       setCaptureError(error instanceof Error ? error.message : "Failed to capture the ticket.");
     } finally {
       setCapturing(false);

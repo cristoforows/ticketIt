@@ -264,6 +264,43 @@ func TestChangeTicketStatus_UnknownAndMalformedIdentifiers404(t *testing.T) {
 	}
 }
 
+func TestTicketRoutes_AcceptUUIDURN(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+	created := createTicket(t, client, baseURL, uniqueTitle(t))
+	id := "urn:uuid:" + created.Id
+
+	if got := getTicketHTTP(t, client, baseURL, id); got.Id != created.Id {
+		t.Fatalf("GET returned id %q, want %q", got.Id, created.Id)
+	}
+	resp, body := patchTicket(t, client, baseURL, id, UpdateTicketRequest{Goal: strPtr("URN update")})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH status = %d; body=%s", resp.StatusCode, body)
+	}
+	if got := getTicketHTTP(t, client, baseURL, created.Id); got.Goal != "URN update" {
+		t.Fatalf("PATCH did not persist: Goal = %q", got.Goal)
+	}
+	if got := changeStatus(t, client, baseURL, id, Ready); got.status != http.StatusOK || got.ticket.Status != Ready {
+		t.Fatalf("status transition = %+v", got)
+	}
+	if got := assignOwnerHTTP(t, client, baseURL, id); got.status != http.StatusOK || got.ticket.AssigneeType != assigneeTypeOwnerValue {
+		t.Fatalf("assign = %+v", got)
+	}
+	if got := unassignHTTP(t, client, baseURL, id); got.status != http.StatusOK || got.ticket.AssigneeType != "" {
+		t.Fatalf("unassign = %+v", got)
+	}
+	for _, status := range []TicketStatus{InProgress, InReview} {
+		if got := changeStatus(t, client, baseURL, id, status); got.status != http.StatusOK || got.ticket.Status != status {
+			t.Fatalf("status transition to %s = %+v", status, got)
+		}
+	}
+	if got := acceptTicketHTTP(t, client, baseURL, id); got.status != http.StatusOK || got.ticket.Status != Done {
+		t.Fatalf("accept = %+v", got)
+	}
+	if got := getTicketHTTP(t, client, baseURL, created.Id); got.Status != Done {
+		t.Fatalf("persisted status = %q, want Done", got.Status)
+	}
+}
+
 // Uses the legitimate manual chain rather than setTicketStatusDirect,
 // so Accept is exercised from a state an Owner could really reach.
 func advanceToInReview(t *testing.T, client *http.Client, baseURL, id string) {
