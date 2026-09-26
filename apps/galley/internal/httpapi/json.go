@@ -1,8 +1,11 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
+	"reflect"
 	"strings"
 )
 
@@ -30,20 +33,43 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 // *json.UnknownFieldError to errors.As against), stable since Go 1.10.
 const unknownFieldPrefix = `json: unknown field "`
 
-// decodeStrictJSON is every request-body decode site's one entry
-// point (issue #75): contracts/openapi.yaml declares
-// additionalProperties: false on every request schema, which a plain
-// json.Decoder does not enforce on its own. shapeMessage is the
-// caller's existing malformed-body message, reused unchanged for any
-// decode failure that is not an unknown property so that behavior does
-// not change; an unknown property instead names itself, since a
-// misspelled field is otherwise indistinguishable from one silently
-// dropped -- but never the underlying "json: ..." text verbatim, which
-// is an encoding/json implementation detail, not a stable API surface.
 func decodeStrictJSON(w http.ResponseWriter, r *http.Request, dst any, shapeMessage string) bool {
 	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	err := dec.Decode(dst)
+	var raw json.RawMessage
+	if err := dec.Decode(&raw); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", shapeMessage)
+		return false
+	}
+	var extra json.RawMessage
+	if err := dec.Decode(&extra); err != io.EOF {
+		writeError(w, http.StatusBadRequest, "invalid_request", shapeMessage)
+		return false
+	}
+
+	var properties map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &properties); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", shapeMessage)
+		return false
+	}
+	allowed := make(map[string]bool)
+	typ := reflect.TypeOf(dst).Elem()
+	for i := 0; i < typ.NumField(); i++ {
+		name, _, _ := strings.Cut(typ.Field(i).Tag.Get("json"), ",")
+		if name != "" && name != "-" {
+			allowed[name] = true
+		}
+	}
+	for name := range properties {
+		if !allowed[name] {
+			writeError(w, http.StatusBadRequest, "invalid_request",
+				`unknown request property "`+name+`" -- `+shapeMessage)
+			return false
+		}
+	}
+
+	strict := json.NewDecoder(bytes.NewReader(raw))
+	strict.DisallowUnknownFields()
+	err := strict.Decode(dst)
 	if err == nil {
 		return true
 	}

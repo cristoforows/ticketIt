@@ -964,6 +964,22 @@ method(s).
 shape** (`internal/httpapi.ErrorBody` / `ErrorDetail`) for its own error
 responses, rather than defining a new one.
 
+## Request-body decoding
+
+All four request-body endpoints use `internal/httpapi/json.go`'s
+`decodeStrictJSON`. It accepts one JSON value followed only by whitespace
+and rejects property names that do not exactly match the contract's
+spelling, returning `400 invalid_request` before any write. Unknown
+properties are named in the error message.
+
+The decoder checks raw object keys against the destination's generated
+`json` tags rather than keeping a separate list of allowed properties:
+`encoding/json`'s struct decoder matches names case-insensitively even
+with `DisallowUnknownFields`, while the generated tags already track
+`contracts/openapi.yaml`. A second decode of the request stream must
+reach EOF so an appended JSON value or malformed suffix cannot be
+silently ignored.
+
 ## Router choice
 
 Routing uses only the standard library's `net/http.ServeMux`, using the
