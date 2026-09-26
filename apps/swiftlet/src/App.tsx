@@ -44,6 +44,8 @@ function App() {
     };
   }, []);
 
+  const returnToSignIn = () => setState({ kind: "signedOut" });
+
   return (
     <main>
       <h1>Swiftlet</h1>
@@ -60,7 +62,7 @@ function App() {
       )}
       {state.kind === "signedOut" && <SignInPage />}
       {state.kind === "signedIn" && (
-        <AppShell owner={state.owner} onSignedOut={() => setState({ kind: "signedOut" })} />
+        <AppShell owner={state.owner} onSignedOut={returnToSignIn} onUnauthenticated={returnToSignIn} />
       )}
     </main>
   );

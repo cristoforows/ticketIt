@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TicketList } from "./TicketList";
 
 type MockResponse = Pick<Response, "ok" | "status" | "statusText" | "json">;
@@ -51,6 +51,10 @@ const CODING_TICKET = {
   completionCondition: "reviewedPrMerge",
 };
 
+function renderTicketList() {
+  return render(<TicketList onUnauthenticated={() => {}} />);
+}
+
 /** Routes by method + path, and can be reprogrammed mid-test (via `set`)
  * so a spec can return a different list after a capture re-fetches it. */
 function stubFetch(initial: Record<string, MockResponse>) {
@@ -82,7 +86,7 @@ describe("TicketList", () => {
   it("shows a loading state before the initial fetch settles", () => {
     vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => {})));
 
-    render(<TicketList />);
+    renderTicketList();
 
     expect(screen.getByTestId("ticket-list-loading")).toBeInTheDocument();
   });
@@ -90,7 +94,7 @@ describe("TicketList", () => {
   it("shows an empty state when the Owner has no Tickets", async () => {
     stubFetch({ "GET /api/tickets": jsonResponse({ tickets: [] }) });
 
-    render(<TicketList />);
+    renderTicketList();
 
     expect(await screen.findByTestId("ticket-list-empty")).toBeInTheDocument();
     expect(screen.queryByTestId("ticket-list-items")).not.toBeInTheDocument();
@@ -99,7 +103,7 @@ describe("TicketList", () => {
   it("renders every Ticket Galley returns, in the order returned", async () => {
     stubFetch({ "GET /api/tickets": jsonResponse({ tickets: [TICKET_A, TICKET_B] }) });
 
-    render(<TicketList />);
+    renderTicketList();
 
     const items = await screen.findAllByTestId(/^ticket-item-/);
     expect(items).toHaveLength(2);
@@ -112,7 +116,7 @@ describe("TicketList", () => {
   it("links each Ticket's title to its full-page detail route", async () => {
     stubFetch({ "GET /api/tickets": jsonResponse({ tickets: [TICKET_A] }) });
 
-    render(<TicketList />);
+    renderTicketList();
 
     expect(await screen.findByTestId("ticket-title")).toHaveAttribute("href", `/tickets/${TICKET_A.id}`);
   });
@@ -120,7 +124,7 @@ describe("TicketList", () => {
   it("renders an explicit error state when the initial fetch fails", async () => {
     stubFetch({ "GET /api/tickets": jsonResponse({ error: "boom" }, 503, "Service Unavailable") });
 
-    render(<TicketList />);
+    renderTicketList();
 
     expect(await screen.findByTestId("ticket-list-error")).toBeInTheDocument();
     expect(screen.getByTestId("ticket-list-error-message")).toHaveTextContent("503");
@@ -129,7 +133,7 @@ describe("TicketList", () => {
   it("disables the capture button until a non-blank title is entered", async () => {
     stubFetch({ "GET /api/tickets": jsonResponse({ tickets: [] }) });
 
-    render(<TicketList />);
+    renderTicketList();
     await screen.findByTestId("ticket-list-empty");
 
     const submit = screen.getByTestId("ticket-capture-submit");
@@ -145,7 +149,7 @@ describe("TicketList", () => {
   it("captures a Ticket, clears the input, and shows the refreshed list with no manual reload", async () => {
     const routes = stubFetch({ "GET /api/tickets": jsonResponse({ tickets: [] }) });
 
-    render(<TicketList />);
+    renderTicketList();
     await screen.findByTestId("ticket-list-empty");
 
     routes.set("POST /api/tickets", jsonResponse(TICKET_B, 201));
@@ -160,10 +164,32 @@ describe("TicketList", () => {
     expect(screen.queryByTestId("ticket-capture-error")).not.toBeInTheDocument();
   });
 
+  it("ignores an older list response after a capture re-fetch completes", async () => {
+    let resolveFirst!: (response: MockResponse) => void;
+    const firstList = new Promise<MockResponse>((resolve) => { resolveFirst = resolve; });
+    let listRequests = 0;
+    vi.stubGlobal("fetch", vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") return Promise.resolve(jsonResponse(TICKET_B, 201));
+      listRequests += 1;
+      return listRequests === 1 ? firstList : Promise.resolve(jsonResponse({ tickets: [TICKET_B] }));
+    }));
+
+    renderTicketList();
+    expect(screen.getByTestId("ticket-list-loading")).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("ticket-title-input"), { target: { value: TICKET_B.title } });
+    fireEvent.click(screen.getByTestId("ticket-capture-submit"));
+
+    expect(await screen.findByTestId(`ticket-item-${TICKET_B.id}`)).toBeInTheDocument();
+    await act(async () => { resolveFirst(jsonResponse({ tickets: [] })); });
+
+    expect(screen.getByTestId(`ticket-item-${TICKET_B.id}`)).toBeInTheDocument();
+    expect(screen.queryByTestId("ticket-list-empty")).not.toBeInTheDocument();
+  });
+
   it("defaults the Template selector to Basic and submits it on capture (issue #59)", async () => {
     const routes = stubFetch({ "GET /api/tickets": jsonResponse({ tickets: [] }) });
 
-    render(<TicketList />);
+    renderTicketList();
     await screen.findByTestId("ticket-list-empty");
 
     expect(screen.getByTestId("ticket-template-select")).toHaveValue("Basic");
@@ -184,7 +210,7 @@ describe("TicketList", () => {
   it("submits the Owner's chosen Coding Template on capture (issue #59)", async () => {
     const routes = stubFetch({ "GET /api/tickets": jsonResponse({ tickets: [] }) });
 
-    render(<TicketList />);
+    renderTicketList();
     await screen.findByTestId("ticket-list-empty");
 
     routes.set("POST /api/tickets", jsonResponse(CODING_TICKET, 201));
@@ -204,7 +230,7 @@ describe("TicketList", () => {
   it("shows Galley's own validation message and leaves the list unchanged when capture is rejected", async () => {
     const routes = stubFetch({ "GET /api/tickets": jsonResponse({ tickets: [] }) });
 
-    render(<TicketList />);
+    renderTicketList();
     await screen.findByTestId("ticket-list-empty");
 
     routes.set(
