@@ -41,6 +41,14 @@ describe("router", () => {
     expect(screen.getByTestId("route")).toHaveTextContent("backlog");
   });
 
+  it("does not crash on a ticket URL with malformed percent encoding", () => {
+    window.history.pushState({}, "", "/tickets/%E0%A4%A");
+
+    render(<RouteProbe />);
+
+    expect(screen.getByTestId("route")).toHaveTextContent("backlog");
+  });
+
   it("navigate() updates the URL and re-renders every subscriber, without a full page load", () => {
     window.history.pushState({}, "", "/");
     render(<RouteProbe />);

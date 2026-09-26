@@ -7,6 +7,7 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -46,10 +47,123 @@ func TestStart_SetIdentityRejectsUnknownPreset(t *testing.T) {
 	}
 }
 
+func TestStart_OverlappingCodesAndTokensKeepTheirIdentities(t *testing.T) {
+	s := New(t, TestOwnerIdentity)
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	authorize := func() string {
+		t.Helper()
+		resp, err := client.Get(s.URL + "/login/oauth/authorize?" + url.Values{
+			"client_id": {s.ClientID}, "redirect_uri": {"https://example.invalid/callback"},
+		}.Encode())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		loc, err := resp.Location()
+		if err != nil || loc.Query().Get("code") == "" {
+			t.Fatalf("authorize Location = %v, error = %v", loc, err)
+		}
+		return loc.Query().Get("code")
+	}
+	exchange := func(code string) string {
+		t.Helper()
+		resp, err := client.PostForm(s.URL+"/login/oauth/access_token", url.Values{
+			"client_id": {s.ClientID}, "client_secret": {s.ClientSecret}, "code": {code},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var body struct {
+			AccessToken string `json:"access_token"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil || resp.StatusCode != http.StatusOK || body.AccessToken == "" {
+			t.Fatalf("exchange status = %d, body = %+v, error = %v", resp.StatusCode, body, err)
+		}
+		return body.AccessToken
+	}
+	ownerCode := authorize()
+	setIdentityPreset(t, s, "non-owner")
+	nonOwnerCode := authorize()
+	ownerToken := exchange(ownerCode)
+	nonOwnerToken := exchange(nonOwnerCode)
+	replayed, err := client.PostForm(s.URL+"/login/oauth/access_token", url.Values{
+		"client_id": {s.ClientID}, "client_secret": {s.ClientSecret}, "code": {ownerCode},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed.Body.Close()
+	if replayed.StatusCode != http.StatusBadRequest {
+		t.Fatalf("replayed code status = %d, want 400", replayed.StatusCode)
+	}
+	for _, tc := range []struct {
+		token string
+		want  Identity
+	}{
+		{ownerToken, TestOwnerIdentity},
+		{nonOwnerToken, NonOwnerIdentity},
+	} {
+		req, err := http.NewRequest(http.MethodGet, s.URL+"/user", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+tc.token)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got Identity
+		decodeErr := json.NewDecoder(resp.Body).Decode(&got)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || decodeErr != nil || got != tc.want {
+			t.Errorf("/user status = %d, identity = %+v, error = %v; want %+v", resp.StatusCode, got, decodeErr, tc.want)
+		}
+	}
+	var wg sync.WaitGroup
+	started := make(chan struct{}, 1)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer func() {
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+		}()
+		for i := range 100 {
+			req, err := http.NewRequest(http.MethodGet, s.URL+"/user", nil)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			req.Header.Set("Authorization", "Bearer "+ownerToken)
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			resp.Body.Close()
+			if i == 0 {
+				started <- struct{}{}
+			}
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("concurrent /user status = %d, want 200", resp.StatusCode)
+			}
+		}
+	}()
+	<-started
+	for range 20 {
+		s.SetIdentity(TestOwnerIdentity)
+		exchange(authorize())
+	}
+	wg.Wait()
+}
+
 // assertRoundTripIdentity drives a full authorize -> token exchange ->
 // identity fetch against s, exactly as internal/auth.GitHubClient would,
-// to prove /_fake/identity actually changes what /user reports -- not
-// just an internal field nothing downstream reads.
+// to prove /_fake/identity actually changes what the next authorization
+// reports through /user.
 func assertRoundTripIdentity(t *testing.T, s *Server, want Identity) {
 	t.Helper()
 

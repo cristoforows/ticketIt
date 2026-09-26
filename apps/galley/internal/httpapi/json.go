@@ -46,8 +46,9 @@ func decodeStrictJSON(w http.ResponseWriter, r *http.Request, dst any, shapeMess
 		return false
 	}
 
-	var properties map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &properties); err != nil {
+	properties := json.NewDecoder(bytes.NewReader(raw))
+	start, err := properties.Token()
+	if err != nil || start != json.Delim('{') {
 		writeError(w, http.StatusBadRequest, "invalid_request", shapeMessage)
 		return false
 	}
@@ -59,17 +60,32 @@ func decodeStrictJSON(w http.ResponseWriter, r *http.Request, dst any, shapeMess
 			allowed[name] = true
 		}
 	}
-	for name := range properties {
+	for properties.More() {
+		key, err := properties.Token()
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", shapeMessage)
+			return false
+		}
+		name := key.(string)
 		if !allowed[name] {
 			writeError(w, http.StatusBadRequest, "invalid_request",
 				`unknown request property "`+name+`" -- `+shapeMessage)
+			return false
+		}
+		var value json.RawMessage
+		if err := properties.Decode(&value); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", shapeMessage)
+			return false
+		}
+		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			writeError(w, http.StatusBadRequest, "invalid_request", shapeMessage)
 			return false
 		}
 	}
 
 	strict := json.NewDecoder(bytes.NewReader(raw))
 	strict.DisallowUnknownFields()
-	err := strict.Decode(dst)
+	err = strict.Decode(dst)
 	if err == nil {
 		return true
 	}
