@@ -18,7 +18,7 @@ type requestBodyCase struct {
 	property    string
 }
 
-func requestBodyCases(t *testing.T, baseURL string, client *http.Client) []requestBodyCase {
+func createRequestBodyCases(t *testing.T, baseURL string, client *http.Client) []requestBodyCase {
 	t.Helper()
 	updated := createTicket(t, client, baseURL, uniqueTitle(t))
 	transitioned := createTicket(t, client, baseURL, uniqueTitle(t))
@@ -63,7 +63,7 @@ func assertInvalidRequestBody(t *testing.T, client *http.Client, tc requestBodyC
 
 func TestRequestBodies_RejectCaseVariantProperties(t *testing.T) {
 	baseURL, client := devServerWithSessionForTickets(t)
-	for _, tc := range requestBodyCases(t, baseURL, client) {
+	for _, tc := range createRequestBodyCases(t, baseURL, client) {
 		t.Run(tc.name, func(t *testing.T) {
 			assertInvalidRequestBody(t, client, tc, tc.caseVariant, tc.property)
 		})
@@ -72,13 +72,13 @@ func TestRequestBodies_RejectCaseVariantProperties(t *testing.T) {
 
 func TestRequestBodies_RejectTrailingContent(t *testing.T) {
 	baseURL, client := devServerWithSessionForTickets(t)
-	for _, tc := range requestBodyCases(t, baseURL, client) {
-		t.Run(tc.name, func(t *testing.T) {
-			for _, suffix := range []struct{ name, value string }{
-				{"second JSON value", ` {"ignored":true}`},
-				{"non-JSON suffix", ` !`},
-			} {
-				t.Run(suffix.name, func(t *testing.T) {
+	for _, suffix := range []struct{ name, value string }{
+		{"second JSON value", ` {"ignored":true}`},
+		{"non-JSON suffix", ` !`},
+	} {
+		t.Run(suffix.name, func(t *testing.T) {
+			for _, tc := range createRequestBodyCases(t, baseURL, client) {
+				t.Run(tc.name, func(t *testing.T) {
 					assertInvalidRequestBody(t, client, tc, tc.valid+suffix.value, "")
 				})
 			}
