@@ -629,6 +629,7 @@ components:
           id,
           title,
           status,
+          allowedActions,
           template,
           completionCondition,
           assigneeType,
@@ -660,6 +661,8 @@ components:
           type: string
         status:
           $ref: "#/components/schemas/TicketStatus"
+        allowedActions:
+          $ref: "#/components/schemas/TicketAllowedActions"
         template:
           $ref: "#/components/schemas/TicketTemplate"
         assigneeType:
@@ -732,6 +735,28 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Ticket"
+    TicketAllowedActions:
+      type: object
+      additionalProperties: false
+      required: [statusChanges, accept]
+      properties:
+        statusChanges:
+          type: array
+          description: Targets accepted by a plain status command from this Ticket's current Status.
+          items:
+            $ref: "#/components/schemas/TicketStatus"
+        accept:
+          $ref: "#/components/schemas/TicketAcceptAvailability"
+    TicketAcceptAvailability:
+      type: object
+      additionalProperties: false
+      required: [available]
+      properties:
+        available:
+          type: boolean
+        reason:
+          description: Present when unavailable; identical to the Accept command's error.
+          $ref: "#/components/schemas/ErrorDetail"
     CreateTicketRequest:
       type: object
       additionalProperties: false

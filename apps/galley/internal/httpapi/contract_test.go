@@ -277,6 +277,55 @@ func TestUpdateTicket_ResponseMatchesContract(t *testing.T) {
 	validateAgainstContract(t, router, notFoundReq, notFoundRec)
 }
 
+func TestTicketCommands_ResponseMatchesContract(t *testing.T) {
+	pool := postgres.NewTestPool(t)
+	router, err := legacy.NewRouter(loadContract(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(config.Config{Environment: config.EnvDevelopment, Version: "dev"}, time.Now(), pool, testLogger(&bytes.Buffer{}))
+	cookie := mintTestSessionCookie(t, pool)
+	request := func(method, path, body string, want int) Ticket {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		req.AddCookie(cookie)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("%s %s: status=%d, want %d; body=%s", method, path, rec.Code, want, rec.Body.String())
+		}
+		validateAgainstContract(t, router, req, rec)
+		var ticket Ticket
+		if want == http.StatusOK || want == http.StatusCreated {
+			if err := json.Unmarshal(rec.Body.Bytes(), &ticket); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return ticket
+	}
+	created := request(http.MethodPost, "/api/tickets", `{"title":"commands contract"}`, http.StatusCreated)
+	path := "/api/tickets/" + created.Id
+	request(http.MethodPost, path+"/status", `{"status":"Done"}`, http.StatusBadRequest)
+	request(http.MethodPost, path+"/accept", "", http.StatusBadRequest)
+	request(http.MethodPost, path+"/status", `{"status":"Ready"}`, http.StatusOK)
+	request(http.MethodPut, path+"/assignee", "", http.StatusOK)
+	request(http.MethodDelete, path+"/assignee", "", http.StatusOK)
+	request(http.MethodPost, path+"/status", `{"status":"InProgress"}`, http.StatusOK)
+	request(http.MethodPost, path+"/status", `{"status":"InReview"}`, http.StatusOK)
+	request(http.MethodPost, path+"/accept", "", http.StatusOK)
+	for _, operation := range []struct{ method, suffix, body string }{
+		{http.MethodPost, "/status", `{"status":"Ready"}`},
+		{http.MethodPost, "/accept", ""},
+		{http.MethodPut, "/assignee", ""},
+		{http.MethodDelete, "/assignee", ""},
+	} {
+		request(operation.method, "/api/tickets/"+uuid.NewString()+operation.suffix, operation.body, http.StatusNotFound)
+	}
+}
+
 // TestGetSession_ResponseMatchesContract validates issue #54's
 // SessionResponse shape (the 200 case) the same way the other
 // operations above are validated.

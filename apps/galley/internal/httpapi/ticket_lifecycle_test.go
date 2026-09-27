@@ -139,6 +139,49 @@ func getTicketHTTP(t *testing.T, client *http.Client, baseURL, id string) Ticket
 
 var allTicketStatuses = []TicketStatus{Backlog, Ready, InProgress, Blocked, InReview, Done}
 
+func TestTicketAllowedActions_MatchCommands(t *testing.T) {
+	baseURL, client, pool, ownerID := devServerWithSessionAndPoolForTickets(t)
+	for _, template := range []TicketTemplate{Basic, Coding} {
+		for _, from := range allTicketStatuses {
+			t.Run(string(template)+"_"+string(from), func(t *testing.T) {
+				created := createTicketWithTemplate(t, client, baseURL, uniqueTitle(t), template)
+				setTicketStatusDirect(t, pool, ownerID, created.Id, from)
+				if template == Basic && from == Backlog {
+					response, body := getTicket(t, client, baseURL, created.Id)
+					if response.StatusCode != http.StatusOK {
+						t.Fatalf("GET ticket status = %d; body=%s", response.StatusCode, body)
+					}
+					t.Logf("GET /api/tickets/%s: %d %s", created.Id, response.StatusCode, body)
+				}
+				advertised := getTicketHTTP(t, client, baseURL, created.Id).AllowedActions
+				for _, target := range allTicketStatuses {
+					setTicketStatusDirect(t, pool, ownerID, created.Id, from)
+					result := changeStatus(t, client, baseURL, created.Id, target)
+					allowed := containsStatus(advertised.StatusChanges, target)
+					if allowed != (result.status == http.StatusOK) {
+						t.Errorf("%s -> %s: advertised %t, command status %d (%+v)", from, target, allowed, result.status, result.errBody)
+					}
+					if result.status == http.StatusOK && result.ticket.Status != target {
+						t.Errorf("%s -> %s: command returned Status %s", from, target, result.ticket.Status)
+					}
+				}
+				setTicketStatusDirect(t, pool, ownerID, created.Id, from)
+				result := acceptTicketHTTP(t, client, baseURL, created.Id)
+				if advertised.Accept.Available != (result.status == http.StatusOK) {
+					t.Errorf("Accept from %s (%s): advertised %t, command status %d", from, template, advertised.Accept.Available, result.status)
+				}
+				if result.status == http.StatusOK {
+					if advertised.Accept.Reason != nil || result.ticket.Status != Done {
+						t.Errorf("successful Accept: reason=%+v, status=%s", advertised.Accept.Reason, result.ticket.Status)
+					}
+				} else if advertised.Accept.Reason == nil || *advertised.Accept.Reason != result.errBody.Error {
+					t.Errorf("rejected Accept: advertised reason=%+v, command reason=%+v", advertised.Accept.Reason, result.errBody.Error)
+				}
+			})
+		}
+	}
+}
+
 // D3 S2's human-assigned workflow table
 // (docs/decisions/d3-agent-template-compatibility.md), transcribed
 // independently of allowedSourceStatusesForTarget so the test checks

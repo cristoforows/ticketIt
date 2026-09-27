@@ -43,6 +43,7 @@ const TICKET = {
   id: "44444444-4444-4444-8444-444444444444",
   title: "Write the report",
   status: "InReview",
+  allowedActions: { statusChanges: ["InProgress"], accept: { available: true } },
   template: "Basic",
   completionCondition: "humanAcceptance",
   assigneeType: "owner",

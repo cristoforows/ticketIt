@@ -855,14 +855,24 @@ change either: `POST /api/tickets/{id}/status`,
 `POST /api/tickets/{id}/accept`, and
 `PUT`/`DELETE /api/tickets/{id}/assignee`.
 
-**The D3 S2 table is transcribed literally, inverted by target
-Status**, not inferred or generalised
-(`allowedSourceStatusesForTarget`): nine allowed (from, to) pairs,
+**The D3 S2 table is inverted by target Status**, not inferred or generalised
+(`allowedSourceStatusesForTarget`): ten allowed (from, to) pairs,
+including Owner-approved `Backlog -> Blocked` ([#87](https://github.com/cristoforows/ticketIt/issues/87)),
 deliberately excluding `Blocked -> Ready` (only `Blocked -> InProgress`
 is permitted) and excluding `Done` as a target entirely -- `Done` is
 reachable only through `POST /api/tickets/{id}/accept`
 (`decideAccept`), never a plain status write, whatever the Ticket's
 current Status or retained completion condition.
+
+Every Ticket response, including the list, carries `allowedActions`:
+`statusChanges` contains the plain status-command targets, and `accept`
+contains `available` plus the command's exact `reason` code and message
+when unavailable. `scanTicketRow` computes this on every read/return
+using `decidePlainStatusChange` and `decideAccept`; it is not persisted.
+`TestTicketAllowedActions_MatchCommands` compares advertised actions
+with actual HTTP commands for all six Statuses and both retained
+completion conditions. `TestTicketCommands_ResponseMatchesContract`
+validates status, Accept, assign, and unassign responses against OpenAPI.
 
 **Accept's two checks are ordered and separately coded.** A Ticket not
 currently `InReview` is rejected with the generic `invalid_transition`

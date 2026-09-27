@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -551,7 +552,7 @@ func TestGetTicket_ReturnsOwnersTicket(t *testing.T) {
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("failed to decode response %q: %v", data, err)
 	}
-	if got != created {
+	if !reflect.DeepEqual(got, created) {
 		t.Errorf("GetTicket(%s) = %+v, want %+v", created.Id, got, created)
 	}
 }

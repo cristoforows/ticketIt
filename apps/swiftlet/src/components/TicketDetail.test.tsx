@@ -7,6 +7,7 @@ const TICKET: Ticket = {
   id: "33333333-3333-4333-8333-333333333333",
   title: "Fix login bug on Safari",
   status: "Backlog",
+  allowedActions: { statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } } },
   template: "Basic",
   completionCondition: "humanAcceptance",
   assigneeType: "",
@@ -267,33 +268,15 @@ describe("TicketDetail", () => {
       expect(onUnassign).toHaveBeenCalledTimes(1);
     });
 
-    it("offers only D3 S2's allowed next Statuses for each current Status, and never Done", () => {
-      const cases: Array<[Ticket["status"], Ticket["status"][]]> = [
-        ["Backlog", ["Ready", "Blocked"]],
-        ["Ready", ["Backlog", "InProgress"]],
-        ["InProgress", ["Ready", "Blocked", "InReview"]],
-        ["Blocked", ["InProgress"]],
-        ["InReview", ["InProgress"]],
-        ["Done", ["Ready"]],
-      ];
-      for (const [status, expectedTargets] of cases) {
-        const ticket: Ticket = { ...TICKET, status };
-        const { unmount } = render(<TicketDetail ticket={ticket} onSave={vi.fn()} {...noopActions()} />);
-
-        for (const target of ["Backlog", "Ready", "InProgress", "Blocked", "InReview", "Done"] as const) {
-          const button = screen.queryByTestId(`ticket-detail-status-button-${target}`);
-          if (expectedTargets.includes(target)) {
-            expect(button, `expected a ${target} button from ${status}`).toBeInTheDocument();
-          } else {
-            expect(button, `expected no ${target} button from ${status}`).not.toBeInTheDocument();
-          }
-        }
-        unmount();
-      }
+    it("offers exactly Galley's supplied targets, even when the Status suggests otherwise", () => {
+      const ticket: Ticket = { ...TICKET, status: "Done", allowedActions: { ...TICKET.allowedActions, statusChanges: ["InReview"] } };
+      render(<TicketDetail ticket={ticket} onSave={vi.fn()} {...noopActions()} />);
+      expect(screen.getByTestId("ticket-detail-status-button-InReview")).toBeInTheDocument();
+      expect(screen.queryByTestId("ticket-detail-status-button-Ready")).not.toBeInTheDocument();
     });
 
     it("moves to the clicked Status and shows the updated Ticket Galley returned", async () => {
-      const moved: Ticket = { ...TICKET, status: "Ready" };
+      const moved: Ticket = { ...TICKET, status: "Ready", allowedActions: { ...TICKET.allowedActions, statusChanges: ["Backlog", "InProgress"] } };
       const onChangeStatus = vi.fn<(status: Ticket["status"]) => Promise<Ticket>>().mockResolvedValue(moved);
       render(<TicketDetail ticket={TICKET} onSave={vi.fn()} {...noopActions()} onChangeStatus={onChangeStatus} />);
 
@@ -307,7 +290,7 @@ describe("TicketDetail", () => {
       const onChangeStatus = vi
         .fn<(status: Ticket["status"]) => Promise<Ticket>>()
         .mockRejectedValue(new Error("the transition Backlog -> InProgress is not permitted"));
-      const ready: Ticket = { ...TICKET, status: "Ready" };
+      const ready: Ticket = { ...TICKET, status: "Ready", allowedActions: { ...TICKET.allowedActions, statusChanges: ["InProgress"] } };
       render(<TicketDetail ticket={ready} onSave={vi.fn()} {...noopActions()} onChangeStatus={onChangeStatus} />);
 
       fireEvent.click(screen.getByTestId("ticket-detail-status-button-InProgress"));
@@ -319,8 +302,8 @@ describe("TicketDetail", () => {
       expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("Ready");
     });
 
-    it("shows Accept only when In Review with a retained humanAcceptance condition", () => {
-      const inReview: Ticket = { ...TICKET, status: "InReview" };
+    it("shows Accept when Galley advertises it", () => {
+      const inReview: Ticket = { ...TICKET, status: "InReview", allowedActions: { ...TICKET.allowedActions, accept: { available: true } } };
       render(<TicketDetail ticket={inReview} onSave={vi.fn()} {...noopActions()} />);
 
       expect(screen.getByTestId("ticket-detail-accept-button")).toBeInTheDocument();
@@ -328,8 +311,8 @@ describe("TicketDetail", () => {
     });
 
     it("accepts and shows the Ticket as Done", async () => {
-      const inReview: Ticket = { ...TICKET, status: "InReview" };
-      const done: Ticket = { ...inReview, status: "Done" };
+      const inReview: Ticket = { ...TICKET, status: "InReview", allowedActions: { ...TICKET.allowedActions, accept: { available: true } } };
+      const done: Ticket = { ...inReview, status: "Done", allowedActions: TICKET.allowedActions };
       const onAccept = vi.fn<() => Promise<Ticket>>().mockResolvedValue(done);
       render(<TicketDetail ticket={inReview} onSave={vi.fn()} {...noopActions()} onAccept={onAccept} />);
 
@@ -339,26 +322,23 @@ describe("TicketDetail", () => {
       expect(onAccept).toHaveBeenCalledTimes(1);
     });
 
-    it("shows Galley's not-yet-implemented reason instead of an Accept button for an In Review reviewedPrMerge Ticket", () => {
-      const inReviewCoding: Ticket = { ...CODING_TICKET, status: "InReview" };
+    it("shows Galley's published reason instead of Accept when unavailable", () => {
+      const reason = { code: "reviewed_pr_merge_not_implemented", message: "Galley says reviewed PR merge is unavailable" };
+      const inReviewCoding: Ticket = { ...CODING_TICKET, status: "InReview", allowedActions: { ...TICKET.allowedActions, accept: { available: false, reason } } };
       render(<TicketDetail ticket={inReviewCoding} onSave={vi.fn()} {...noopActions()} />);
 
       expect(screen.queryByTestId("ticket-detail-accept-button")).not.toBeInTheDocument();
-      expect(screen.getByTestId("ticket-detail-accept-unavailable")).toHaveTextContent(
-        "reviewed PR merge, which cannot be completed in M2",
-      );
-      expect(screen.getByTestId("ticket-detail-accept-unavailable")).toHaveTextContent("D2");
-      expect(screen.getByTestId("ticket-detail-accept-unavailable")).toHaveTextContent("M8");
+      expect(screen.getByTestId("ticket-detail-accept-unavailable")).toHaveTextContent(reason.message);
     });
 
-    it("shows no Accept control at all outside In Review, for either completion condition", () => {
+    it("shows the published unavailability reason outside In Review, for either completion condition", () => {
       render(<TicketDetail ticket={TICKET} onSave={vi.fn()} {...noopActions()} />);
       expect(screen.queryByTestId("ticket-detail-accept-button")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("ticket-detail-accept-unavailable")).not.toBeInTheDocument();
+      expect(screen.getByTestId("ticket-detail-accept-unavailable")).toHaveTextContent(TICKET.allowedActions.accept.reason!.message);
 
       render(<TicketDetail ticket={CODING_TICKET} onSave={vi.fn()} {...noopActions()} />);
       expect(screen.queryByTestId("ticket-detail-accept-button")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("ticket-detail-accept-unavailable")).not.toBeInTheDocument();
+      expect(screen.getAllByTestId("ticket-detail-accept-unavailable")).toHaveLength(2);
     });
 
     it("offers no Agent Assignee option anywhere -- M2 has no Agents (AGENTS.md)", () => {

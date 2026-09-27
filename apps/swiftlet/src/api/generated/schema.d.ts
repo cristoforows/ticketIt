@@ -289,6 +289,7 @@ export interface components {
             id: string;
             title: string;
             status: components["schemas"]["TicketStatus"];
+            allowedActions: components["schemas"]["TicketAllowedActions"];
             template: components["schemas"]["TicketTemplate"];
             assigneeType: components["schemas"]["TicketAssigneeType"];
             completionCondition: components["schemas"]["TicketCompletionCondition"];
@@ -316,6 +317,16 @@ export interface components {
         /** @description The signed-in Owner's Tickets, newest first (createdAt descending, id descending as the tiebreak). */
         TicketList: {
             tickets: components["schemas"]["Ticket"][];
+        };
+        TicketAllowedActions: {
+            /** @description Targets accepted by a plain status command from this Ticket's current Status. */
+            statusChanges: components["schemas"]["TicketStatus"][];
+            accept: components["schemas"]["TicketAcceptAvailability"];
+        };
+        TicketAcceptAvailability: {
+            available: boolean;
+            /** @description Present when unavailable; identical to the Accept command's error. */
+            reason?: components["schemas"]["ErrorDetail"];
         };
         CreateTicketRequest: {
             /** @description Trimmed of leading/trailing whitespace before validation. Must be non-empty and at most 200 characters after trimming. */

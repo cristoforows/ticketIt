@@ -91,6 +91,7 @@ of that history is erased. The following owner transitions apply with no open Ro
 | From | To | Allowed | Notes |
 | --- | --- | --- | --- |
 | Backlog | Ready | Yes | Title alone is sufficient for a human Assignee. |
+| Backlog | Blocked | Yes | Owner marks work blocked before readiness. |
 | Ready | Backlog | Yes | Owner withdraws readiness. |
 | Ready | In Progress | Yes | Owner marks the start of their own work. |
 | In Progress | Ready | Yes | Owner pauses or backs out. |
@@ -102,6 +103,8 @@ of that history is erased. The following owner transitions apply with no open Ro
 | In Review | Done (reviewed-PR-merge condition) | Not via plain status-set | Use the shared evidence mechanism selected by D2. |
 | Done | Ready | Yes, subject to D4 for an already-merged PR | Reopening never restores expired ticket-based Permissions. |
 | Other skips, such as Backlog → In Progress/Done or Ready → In Review/Done | Rejected | Follow the manual sequence and completion condition above. |
+
+Backlog → Blocked is retained by the Owner's decision in [#87](https://github.com/cristoforows/ticketIt/issues/87).
 
 **Manual Blocked options:** Option A permits the Owner to mark human work Blocked
 (accepted); Option B reserves Blocked solely for Agent execution (rejected). The

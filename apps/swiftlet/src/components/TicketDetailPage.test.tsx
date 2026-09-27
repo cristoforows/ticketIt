@@ -18,6 +18,7 @@ const TICKET = {
   id: TICKET_ID,
   title: "Write the report",
   status: "Backlog",
+  allowedActions: { statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } } },
   template: "Basic",
   completionCondition: "humanAcceptance",
   assigneeType: "",
@@ -57,6 +58,19 @@ describe("TicketDetailPage", () => {
 
     expect(await screen.findByTestId("ticket-detail-title")).toHaveTextContent(TICKET.title);
     expect(fetch).toHaveBeenCalledWith(`/api/tickets/${TICKET_ID}`, undefined);
+  });
+
+  it("rejects a Ticket missing Galley's allowed actions or an unavailable Accept reason", async () => {
+    for (const payload of [
+      { ...TICKET, allowedActions: undefined },
+      { ...TICKET, allowedActions: { statusChanges: ["Ready"], accept: { available: false } } },
+    ]) {
+      stubFetch(jsonResponse(payload));
+      const { unmount } = render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+      expect(await screen.findByTestId("ticket-detail-error")).toBeInTheDocument();
+      expect(screen.queryByTestId("ticket-detail-title")).not.toBeInTheDocument();
+      unmount();
+    }
   });
 
   it("renders an explicit not-found state on Galley's 404, not a blank screen or raw error", async () => {
@@ -181,8 +195,8 @@ describe("TicketDetailPage", () => {
   });
 
   it("accepts through POST /api/tickets/:id/accept and shows the Ticket as Done", async () => {
-    const inReview = { ...TICKET, status: "InReview" };
-    const done = { ...inReview, status: "Done" };
+    const inReview = { ...TICKET, status: "InReview", allowedActions: { ...TICKET.allowedActions, accept: { available: true } } };
+    const done = { ...inReview, status: "Done", allowedActions: TICKET.allowedActions };
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse(inReview))
