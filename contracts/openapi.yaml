@@ -751,6 +751,17 @@ components:
       type: object
       additionalProperties: false
       required: [available]
+      not:
+        anyOf:
+          - properties:
+              available:
+                const: false
+            not:
+              required: [reason]
+          - properties:
+              available:
+                const: true
+            required: [reason]
       properties:
         available:
           type: boolean

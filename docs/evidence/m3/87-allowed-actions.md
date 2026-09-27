@@ -12,7 +12,7 @@ Galley enforced D3 transitions and Accept via `decidePlainStatusChange` and `dec
 
 - `Ticket.allowedActions.statusChanges` is an ordered array of plain status-command targets; `accept` has `available` and, when false, `reason` with the same `code` and `message` as the command. Chosen over endpoint-specific metadata so create, list, detail, edits, and commands all return one contract shape. No migration: these values are computed when `scanTicketRow` materializes each persisted Ticket.
 - `allowedActionsForTicket` enumerates the known Status values and calls the same two decision functions as the commands. Enumeration is only a candidate list, not an alternative permission table. The exhaustive HTTP test compares GET's advertised targets against each real status command for six Statuses × both retained completion conditions, and compares Accept success or exact rejection code/message. The existing independent D3 grid still checks the intended ten pairs. The four formerly uncovered command endpoints now have response-vs-schema tests, including success and error responses. The existing Template guardrail explicitly allows the new completion-condition reader; the no-execution-table guardrail remains unchanged.
-- The contract describes `reason` as present iff Accept is unavailable. `contract_test.go` validates this additional invariant for single-Ticket and list responses after kin-openapi response-schema validation, with both valid and both invalid combinations tested on a real response. With this contract's references, kin-openapi 0.149.0 parsed `if/then/else` but `ValidateResponse` and direct `VisitJSON` returned nil for both invalid combinations. The generator output remained valid; the conditional keywords were removed because neither response validation path enforced them. The explicit test check closes that local enforcement gap; schema-only consumers receive the documented rule, not a machine-enforced conditional.
+- `TicketAcceptAvailability` rejects two invalid combinations through OpenAPI 3.1's `not`/`anyOf`: unavailable without reason, and available with reason. `TestTicketAcceptAvailability_ResponseContractRejectsInvalidCombinations` validates real GET response mutations directly with kin-openapi's `ValidateResponse`, including both valid combinations. Standard response-vs-schema coverage now enforces the same constraint on single-Ticket and list responses; no test-only rule remains. `if/then/else` loaded but failed both negative kin-openapi checks. A direct `oneOf` passed those checks but made oapi-codegen add a `union json.RawMessage` field, two extra models, and custom JSON marshal/unmarshal methods to the existing Galley struct. The equivalent nested `not`/`anyOf` keeps both generated clients' original types intact.
 - Swiftlet's `parseTicket` requires the new shape and rejects unavailable Accept without a reason. `TicketDetail` renders only the supplied actions and message; stale-page command errors still display Galley's live response. A browser spec compares full-page controls with live GET results for Backlog, human In Review, and Coding In Review; it compares unavailable reasons against direct Accept responses. `e2e/run.sh` registers and checks the spec.
 - D3 §2 and Galley's README record the Owner-approved Backlog → Blocked pair; behavior stays the same. Both app READMEs document the new behavior. `docs/evidence/m3/TEMPLATE.md` follows the M2 template.
 
@@ -37,34 +37,28 @@ Run drift checks after staging regenerated files (or on a clean checkout): both 
 
 ## Observed results
 
-Before the allowed-actions implementation, the grid failed with `Backlog -> Ready: advertised false, command status 200 ({Error:{Code: Message:}})`; `TestTicketCommands_ResponseMatchesContract` rejected `allowedActions.statusChanges: null`. Before the follow-up invariant check, both malformed Accept combinations passed kin-openapi response validation (`error=<nil>, want invalid=true` in the two failing subtests).
+Before the allowed-actions implementation, the grid failed with `Backlog -> Ready: advertised false, command status 200 ({Error:{Code: Message:}})`; `TestTicketCommands_ResponseMatchesContract` rejected `allowedActions.statusChanges: null`. Before the schema constraint, both malformed Accept combinations passed kin-openapi response validation (`error=<nil>, want invalid=true` in the two failing subtests).
 
-Observed after the follow-up in each app directory; shown below as equivalent root-relative subshell commands (short exact output excerpts; exit status 0 for each command):
+Observed command output after adding the schema constraint (short exact excerpts; each command ran from the named directory and exited 0):
 
 ```text
-$ (cd apps/galley && go generate ./... && go test ./... && go build ./...)
-ok  	github.com/cristoforows/ticketIt/apps/galley/cmd/galley	4.451s
-ok  	github.com/cristoforows/ticketIt/apps/galley/internal/httpapi	5.980s
-$ (cd apps/galley && go test ./internal/httpapi -run 'TestTicketAcceptAvailability_ResponseContractRejectsInvalidCombinations|TestTicketCommands_ResponseMatchesContract|TestGetTicket_ResponseMatchesContract|TestTickets_ResponseMatchesContract|TestTicketAllowedActions_MatchCommands' -count=1 -v)
---- PASS: TestTicketAcceptAvailability_ResponseContractRejectsInvalidCombinations (0.04s)
+apps/galley $ go test ./... && go build ./... && ./scripts/check-contract-drift.sh
+ok  	github.com/cristoforows/ticketIt/apps/galley/internal/httpapi	5.814s
+OK: internal/httpapi/api.gen.go matches contracts/openapi.yaml (no drift).
+apps/galley $ go test ./internal/httpapi -run 'TestTicketAcceptAvailability_ResponseContractRejectsInvalidCombinations|TestTicketCommands_ResponseMatchesContract|TestTickets_ResponseMatchesContract|TestGetTicket_ResponseMatchesContract|TestTicketAllowedActions_MatchCommands' -count=1 -v
+--- PASS: TestTicketAcceptAvailability_ResponseContractRejectsInvalidCombinations (0.03s)
     --- PASS: TestTicketAcceptAvailability_ResponseContractRejectsInvalidCombinations/unavailable_without_reason (0.00s)
     --- PASS: TestTicketAcceptAvailability_ResponseContractRejectsInvalidCombinations/available_with_reason (0.00s)
---- PASS: TestTicketAllowedActions_MatchCommands (0.32s)
-$ (cd apps/swiftlet && npm test && npm run build)
+--- PASS: TestTicketAllowedActions_MatchCommands (0.31s)
+apps/swiftlet $ npm test && npm run build
  Test Files  8 passed (8)
       Tests  81 passed (81)
-✓ built in 90ms
-$ (cd apps/galley && ./scripts/check-contract-drift.sh)
-OK: internal/httpapi/api.gen.go matches contracts/openapi.yaml (no drift).
-$ (cd contracts && npm run check:swiftlet-drift)
+✓ built in 86ms
+contracts $ npm run check:swiftlet-drift
 OK: ../apps/swiftlet/src/api/generated/schema.d.ts matches openapi.yaml (no drift).
-$ (cd e2e && PATH="/var/folders/5q/00sd8m8x1ydbzf8zsvq9np440000gp/T/opencode/pgshim:$PATH" NPM_CONFIG_USERCONFIG=/dev/null ./run.sh)
-  1 passed (1.3s)
-[run.sh] ticket-allowed-actions.spec.ts exit code: 0
-[run.sh] SUITE PASSED
 ```
 
-The browser runner reported exit code 0 for all 17 registered spec files. Its `1 passed (1.3s)` excerpt above is from `tests/ticket-allowed-actions.spec.ts`.
+The previous commit's browser run (before this contract-only change) reported `1 passed (1.3s)` for `tests/ticket-allowed-actions.spec.ts`, all 17 spec exit codes `0`, and `[run.sh] SUITE PASSED`. It was not rerun for this schema/test/evidence change.
 
 The targeted real HTTP test printed this response:
 

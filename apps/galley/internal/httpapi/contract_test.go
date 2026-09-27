@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -361,6 +360,10 @@ func TestTicketAcceptAvailability_ResponseContractRejectsInvalidCombinations(t *
 	}
 	actions := body["allowedActions"].(map[string]any)
 	reason := actions["accept"].(map[string]any)["reason"]
+	route, pathParams, err := router.FindRoute(req)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		name    string
 		accept  map[string]any
@@ -381,9 +384,15 @@ func TestTicketAcceptAvailability_ResponseContractRejectsInvalidCombinations(t *
 			if _, err := rec.Body.Write(data); err != nil {
 				t.Fatal(err)
 			}
-			err = responseContractError(router, req, rec)
-			if (err != nil) != tc.invalid {
-				t.Errorf("response contract validation (%s) error=%v, want invalid=%t", data, err, tc.invalid)
+			input := &openapi3filter.ResponseValidationInput{
+				RequestValidationInput: &openapi3filter.RequestValidationInput{Request: req, PathParams: pathParams, Route: route},
+				Status:                 rec.Code,
+				Header:                 rec.Header(),
+			}
+			input.SetBodyBytes(data)
+			schemaErr := openapi3filter.ValidateResponse(context.Background(), input)
+			if (schemaErr != nil) != tc.invalid {
+				t.Errorf("kin-openapi ValidateResponse(%s) error=%v, want invalid=%t", data, schemaErr, tc.invalid)
 			}
 		})
 	}
@@ -437,16 +446,9 @@ func mintTestSessionCookie(t *testing.T, pool *pgxpool.Pool) *http.Cookie {
 
 func validateAgainstContract(t *testing.T, router routers.Router, req *http.Request, rec *httptest.ResponseRecorder) {
 	t.Helper()
-	if err := responseContractError(router, req, rec); err != nil {
-		t.Fatalf("%s %s response %s does not validate against %s: %v",
-			req.Method, req.URL.Path, rec.Body.String(), contractPath, err)
-	}
-}
-
-func responseContractError(router routers.Router, req *http.Request, rec *httptest.ResponseRecorder) error {
 	route, pathParams, err := router.FindRoute(req)
 	if err != nil {
-		return fmt.Errorf("contract has no route for %s %s: %w", req.Method, req.URL.Path, err)
+		t.Fatalf("contract %s has no route for %s %s: %v", contractPath, req.Method, req.URL.Path, err)
 	}
 
 	input := &openapi3filter.ResponseValidationInput{
@@ -461,47 +463,9 @@ func responseContractError(router routers.Router, req *http.Request, rec *httpte
 	input.SetBodyBytes(rec.Body.Bytes())
 
 	if err := openapi3filter.ValidateResponse(context.Background(), input); err != nil {
-		return err
+		t.Fatalf("%s %s response %s does not validate against %s: %v",
+			req.Method, req.URL.Path, rec.Body.String(), contractPath, err)
 	}
-	if rec.Code < http.StatusOK || rec.Code >= http.StatusMultipleChoices || rec.Body.Len() == 0 {
-		return nil
-	}
-	var body struct {
-		AllowedActions json.RawMessage   `json:"allowedActions"`
-		Tickets        []json.RawMessage `json:"tickets"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		return err
-	}
-	if len(body.AllowedActions) != 0 {
-		if err := ticketAcceptAvailabilityError(rec.Body.Bytes()); err != nil {
-			return err
-		}
-	}
-	for _, ticket := range body.Tickets {
-		if err := ticketAcceptAvailabilityError(ticket); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func ticketAcceptAvailabilityError(data []byte) error {
-	var ticket struct {
-		AllowedActions struct {
-			Accept struct {
-				Available bool         `json:"available"`
-				Reason    *ErrorDetail `json:"reason"`
-			} `json:"accept"`
-		} `json:"allowedActions"`
-	}
-	if err := json.Unmarshal(data, &ticket); err != nil {
-		return err
-	}
-	if ticket.AllowedActions.Accept.Available == (ticket.AllowedActions.Accept.Reason != nil) {
-		return fmt.Errorf("Ticket.allowedActions.accept.reason must be present iff available is false")
-	}
-	return nil
 }
 
 // TestErrorResponses_MatchContract validates the 404 and 405 bodies
