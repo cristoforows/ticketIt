@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -326,6 +327,68 @@ func TestTicketCommands_ResponseMatchesContract(t *testing.T) {
 	}
 }
 
+func TestTicketAcceptAvailability_ResponseContractRejectsInvalidCombinations(t *testing.T) {
+	pool := postgres.NewTestPool(t)
+	router, err := legacy.NewRouter(loadContract(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(config.Config{Environment: config.EnvDevelopment, Version: "dev"}, time.Now(), pool, testLogger(&bytes.Buffer{}))
+	cookie := mintTestSessionCookie(t, pool)
+	create := httptest.NewRequest(http.MethodPost, "/api/tickets", strings.NewReader(`{"title":"accept availability contract"}`))
+	create.Header.Set("Content-Type", "application/json")
+	create.AddCookie(cookie)
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, create)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create status=%d; body=%s", created.Code, created.Body.String())
+	}
+	var ticket Ticket
+	if err := json.Unmarshal(created.Body.Bytes(), &ticket); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/tickets/"+ticket.Id, nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get status=%d; body=%s", rec.Code, rec.Body.String())
+	}
+	validateAgainstContract(t, router, req, rec)
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	actions := body["allowedActions"].(map[string]any)
+	reason := actions["accept"].(map[string]any)["reason"]
+	for _, tc := range []struct {
+		name    string
+		accept  map[string]any
+		invalid bool
+	}{
+		{"unavailable with reason", map[string]any{"available": false, "reason": reason}, false},
+		{"available without reason", map[string]any{"available": true}, false},
+		{"unavailable without reason", map[string]any{"available": false}, true},
+		{"available with reason", map[string]any{"available": true, "reason": reason}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			actions["accept"] = tc.accept
+			data, err := json.Marshal(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rec.Body.Reset()
+			if _, err := rec.Body.Write(data); err != nil {
+				t.Fatal(err)
+			}
+			err = responseContractError(router, req, rec)
+			if (err != nil) != tc.invalid {
+				t.Errorf("response contract validation (%s) error=%v, want invalid=%t", data, err, tc.invalid)
+			}
+		})
+	}
+}
+
 // TestGetSession_ResponseMatchesContract validates issue #54's
 // SessionResponse shape (the 200 case) the same way the other
 // operations above are validated.
@@ -374,10 +437,16 @@ func mintTestSessionCookie(t *testing.T, pool *pgxpool.Pool) *http.Cookie {
 
 func validateAgainstContract(t *testing.T, router routers.Router, req *http.Request, rec *httptest.ResponseRecorder) {
 	t.Helper()
+	if err := responseContractError(router, req, rec); err != nil {
+		t.Fatalf("%s %s response %s does not validate against %s: %v",
+			req.Method, req.URL.Path, rec.Body.String(), contractPath, err)
+	}
+}
 
+func responseContractError(router routers.Router, req *http.Request, rec *httptest.ResponseRecorder) error {
 	route, pathParams, err := router.FindRoute(req)
 	if err != nil {
-		t.Fatalf("contract %s has no route for %s %s: %v", contractPath, req.Method, req.URL.Path, err)
+		return fmt.Errorf("contract has no route for %s %s: %w", req.Method, req.URL.Path, err)
 	}
 
 	input := &openapi3filter.ResponseValidationInput{
@@ -392,9 +461,47 @@ func validateAgainstContract(t *testing.T, router routers.Router, req *http.Requ
 	input.SetBodyBytes(rec.Body.Bytes())
 
 	if err := openapi3filter.ValidateResponse(context.Background(), input); err != nil {
-		t.Fatalf("%s %s response %s does not validate against %s: %v",
-			req.Method, req.URL.Path, rec.Body.String(), contractPath, err)
+		return err
 	}
+	if rec.Code < http.StatusOK || rec.Code >= http.StatusMultipleChoices || rec.Body.Len() == 0 {
+		return nil
+	}
+	var body struct {
+		AllowedActions json.RawMessage   `json:"allowedActions"`
+		Tickets        []json.RawMessage `json:"tickets"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		return err
+	}
+	if len(body.AllowedActions) != 0 {
+		if err := ticketAcceptAvailabilityError(rec.Body.Bytes()); err != nil {
+			return err
+		}
+	}
+	for _, ticket := range body.Tickets {
+		if err := ticketAcceptAvailabilityError(ticket); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ticketAcceptAvailabilityError(data []byte) error {
+	var ticket struct {
+		AllowedActions struct {
+			Accept struct {
+				Available bool         `json:"available"`
+				Reason    *ErrorDetail `json:"reason"`
+			} `json:"accept"`
+		} `json:"allowedActions"`
+	}
+	if err := json.Unmarshal(data, &ticket); err != nil {
+		return err
+	}
+	if ticket.AllowedActions.Accept.Available == (ticket.AllowedActions.Accept.Reason != nil) {
+		return fmt.Errorf("Ticket.allowedActions.accept.reason must be present iff available is false")
+	}
+	return nil
 }
 
 // TestErrorResponses_MatchContract validates the 404 and 405 bodies

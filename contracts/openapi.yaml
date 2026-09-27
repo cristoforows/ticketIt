@@ -755,7 +755,7 @@ components:
         available:
           type: boolean
         reason:
-          description: Present when unavailable; identical to the Accept command's error.
+          description: Required when unavailable; absent when available. Matches the Accept command's error.
           $ref: "#/components/schemas/ErrorDetail"
     CreateTicketRequest:
       type: object

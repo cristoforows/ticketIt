@@ -31,13 +31,13 @@ test("full-page controls follow Galley's published actions across Backlog and bo
   expect(rejected.errorCode).toBe(backlog.allowedActions.accept.reason?.code);
   expect(rejected.errorMessage).toBe(backlog.allowedActions.accept.reason?.message);
 
-  async function advance(id: string) {
+  async function moveTicketToInReview(id: string) {
     for (const status of ["Ready", "InProgress", "InReview"] as TicketStatus[]) {
       const result = await changeTicketStatusDirect(page, id, status);
       expect(result.ok).toBe(true);
     }
   }
-  await advance(basic.id);
+  await moveTicketToInReview(basic.id);
   const human = await assertPublishedControls(page, basic.id);
   expect(human.allowedActions.accept.available).toBe(true);
   expect(human.allowedActions.accept.reason).toBeUndefined();
@@ -45,7 +45,7 @@ test("full-page controls follow Galley's published actions across Backlog and bo
   await expect(page.getByTestId("ticket-detail-status")).toHaveText("Done");
 
   const coding = await createTicket(page, `allowed actions coding ${Date.now()}`, "Coding");
-  await advance(coding.id);
+  await moveTicketToInReview(coding.id);
   const reviewed = await assertPublishedControls(page, coding.id);
   expect(reviewed.allowedActions.accept.available).toBe(false);
   const denied = await acceptTicketDirect(page, coding.id);

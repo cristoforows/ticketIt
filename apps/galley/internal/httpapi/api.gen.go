@@ -309,7 +309,7 @@ type Ticket struct {
 type TicketAcceptAvailability struct {
 	Available bool `json:"available"`
 
-	// Reason Present when unavailable; identical to the Accept command's error.
+	// Reason Required when unavailable; absent when available. Matches the Accept command's error.
 	Reason *ErrorDetail `json:"reason,omitempty"`
 }
 

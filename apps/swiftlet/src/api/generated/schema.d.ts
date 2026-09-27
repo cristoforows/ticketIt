@@ -325,7 +325,7 @@ export interface components {
         };
         TicketAcceptAvailability: {
             available: boolean;
-            /** @description Present when unavailable; identical to the Accept command's error. */
+            /** @description Required when unavailable; absent when available. Matches the Accept command's error. */
             reason?: components["schemas"]["ErrorDetail"];
         };
         CreateTicketRequest: {
