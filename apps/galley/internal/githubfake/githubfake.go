@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -70,10 +71,10 @@ type Server struct {
 
 	srv *httptest.Server
 
-	mu          sync.Mutex
-	identity    Identity
-	pendingCode string
-	issuedToken string
+	mu           sync.Mutex
+	identity     Identity
+	pendingCodes map[string]Identity
+	issuedTokens map[string]Identity
 }
 
 // Start starts a fake provider that will hand back identity as the
@@ -90,6 +91,8 @@ func Start(identity Identity) *Server {
 		ClientID:     "githubfake-client-id",
 		ClientSecret: "githubfake-client-secret",
 		identity:     identity,
+		pendingCodes: make(map[string]Identity),
+		issuedTokens: make(map[string]Identity),
 	}
 
 	mux := http.NewServeMux()
@@ -158,7 +161,7 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	s.pendingCode = code
+	s.pendingCodes[code] = s.identity
 	s.mu.Unlock()
 
 	loc, err := url.Parse(redirectURI)
@@ -191,9 +194,9 @@ func (s *Server) handleAccessToken(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	code := r.PostForm.Get("code")
-	valid := code != "" && code == s.pendingCode
+	identity, valid := s.pendingCodes[code]
 	if valid {
-		s.pendingCode = ""
+		delete(s.pendingCodes, code)
 	}
 	s.mu.Unlock()
 
@@ -208,7 +211,7 @@ func (s *Server) handleAccessToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	s.issuedToken = token
+	s.issuedTokens[token] = identity
 	s.mu.Unlock()
 
 	writeJSON(w, http.StatusOK, map[string]string{
@@ -218,15 +221,14 @@ func (s *Server) handleAccessToken(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleUser returns the currently configured fixture Identity for a
-// request bearing the most recently issued access token.
+// handleUser returns the identity captured when the code was issued.
 func (s *Server) handleUser(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
-	wantAuth := "Bearer " + s.issuedToken
-	identity := s.identity
+	token, bearer := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	identity, valid := s.issuedTokens[token]
 	s.mu.Unlock()
 
-	if s.issuedToken == "" || r.Header.Get("Authorization") != wantAuth {
+	if !bearer || !valid {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "Bad credentials"})
 		return
 	}
@@ -245,7 +247,7 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSetIdentity lets a caller outside this Go process choose which
-// fixture identity subsequent /user calls report, by name rather than
+// fixture identity subsequent authorizations use, by name rather than
 // by numeric id/login -- e2e/run.sh's one shared fake-provider process
 // serves every browser spec, and specs needing a different identity
 // (e.g. non-owner rejection, after an owner sign-in already happened

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { UnauthenticatedError } from "../api/session";
 import {
   fetchTicket,
   updateTicket,
@@ -15,6 +16,7 @@ import { TicketDetail } from "./TicketDetail";
 
 interface TicketDetailPageProps {
   ticketId: string;
+  onUnauthenticated: () => void;
 }
 
 type DetailState =
@@ -33,7 +35,7 @@ type DetailState =
  * show from wherever the modal was opened, rather than a route
  * parameter) but renders the same TicketDetail underneath.
  */
-export function TicketDetailPage({ ticketId }: TicketDetailPageProps) {
+export function TicketDetailPage({ ticketId, onUnauthenticated }: TicketDetailPageProps) {
   const [state, setState] = useState<DetailState>({ kind: "loading" });
 
   useEffect(() => {
@@ -50,6 +52,10 @@ export function TicketDetailPage({ ticketId }: TicketDetailPageProps) {
         if (cancelled) {
           return;
         }
+        if (error instanceof UnauthenticatedError) {
+          onUnauthenticated();
+          return;
+        }
         if (error instanceof TicketNotFoundError) {
           setState({ kind: "not-found" });
           return;
@@ -61,31 +67,40 @@ export function TicketDetailPage({ ticketId }: TicketDetailPageProps) {
     return () => {
       cancelled = true;
     };
-  }, [ticketId]);
+  }, [ticketId, onUnauthenticated]);
+
+  async function runCommand(command: () => Promise<Ticket>): Promise<Ticket> {
+    try {
+      return await command();
+    } catch (error) {
+      if (error instanceof UnauthenticatedError) onUnauthenticated();
+      throw error;
+    }
+  }
 
   // Passed to TicketDetail as `onSave` -- this container is the only
   // place that ever calls updateTicket, keeping TicketDetail itself
   // free of fetching (issue #57's split, preserved by issue #58).
   function saveTicket(update: TicketUpdate): Promise<Ticket> {
-    return updateTicket(ticketId, update);
+    return runCommand(() => updateTicket(ticketId, update));
   }
 
   // Like saveTicket: the owner commands live here so TicketDetail
   // stays free of fetching.
   function changeStatus(status: Ticket["status"]): Promise<Ticket> {
-    return changeTicketStatus(ticketId, status);
+    return runCommand(() => changeTicketStatus(ticketId, status));
   }
 
   function accept(): Promise<Ticket> {
-    return acceptTicket(ticketId);
+    return runCommand(() => acceptTicket(ticketId));
   }
 
   function assign(): Promise<Ticket> {
-    return assignTicketOwner(ticketId);
+    return runCommand(() => assignTicketOwner(ticketId));
   }
 
   function unassign(): Promise<Ticket> {
-    return unassignTicket(ticketId);
+    return runCommand(() => unassignTicket(ticketId));
   }
 
   return (

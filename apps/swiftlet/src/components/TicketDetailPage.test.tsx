@@ -30,6 +30,8 @@ const TICKET = {
   updatedAt: "2026-09-22T10:00:00Z",
 };
 
+const onUnauthenticated = () => {};
+
 function stubFetch(response: MockResponse) {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
 }
@@ -43,7 +45,7 @@ describe("TicketDetailPage", () => {
   it("shows a loading state before the fetch settles", () => {
     vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => {})));
 
-    render(<TicketDetailPage ticketId={TICKET_ID} />);
+    render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
 
     expect(screen.getByTestId("ticket-detail-loading")).toBeInTheDocument();
   });
@@ -51,7 +53,7 @@ describe("TicketDetailPage", () => {
   it("fetches the Ticket by id and renders TicketDetail with it", async () => {
     stubFetch(jsonResponse(TICKET));
 
-    render(<TicketDetailPage ticketId={TICKET_ID} />);
+    render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
 
     expect(await screen.findByTestId("ticket-detail-title")).toHaveTextContent(TICKET.title);
     expect(fetch).toHaveBeenCalledWith(`/api/tickets/${TICKET_ID}`, undefined);
@@ -60,7 +62,7 @@ describe("TicketDetailPage", () => {
   it("renders an explicit not-found state on Galley's 404, not a blank screen or raw error", async () => {
     stubFetch(jsonResponse({ error: { code: "not_found", message: "no ticket with that identifier" } }, 404));
 
-    render(<TicketDetailPage ticketId={TICKET_ID} />);
+    render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
 
     expect(await screen.findByTestId("ticket-detail-not-found")).toBeInTheDocument();
     expect(screen.queryByTestId("ticket-detail-title")).not.toBeInTheDocument();
@@ -70,7 +72,7 @@ describe("TicketDetailPage", () => {
   it("renders an explicit error state for a failure other than 404", async () => {
     stubFetch(jsonResponse({ error: "boom" }, 503, "Service Unavailable"));
 
-    render(<TicketDetailPage ticketId={TICKET_ID} />);
+    render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
 
     expect(await screen.findByTestId("ticket-detail-error")).toBeInTheDocument();
     expect(screen.getByTestId("ticket-detail-error-message")).toHaveTextContent("503");
@@ -80,7 +82,7 @@ describe("TicketDetailPage", () => {
   it("offers a link back to the Backlog", async () => {
     stubFetch(jsonResponse(TICKET));
 
-    render(<TicketDetailPage ticketId={TICKET_ID} />);
+    render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
     await screen.findByTestId("ticket-detail-title");
 
     expect(screen.getByTestId("back-to-backlog-link")).toHaveAttribute("href", "/");
@@ -88,13 +90,13 @@ describe("TicketDetailPage", () => {
 
   it("re-fetches when the ticketId prop changes", async () => {
     stubFetch(jsonResponse(TICKET));
-    const { rerender } = render(<TicketDetailPage ticketId={TICKET_ID} />);
+    const { rerender } = render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
     await screen.findByTestId("ticket-detail-title");
 
     const otherId = "55555555-5555-4555-8555-555555555555";
     const otherTicket = { ...TICKET, id: otherId, title: "A different ticket" };
     stubFetch(jsonResponse(otherTicket));
-    rerender(<TicketDetailPage ticketId={otherId} />);
+    rerender(<TicketDetailPage ticketId={otherId} onUnauthenticated={onUnauthenticated} />);
 
     expect(await screen.findByTestId("ticket-detail-title")).toHaveTextContent(otherTicket.title);
     expect(fetch).toHaveBeenCalledWith(`/api/tickets/${otherId}`, undefined);
@@ -108,7 +110,7 @@ describe("TicketDetailPage", () => {
       .mockResolvedValueOnce(jsonResponse(updated));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<TicketDetailPage ticketId={TICKET_ID} />);
+    render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
     await screen.findByTestId("ticket-detail-title");
 
     fireEvent.click(screen.getByTestId("ticket-detail-edit-button"));
@@ -124,15 +126,37 @@ describe("TicketDetailPage", () => {
       `/api/tickets/${TICKET_ID}`,
       expect.objectContaining({
         method: "PATCH",
-        body: JSON.stringify({
-          title: TICKET.title,
-          goal: "Ship the report on time.",
-          context: "",
-          successCriteria: "",
-          constraints: "",
-          repository: "",
-        }),
+        body: JSON.stringify({ goal: "Ship the report on time." }),
       }),
+    );
+  });
+
+  it("keeps a disjoint edit made in another tab when saving a field from this tab", async () => {
+    const loaded = { ...TICKET, context: "Original context" };
+    const concurrentlyEdited = { ...loaded, context: "Other tab's context" };
+    const saved = { ...concurrentlyEdited, goal: "My new goal" };
+    const stored = { ...loaded };
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      if (!init) return Promise.resolve(jsonResponse(loaded));
+      const update = JSON.parse(String(init.body)) as Record<string, string>;
+      Object.assign(stored, update);
+      return Promise.resolve(jsonResponse(stored));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+    await screen.findByTestId("ticket-detail-title");
+    Object.assign(stored, { context: concurrentlyEdited.context });
+    fireEvent.click(screen.getByTestId("ticket-detail-edit-button"));
+    fireEvent.change(screen.getByTestId("ticket-detail-textarea-goal"), { target: { value: "My new goal" } });
+    fireEvent.click(screen.getByTestId("ticket-detail-save-button"));
+
+    expect(await screen.findByTestId("ticket-detail-field-goal")).toHaveTextContent(saved.goal);
+    expect(screen.getByTestId("ticket-detail-field-context")).toHaveTextContent(saved.context);
+    expect(stored).toEqual(saved);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `/api/tickets/${TICKET_ID}`,
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ goal: "My new goal" }) }),
     );
   });
 
@@ -144,7 +168,7 @@ describe("TicketDetailPage", () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(TICKET)).mockResolvedValueOnce(jsonResponse(moved));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<TicketDetailPage ticketId={TICKET_ID} />);
+    render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
     await screen.findByTestId("ticket-detail-title");
 
     fireEvent.click(screen.getByTestId("ticket-detail-status-button-Ready"));
@@ -165,7 +189,7 @@ describe("TicketDetailPage", () => {
       .mockResolvedValueOnce(jsonResponse(done));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<TicketDetailPage ticketId={TICKET_ID} />);
+    render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
     await screen.findByTestId("ticket-detail-title");
 
     fireEvent.click(screen.getByTestId("ticket-detail-accept-button"));
@@ -184,7 +208,7 @@ describe("TicketDetailPage", () => {
       .mockResolvedValueOnce(jsonResponse(unassigned));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<TicketDetailPage ticketId={TICKET_ID} />);
+    render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
     await screen.findByTestId("ticket-detail-title");
 
     fireEvent.click(screen.getByTestId("ticket-detail-assign-button"));

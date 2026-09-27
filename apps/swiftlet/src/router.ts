@@ -18,7 +18,11 @@ export type Route = { name: "backlog" } | { name: "ticket-detail"; ticketId: str
 function parseRoute(pathname: string): Route {
   const detailMatch = pathname.match(/^\/tickets\/([^/]+)\/?$/);
   if (detailMatch) {
-    return { name: "ticket-detail", ticketId: decodeURIComponent(detailMatch[1]) };
+    try {
+      return { name: "ticket-detail", ticketId: decodeURIComponent(detailMatch[1]) };
+    } catch (error) {
+      if (!(error instanceof URIError)) throw error;
+    }
   }
   return { name: "backlog" };
 }

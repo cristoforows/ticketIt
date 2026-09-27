@@ -45,7 +45,7 @@ describe("AppShell", () => {
   it("shows which Owner is signed in", () => {
     stubFetchByPath({ "/api/status": jsonResponse({ ok: true }), "/api/tickets": EMPTY_TICKET_LIST });
 
-    render(<AppShell owner={OWNER} onSignedOut={() => {}} />);
+    render(<AppShell owner={OWNER} onSignedOut={() => {}} onUnauthenticated={() => {}} />);
 
     expect(screen.getByTestId("signed-in-owner")).toHaveTextContent(OWNER.login);
   });
@@ -58,7 +58,7 @@ describe("AppShell", () => {
     });
     const onSignedOut = vi.fn();
 
-    render(<AppShell owner={OWNER} onSignedOut={onSignedOut} />);
+    render(<AppShell owner={OWNER} onSignedOut={onSignedOut} onUnauthenticated={() => {}} />);
     fireEvent.click(screen.getByTestId("sign-out-button"));
 
     await vi.waitFor(() => expect(onSignedOut).toHaveBeenCalledOnce());
@@ -72,7 +72,7 @@ describe("AppShell", () => {
     });
     const onSignedOut = vi.fn();
 
-    render(<AppShell owner={OWNER} onSignedOut={onSignedOut} />);
+    render(<AppShell owner={OWNER} onSignedOut={onSignedOut} onUnauthenticated={() => {}} />);
     fireEvent.click(screen.getByTestId("sign-out-button"));
 
     expect(await screen.findByTestId("sign-out-error")).toHaveTextContent("503");
@@ -100,7 +100,7 @@ describe("AppShell", () => {
       }),
     });
 
-    render(<AppShell owner={OWNER} onSignedOut={() => {}} />);
+    render(<AppShell owner={OWNER} onSignedOut={() => {}} onUnauthenticated={() => {}} />);
 
     expect(await screen.findByTestId("ticket-detail-page")).toBeInTheDocument();
     expect(screen.queryByTestId("ticket-list")).not.toBeInTheDocument();
@@ -114,7 +114,7 @@ describe("AppShell", () => {
     });
     const onSignedOut = vi.fn();
 
-    render(<AppShell owner={OWNER} onSignedOut={onSignedOut} />);
+    render(<AppShell owner={OWNER} onSignedOut={onSignedOut} onUnauthenticated={() => {}} />);
     fireEvent.click(screen.getByTestId("sign-out-button"));
 
     await vi.waitFor(() => expect(onSignedOut).toHaveBeenCalledOnce());

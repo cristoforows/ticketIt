@@ -100,8 +100,8 @@ const REVIEWED_PR_MERGE_NOT_IMPLEMENTED_MESSAGE =
  * plus Save and Cancel. Template itself has no edit control here:
  * changing it after creation is out of scope for M2 (D4, M8), and
  * completionCondition has no control at all -- it is never sent in any
- * update this component makes. No AI of any kind: Save submits exactly
- * what the Owner typed and triggers nothing else.
+ * update this component makes. No AI of any kind: Save submits only
+ * changed fields and triggers nothing else.
  *
  * Saving delegates to the `onSave` prop rather than calling
  * updateTicket itself, so this component still neither fetches nor
@@ -161,16 +161,19 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
   async function handleSave(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaveError(null);
+    const update: TicketUpdate = {};
+    for (const field of Object.keys(fields) as Array<keyof EditableFields>) {
+      if (fields[field] !== current[field]) {
+        update[field] = fields[field];
+      }
+    }
+    if (Object.keys(update).length === 0) {
+      setMode("view");
+      return;
+    }
     setSaving(true);
     try {
-      const updated = await onSave({
-        title: fields.title,
-        goal: fields.goal,
-        context: fields.context,
-        successCriteria: fields.successCriteria,
-        constraints: fields.constraints,
-        repository: fields.repository,
-      });
+      const updated = await onSave(update);
       setCurrent(updated);
       setFields(fieldsFrom(updated));
       setMode("view");

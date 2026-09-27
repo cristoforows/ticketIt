@@ -242,6 +242,59 @@ func TestLoad_InvalidProviderURLs(t *testing.T) {
 	}
 }
 
+func TestLoad_BaseURLMustBeOrigin(t *testing.T) {
+	for _, value := range []string{
+		"ftp://ticketit.example.com",
+		"https://",
+		"https://ticketit.example.com/path",
+		"https://ticketit.example.com/",
+		"https://ticketit.example.com?key=value",
+		"https://ticketit.example.com?",
+		"https://ticketit.example.com#fragment",
+		"https://ticketit.example.com#",
+		"https://ticketit.example.com:",
+		"https://ticketit.example.com:99999",
+		"https://user@ticketit.example.com",
+		"//ticketit.example.com",
+	} {
+		t.Run(value, func(t *testing.T) {
+			_, err := Load(fakeGetenv(withValidAuthEnv(map[string]string{
+				"DATABASE_URL": validDatabaseURL, "GALLEY_BASE_URL": value,
+			})))
+			if err == nil || !strings.Contains(err.Error(), "GALLEY_BASE_URL") {
+				t.Fatalf("Load() with GALLEY_BASE_URL=%q: error = %v, want GALLEY_BASE_URL error", value, err)
+			}
+		})
+	}
+	for _, value := range []string{"http://localhost:8080", "https://ticketit.example.com", "https://[::1]:8443"} {
+		t.Run(value, func(t *testing.T) {
+			cfg, err := Load(fakeGetenv(withValidAuthEnv(map[string]string{
+				"DATABASE_URL": validDatabaseURL, "GALLEY_BASE_URL": value,
+			})))
+			if err != nil || cfg.BaseURL != value {
+				t.Fatalf("Load() with GALLEY_BASE_URL=%q: config = %+v, error = %v", value, cfg, err)
+			}
+		})
+	}
+}
+
+func TestLoad_ProductionRequiresExplicitBaseURL(t *testing.T) {
+	for _, value := range []string{"", "https://ticketit.example.com"} {
+		t.Run(value, func(t *testing.T) {
+			cfg, err := Load(fakeGetenv(withValidAuthEnv(map[string]string{
+				"DATABASE_URL": validDatabaseURL, "GALLEY_ENVIRONMENT": EnvProduction, "GALLEY_BASE_URL": value,
+			})))
+			if value == "" {
+				if err == nil || !strings.Contains(err.Error(), "GALLEY_BASE_URL") {
+					t.Fatalf("production without base URL: error = %v, want GALLEY_BASE_URL error", err)
+				}
+			} else if err != nil || cfg.BaseURL != value {
+				t.Fatalf("production with base URL: config = %+v, error = %v", cfg, err)
+			}
+		})
+	}
+}
+
 func TestLoad_InvalidSessionTTL(t *testing.T) {
 	cases := []string{"30", "thirty days", "30d", "0", "0s", "-1h"}
 	for _, ttl := range cases {

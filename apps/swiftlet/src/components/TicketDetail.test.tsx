@@ -164,16 +164,35 @@ describe("TicketDetail", () => {
       "Restore sign-in for existing users on Safari.",
     );
     expect(screen.queryByTestId("ticket-detail-edit-form")).not.toBeInTheDocument();
-    // template is never part of the payload -- Save never sends it, and
-    // there is no control anywhere in this component that could.
-    expect(onSave).toHaveBeenCalledWith({
-      title: TICKET.title,
-      goal: "Restore sign-in for existing users on Safari.",
-      context: "",
-      successCriteria: "",
-      constraints: "",
-      repository: "",
+    expect(onSave).toHaveBeenCalledWith({ goal: "Restore sign-in for existing users on Safari." });
+  });
+
+  it("sends only changed fields, including clearing an initially populated field", async () => {
+    const saved: Ticket = { ...REFINED_TICKET, goal: "", context: "Updated context" };
+    const onSave = vi.fn<(update: TicketUpdate) => Promise<Ticket>>().mockResolvedValue(saved);
+    render(<TicketDetail ticket={REFINED_TICKET} onSave={onSave} {...noopActions()} />);
+
+    fireEvent.click(screen.getByTestId("ticket-detail-edit-button"));
+    fireEvent.change(screen.getByTestId("ticket-detail-textarea-goal"), { target: { value: "" } });
+    fireEvent.change(screen.getByTestId("ticket-detail-textarea-context"), {
+      target: { value: "Updated context" },
     });
+    fireEvent.click(screen.getByTestId("ticket-detail-save-button"));
+
+    expect(await screen.findByTestId("ticket-detail-field-context")).toHaveTextContent("Updated context");
+    expect(screen.getByTestId("ticket-detail-field-goal")).toHaveTextContent("Not set.");
+    expect(onSave).toHaveBeenCalledWith({ goal: "", context: "Updated context" });
+  });
+
+  it("does not PATCH when Save is clicked without edits", () => {
+    const onSave = vi.fn();
+    render(<TicketDetail ticket={REFINED_TICKET} onSave={onSave} {...noopActions()} />);
+
+    fireEvent.click(screen.getByTestId("ticket-detail-edit-button"));
+    fireEvent.click(screen.getByTestId("ticket-detail-save-button"));
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getByTestId("ticket-detail-field-goal")).toHaveTextContent(REFINED_TICKET.goal);
   });
 
   it("discards edits and returns to view mode on Cancel, without calling onSave", () => {
@@ -196,6 +215,7 @@ describe("TicketDetail", () => {
 
     render(<TicketDetail ticket={TICKET} onSave={onSave} {...noopActions()} />);
     fireEvent.click(screen.getByTestId("ticket-detail-edit-button"));
+    fireEvent.change(screen.getByTestId("ticket-detail-textarea-goal"), { target: { value: "New goal" } });
     fireEvent.click(screen.getByTestId("ticket-detail-save-button"));
 
     expect(await screen.findByTestId("ticket-detail-save-error")).toHaveTextContent(

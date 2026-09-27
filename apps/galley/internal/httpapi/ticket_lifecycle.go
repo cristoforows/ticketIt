@@ -8,8 +8,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/google/uuid"
 )
 
 // invalidTransitionCode is the one stable reason code for every move
@@ -170,7 +168,8 @@ func (s *server) ChangeTicketStatus(w http.ResponseWriter, r *http.Request, id s
 	if !ok {
 		return
 	}
-	if _, err := uuid.Parse(id); err != nil {
+	id, ok = canonicalTicketID(id)
+	if !ok {
 		writeTicketNotFound(w)
 		return
 	}
@@ -219,7 +218,8 @@ func (s *server) AcceptTicket(w http.ResponseWriter, r *http.Request, id string)
 	if !ok {
 		return
 	}
-	if _, err := uuid.Parse(id); err != nil {
+	id, ok = canonicalTicketID(id)
+	if !ok {
 		writeTicketNotFound(w)
 		return
 	}
@@ -283,7 +283,8 @@ func (s *server) AssignTicketOwner(w http.ResponseWriter, r *http.Request, id st
 	if !ok {
 		return
 	}
-	if _, err := uuid.Parse(id); err != nil {
+	id, ok = canonicalTicketID(id)
+	if !ok {
 		writeTicketNotFound(w)
 		return
 	}
@@ -309,7 +310,8 @@ func (s *server) UnassignTicket(w http.ResponseWriter, r *http.Request, id strin
 	if !ok {
 		return
 	}
-	if _, err := uuid.Parse(id); err != nil {
+	id, ok = canonicalTicketID(id)
+	if !ok {
 		writeTicketNotFound(w)
 		return
 	}

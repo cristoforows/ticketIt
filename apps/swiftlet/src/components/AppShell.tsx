@@ -10,6 +10,7 @@ interface AppShellProps {
   /** Called once Galley confirms sign-out; App.tsx uses this to return
    * to the sign-in page without re-querying /api/session. */
   onSignedOut: () => void;
+  onUnauthenticated: () => void;
 }
 
 /**
@@ -18,7 +19,7 @@ interface AppShellProps {
  * already succeeded — this component never decides who is signed in
  * itself.
  */
-export function AppShell({ owner, onSignedOut }: AppShellProps) {
+export function AppShell({ owner, onSignedOut, onUnauthenticated }: AppShellProps) {
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const route = useRoute();
@@ -49,11 +50,13 @@ export function AppShell({ owner, onSignedOut }: AppShellProps) {
       )}
       {route.name === "backlog" && (
         <>
-          <TicketList />
+          <TicketList onUnauthenticated={onUnauthenticated} />
           <StatusView />
         </>
       )}
-      {route.name === "ticket-detail" && <TicketDetailPage ticketId={route.ticketId} />}
+      {route.name === "ticket-detail" && (
+        <TicketDetailPage key={route.ticketId} ticketId={route.ticketId} onUnauthenticated={onUnauthenticated} />
+      )}
     </div>
   );
 }

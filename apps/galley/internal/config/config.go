@@ -1,6 +1,6 @@
 // Package config reads Galley's process configuration from the
-// environment. It is deliberately small and dependency-free: every
-// setting has an explicit default, and any value that is present but
+// environment. It is deliberately small and dependency-free: optional
+// settings have defaults, and any value that is present but
 // invalid fails loudly with an actionable error rather than starting
 // the process in an unknown state.
 package config
@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -207,10 +208,23 @@ func Load(getenv func(string) string) (Config, error) {
 
 	baseURL := getenv("GALLEY_BASE_URL")
 	if baseURL == "" {
+		if environment == EnvProduction {
+			return Config{}, fmt.Errorf("GALLEY_BASE_URL is required in production: set the browser-facing origin")
+		}
 		baseURL = DefaultBaseURL
 	}
-	if _, err := url.ParseRequestURI(baseURL); err != nil {
-		return Config{}, fmt.Errorf("invalid GALLEY_BASE_URL %q: must be an absolute URL", baseURL)
+	parsedBaseURL, err := url.Parse(baseURL)
+	if err != nil || (parsedBaseURL.Scheme != "http" && parsedBaseURL.Scheme != "https") ||
+		parsedBaseURL.Hostname() == "" || strings.HasSuffix(parsedBaseURL.Host, ":") ||
+		parsedBaseURL.User != nil || parsedBaseURL.Opaque != "" || parsedBaseURL.Path != "" ||
+		parsedBaseURL.RawQuery != "" || parsedBaseURL.ForceQuery || strings.Contains(baseURL, "#") {
+		return Config{}, fmt.Errorf("invalid GALLEY_BASE_URL %q: must be an http(s) origin with a host and no path, query, or fragment", baseURL)
+	}
+	if port := parsedBaseURL.Port(); port != "" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n > 65535 {
+			return Config{}, fmt.Errorf("invalid GALLEY_BASE_URL %q: port must be between 0 and 65535", baseURL)
+		}
 	}
 
 	sessionTTL := DefaultSessionTTL

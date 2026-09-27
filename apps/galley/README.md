@@ -129,10 +129,10 @@ DATABASE_URL=postgres://localhost:5432/ticketit_dev?sslmode=disable \
 
 `DATABASE_URL`, `GALLEY_OWNER_GITHUB_LOGIN`,
 `GALLEY_OAUTH_GITHUB_CLIENT_ID`, and `GALLEY_OAUTH_GITHUB_CLIENT_SECRET`
-are all required (see "Database configuration" and "Owner
-configuration and GitHub OAuth sign-in" below); every other setting
-keeps its previous default. By default this listens on `:8080` (all
-interfaces, port 8080) and serves:
+are required (see "Database configuration" and "Owner configuration and
+GitHub OAuth sign-in" below). `GALLEY_BASE_URL` is also required in
+production; development defaults to `http://localhost:8080`. By
+default Galley listens on `:8080` (all interfaces, port 8080) and serves:
 
 ```sh
 curl http://localhost:8080/api/status
@@ -149,8 +149,8 @@ in-flight requests and releases the listening socket before exiting
 
 ## Configuration
 
-Galley reads configuration from the environment at startup. Every
-setting has an explicit default; a value that is present but cannot be
+Galley reads configuration from the environment at startup. Optional
+settings have explicit defaults; a value that is present but cannot be
 parsed or is not one of the accepted values fails startup immediately
 with an actionable error on stderr and a non-zero exit code, rather
 than starting in an unknown state.
@@ -167,7 +167,7 @@ than starting in an unknown state.
 | `GALLEY_OAUTH_GITHUB_CLIENT_SECRET` | *(none — required)* | OAuth app client secret. Never logged.                |
 | `GALLEY_OAUTH_GITHUB_BASE_URL` | `https://github.com` | Authorize/token endpoint host. Tests point this at a local fixture. |
 | `GALLEY_OAUTH_GITHUB_API_BASE_URL` | `https://api.github.com` | Identity (`/user`) endpoint host. Tests point this at a local fixture. |
-| `GALLEY_BASE_URL`     | `http://localhost:8080` | The browser-facing origin Galley is reached at; builds the fixed OAuth `redirect_uri`. See below. |
+| `GALLEY_BASE_URL`     | `http://localhost:8080` in development; required in production | Browser-facing HTTP(S) origin with host and no path, query, or fragment; builds the fixed OAuth `redirect_uri`. See below. |
 | `GALLEY_SESSION_TTL`  | `720h`        | Session lifetime (database expiry and cookie `Expires`), a positive Go duration (`time.ParseDuration`, e.g. `12h`, `168h`). |
 
 Example of a configuration failure:
@@ -635,8 +635,9 @@ else"), proven byte-for-byte, not just asserted, by
 `production_gating_test.go` uses to prove two responses are identical
 rather than merely similar).
 
-Concretely: `GetTicket` first calls `uuid.Parse(id)` — a value that
-fails to parse is rejected as `404 not_found` immediately, before ever
+Concretely: ticket handlers parse the identifier and pass its canonical
+UUID string to PostgreSQL (including when a caller supplies a UUID URN).
+A value that fails to parse is rejected as `404 not_found` before ever
 reaching the database. This is not only a privacy choice; it is also
 required for correctness. `getTicketForOwner`'s query filters with
 `public_id = $2::uuid`, and PostgreSQL has **no cast at all** (checked
@@ -691,6 +692,9 @@ required cases distinguishable on the wire and in Go:
    field.
 3. **Present with text** → trimmed, validated against its documented
    maximum length (below), and stored.
+
+Explicit JSON `null` is rejected for every request property; it cannot
+stand in for an absent PATCH field. `{}` remains a valid PATCH body.
 
 A bare (non-pointer) `string` field cannot distinguish case 1 from
 case 2 — this is exactly the trap issue #58 itself names (a title-only

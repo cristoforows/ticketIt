@@ -211,7 +211,10 @@ on a `401` (already signed out) it returns to the sign-in page, and on
 any other failure it shows an inline error and stays in the shell.
 `src/api/session.ts`'s `UnauthenticatedError` is the one signal every
 authenticated call in this app treats as "return to the sign-in page" —
-the same rule `App.tsx`'s own initial session check follows.
+the same rule `App.tsx`'s own initial session check follows. `AppShell`
+passes App's sign-in callback to both Ticket containers: a `401` from
+list/detail loading, capture, edit, or a workflow command returns to
+sign-in instead of displaying an inline Ticket error.
 
 Swiftlet enforces no authorization rule of its own here: it renders
 whichever of Galley's own responses it receives (`docs/adr/0001-single-authority-galley.md`).
@@ -240,7 +243,8 @@ capture" and "Flexible ticket structure").
 (`src/api/tickets.ts`'s `createTicket`) clears the input and re-fetches
 the list; Galley alone decides where the new Ticket sorts
 (`apps/galley/README.md`, "Ticket ordering"), so this component never
-guesses at the insertion point itself. A rejected capture (Galley's
+guesses at the insertion point itself. An older in-flight list response
+cannot replace the result of this re-fetch. A rejected capture (Galley's
 `invalid_request`, e.g. a blank or over-length title) shows Galley's
 own message inline (`data-testid="ticket-capture-error"`) and leaves
 the list exactly as it was — no re-fetch, since nothing changed.
@@ -293,7 +297,8 @@ as a plain link) that calls `navigate()` on an unmodified left click
 instead of a full page load. Any path other than exactly `/` or
 `/tickets/:id` falls back to rendering the Backlog view — only a Ticket
 identifier needs its own not-found presentation in this slice (see
-below), not an arbitrary unmapped route.
+below), not an arbitrary unmapped route. Malformed percent encoding in a
+Ticket URL also falls back to Backlog rather than crashing the router.
 
 **A reload of `/tickets/:id` renders the same page, not a 404** —
 confirmed directly against the production build (`vite preview`,
@@ -323,7 +328,8 @@ of a loading state, `TicketDetail`, an explicit not-found state
 (`data-testid="ticket-detail-not-found"`, shown on Galley's `404`), or
 an explicit error state (any other failure) — never a blank screen or
 a raw error for an unknown identifier, per the issue's own acceptance
-criterion.
+criterion. Switching between detail URLs remounts the page so the prior
+Ticket is hidden while the new one loads.
 
 **This container/presentation split is what issue #57 requires for
 M3's modal to reuse this content "without a second implementation."**
@@ -362,8 +368,8 @@ now the `<a>` itself rather than a `<span>` wrapping plain text).
 Ticket's `title`, `goal`, `context`, `successCriteria`, and
 `constraints` (docs/ticket-creation.md, "Manual guidance"). **No AI of
 any kind, and this triggers nothing else** — Save performs exactly one
-`PATCH /api/tickets/:id` request with what the Owner typed, and
-nothing else in this app reacts to it.
+`PATCH /api/tickets/:id` request when fields changed, with only those
+fields, and nothing else in this app reacts to it.
 
 **View mode** shows each refinement field's stored value, or an
 explicit "Not set." placeholder for whichever are still empty (a
@@ -383,24 +389,24 @@ exactly, and `TicketDetail.test.tsx` and
 
 **Saving delegates to an `onSave` prop**
 (`(update: TicketUpdate) => Promise<Ticket>`), supplied by
-`TicketDetailPage.tsx` as `(update) => updateTicket(ticketId, update)`
-— the only place in this app that calls
+`TicketDetailPage.tsx`, which calls `updateTicket(ticketId, update)` and
+routes a `401` to sign-in — the only place in this app that calls
 `src/api/tickets.ts`'s new `updateTicket`. This keeps `TicketDetail`
 itself free of fetching, exactly like issue #57's read-only fields
 already were, which is what lets a future M3 modal container supply
 its own `onSave` and render this exact component unchanged.
 
-**Every save submits all five fields as currently shown in the edit
-form**, not a computed diff of only what changed. Galley's
-`PATCH /api/tickets/:id` genuinely supports a partial update (a field
-absent from the request leaves the stored value unchanged; present
-and `""` clears it; present with text stores it — see
+**Save sends only fields changed relative to the currently loaded Ticket**
+(including `""` when clearing a populated field). An unchanged form
+sends no PATCH. Galley's `PATCH /api/tickets/:id` genuinely supports a
+partial update (a field absent from the request leaves the stored value
+unchanged; present and `""` clears it; present with text stores it — see
 `apps/galley/README.md`, "Manual refinement fields," for the full
 rule), and that partial-update behavior is proven directly against
 Galley by its own tests (`apps/galley/internal/httpapi/ticket_test.go`,
-per ADR 0001) — this app's edit form always displaying (and thus
-submitting) every field at once is a UI choice, not a gap in what the
-contract or Galley enforces.
+per ADR 0001). Disjoint edits from another tab therefore remain intact
+when this tab saves a different field; the edit form still displays all
+fields.
 
 **Galley's own rejection message is shown verbatim, never
 substituted.** `updateTicket` surfaces `error.message` from Galley's

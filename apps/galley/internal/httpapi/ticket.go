@@ -90,7 +90,8 @@ func (s *server) GetTicket(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 
-	if _, err := uuid.Parse(id); err != nil {
+	id, ok = canonicalTicketID(id)
+	if !ok {
 		writeTicketNotFound(w)
 		return
 	}
@@ -112,6 +113,14 @@ func (s *server) GetTicket(w http.ResponseWriter, r *http.Request, id string) {
 
 func writeTicketNotFound(w http.ResponseWriter) {
 	writeError(w, http.StatusNotFound, "not_found", "no ticket with that identifier")
+}
+
+func canonicalTicketID(id string) (string, bool) {
+	parsed, err := uuid.Parse(id)
+	if err != nil {
+		return "", false
+	}
+	return parsed.String(), true
 }
 
 // UpdateTicket partially updates a Ticket's title and/or its manual
@@ -137,7 +146,8 @@ func (s *server) UpdateTicket(w http.ResponseWriter, r *http.Request, id string)
 		return
 	}
 
-	if _, err := uuid.Parse(id); err != nil {
+	id, ok = canonicalTicketID(id)
+	if !ok {
 		writeTicketNotFound(w)
 		return
 	}
