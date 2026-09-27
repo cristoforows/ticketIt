@@ -147,6 +147,8 @@ Distinguish estimates and reported costs; missing data is unknown rather than ze
 
 **Later, not assigned a release:** booths (zero or one per ticket), sprints, RAG, custom templates/forms/completion rules, recipe/skill editors, skill resource bundles, budget controls, extra account/storage providers, web-managed credentials and multiple owners, remote runners, service/desktop packaging, advanced concurrency and badge automation.
 
+Later Booth views may filter Tickets by Booth and Assignee.
+
 ## Acceptance
 
 Both native research and OpenCode coding belong to v1. M7 research and M8 coding can proceed independently after their shared M5/M6 prerequisites; research is not a blocker for coding. See [acceptance-scenarios.md](acceptance-scenarios.md) for complete hosted acceptance in M10. Deployment feasibility checks and integration gates are part of the build plan, not claims that the behavior is already available.

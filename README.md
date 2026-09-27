@@ -32,7 +32,6 @@ Start here:
 
 - [Ticket creation and templates](docs/ticket-creation.md)
 - [Ticket views, locks, and archiving](docs/ticket-views.md)
-- [Organization, booths, and badges](docs/ticket-organization.md)
 - [Agent execution and permissions](docs/agent-execution.md)
 - [Deployment and application boundaries](docs/deployment.md)
 - [Usage accounting](docs/usage-accounting.md)

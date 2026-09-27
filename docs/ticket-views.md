@@ -9,7 +9,7 @@ Use a continuous flow of tickets rather than time-boxed sprints. Both views pres
 
 Backlog holds captured work that is not ready to begin. Title-only tickets can be refined here. Agent execution becomes eligible when a ticket is Ready and assigned to an agent, with the goal and success criteria required by `ticket-creation.md`.
 
-Support custom badge creation, manual attachment/removal, and badge filtering in v1. See `ticket-organization.md` for badge membership and future booth organization.
+Support custom badge creation, manual attachment/removal, and badge filtering in v1. Booth membership is defined in [CONTEXT.md](../CONTEXT.md); Booth organization is deferred in [v1-scope.md](v1-scope.md).
 
 ## Ticket details
 
