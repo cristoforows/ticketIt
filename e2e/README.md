@@ -204,6 +204,12 @@ compares the list's full order to that same response, checks direct
 session. `run.sh` registers and checks its exit code after the restart
 phase, while Galley is running.
 
+`tests/ticket-board-moves.spec.ts` drives native drag and a keyboard
+`Move to…` control, checks persisted Status and returned allowed actions
+after reload, proves disallowed and Done drops send no command, and
+compares a stale move's visible rejection with Galley's live error. It
+is registered in `run.sh` while Galley is running.
+
 ## Ticket detail modal
 
 `tests/ticket-modal.spec.ts` opens Tickets below the fold from both list

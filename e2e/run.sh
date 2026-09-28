@@ -359,6 +359,12 @@ log "running tests/ticket-board.spec.ts against the restarted galley"
   E2E_GITHUBFAKE_BASE_URL="$GITHUBFAKE_URL" \
   npx playwright test tests/ticket-board.spec.ts) || BOARD_EXIT=$?
 
+BOARD_MOVES_EXIT=0
+log "running tests/ticket-board-moves.spec.ts against the restarted galley"
+(cd "$SCRIPT_DIR" && E2E_BASE_URL="$SWIFTLET_BASE_URL" GALLEY_BASE_URL="$GALLEY_BASE_URL" \
+  E2E_GITHUBFAKE_BASE_URL="$GITHUBFAKE_URL" \
+  npx playwright test tests/ticket-board-moves.spec.ts) || BOARD_MOVES_EXIT=$?
+
 MODAL_EXIT=0
 log "running tests/ticket-modal.spec.ts against the restarted galley"
 (cd "$SCRIPT_DIR" && E2E_BASE_URL="$SWIFTLET_BASE_URL" GALLEY_BASE_URL="$GALLEY_BASE_URL" \
@@ -401,6 +407,7 @@ log "ticket-templates.spec.ts exit code: $TEMPLATES_EXIT"
 log "ticket-lifecycle.spec.ts exit code: $LIFECYCLE_EXIT"
 log "ticket-allowed-actions.spec.ts exit code: $ALLOWED_ACTIONS_EXIT"
 log "ticket-board.spec.ts exit code: $BOARD_EXIT"
+log "ticket-board-moves.spec.ts exit code: $BOARD_MOVES_EXIT"
 log "ticket-modal.spec.ts exit code: $MODAL_EXIT"
 log "status-failure.spec.ts exit code: $STATUS_FAILURE_EXIT"
 log "backend-failure.spec.ts exit code: $FAILURE_EXIT"
@@ -409,7 +416,7 @@ if [ "$STATUS_EXIT" -ne 0 ] || [ "$AUTH_EXIT" -ne 0 ] || [ "$RESTART_BEFORE_EXIT
   || [ "$LIFECYCLE_BEFORE_EXIT" -ne 0 ] || [ "$TICKET_BEFORE_EXIT" -ne 0 ] || [ "$REFINEMENT_BEFORE_EXIT" -ne 0 ] \
   || [ "$RESTART_AFTER_EXIT" -ne 0 ] || [ "$TICKET_AFTER_EXIT" -ne 0 ] || [ "$REFINEMENT_AFTER_EXIT" -ne 0 ] \
   || [ "$LIFECYCLE_AFTER_EXIT" -ne 0 ] || [ "$TICKET_DETAIL_EXIT" -ne 0 ] || [ "$REFINEMENT_EXIT" -ne 0 ] \
-  || [ "$TEMPLATES_EXIT" -ne 0 ] || [ "$LIFECYCLE_EXIT" -ne 0 ] || [ "$ALLOWED_ACTIONS_EXIT" -ne 0 ] || [ "$BOARD_EXIT" -ne 0 ] || [ "$MODAL_EXIT" -ne 0 ] || [ "$STATUS_FAILURE_EXIT" -ne 0 ] \
+  || [ "$TEMPLATES_EXIT" -ne 0 ] || [ "$LIFECYCLE_EXIT" -ne 0 ] || [ "$ALLOWED_ACTIONS_EXIT" -ne 0 ] || [ "$BOARD_EXIT" -ne 0 ] || [ "$BOARD_MOVES_EXIT" -ne 0 ] || [ "$MODAL_EXIT" -ne 0 ] || [ "$STATUS_FAILURE_EXIT" -ne 0 ] \
   || [ "$FAILURE_EXIT" -ne 0 ]; then
   log "SUITE FAILED"
   exit 1

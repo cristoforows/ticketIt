@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { TicketBoard } from "./TicketBoard";
 
 const ticket = (id: string, status: string, template = "Basic") => ({
@@ -112,5 +112,56 @@ describe("TicketBoard", () => {
     render(<TicketBoard onUnauthenticated={onUnauthenticated} />);
 
     await vi.waitFor(() => expect(onUnauthenticated).toHaveBeenCalledOnce());
+  });
+
+  it("highlights only advertised drag targets and sends no disallowed or Done command", async () => {
+    stubTickets([{ ...ticket("moving", "Backlog"), allowedActions: { statusChanges: ["Ready", "Blocked", "Done"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } } } }]);
+    render(<TicketBoard onUnauthenticated={() => {}} />);
+    const card = await screen.findByTestId("board-ticket-moving");
+    fireEvent.click(within(card).getByText("Move to…"));
+    expect(within(card).getAllByRole("button").map((button) => button.getAttribute("data-move-target"))).toEqual(["Ready", "Blocked"]);
+    fireEvent.dragStart(card, { dataTransfer: { setData: vi.fn(), effectAllowed: "move" } });
+    expect(screen.getByTestId("board-status-Ready")).toHaveAttribute("data-drop-target", "true");
+    expect(screen.getByTestId("board-status-Blocked")).toHaveAttribute("data-drop-target", "true");
+    expect(screen.getByTestId("board-status-InReview")).not.toHaveAttribute("data-drop-target", "true");
+    expect(screen.getByTestId("board-status-Done")).not.toHaveAttribute("data-drop-target", "true");
+    fireEvent.drop(screen.getByTestId("board-status-InReview"));
+    fireEvent.drop(screen.getByTestId("board-status-Done"));
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for Galley's response before moving and uses returned actions", async () => {
+    const original = { ...ticket("moving", "Backlog"), allowedActions: { statusChanges: ["Ready"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } } } };
+    const changed = { ...original, status: "Ready", allowedActions: { ...original.allowedActions, statusChanges: ["Backlog", "InProgress"] } };
+    let resolveCommand!: (response: unknown) => void;
+    const fetchStub = vi.fn().mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ tickets: [original] }) })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveCommand = resolve; }));
+    vi.stubGlobal("fetch", fetchStub);
+    render(<TicketBoard onUnauthenticated={() => {}} />);
+    const card = await screen.findByTestId("board-ticket-moving");
+    fireEvent.click(within(card).getByText("Move to…"));
+    fireEvent.click(within(card).getByRole("button", { name: "Ready" }));
+    expect(screen.getByTestId("board-status-Backlog")).toContainElement(card);
+    await vi.waitFor(() => expect(fetchStub).toHaveBeenCalledTimes(2));
+    expect(fetchStub).toHaveBeenLastCalledWith("/api/tickets/moving/status", expect.objectContaining({ method: "POST", body: JSON.stringify({ status: "Ready" }) }));
+    resolveCommand({ ok: true, status: 200, json: async () => changed });
+    await vi.waitFor(() => expect(screen.getByTestId("board-status-Ready")).toContainElement(screen.getByTestId("board-ticket-moving")));
+    const moved = screen.getByTestId("board-ticket-moving");
+    await vi.waitFor(() => expect(within(moved).getByText("Move to…")).toHaveFocus());
+    fireEvent.click(within(moved).getByText("Move to…"));
+    expect(within(moved).getAllByRole("button").map((button) => button.textContent)).toEqual(["Backlog", "In Progress"]);
+  });
+
+  it("shows Galley's rejection verbatim without moving the card", async () => {
+    const original = { ...ticket("stale", "Backlog"), allowedActions: { statusChanges: ["Ready"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } } } };
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ tickets: [original] }) })
+      .mockResolvedValueOnce({ ok: false, status: 400, json: async () => ({ error: { code: "invalid_transition", message: "Galley stale move reason" } }) }));
+    render(<TicketBoard onUnauthenticated={() => {}} />);
+    const card = await screen.findByTestId("board-ticket-stale");
+    fireEvent.click(within(card).getByText("Move to…"));
+    fireEvent.click(within(card).getByRole("button", { name: "Ready" }));
+    expect(await screen.findByTestId("ticket-board-move-error")).toHaveTextContent("Galley stale move reason");
+    expect(screen.getByTestId("board-status-Backlog")).toContainElement(card);
   });
 });
