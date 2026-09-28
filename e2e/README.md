@@ -194,6 +194,16 @@ controls for Backlog, human In Review, and Coding In Review. The
 unavailable reasons are also compared to direct Accept responses.
 `run.sh` runs it while Galley is available and checks its exit code.
 
+## Status board
+
+`tests/ticket-board.spec.ts` creates Tickets and moves them through
+Galley's API, then compares every board card's identity, Status,
+Template, and within-Status order with live `GET /api/tickets`. It
+compares the list's full order to that same response, checks direct
+`/board` load and reload, and switches views without losing the signed-in
+session. `run.sh` registers and checks its exit code after the restart
+phase, while Galley is running.
+
 ## The failure-mode spec
 
 `tests/backend-failure.spec.ts` runs *after* `run.sh` stops Galley, and

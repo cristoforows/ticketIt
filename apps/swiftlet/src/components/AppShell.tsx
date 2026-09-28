@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { signOut, type Owner } from "../api/session";
 import { useRoute } from "../router";
+import { Link } from "./Link";
 import { StatusView } from "./StatusView";
+import { TicketBoard } from "./TicketBoard";
 import { TicketDetailPage } from "./TicketDetailPage";
 import { TicketList } from "./TicketList";
 
@@ -48,12 +50,17 @@ export function AppShell({ owner, onSignedOut, onUnauthenticated }: AppShellProp
           {signOutError}
         </p>
       )}
+      <nav aria-label="Ticket views">
+        <Link to="/" aria-current={route.name === "backlog" ? "page" : undefined}>List</Link>{" "}
+        <Link to="/board" aria-current={route.name === "board" ? "page" : undefined}>Board</Link>
+      </nav>
       {route.name === "backlog" && (
         <>
           <TicketList onUnauthenticated={onUnauthenticated} />
           <StatusView />
         </>
       )}
+      {route.name === "board" && <TicketBoard onUnauthenticated={onUnauthenticated} />}
       {route.name === "ticket-detail" && (
         <TicketDetailPage key={route.ticketId} ticketId={route.ticketId} onUnauthenticated={onUnauthenticated} />
       )}

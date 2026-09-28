@@ -6,7 +6,7 @@ function RouteProbe() {
   const route = useRoute();
   return (
     <p data-testid="route">
-      {route.name === "backlog" ? "backlog" : `ticket-detail:${route.ticketId}`}
+      {route.name === "ticket-detail" ? `ticket-detail:${route.ticketId}` : route.name}
     </p>
   );
 }
@@ -31,6 +31,20 @@ describe("router", () => {
     render(<RouteProbe />);
 
     expect(screen.getByTestId("route")).toHaveTextContent("ticket-detail:abc-123");
+  });
+
+  it("reads /board on direct load and reacts to navigation back to it", () => {
+    window.history.pushState({}, "", "/board");
+    render(<RouteProbe />);
+    expect(screen.getByTestId("route")).toHaveTextContent("board");
+
+    act(() => navigate("/"));
+    expect(screen.getByTestId("route")).toHaveTextContent("backlog");
+    act(() => {
+      window.history.pushState({}, "", "/board");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(screen.getByTestId("route")).toHaveTextContent("board");
   });
 
   it("falls back to the Backlog route for any other path", () => {

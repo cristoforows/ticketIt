@@ -107,6 +107,24 @@ describe("AppShell", () => {
     expect(screen.queryByTestId("ticket-list")).not.toBeInTheDocument();
   });
 
+  it("switches between List and Board in the same signed-in shell and loads /board directly", async () => {
+    window.history.pushState({}, "", "/board");
+    stubFetchByPath({ "/api/status": jsonResponse({ ok: true }), "/api/tickets": EMPTY_TICKET_LIST });
+
+    render(<AppShell owner={OWNER} onSignedOut={() => {}} onUnauthenticated={() => {}} />);
+
+    expect(await screen.findAllByText("No tickets.")).toHaveLength(6);
+    expect(screen.queryByTestId("ticket-capture-form")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Board" })).toHaveAttribute("aria-current", "page");
+    fireEvent.click(screen.getByRole("link", { name: "List" }));
+    expect(await screen.findByTestId("ticket-list-empty")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "List" })).toHaveAttribute("aria-current", "page");
+    fireEvent.click(screen.getByRole("link", { name: "Board" }));
+    expect(await screen.findAllByText("No tickets.")).toHaveLength(6);
+    expect(screen.getByTestId("signed-in-owner")).toHaveTextContent(OWNER.login);
+    expect(window.location.pathname).toBe("/board");
+  });
+
   it("treats a 401 on sign-out as already signed out", async () => {
     stubFetchByPath({
       "/api/status": jsonResponse({ ok: true }),
