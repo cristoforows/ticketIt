@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -323,6 +324,40 @@ func TestTicketCommands_ResponseMatchesContract(t *testing.T) {
 		{http.MethodDelete, "/assignee", ""},
 	} {
 		request(operation.method, "/api/tickets/"+uuid.NewString()+operation.suffix, operation.body, http.StatusNotFound)
+	}
+}
+
+func TestBadges_ResponsesMatchContractAndMethod405(t *testing.T) {
+	handler, _, cookie := badgeTestHandler(t)
+	doc := loadContract(t)
+	router, err := legacy.NewRouter(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	badge, rec, req := badgeRequest(t, handler, cookie, http.MethodPost, "/api/badges", fmt.Sprintf(`{"name":%q}`, uuid.NewString()), http.StatusCreated)
+	validateAgainstContract(t, router, req, rec)
+	_, rec, req = badgeRequest(t, handler, cookie, http.MethodGet, "/api/badges", "", http.StatusOK)
+	validateAgainstContract(t, router, req, rec)
+	created, rec, req := badgeRequest(t, handler, cookie, http.MethodPost, "/api/tickets", `{"title":"badge contract"}`, http.StatusCreated)
+	validateAgainstContract(t, router, req, rec)
+	path := "/api/tickets/" + created.(map[string]any)["id"].(string) + "/badges/" + badge.(map[string]any)["id"].(string)
+	_, rec, req = badgeRequest(t, handler, cookie, http.MethodPut, path, "", http.StatusOK)
+	validateAgainstContract(t, router, req, rec)
+	_, rec, req = badgeRequest(t, handler, cookie, http.MethodPut, "/api/tickets/bad/badges/"+uuid.NewString(), "", http.StatusNotFound)
+	validateAgainstContract(t, router, req, rec)
+	_, rec, req = badgeRequest(t, handler, cookie, http.MethodPost, "/api/badges", fmt.Sprintf(`{"name":%q}`, badge.(map[string]any)["name"]), http.StatusConflict)
+	validateAgainstContract(t, router, req, rec)
+	for _, tc := range []struct{ method, path, allow string }{
+		{http.MethodDelete, "/api/badges", "GET, POST"},
+		{http.MethodPost, path, "PUT"},
+	} {
+		result, rec, _ := badgeRequest(t, handler, cookie, tc.method, tc.path, "", http.StatusMethodNotAllowed)
+		if rec.Header().Get("Allow") != tc.allow || result.(map[string]any)["error"].(map[string]any)["code"] != "method_not_allowed" {
+			t.Fatalf("405 %s %s: %s, %v", tc.method, tc.path, rec.Header().Get("Allow"), result)
+		}
+		if err := doc.Components.Schemas["ErrorBody"].Value.VisitJSON(result); err != nil {
+			t.Fatalf("405 body not ErrorBody: %v", err)
+		}
 	}
 }
 

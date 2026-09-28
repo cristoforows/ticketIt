@@ -166,6 +166,9 @@ func applyTicketTransition(
 	if err := tx.Commit(ctx); err != nil {
 		return Ticket{}, true, nil, fmt.Errorf("failed to commit the transition: %w", err)
 	}
+	if err := loadTicketBadges(ctx, pool, ownerID, &ticket); err != nil {
+		return Ticket{}, true, nil, err
+	}
 	return ticket, true, nil, nil
 }
 
@@ -279,6 +282,9 @@ func setTicketAssigneeForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID 
 		return Ticket{}, false, nil
 	}
 	if err != nil {
+		return Ticket{}, false, err
+	}
+	if err := loadTicketBadges(ctx, pool, ownerID, &ticket); err != nil {
 		return Ticket{}, false, err
 	}
 	return ticket, true, nil

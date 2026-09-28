@@ -222,6 +222,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/badges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the Owner's Badges
+         * @description Ordered by case-insensitive name ascending, then id ascending.
+         */
+        get: operations["listBadges"];
+        put?: never;
+        /**
+         * Create a reusable Badge
+         * @description Names are trimmed, non-empty, at most 80 characters after trimming, and unique per Owner case-insensitively. Duplicate names return 409 duplicate_badge_name, including under concurrent creation.
+         */
+        post: operations["createBadge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tickets/{id}/badges/{badgeId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                badgeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Attach an existing Badge to a Ticket
+         * @description Idempotent. Returns the Ticket with its Badges; an unknown, malformed, or foreign Ticket or Badge id returns the shared 404 not_found.
+         */
+        put: operations["attachTicketBadge"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/session": {
         parameters: {
             query?: never;
@@ -290,6 +337,8 @@ export interface components {
             title: string;
             status: components["schemas"]["TicketStatus"];
             allowedActions: components["schemas"]["TicketAllowedActions"];
+            /** @description Ordered by case-insensitive name ascending, then id ascending. Empty when none attached. */
+            badges: components["schemas"]["TicketBadge"][];
             template: components["schemas"]["TicketTemplate"];
             assigneeType: components["schemas"]["TicketAssigneeType"];
             completionCondition: components["schemas"]["TicketCompletionCondition"];
@@ -317,6 +366,24 @@ export interface components {
         /** @description The signed-in Owner's Tickets, newest first (createdAt descending, id descending as the tiebreak). */
         TicketList: {
             tickets: components["schemas"]["Ticket"][];
+        };
+        TicketBadge: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+        };
+        Badge: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        BadgeList: {
+            badges: components["schemas"]["Badge"][];
+        };
+        CreateBadgeRequest: {
+            name: string;
         };
         TicketAllowedActions: {
             /** @description Targets accepted by a plain status command from this Ticket's current Status. */
@@ -803,6 +870,100 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description The Ticket, now unassigned. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ticket"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    listBadges: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Owner's reusable Badges. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BadgeList"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    createBadge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateBadgeRequest"];
+            };
+        };
+        responses: {
+            /** @description The created Badge. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Badge"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    attachTicketBadge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                badgeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Ticket with the Badge attached. */
             200: {
                 headers: {
                     [name: string]: unknown;

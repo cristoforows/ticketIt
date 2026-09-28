@@ -163,10 +163,27 @@ func (e TicketTemplate) Valid() bool {
 	}
 }
 
+// Badge defines model for Badge.
+type Badge struct {
+	CreatedAt string `json:"createdAt"`
+	Id        string `json:"id"`
+	Name      string `json:"name"`
+}
+
+// BadgeList defines model for BadgeList.
+type BadgeList struct {
+	Badges []Badge `json:"badges"`
+}
+
 // ChangeTicketStatusRequest `status` names the requested target Status, validated against the Ticket's persisted current Status per D3 S2. `Done` is always rejected here -- see `POST /api/tickets/{id}/accept`.
 type ChangeTicketStatusRequest struct {
 	// Status A Ticket's lifecycle stage (CONTEXT.md, "Status"). Moves between these values are validated against the persisted current Status per D3 S2 (docs/decisions/d3-agent-template-compatibility.md). `Done` is reachable only through explicit Accept.
 	Status TicketStatus `json:"status"`
+}
+
+// CreateBadgeRequest defines model for CreateBadgeRequest.
+type CreateBadgeRequest struct {
+	Name string `json:"name"`
 }
 
 // CreateDiagnosticNoteRequest defines model for CreateDiagnosticNoteRequest.
@@ -270,6 +287,9 @@ type Ticket struct {
 	// AssigneeType The kind of Assignee responsible for a Ticket (CONTEXT.md, "Assignee"). "" means unassigned, always present on the wire, matching `goal`'s convention. `owner` is the only non-empty value in M2: there is no Agent Assignee yet.
 	AssigneeType TicketAssigneeType `json:"assigneeType"`
 
+	// Badges Ordered by case-insensitive name ascending, then id ascending. Empty when none attached.
+	Badges []TicketBadge `json:"badges"`
+
 	// CompletionCondition The condition that completes a Ticket (CONTEXT.md, "Done"): human acceptance, or merging its reviewed pull request. Derived from the Ticket's Template default exactly once, at creation (issue #59, D3) -- there is no request field or operation anywhere in this contract that sets or changes it directly. Assignment, reassignment, and editing any other field never change it.
 	CompletionCondition TicketCompletionCondition `json:"completionCondition"`
 
@@ -324,6 +344,12 @@ type TicketAllowedActions struct {
 // TicketAssigneeType The kind of Assignee responsible for a Ticket (CONTEXT.md, "Assignee"). "" means unassigned, always present on the wire, matching `goal`'s convention. `owner` is the only non-empty value in M2: there is no Agent Assignee yet.
 type TicketAssigneeType string
 
+// TicketBadge defines model for TicketBadge.
+type TicketBadge struct {
+	Id   string `json:"id"`
+	Name string `json:"name"`
+}
+
 // TicketCompletionCondition The condition that completes a Ticket (CONTEXT.md, "Done"): human acceptance, or merging its reviewed pull request. Derived from the Ticket's Template default exactly once, at creation (issue #59, D3) -- there is no request field or operation anywhere in this contract that sets or changes it directly. Assignment, reassignment, and editing any other field never change it.
 type TicketCompletionCondition string
 
@@ -371,6 +397,9 @@ type CompleteGithubOAuthParams struct {
 	Error *string `form:"error,omitempty" json:"error,omitempty"`
 }
 
+// CreateBadgeJSONRequestBody defines body for CreateBadge for application/json ContentType.
+type CreateBadgeJSONRequestBody = CreateBadgeRequest
+
 // CreateDiagnosticNoteJSONRequestBody defines body for CreateDiagnosticNote for application/json ContentType.
 type CreateDiagnosticNoteJSONRequestBody = CreateDiagnosticNoteRequest
 
@@ -391,6 +420,12 @@ type ServerInterface interface {
 	// StartGithubOAuth Begin GitHub OAuth sign-in
 	// (GET /api/auth/github/start)
 	StartGithubOAuth(w http.ResponseWriter, r *http.Request)
+	// ListBadges List the Owner's Badges
+	// (GET /api/badges)
+	ListBadges(w http.ResponseWriter, r *http.Request)
+	// CreateBadge Create a reusable Badge
+	// (POST /api/badges)
+	CreateBadge(w http.ResponseWriter, r *http.Request)
 	// ListDiagnosticNotes List development diagnostic notes
 	// (GET /api/dev/diagnostic-notes)
 	ListDiagnosticNotes(w http.ResponseWriter, r *http.Request)
@@ -427,6 +462,9 @@ type ServerInterface interface {
 	// AssignTicketOwner Assign the signed-in Owner as a Ticket's Assignee
 	// (PUT /api/tickets/{id}/assignee)
 	AssignTicketOwner(w http.ResponseWriter, r *http.Request, id string)
+	// AttachTicketBadge Attach an existing Badge to a Ticket
+	// (PUT /api/tickets/{id}/badges/{badgeId})
+	AttachTicketBadge(w http.ResponseWriter, r *http.Request, id string, badgeId string)
 	// ChangeTicketStatus Change a Ticket's Status
 	// (POST /api/tickets/{id}/status)
 	ChangeTicketStatus(w http.ResponseWriter, r *http.Request, id string)
@@ -505,6 +543,34 @@ func (siw *ServerInterfaceWrapper) StartGithubOAuth(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.StartGithubOAuth(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListBadges operation middleware
+func (siw *ServerInterfaceWrapper) ListBadges(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListBadges(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateBadge operation middleware
+func (siw *ServerInterfaceWrapper) CreateBadge(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateBadge(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -742,6 +808,41 @@ func (siw *ServerInterfaceWrapper) AssignTicketOwner(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// AttachTicketBadge operation middleware
+func (siw *ServerInterfaceWrapper) AttachTicketBadge(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "badgeId" -------------
+	var badgeId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "badgeId", r.PathValue("badgeId"), &badgeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "badgeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AttachTicketBadge(w, r, id, badgeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ChangeTicketStatus operation middleware
 func (siw *ServerInterfaceWrapper) ChangeTicketStatus(w http.ResponseWriter, r *http.Request) {
 
@@ -901,6 +1002,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/accept", wrapper.AcceptTicket)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/tickets/{id}/assignee", wrapper.UnassignTicket)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/tickets/{id}/assignee", wrapper.AssignTicketOwner)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/badges", wrapper.ListBadges)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/badges", wrapper.CreateBadge)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/tickets/{id}/badges/{badgeId}", wrapper.AttachTicketBadge)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/session", wrapper.SignOut)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/session", wrapper.GetSession)
 

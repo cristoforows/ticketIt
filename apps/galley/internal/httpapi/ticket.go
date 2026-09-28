@@ -424,7 +424,14 @@ func insertTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64, title 
 		 RETURNING `+ticketSelectColumns,
 		ownerID, title, string(Backlog), publicID, string(template), string(completionCondition),
 	)
-	return scanTicketRow(row)
+	ticket, err := scanTicketRow(row)
+	if err != nil {
+		return Ticket{}, err
+	}
+	if err := loadTicketBadges(ctx, pool, ownerID, &ticket); err != nil {
+		return Ticket{}, err
+	}
+	return ticket, nil
 }
 
 // getTicketForOwner looks up one Ticket by its public identifier,
@@ -447,6 +454,9 @@ func getTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, p
 		return Ticket{}, false, nil
 	}
 	if err != nil {
+		return Ticket{}, false, err
+	}
+	if err := loadTicketBadges(ctx, pool, ownerID, &ticket); err != nil {
 		return Ticket{}, false, err
 	}
 	return ticket, true, nil
@@ -505,6 +515,9 @@ func updateTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64
 	if err != nil {
 		return Ticket{}, false, err
 	}
+	if err := loadTicketBadges(ctx, pool, ownerID, &ticket); err != nil {
+		return Ticket{}, false, err
+	}
 	return ticket, true, nil
 }
 
@@ -526,17 +539,25 @@ func listTicketsForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
 	tickets := []Ticket{}
 	for rows.Next() {
 		ticket, err := scanTicketRow(rows)
 		if err != nil {
+			rows.Close()
 			return nil, err
 		}
 		tickets = append(tickets, ticket)
 	}
 	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	refs := make([]*Ticket, len(tickets))
+	for i := range tickets {
+		refs[i] = &tickets[i]
+	}
+	if err := loadTicketBadges(ctx, pool, ownerID, refs...); err != nil {
 		return nil, err
 	}
 	return tickets, nil

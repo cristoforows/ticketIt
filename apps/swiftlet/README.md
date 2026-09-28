@@ -559,6 +559,20 @@ workflow change was needed. Run `npm test && npm run build` here and
 `cd e2e && ./run.sh` from repo
 root; `e2e/tests/ticket-modal.spec.ts` covers both views and mutations.
 
+## Badges (issue #91)
+
+List rows and board cards render Badge names from each Galley Ticket.
+Full-page detail and its modal share one picker: open **Add badge**,
+select an unattached existing Badge and **Attach badge**, or enter a
+name and **Create and attach**. The latter submits creation then
+attachment as two commands; if attachment fails after creation, that
+Badge stays reusable in the picker. Validation and ownership remain
+Galley's rules; `duplicate_badge_name` and other rejected commands show
+Galley's `error.message` inline. Ticket parsing requires `badges` on
+every response, including list and commands. Use `npm test && npm run build`
+here; `cd e2e && ./run.sh` at repo root covers real creation,
+reuse, modal/list/board, rejection, and restart persistence.
+
 ## Browser-to-backend suite
 
 The tests above stub `fetch`, so they never exercise the real proxy or

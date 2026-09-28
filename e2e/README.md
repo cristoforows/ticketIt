@@ -20,6 +20,13 @@ It never uses servers you already have running: every port is chosen
 free at startup, and both processes are killed on exit, including on
 `Ctrl-C`.
 
+`ticket-badges-before.spec.ts` creates and attaches two custom Badges
+through the shared modal/full-page picker, verifies list and board
+names, API responses, idempotent reuse, and Galley's duplicate rejection.
+`ticket-badges-after.spec.ts` reads the same definitions and links after
+`run.sh`'s real Galley restart. Both use the saved Owner session from
+the restart phase and create background Tickets through Galley's API.
+
 ## Prerequisites
 
 Go 1.27+, Node 26.9.0, and a running PostgreSQL your user can

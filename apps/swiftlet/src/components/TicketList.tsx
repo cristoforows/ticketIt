@@ -143,6 +143,7 @@ export function TicketList({ onUnauthenticated, refreshKey = 0, focusTicketId }:
                 {ticket.title}
               </TicketModalLink>{" "}
               <span data-testid="ticket-status">{ticket.status}</span>
+              <span data-testid="ticket-badges">{ticket.badges.map((badge) => badge.name).join(", ")}</span>
             </li>
           ))}
         </ul>

@@ -17,6 +17,7 @@ import (
 // lifecycle actions write to it. See
 // docs/evidence/m2/60-lifecycle-transitions.md.
 var knownPublicTables = []string{
+	"badges",
 	"diagnostic_notes",
 	"oauth_states",
 	"owner_identities",
@@ -24,6 +25,7 @@ var knownPublicTables = []string{
 	"schema_migrations",
 	"sessions",
 	"tickets",
+	"ticket_badges",
 }
 
 func publicTableNames(t *testing.T, pool *pgxpool.Pool) []string {

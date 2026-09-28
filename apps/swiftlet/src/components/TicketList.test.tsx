@@ -28,6 +28,7 @@ const TICKET_A = {
   repository: "",
   createdAt: "2026-09-22T10:01:00Z",
   updatedAt: "2026-09-22T10:01:00Z",
+  badges: [],
 };
 const TICKET_B = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -44,6 +45,7 @@ const TICKET_B = {
   repository: "",
   createdAt: "2026-09-22T10:00:00Z",
   updatedAt: "2026-09-22T10:00:00Z",
+  badges: [],
 };
 const CODING_TICKET = {
   ...TICKET_B,

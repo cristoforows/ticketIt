@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TicketDetail } from "./TicketDetail";
-import type { Ticket, TicketUpdate } from "../api/tickets";
+import type { Badge, Ticket, TicketUpdate } from "../api/tickets";
 
 const TICKET: Ticket = {
   id: "33333333-3333-4333-8333-333333333333",
@@ -18,6 +18,7 @@ const TICKET: Ticket = {
   repository: "",
   createdAt: "2026-09-22T10:00:00Z",
   updatedAt: "2026-09-22T10:05:00Z",
+  badges: [],
 };
 
 const CODING_TICKET: Ticket = {
@@ -43,8 +44,48 @@ function noopActions() {
     onAccept: vi.fn<() => Promise<Ticket>>(),
     onAssign: vi.fn<() => Promise<Ticket>>(),
     onUnassign: vi.fn<() => Promise<Ticket>>(),
+    onLoadBadges: vi.fn<() => Promise<import("../api/tickets").Badge[]>>().mockResolvedValue([]),
+    onCreateBadge: vi.fn<(name: string) => Promise<import("../api/tickets").Badge>>(),
+    onAttachBadge: vi.fn<(id: string) => Promise<Ticket>>(),
   };
 }
+
+const BADGE: Badge = { id: "11111111-1111-4111-8111-111111111111", name: "Urgent", createdAt: "2026-09-22T10:00:00Z" };
+
+describe("Badge picker", () => {
+  afterEach(cleanup);
+
+  it("creates and attaches inline, then offers another Ticket the existing Badge", async () => {
+    const onCreateBadge = vi.fn().mockResolvedValue(BADGE);
+    const onAttachBadge = vi.fn().mockResolvedValue({ ...TICKET, badges: [{ id: BADGE.id, name: BADGE.name }] });
+    const actions = { ...noopActions(), onLoadBadges: vi.fn().mockResolvedValue([BADGE]), onCreateBadge, onAttachBadge };
+    const { unmount } = render(<TicketDetail ticket={TICKET} onSave={vi.fn()} {...actions} />);
+    fireEvent.click(screen.getByTestId("badge-picker-toggle"));
+    await waitFor(() => expect(screen.getByRole("option", { name: BADGE.name })).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId("new-badge-name"), { target: { value: BADGE.name } });
+    fireEvent.click(screen.getByRole("button", { name: "Create and attach" }));
+    await waitFor(() => expect(screen.getByTestId("ticket-detail-badges")).toHaveTextContent(BADGE.name));
+    expect(onCreateBadge).toHaveBeenCalledWith(BADGE.name);
+    expect(onAttachBadge).toHaveBeenCalledWith(BADGE.id);
+    unmount();
+    render(<TicketDetail ticket={{ ...TICKET, id: "another-ticket" }} onSave={vi.fn()} {...actions} />);
+    fireEvent.click(screen.getByTestId("badge-picker-toggle"));
+    await waitFor(() => expect(screen.getByRole("option", { name: BADGE.name })).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId("badge-picker-select"), { target: { value: BADGE.id } });
+    fireEvent.click(screen.getByRole("button", { name: "Attach badge" }));
+    await waitFor(() => expect(onAttachBadge).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows Galley's duplicate rejection and leaves the Ticket unchanged", async () => {
+    const actions = { ...noopActions(), onCreateBadge: vi.fn().mockRejectedValue(new Error("a badge with that name already exists")) };
+    render(<TicketDetail ticket={TICKET} onSave={vi.fn()} {...actions} />);
+    fireEvent.click(screen.getByTestId("badge-picker-toggle"));
+    fireEvent.change(screen.getByTestId("new-badge-name"), { target: { value: BADGE.name } });
+    fireEvent.click(screen.getByRole("button", { name: "Create and attach" }));
+    expect(await screen.findByTestId("badge-picker-error")).toHaveTextContent("a badge with that name already exists");
+    expect(actions.onAttachBadge).not.toHaveBeenCalled();
+  });
+});
 
 describe("TicketDetail", () => {
   afterEach(() => {
