@@ -235,15 +235,16 @@ export async function createTicket(title: string, template: Ticket["template"] =
 /**
  * Shared response handling for every id-scoped Ticket command below
  * (issue #61) plus updateTicket: Galley's shared 404 becomes
- * TicketNotFoundError, any other non-2xx becomes an Error carrying
+ * TicketNotFoundError except for Badge attachment, whose 404 can mean
+ * either a missing Ticket or a missing Badge. Any other non-2xx becomes an Error carrying
  * Galley's own message verbatim (never a friendlier substitute -- see
  * docs/adr/0001-single-authority-galley.md), and success parses the
  * returned Ticket the same way every other call in this file already
  * does.
  */
-async function ticketCommand(path: string, init?: RequestInit): Promise<Ticket> {
+async function ticketCommand(path: string, init?: RequestInit, notFound: "ticket" | "response" = "ticket"): Promise<Ticket> {
   const response = await authenticatedFetch(path, init);
-  if (response.status === 404) {
+  if (response.status === 404 && notFound === "ticket") {
     throw new TicketNotFoundError();
   }
   if (!response.ok) {
@@ -355,5 +356,5 @@ export async function createBadge(name: string): Promise<Badge> {
 }
 
 export async function attachTicketBadge(ticketId: string, badgeId: string): Promise<Ticket> {
-  return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(ticketId)}/badges/${encodeURIComponent(badgeId)}`, { method: "PUT" });
+  return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(ticketId)}/badges/${encodeURIComponent(badgeId)}`, { method: "PUT" }, "response");
 }

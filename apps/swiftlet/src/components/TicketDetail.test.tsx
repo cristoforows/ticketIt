@@ -85,6 +85,18 @@ describe("Badge picker", () => {
     expect(await screen.findByTestId("badge-picker-error")).toHaveTextContent("a badge with that name already exists");
     expect(actions.onAttachBadge).not.toHaveBeenCalled();
   });
+
+  it("clears a failed Badge list load when the picker reopens and the retry succeeds", async () => {
+    const onLoadBadges = vi.fn().mockRejectedValueOnce(new Error("Badge list unavailable")).mockResolvedValue([BADGE]);
+    render(<TicketDetail ticket={TICKET} onSave={vi.fn()} {...noopActions()} onLoadBadges={onLoadBadges} />);
+    fireEvent.click(screen.getByTestId("badge-picker-toggle"));
+    expect(await screen.findByTestId("badge-picker-error")).toHaveTextContent("Badge list unavailable");
+    fireEvent.click(screen.getByTestId("badge-picker-toggle"));
+    fireEvent.click(screen.getByTestId("badge-picker-toggle"));
+    await waitFor(() => expect(onLoadBadges).toHaveBeenCalledTimes(2));
+    await screen.findByRole("option", { name: BADGE.name });
+    expect(screen.queryByTestId("badge-picker-error")).not.toBeInTheDocument();
+  });
 });
 
 describe("TicketDetail", () => {

@@ -26,6 +26,9 @@ names, API responses, idempotent reuse, and Galley's duplicate rejection.
 `ticket-badges-after.spec.ts` reads the same definitions and links after
 `run.sh`'s real Galley restart. Both use the saved Owner session from
 the restart phase and create background Tickets through Galley's API.
+Displayed names are compared to live `GET /api/tickets`; Badge ids are
+checked against the Badge catalog and per-Ticket GET on both sides of
+the restart.
 
 ## Prerequisites
 

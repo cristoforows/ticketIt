@@ -572,6 +572,10 @@ Galley's `error.message` inline. Ticket parsing requires `badges` on
 every response, including list and commands. Use `npm test && npm run build`
 here; `cd e2e && ./run.sh` at repo root covers real creation,
 reuse, modal/list/board, rejection, and restart persistence.
+An attach `404` shows Galley's "no ticket or badge" message; other
+Ticket commands retain their existing `TicketNotFoundError` handling.
+Closing and reopening the picker retries a failed Badge list load and
+clears the old error when the retry starts.
 
 ## Browser-to-backend suite
 

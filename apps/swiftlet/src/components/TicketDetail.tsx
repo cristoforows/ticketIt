@@ -326,8 +326,12 @@ function BadgePicker({ ticket, onAttached, onLoad, onCreate, onAttach }: {
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
+    setError(null);
     onLoad().then((available) => {
-      if (!cancelled) setBadges(available);
+      if (!cancelled) {
+        setBadges(available);
+        setError(null);
+      }
     }).catch((cause: unknown) => {
       if (!cancelled) setError(cause instanceof Error ? cause.message : "Failed to load badges.");
     });

@@ -22,11 +22,21 @@ test("Badge definitions and both Ticket attachments survive a Galley process res
   const secondTicket = tickets.find(({ title }) => title === second)!;
   expect(firstTicket.badges.map(({ name }) => name)).toEqual([extra, shared]);
   expect(secondTicket.badges.map(({ name }) => name)).toEqual([shared]);
+  const expected = badges.filter(({ name }) => name === shared || name === extra).map(({ id, name }) => ({ id, name }));
+  expect(firstTicket.badges).toEqual(expected);
+  expect(secondTicket.badges).toEqual(expected.filter(({ name }) => name === shared));
+  for (const ticket of [firstTicket, secondTicket]) {
+    const detailResponse = await page.request.get(`/api/tickets/${ticket.id}`);
+    expect(detailResponse.ok()).toBe(true);
+    expect((await detailResponse.json() as Ticket).badges).toEqual(ticket.badges);
+  }
   await page.goto("/");
-  await expect(page.getByTestId(`ticket-item-${firstTicket.id}`).getByTestId("ticket-badges")).toContainText(shared);
+  await expect(page.getByTestId(`ticket-item-${firstTicket.id}`).getByTestId("ticket-badges")).toHaveText(firstTicket.badges.map(({ name }) => name).join(", "));
+  await expect(page.getByTestId(`ticket-item-${secondTicket.id}`).getByTestId("ticket-badges")).toHaveText(secondTicket.badges.map(({ name }) => name).join(", "));
   await page.getByTestId(`ticket-item-${firstTicket.id}`).getByRole("link").click();
-  await expect(page.getByRole("dialog").getByTestId("ticket-detail-badges").getByRole("listitem")).toHaveCount(2);
+  await expect(page.getByRole("dialog").getByTestId("ticket-detail-badges").getByRole("listitem")).toHaveText(firstTicket.badges.map(({ name }) => name));
   await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
   await page.goto("/board");
-  await expect(page.getByTestId(`board-ticket-${secondTicket.id}`).getByTestId("board-badges")).toHaveText(shared);
+  await expect(page.getByTestId(`board-ticket-${firstTicket.id}`).getByTestId("board-badges")).toHaveText(firstTicket.badges.map(({ name }) => name).join(", "));
+  await expect(page.getByTestId(`board-ticket-${secondTicket.id}`).getByTestId("board-badges")).toHaveText(secondTicket.badges.map(({ name }) => name).join(", "));
 });

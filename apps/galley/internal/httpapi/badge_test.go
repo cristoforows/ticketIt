@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/cristoforows/ticketIt/apps/galley/internal/auth"
 	"github.com/cristoforows/ticketIt/apps/galley/internal/config"
 	"github.com/cristoforows/ticketIt/apps/galley/internal/postgres"
 )
@@ -195,5 +196,73 @@ func TestBadges_AttachOwnerScopeAndTicketResponses(t *testing.T) {
 	}
 	if _, found, err := getTicketForOwner(context.Background(), pool, ownerID+1000000, first.Id); err != nil || found {
 		t.Fatalf("foreign owner Ticket found = %t, error = %v", found, err)
+	}
+}
+
+func TestBadges_ActualOwnersAreIsolatedThroughHTTP(t *testing.T) {
+	pool := postgres.NewEmptyMigratedTestPool(t)
+	handler := NewHandler(config.Config{Environment: config.EnvDevelopment}, time.Now(), pool, testLogger(&bytes.Buffer{}))
+	firstCookie := mintTestSessionCookie(t, pool)
+	ctx := context.Background()
+	var secondOwnerID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO owners (singleton) VALUES (false) RETURNING id`).Scan(&secondOwnerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO owner_identities (owner_id, provider, provider_account_id, login)
+		VALUES ($1, 'github', -99911, 'second-badge-test-owner')`, secondOwnerID); err != nil {
+		t.Fatal(err)
+	}
+	token, _, err := auth.CreateSession(ctx, pool, secondOwnerID, config.DefaultSessionTTL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondCookie := &http.Cookie{Name: SessionCookieName, Value: token}
+	identifier := func(body any) string { return body.(map[string]any)["id"].(string) }
+	name := "Evidence Badge"
+	firstBadge, createdRec, _ := badgeRequest(t, handler, firstCookie, http.MethodPost, "/api/badges", fmt.Sprintf(`{"name":%q}`, name), http.StatusCreated)
+	t.Logf("POST /api/badges %s -> HTTP %d %s", fmt.Sprintf(`{"name":%q}`, name), createdRec.Code, strings.TrimSpace(createdRec.Body.String()))
+	secondBadge, _, _ := badgeRequest(t, handler, secondCookie, http.MethodPost, "/api/badges", fmt.Sprintf(`{"name":%q}`, strings.ToUpper(name)), http.StatusCreated)
+	if identifier(firstBadge) == identifier(secondBadge) {
+		t.Fatal("different Owners received the same Badge")
+	}
+	firstTicket, _, _ := badgeRequest(t, handler, firstCookie, http.MethodPost, "/api/tickets", `{"title":"first Owner ticket"}`, http.StatusCreated)
+	secondTicket, _, _ := badgeRequest(t, handler, secondCookie, http.MethodPost, "/api/tickets", `{"title":"second Owner ticket"}`, http.StatusCreated)
+	for _, tc := range []struct {
+		cookie       *http.Cookie
+		badgeID      string
+		ticketID     string
+		foreignID    string
+		foreignBadge string
+	}{
+		{firstCookie, identifier(firstBadge), identifier(firstTicket), identifier(secondTicket), identifier(secondBadge)},
+		{secondCookie, identifier(secondBadge), identifier(secondTicket), identifier(firstTicket), identifier(firstBadge)},
+	} {
+		list, _, _ := badgeRequest(t, handler, tc.cookie, http.MethodGet, "/api/badges", "", http.StatusOK)
+		badges := list.(map[string]any)["badges"].([]any)
+		if len(badges) != 1 || identifier(badges[0]) != tc.badgeID {
+			t.Fatalf("Owner sees foreign Badges: %v", badges)
+		}
+		own, _, _ := badgeRequest(t, handler, tc.cookie, http.MethodPut,
+			"/api/tickets/"+tc.ticketID+"/badges/"+tc.badgeID, "", http.StatusOK)
+		attached := own.(map[string]any)["badges"].([]any)
+		if len(attached) != 1 || identifier(attached[0]) != tc.badgeID {
+			t.Fatalf("Owner's Ticket Badges = %v", attached)
+		}
+		for _, pair := range [][2]string{{tc.ticketID, tc.foreignBadge}, {tc.foreignID, tc.badgeID}} {
+			result, rejectedRec, _ := badgeRequest(t, handler, tc.cookie, http.MethodPut,
+				"/api/tickets/"+pair[0]+"/badges/"+pair[1], "", http.StatusNotFound)
+			if tc.cookie == firstCookie && pair[1] == tc.foreignBadge {
+				t.Logf("PUT /api/tickets/%s/badges/%s -> HTTP %d %s", pair[0], pair[1], rejectedRec.Code, strings.TrimSpace(rejectedRec.Body.String()))
+			}
+			if result.(map[string]any)["error"].(map[string]any)["code"] != "not_found" {
+				t.Fatalf("foreign attachment leaked: %v", result)
+			}
+		}
+		badgeRequest(t, handler, tc.cookie, http.MethodGet, "/api/tickets/"+tc.foreignID, "", http.StatusNotFound)
+		listTickets, _, _ := badgeRequest(t, handler, tc.cookie, http.MethodGet, "/api/tickets", "", http.StatusOK)
+		visible := listTickets.(map[string]any)["tickets"].([]any)
+		if len(visible) != 1 || identifier(visible[0]) != tc.ticketID || len(visible[0].(map[string]any)["badges"].([]any)) != 1 {
+			t.Fatalf("Owner sees foreign Tickets or links: %v", visible)
+		}
 	}
 }

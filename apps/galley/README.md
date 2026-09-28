@@ -968,6 +968,16 @@ exists in this slice. Check with `go test ./...`, `go vet ./...`, and
 The two added tables are included in the fixed known-table guardrail;
 the lifecycle actions still leave both row counts unchanged.
 
+Every Ticket-returning storage path enriches its scanned row with
+`loadTicketBadges`; the list closes its cursor and loads all its Tickets'
+Badges in one query. `scanTicketRow` cannot do this without a query per
+row and a nested database read while list rows remain open. A new Ticket
+return path must perform the same enrichment before writing JSON.
+`TestBadges_ActualOwnersAreIsolatedThroughHTTP` exercises foreign ids
+and same-name Badge definitions through real sessions for two Owners in
+an isolated test database (the second row uses `singleton=false`, not a
+production sign-in path).
+
 ## Error shape
 
 `ErrorBody`/`ErrorDetail` are generated from
