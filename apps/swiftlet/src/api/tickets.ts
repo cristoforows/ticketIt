@@ -76,6 +76,9 @@ function parseTicket(payload: unknown): Ticket {
     throw new Error("Galley's response body was not a JSON object.");
   }
   const record = payload as Record<string, unknown>;
+  const actions = record.allowedActions as Record<string, unknown> | undefined;
+  const accept = actions?.accept as Record<string, unknown> | undefined;
+  const reason = accept?.reason as Record<string, unknown> | undefined;
   if (
     typeof record.id !== "string" ||
     typeof record.title !== "string" ||
@@ -89,7 +92,17 @@ function parseTicket(payload: unknown): Ticket {
     typeof record.constraints !== "string" ||
     typeof record.repository !== "string" ||
     typeof record.createdAt !== "string" ||
-    typeof record.updatedAt !== "string"
+    typeof record.updatedAt !== "string" ||
+    !actions ||
+    typeof actions !== "object" ||
+    !Array.isArray(actions.statusChanges) ||
+    !actions.statusChanges.every((status: unknown) => typeof status === "string") ||
+    !accept ||
+    typeof accept !== "object" ||
+    typeof accept.available !== "boolean" ||
+    (accept.available
+      ? accept.reason !== undefined
+      : !reason || typeof reason !== "object" || typeof reason.code !== "string" || typeof reason.message !== "string")
   ) {
     throw new Error("Galley's Ticket response was missing a required field.");
   }
@@ -97,6 +110,12 @@ function parseTicket(payload: unknown): Ticket {
     id: record.id,
     title: record.title,
     status: record.status as Ticket["status"],
+    allowedActions: {
+      statusChanges: actions.statusChanges as Ticket["status"][],
+      accept: accept.available
+        ? { available: true }
+        : { available: false, reason: { code: reason!.code as string, message: reason!.message as string } },
+    },
     template: record.template as Ticket["template"],
     completionCondition: record.completionCondition as Ticket["completionCondition"],
     assigneeType: record.assigneeType as Ticket["assigneeType"],

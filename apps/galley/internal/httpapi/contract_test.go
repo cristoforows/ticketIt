@@ -277,6 +277,127 @@ func TestUpdateTicket_ResponseMatchesContract(t *testing.T) {
 	validateAgainstContract(t, router, notFoundReq, notFoundRec)
 }
 
+func TestTicketCommands_ResponseMatchesContract(t *testing.T) {
+	pool := postgres.NewTestPool(t)
+	router, err := legacy.NewRouter(loadContract(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(config.Config{Environment: config.EnvDevelopment, Version: "dev"}, time.Now(), pool, testLogger(&bytes.Buffer{}))
+	cookie := mintTestSessionCookie(t, pool)
+	request := func(method, path, body string, want int) Ticket {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		req.AddCookie(cookie)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("%s %s: status=%d, want %d; body=%s", method, path, rec.Code, want, rec.Body.String())
+		}
+		validateAgainstContract(t, router, req, rec)
+		var ticket Ticket
+		if want == http.StatusOK || want == http.StatusCreated {
+			if err := json.Unmarshal(rec.Body.Bytes(), &ticket); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return ticket
+	}
+	created := request(http.MethodPost, "/api/tickets", `{"title":"commands contract"}`, http.StatusCreated)
+	path := "/api/tickets/" + created.Id
+	request(http.MethodPost, path+"/status", `{"status":"Done"}`, http.StatusBadRequest)
+	request(http.MethodPost, path+"/accept", "", http.StatusBadRequest)
+	request(http.MethodPost, path+"/status", `{"status":"Ready"}`, http.StatusOK)
+	request(http.MethodPut, path+"/assignee", "", http.StatusOK)
+	request(http.MethodDelete, path+"/assignee", "", http.StatusOK)
+	request(http.MethodPost, path+"/status", `{"status":"InProgress"}`, http.StatusOK)
+	request(http.MethodPost, path+"/status", `{"status":"InReview"}`, http.StatusOK)
+	request(http.MethodPost, path+"/accept", "", http.StatusOK)
+	for _, operation := range []struct{ method, suffix, body string }{
+		{http.MethodPost, "/status", `{"status":"Ready"}`},
+		{http.MethodPost, "/accept", ""},
+		{http.MethodPut, "/assignee", ""},
+		{http.MethodDelete, "/assignee", ""},
+	} {
+		request(operation.method, "/api/tickets/"+uuid.NewString()+operation.suffix, operation.body, http.StatusNotFound)
+	}
+}
+
+func TestTicketAcceptAvailability_ResponseContractRejectsInvalidCombinations(t *testing.T) {
+	pool := postgres.NewTestPool(t)
+	router, err := legacy.NewRouter(loadContract(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(config.Config{Environment: config.EnvDevelopment, Version: "dev"}, time.Now(), pool, testLogger(&bytes.Buffer{}))
+	cookie := mintTestSessionCookie(t, pool)
+	create := httptest.NewRequest(http.MethodPost, "/api/tickets", strings.NewReader(`{"title":"accept availability contract"}`))
+	create.Header.Set("Content-Type", "application/json")
+	create.AddCookie(cookie)
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, create)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create status=%d; body=%s", created.Code, created.Body.String())
+	}
+	var ticket Ticket
+	if err := json.Unmarshal(created.Body.Bytes(), &ticket); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/tickets/"+ticket.Id, nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get status=%d; body=%s", rec.Code, rec.Body.String())
+	}
+	validateAgainstContract(t, router, req, rec)
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	actions := body["allowedActions"].(map[string]any)
+	reason := actions["accept"].(map[string]any)["reason"]
+	route, pathParams, err := router.FindRoute(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name    string
+		accept  map[string]any
+		invalid bool
+	}{
+		{"unavailable with reason", map[string]any{"available": false, "reason": reason}, false},
+		{"available without reason", map[string]any{"available": true}, false},
+		{"unavailable without reason", map[string]any{"available": false}, true},
+		{"available with reason", map[string]any{"available": true, "reason": reason}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			actions["accept"] = tc.accept
+			data, err := json.Marshal(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rec.Body.Reset()
+			if _, err := rec.Body.Write(data); err != nil {
+				t.Fatal(err)
+			}
+			input := &openapi3filter.ResponseValidationInput{
+				RequestValidationInput: &openapi3filter.RequestValidationInput{Request: req, PathParams: pathParams, Route: route},
+				Status:                 rec.Code,
+				Header:                 rec.Header(),
+			}
+			input.SetBodyBytes(data)
+			schemaErr := openapi3filter.ValidateResponse(context.Background(), input)
+			if (schemaErr != nil) != tc.invalid {
+				t.Errorf("kin-openapi ValidateResponse(%s) error=%v, want invalid=%t", data, schemaErr, tc.invalid)
+			}
+		})
+	}
+}
+
 // TestGetSession_ResponseMatchesContract validates issue #54's
 // SessionResponse shape (the 200 case) the same way the other
 // operations above are validated.
@@ -325,7 +446,6 @@ func mintTestSessionCookie(t *testing.T, pool *pgxpool.Pool) *http.Cookie {
 
 func validateAgainstContract(t *testing.T, router routers.Router, req *http.Request, rec *httptest.ResponseRecorder) {
 	t.Helper()
-
 	route, pathParams, err := router.FindRoute(req)
 	if err != nil {
 		t.Fatalf("contract %s has no route for %s %s: %v", contractPath, req.Method, req.URL.Path, err)

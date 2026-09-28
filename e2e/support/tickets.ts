@@ -1,12 +1,17 @@
 import type { Page } from "@playwright/test";
 
 export type TicketTemplate = "Basic" | "Coding";
+export type TicketStatus = "Backlog" | "Ready" | "InProgress" | "Blocked" | "InReview" | "Done";
 
 export interface Ticket {
   /** Opaque public identifier (issue #57) -- never the internal sequential database id. */
   id: string;
   title: string;
-  status: string;
+  status: TicketStatus;
+  allowedActions: {
+    statusChanges: TicketStatus[];
+    accept: { available: boolean; reason?: { code: string; message: string } };
+  };
   /** Chosen at capture (issue #59), default Basic -- see docs/ticket-creation.md. */
   template: TicketTemplate;
   /** Derived from template's default once, at creation, and retained thereafter (issue #59, D3). */
@@ -49,8 +54,6 @@ export async function createTicket(page: Page, title: string, template: TicketTe
   }
   return response.json();
 }
-
-export type TicketStatus = "Backlog" | "Ready" | "InProgress" | "Blocked" | "InReview" | "Done";
 
 /**
  * Never throws on a rejection, unlike createTicket: callers need

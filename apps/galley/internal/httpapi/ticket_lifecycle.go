@@ -21,13 +21,8 @@ const invalidTransitionCode = "invalid_transition"
 // current-implementation limit (D2 unresolved, mechanism owned by M8).
 const reviewedPrMergeNotImplementedCode = "reviewed_pr_merge_not_implemented"
 
-// allowedSourceStatusesForTarget is D3 S2's workflow table
-// (docs/decisions/d3-agent-template-compatibility.md) inverted: per
-// requested target Status, the current Statuses a plain
-// POST /api/tickets/{id}/status may move from. Transcribed literally,
-// so every absence is deliberate -- notably Done, which has no entry
-// because only Accept reaches it, and Blocked -> Ready, which D3
-// omits in favour of Blocked -> InProgress alone.
+// D3 S2's table, including the Owner-approved Backlog -> Blocked correction (#87).
+// Done is reached through Accept; Blocked -> Ready remains disallowed.
 var allowedSourceStatusesForTarget = map[TicketStatus][]TicketStatus{
 	Backlog:    {Ready},
 	Ready:      {Backlog, InProgress, Done},
@@ -96,6 +91,23 @@ func containsStatus(statuses []TicketStatus, target TicketStatus) bool {
 		}
 	}
 	return false
+}
+
+var statusTargets = []TicketStatus{Backlog, Ready, InProgress, Blocked, InReview, Done}
+
+func allowedActionsForTicket(status TicketStatus, condition TicketCompletionCondition) TicketAllowedActions {
+	actions := TicketAllowedActions{StatusChanges: []TicketStatus{}}
+	for _, target := range statusTargets {
+		if decidePlainStatusChange(status, target) == nil {
+			actions.StatusChanges = append(actions.StatusChanges, target)
+		}
+	}
+	if rejection := decideAccept(status, condition); rejection != nil {
+		actions.Accept.Reason = &ErrorDetail{Code: rejection.code, Message: rejection.message}
+	} else {
+		actions.Accept.Available = true
+	}
+	return actions
 }
 
 // applyTicketTransition validates and applies a Status transition

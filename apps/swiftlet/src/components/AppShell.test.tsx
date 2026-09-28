@@ -87,6 +87,7 @@ describe("AppShell", () => {
         id: "some-ticket-id",
         title: "Routed ticket",
         status: "Backlog",
+        allowedActions: { statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } } },
         template: "Basic",
         completionCondition: "humanAcceptance",
         assigneeType: "",

@@ -265,6 +265,8 @@ type StatusResponseStatus string
 
 // Ticket ticketIt's first domain record (issue #56): a title captured in Backlog. No work-type/category column -- see docs/ticket-creation.md, "Flexible ticket structure". Owned by exactly one Owner, enforced by Galley (docs/adr/0001-single-authority-galley.md). Addressed by an opaque, non-sequential public identifier (issue #57) -- see `id` below.
 type Ticket struct {
+	AllowedActions TicketAllowedActions `json:"allowedActions"`
+
 	// AssigneeType The kind of Assignee responsible for a Ticket (CONTEXT.md, "Assignee"). "" means unassigned, always present on the wire, matching `goal`'s convention. `owner` is the only non-empty value in M2: there is no Agent Assignee yet.
 	AssigneeType TicketAssigneeType `json:"assigneeType"`
 
@@ -301,6 +303,22 @@ type Ticket struct {
 
 	// UpdatedAt RFC3339 UTC timestamp of the Ticket's last change. Equal to createdAt until a transition (#60) or a refinement edit (#58) changes it.
 	UpdatedAt string `json:"updatedAt"`
+}
+
+// TicketAcceptAvailability defines model for TicketAcceptAvailability.
+type TicketAcceptAvailability struct {
+	Available bool `json:"available"`
+
+	// Reason Required when unavailable; absent when available. Matches the Accept command's error.
+	Reason *ErrorDetail `json:"reason,omitempty"`
+}
+
+// TicketAllowedActions defines model for TicketAllowedActions.
+type TicketAllowedActions struct {
+	Accept TicketAcceptAvailability `json:"accept"`
+
+	// StatusChanges Targets accepted by a plain status command from this Ticket's current Status.
+	StatusChanges []TicketStatus `json:"statusChanges"`
 }
 
 // TicketAssigneeType The kind of Assignee responsible for a Ticket (CONTEXT.md, "Assignee"). "" means unassigned, always present on the wire, matching `goal`'s convention. `owner` is the only non-empty value in M2: there is no Agent Assignee yet.

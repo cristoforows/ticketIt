@@ -475,6 +475,18 @@ list. `TicketUpdate` picked up the generated schema's new optional
 one) automatically, with no hand-written change needed beyond the
 regenerated `schema.d.ts`.
 
+## Galley-published Ticket actions (issue #87)
+
+Ticket detail workflow controls use each Ticket's Galley-published
+`allowedActions.statusChanges` and `allowedActions.accept`. Unavailable
+Accept shows Galley's supplied reason; a stale control rejected by
+Galley still shows the live rejection. `parseTicket` requires these
+fields on every list, detail, and command response. No workflow table
+or Accept message is maintained in Swiftlet. Run `npm test` and
+`npm run build` here; `e2e/tests/ticket-allowed-actions.spec.ts` compares
+full-page controls with live API values for Backlog and both In Review
+completion conditions through `cd e2e && ./run.sh` from repo root.
+
 ## Browser-to-backend suite
 
 The tests above stub `fetch`, so they never exercise the real proxy or

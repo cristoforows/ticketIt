@@ -347,6 +347,12 @@ log "running tests/ticket-lifecycle.spec.ts against the restarted galley"
   E2E_GITHUBFAKE_BASE_URL="$GITHUBFAKE_URL" \
   npx playwright test tests/ticket-lifecycle.spec.ts) || LIFECYCLE_EXIT=$?
 
+ALLOWED_ACTIONS_EXIT=0
+log "running tests/ticket-allowed-actions.spec.ts against the restarted galley"
+(cd "$SCRIPT_DIR" && E2E_BASE_URL="$SWIFTLET_BASE_URL" GALLEY_BASE_URL="$GALLEY_BASE_URL" \
+  E2E_GITHUBFAKE_BASE_URL="$GITHUBFAKE_URL" \
+  npx playwright test tests/ticket-allowed-actions.spec.ts) || ALLOWED_ACTIONS_EXIT=$?
+
 # --- 10c. Run StatusView's own error-state spec (issue #80) ---
 # Needs Galley up for the real session check; the spec itself fails
 # only the browser's GET /api/status.
@@ -381,6 +387,7 @@ log "ticket-detail.spec.ts exit code: $TICKET_DETAIL_EXIT"
 log "ticket-refinement.spec.ts exit code: $REFINEMENT_EXIT"
 log "ticket-templates.spec.ts exit code: $TEMPLATES_EXIT"
 log "ticket-lifecycle.spec.ts exit code: $LIFECYCLE_EXIT"
+log "ticket-allowed-actions.spec.ts exit code: $ALLOWED_ACTIONS_EXIT"
 log "status-failure.spec.ts exit code: $STATUS_FAILURE_EXIT"
 log "backend-failure.spec.ts exit code: $FAILURE_EXIT"
 
@@ -388,7 +395,7 @@ if [ "$STATUS_EXIT" -ne 0 ] || [ "$AUTH_EXIT" -ne 0 ] || [ "$RESTART_BEFORE_EXIT
   || [ "$LIFECYCLE_BEFORE_EXIT" -ne 0 ] || [ "$TICKET_BEFORE_EXIT" -ne 0 ] || [ "$REFINEMENT_BEFORE_EXIT" -ne 0 ] \
   || [ "$RESTART_AFTER_EXIT" -ne 0 ] || [ "$TICKET_AFTER_EXIT" -ne 0 ] || [ "$REFINEMENT_AFTER_EXIT" -ne 0 ] \
   || [ "$LIFECYCLE_AFTER_EXIT" -ne 0 ] || [ "$TICKET_DETAIL_EXIT" -ne 0 ] || [ "$REFINEMENT_EXIT" -ne 0 ] \
-  || [ "$TEMPLATES_EXIT" -ne 0 ] || [ "$LIFECYCLE_EXIT" -ne 0 ] || [ "$STATUS_FAILURE_EXIT" -ne 0 ] \
+  || [ "$TEMPLATES_EXIT" -ne 0 ] || [ "$LIFECYCLE_EXIT" -ne 0 ] || [ "$ALLOWED_ACTIONS_EXIT" -ne 0 ] || [ "$STATUS_FAILURE_EXIT" -ne 0 ] \
   || [ "$FAILURE_EXIT" -ne 0 ]; then
   log "SUITE FAILED"
   exit 1

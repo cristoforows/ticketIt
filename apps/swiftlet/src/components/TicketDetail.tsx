@@ -59,35 +59,6 @@ function completionConditionLabel(condition: Ticket["completionCondition"]): str
 const OWNER_ASSIGNEE_TYPE = "owner";
 
 /**
- * D3 S2's workflow table
- * (docs/decisions/d3-agent-template-compatibility.md), mirrored for
- * presentation only. It decides nothing: Galley re-validates every
- * request against the persisted Status, so a stale offer here surfaces
- * Galley's rejection rather than a fabricated success (ADR 0001).
- * Omits Done, which only Accept reaches.
- */
-const presentationNextStatuses: Record<Ticket["status"], Ticket["status"][]> = {
-  Backlog: ["Ready", "Blocked"],
-  Ready: ["Backlog", "InProgress"],
-  InProgress: ["Ready", "Blocked", "InReview"],
-  Blocked: ["InProgress"],
-  InReview: ["InProgress"],
-  Done: ["Ready"],
-};
-
-/**
- * Copied from decideAccept so the limitation can be shown without
- * firing Accept, which is an explicit owner action. Drift is caught by
- * e2e/tests/ticket-lifecycle.spec.ts's Coding-Template case, which
- * compares this against Galley's live response.
- */
-const REVIEWED_PR_MERGE_NOT_IMPLEMENTED_MESSAGE =
-  "this ticket's retained completion condition is reviewed PR merge, which cannot be completed in M2: " +
-  "D2 (review/merge evidence) is unresolved and the shared mechanism it selects is owned by M8 " +
-  '(docs/decisions/d3-agent-template-compatibility.md, "Completing human work that requires a reviewed PR merge"); ' +
-  "this is a current-implementation limitation, not a permanent rule -- the condition is never downgraded to human acceptance";
-
-/**
  * Pure presentation of one already-fetched Ticket's detail content,
  * now including manual refinement (issue #58) and Templates (issue
  * #59). View mode shows title, Status, Template, the retained
@@ -250,9 +221,9 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
               </button>
             )}
 
-            {presentationNextStatuses[current.status].length > 0 && (
+            {current.allowedActions.statusChanges.length > 0 && (
               <div data-testid="ticket-detail-status-actions">
-                {presentationNextStatuses[current.status].map((target) => (
+                {current.allowedActions.statusChanges.map((target) => (
                   <button
                     key={target}
                     type="button"
@@ -266,7 +237,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
               </div>
             )}
 
-            {current.status === "InReview" && current.completionCondition === "humanAcceptance" && (
+            {current.allowedActions.accept.available ? (
               <button
                 type="button"
                 data-testid="ticket-detail-accept-button"
@@ -275,9 +246,8 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
               >
                 Accept
               </button>
-            )}
-            {current.status === "InReview" && current.completionCondition === "reviewedPrMerge" && (
-              <p data-testid="ticket-detail-accept-unavailable">{REVIEWED_PR_MERGE_NOT_IMPLEMENTED_MESSAGE}</p>
+            ) : (
+              <p data-testid="ticket-detail-accept-unavailable">{current.allowedActions.accept.reason?.message}</p>
             )}
 
             {actionError && (

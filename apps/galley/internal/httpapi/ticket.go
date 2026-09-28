@@ -385,6 +385,7 @@ func scanTicketRow(row ticketRowScanner) (Ticket, error) {
 	ticket.Status = TicketStatus(status)
 	ticket.Template = TicketTemplate(template)
 	ticket.CompletionCondition = TicketCompletionCondition(completionCondition)
+	ticket.AllowedActions = allowedActionsForTicket(ticket.Status, ticket.CompletionCondition)
 	// NULL means "never assigned", surfaced as "" on the wire -- the
 	// same convention goal/context already use.
 	ticket.AssigneeType = TicketAssigneeType(assigneeType.String)

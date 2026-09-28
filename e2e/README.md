@@ -13,8 +13,8 @@ cd e2e && ./run.sh
 
 It resets a dedicated database, applies migrations, builds and starts
 Galley, builds and serves Swiftlet, installs Chromium's headless shell
-on first run, runs both specs, and tears everything down. Exit code is
-non-zero if either spec fails.
+on first run, runs the registered specs, and tears everything down.
+Exit code is non-zero if any spec fails.
 
 It never uses servers you already have running: every port is chosen
 free at startup, and both processes are killed on exit, including on
@@ -185,6 +185,14 @@ and `tests/session-restart-after.spec.ts` for the pattern.
 
 Prefer reusing one signed-in storage state over signing in per spec once
 there is more than a handful.
+
+## Published Ticket actions
+
+`tests/ticket-allowed-actions.spec.ts` reads each Ticket's live
+`allowedActions` from Galley and compares full-page status and Accept
+controls for Backlog, human In Review, and Coding In Review. The
+unavailable reasons are also compared to direct Accept responses.
+`run.sh` runs it while Galley is available and checks its exit code.
 
 ## The failure-mode spec
 
