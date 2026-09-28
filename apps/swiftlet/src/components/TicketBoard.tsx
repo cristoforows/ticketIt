@@ -22,6 +22,7 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [moveRefreshKey, setMoveRefreshKey] = useState(0);
   const commandPending = useRef(false);
   const requestId = useRef(0);
   const focusMovedTicketId = useRef<string | null>(null);
@@ -48,7 +49,7 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
           : { kind: "error", message });
       });
     return () => { cancelled = true; };
-  }, [onUnauthenticated, refreshKey]);
+  }, [onUnauthenticated, refreshKey, moveRefreshKey]);
 
   useEffect(() => {
     if (refreshKey > 0 && state.kind === "loaded" && state.refreshKey === refreshKey && focusTicketId) {
@@ -80,6 +81,7 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
       setState((current) => current.kind === "loaded"
         ? { ...current, tickets: current.tickets.map((item) => item.id === ticket.id ? updated : item) }
         : current);
+      setMoveRefreshKey((key) => key + 1);
     } catch (error) {
       if (error instanceof UnauthenticatedError) {
         onUnauthenticated();
@@ -127,37 +129,42 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
                 <h3 id={`board-heading-${value}`}>{label}</h3>
                 {tickets.length === 0 ? <p>No tickets.</p> : (
                   <ul>
-                    {tickets.map((ticket) => (
-                      <li
-                        key={ticket.id}
-                        data-testid={ticketRowTestId("board", ticket.id)}
-                        draggable={pendingId !== ticket.id}
-                        className={pendingId === ticket.id ? undefined : "cursor-grab"}
-                        onDragStart={(event) => {
-                          if (commandPending.current) {
-                            event.preventDefault();
-                            return;
-                          }
-                          event.dataTransfer.effectAllowed = "move";
-                          event.dataTransfer.setData("application/x-ticketit-ticket", ticket.id);
-                          setDraggingId(ticket.id);
-                        }}
-                        onDragEnd={() => setDraggingId(null)}
-                      >
-                        <TicketModalLink ticketId={ticket.id} view="board" disabled={pendingId === ticket.id}>{ticket.title}</TicketModalLink>
-                        <p>Template: {ticket.template}</p>
-                        {ticket.allowedActions.statusChanges.filter((target) => target !== "Done").length > 0 && (
-                          <details>
-                            <summary>Move to…</summary>
-                            {ticket.allowedActions.statusChanges.filter((target) => target !== "Done").map((target) => (
-                              <button key={target} type="button" data-move-target={target} disabled={pendingId !== null} onClick={() => void moveTicket(ticket, target)}>
-                                {statuses.find(({ value }) => value === target)?.label ?? target}
-                              </button>
-                            ))}
-                          </details>
-                        )}
-                      </li>
-                    ))}
+                    {tickets.map((ticket) => {
+                      const eligibleTargets = ticket.allowedActions.statusChanges.filter((target) => target !== "Done");
+                      return (
+                        <li
+                          key={ticket.id}
+                          data-testid={ticketRowTestId("board", ticket.id)}
+                          aria-busy={pendingId === ticket.id}
+                          draggable={pendingId !== ticket.id}
+                          className={pendingId === ticket.id ? undefined : "cursor-grab"}
+                          onDragStart={(event) => {
+                            if (commandPending.current) {
+                              event.preventDefault();
+                              return;
+                            }
+                            event.dataTransfer.effectAllowed = "move";
+                            event.dataTransfer.setData("application/x-ticketit-ticket", ticket.id);
+                            setDraggingId(ticket.id);
+                          }}
+                          onDragEnd={() => setDraggingId(null)}
+                        >
+                          <TicketModalLink ticketId={ticket.id} view="board" disabled={pendingId === ticket.id}>{ticket.title}</TicketModalLink>
+                          <p>Template: {ticket.template}</p>
+                          {pendingId === ticket.id && <span role="status">Moving…</span>}
+                          {eligibleTargets.length > 0 && (
+                            <details>
+                              <summary>Move to…</summary>
+                              {eligibleTargets.map((target) => (
+                                <button key={target} type="button" data-move-target={target} disabled={pendingId !== null} onClick={() => void moveTicket(ticket, target)}>
+                                  {statuses.find(({ value }) => value === target)?.label ?? target}
+                                </button>
+                              ))}
+                            </details>
+                          )}
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </section>

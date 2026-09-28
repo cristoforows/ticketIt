@@ -11,8 +11,9 @@ Reviewed M3.3 base `bad7bbe` provided the board, modal detail, Galley's `POST /a
 ## What this slice added
 
 - `TicketBoard` now offers native HTML5 card dragging and a keyboard-operable `Move to…` disclosure. Both call the existing `changeTicketStatus` client and use the Ticket's Galley-advertised `allowedActions.statusChanges`; Done is excluded as a target. Native dragging needs no dependency and Playwright drives it with `dragTo`. CSS highlights only advertised drop sections during a drag. Target buttons carry their Status value for API-to-UI browser assertions; the existing Status list supplies display names, not transition rules.
-- A move awaits Galley's returned Ticket before changing board placement or offered controls; a rejection retains the previous card and shows Galley's error message. A successful keyboard move focuses the relocated card's disclosure. A completed command invalidates in-flight collection reads so an older response cannot undo its returned Ticket.
-- Unit coverage checks target highlighting, Done exclusion even if erroneously advertised, non-optimistic updates, returned actions, keyboard focus, and rejected moves. `e2e/tests/ticket-board-moves.spec.ts` covers allowed drag Backlog → Ready, keyboard In Progress → In Review, reload persistence, disallowed/Done drops without browser commands, and stale drag rejection compared with Galley's live response. Drops in the browser spec target section headings: a tall section's midpoint can scroll the source card out of the drag start position in Playwright. `e2e/run.sh` registers and checks this spec. Swiftlet and browser READMEs describe use and verification.
+- A move awaits Galley's returned Ticket before changing board placement or offered controls; a rejection retains the previous card and shows Galley's error message. A successful keyboard move focuses the relocated card's disclosure. A completed command invalidates in-flight collection reads so an older response cannot undo its returned Ticket, then re-fetches Galley's collection to include concurrent modal changes to other Tickets. A pending card exposes busy/disabled link state and prevents an unmodified click from opening a modal against its previous Status; the link works again after the move settles.
+- Unit coverage checks target highlighting, Done exclusion even if erroneously advertised, non-optimistic updates, returned actions, keyboard focus, and rejected moves. `e2e/tests/ticket-board-moves.spec.ts` covers allowed drag Backlog → Ready, keyboard In Progress → In Review, reload persistence, disallowed/Done drops without browser commands, stale drag rejection compared with Galley's live response, a deferred pending move, and an overlapping modal-close GET carrying another Ticket's edit. Drops in the browser spec target section headings: a tall section's midpoint can scroll the source card out of the drag start position in Playwright. `e2e/run.sh` registers and checks this spec. Swiftlet and browser READMEs describe use and verification.
+- Review follow-up after `ee54fea`: both new browser cases failed against the original commit. A pending move exposed no `aria-busy`, and the board kept an unrelated Ticket's old title after the command discarded its modal-close GET. After the fixes, both passed. `eligibleTargets` is computed once per card; the explicit Done exclusion remains in both rendered targets and drag command guard. The browser helper is now `getCardInStatus`.
 - No contract, Galley, or persistence change was needed. Open-Round behavior later extends Galley's `decidePlainStatusChange` decision point in M4/M5, not this board.
 
 ## Exact versions and toolchain
@@ -39,21 +40,21 @@ Final `npm test && npm run build` in `apps/swiftlet` exited 0:
       Tests  92 passed (92)
 vite v8.3.0 building client environment for production...
 ✓ 29 modules transformed.
-✓ built in 101ms
+✓ built in 121ms
 ```
 
-Final full `e2e/run.sh` exited 0: all 20 registered spec invocations passed (49 Chromium tests), including restart and stopped-backend phases.
+Final full `e2e/run.sh` exited 0: all 20 registered spec invocations passed (51 Chromium tests), including restart and stopped-backend phases.
 
 ```text
 [run.sh] applying migrations to 'ticketit_e2e'
 migrations applied: schema version 7
 [run.sh] running tests/ticket-board-moves.spec.ts against the restarted galley
-  4 passed (2.1s)
+  6 passed (3.5s)
 [run.sh] ticket-board-moves.spec.ts exit code: 0
 [run.sh] SUITE PASSED
 ```
 
-The live Galley request log during those four tests included `POST /api/tickets/a68c2d3b-0e53-444f-a0b2-a32da57affd2/status` → `200` for drag, and `POST /api/tickets/435ebeda-f3a6-466e-bfb0-c89971ca27f9/status` → `400` for the stale move. The browser spec compared the rejected response's `error.message` to the rendered alert and confirmed the original card remained visible; Galley's response for Ready → Ready was `the transition Ready -> Ready is not permitted`. No command was observed for disallowed or Done drops. An initial run timed out waiting for the fake provider to start; direct launch succeeded and subsequent full runs reached the browser tests. During test iteration, dragging to a tall section's midpoint hit another card; using its heading exercised the intended drop. The final full run passed.
+The live Galley request log in the initial #90 run included `POST /api/tickets/a68c2d3b-0e53-444f-a0b2-a32da57affd2/status` → `200` for drag, and `POST /api/tickets/435ebeda-f3a6-466e-bfb0-c89971ca27f9/status` → `400` for the stale move. The browser spec compared the rejected response's `error.message` to the rendered alert and confirmed the original card remained visible; Galley's response for Ready → Ready was `the transition Ready -> Ready is not permitted`. No command was observed for disallowed or Done drops. In the review run against `ee54fea`, the pending-detail regression failed on missing `aria-busy`, and the overlapping-GET regression failed because the other Ticket's edited title remained stale. The fixed run passed all six board-move cases, including both deferred-network paths. An initial run timed out waiting for the fake provider to start; direct launch succeeded and subsequent full runs reached the browser tests. During test iteration, dragging to a tall section's midpoint hit another card; using its heading exercised the intended drop.
 
 ## Implementation limitations and follow-ups
 

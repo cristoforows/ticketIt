@@ -516,9 +516,14 @@ command is attached to dragging.
 
 The board waits for Galley's returned Ticket before relocating a card
 and replacing its offered moves; a rejection keeps the last displayed
-card in place and shows Galley's message. After a keyboard move, focus
-returns to the relocated card's `Move to…` control. Native drag events
-need no new dependency and are driven by Playwright's `dragTo` in
+card in place and shows Galley's message. During a pending move, its
+card reports `aria-busy`, and its detail link is `aria-disabled` and
+cannot open a stale modal through a plain click. It becomes available
+again after success or rejection. After a keyboard move, focus returns
+to the relocated card's `Move to…` control. A successful command also
+starts a fresh collection read: an overlapping modal-close GET cannot
+lose edits to other Tickets or replace the returned Ticket. Native drag
+events need no new dependency and are driven by Playwright's `dragTo` in
 `e2e/tests/ticket-board-moves.spec.ts`. Run `npm test && npm run build`
 here and `cd e2e && ./run.sh` from the repo root.
 

@@ -208,7 +208,11 @@ phase, while Galley is running.
 `Move to…` control, checks persisted Status and returned allowed actions
 after reload, proves disallowed and Done drops send no command, and
 compares a stale move's visible rejection with Galley's live error. It
-is registered in `run.sh` while Galley is running.
+also defers the Status request to check that plain detail entry is
+unavailable until the move settles, and holds a modal-close GET
+containing another Ticket's edit while a card moves: the board must
+retain both Galley's returned move and the other Ticket's edit. It is
+registered in `run.sh` while Galley is running.
 
 ## Ticket detail modal
 

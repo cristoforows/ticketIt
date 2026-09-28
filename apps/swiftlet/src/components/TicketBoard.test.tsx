@@ -163,5 +163,6 @@ describe("TicketBoard", () => {
     fireEvent.click(within(card).getByRole("button", { name: "Ready" }));
     expect(await screen.findByTestId("ticket-board-move-error")).toHaveTextContent("Galley stale move reason");
     expect(screen.getByTestId("board-status-Backlog")).toContainElement(card);
+    expect(within(card).getByRole("link")).not.toHaveAttribute("aria-disabled", "true");
   });
 });
