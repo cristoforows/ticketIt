@@ -1,21 +1,9 @@
 import { useSyncExternalStore } from "react";
 
-export type Route = { name: "backlog" } | { name: "ticket-detail"; ticketId: string };
+export type Route = { name: "backlog" } | { name: "board" } | { name: "ticket-detail"; ticketId: string };
 
-/**
- * Swiftlet's whole router (issue #57): two fixed routes -- the Backlog
- * list and a Ticket's canonical full-page detail view. A hand-rolled
- * ~30-line reader of window.location.pathname, not a routing library:
- * proportionate to a small app with exactly this shape today (see
- * docs/evidence/m2/57-*.md for the full reasoning, matching
- * apps/galley/README.md's own "Router choice" -- reach for the
- * standard tool before a third-party one for a handful of fixed
- * routes). Any path that isn't exactly "/" or "/tickets/:id" falls
- * back to the Backlog view rather than a separate app-level 404 page,
- * since only a Ticket identifier (not an arbitrary route) needs its
- * own not-found presentation here.
- */
 function parseRoute(pathname: string): Route {
+  if (pathname === "/board") return { name: "board" };
   const detailMatch = pathname.match(/^\/tickets\/([^/]+)\/?$/);
   if (detailMatch) {
     try {

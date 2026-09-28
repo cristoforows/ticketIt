@@ -269,22 +269,26 @@ None of these has a placeholder here.
 
 ## Routing and the Ticket detail page (issue #57)
 
-**Router choice: a hand-rolled ~50-line reader of
+**Router choice: a hand-rolled reader of
 `window.location.pathname` (`src/router.ts`), not a routing library.**
-No router was installed before this slice, and this slice needs exactly
-two routes — the Backlog list (`/`) and a Ticket's full-page detail
-view (`/tickets/:id`). A third-party router (`react-router`,
+Issue #57 needed two routes — the list (`/`) and a Ticket's full-page
+detail view (`/tickets/:id`). A third-party router (`react-router`,
 `@tanstack/router`, ...) would add a dependency, its own API surface,
 and (for the data-loader-style routers) a data-fetching convention this
 app does not otherwise use, for capability the platform already
-provides for two fixed routes. This mirrors
+provides for a few fixed routes. This mirrors
 `apps/galley/README.md`'s own "Router choice" for the same reason at
 the same proportional scale (`net/http.ServeMux` over `chi`/`gorilla/
 mux` for "a handful of fixed routes with per-method dispatch") — revisit
 this choice explicitly, the same way that section asks Galley's own
-routing decision to be revisited, if a future milestone's routing needs
-grow past two fixed paths (nested routes, route guards, code-splitting
-per route).
+routing decision to be revisited as routing needs grow.
+
+**M3.2 (#88) reevaluation:** `/board` is a third fixed route. The
+upcoming detail modal (#89) can preserve its underlying view using
+navigation state without adding a new URL pattern. The existing router
+still fits: path matching and browser-history subscription stay small;
+there are no nested routes, guards, or data loaders. Revisit if modal
+navigation or later routes require more complex history/state handling.
 
 `useRoute()` reads `window.location.pathname` via `useSyncExternalStore`,
 subscribed to the browser's native `popstate` event; `navigate(path)`
@@ -294,8 +298,8 @@ lets one subscription handle both an in-app `Link` click and a real
 browser back/forward. `src/components/Link.tsx` is a real `<a href>`
 (so middle-click, ctrl/cmd-click, and "open in new tab" behave exactly
 as a plain link) that calls `navigate()` on an unmodified left click
-instead of a full page load. Any path other than exactly `/` or
-`/tickets/:id` falls back to rendering the Backlog view — only a Ticket
+instead of a full page load. Any path other than `/`, `/board`, or
+`/tickets/:id` falls back to rendering the list — only a Ticket
 identifier needs its own not-found presentation in this slice (see
 below), not an arbitrary unmapped route. Malformed percent encoding in a
 Ticket URL also falls back to Backlog rather than crashing the router.
@@ -486,6 +490,32 @@ or Accept message is maintained in Swiftlet. Run `npm test` and
 `npm run build` here; `e2e/tests/ticket-allowed-actions.spec.ts` compares
 full-page controls with live API values for Backlog and both In Review
 completion conditions through `cd e2e && ./run.sh` from repo root.
+
+## Status board (issue #88)
+
+`/board` and `/` are switchable through the authenticated shell's List /
+Board links. The board calls the same `GET /api/tickets` as the list;
+there is no board endpoint or separate Ticket state. Capture stays on
+the list. Each of six Status sections renders even when empty, in
+lifecycle order: Backlog, Ready, In Progress, Blocked, In Review, Done.
+Cards show title and Template and link to `/tickets/:id`. Nothing on
+the board starts or controls execution.
+
+Within each Status, cards retain Galley's list order: newest first by
+`created_at DESC`, with internal `id DESC` as deterministic tiebreak
+(`apps/galley/README.md`, "Ticket ordering"). Grouping only filters
+the returned array by its persisted Status; Swiftlet does not infer a
+Status or reorder Tickets. An unrecognized Status produces an error
+instead of silently dropping a Ticket. Load, non-2xx, and expired
+session use the same conventions as the list.
+
+Styling uses one plain `src/board.css` linked in `index.html`, bundled
+by Vite: a horizontally scrollable six-column CSS grid. This supplies
+side-by-side layout without introducing a design-system dependency or
+changing TypeScript configuration. `npm test && npm run build` checks
+the app; `cd e2e && ./run.sh` verifies direct load, reload, view
+switching, Status placement, ordering, and list/board identities in a
+real browser against Galley.
 
 ## Browser-to-backend suite
 
