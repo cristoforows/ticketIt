@@ -69,6 +69,26 @@ describe("TicketBoard", () => {
     expect(screen.queryByTestId(/^board-ticket-/)).not.toBeInTheDocument();
   });
 
+  it("keeps empty Status sections beside populated ones", async () => {
+    stubTickets([ticket("captured", "Backlog"), ticket("reviewing", "InReview")]);
+    render(<TicketBoard onUnauthenticated={() => {}} />);
+
+    const sections = await screen.findAllByTestId(/^board-status-/);
+    expect(sections.map((section) => within(section).getByRole("heading").textContent)).toEqual([
+      "Backlog", "Ready", "In Progress", "Blocked", "In Review", "Done",
+    ]);
+    for (const [status, id] of [["Backlog", "captured"], ["InReview", "reviewing"]]) {
+      const section = within(screen.getByTestId(`board-status-${status}`));
+      expect(section.getByTestId(`board-ticket-${id}`)).toBeInTheDocument();
+      expect(section.queryByText("No tickets.")).not.toBeInTheDocument();
+    }
+    for (const status of ["Ready", "InProgress", "Blocked", "Done"]) {
+      const section = within(screen.getByTestId(`board-status-${status}`));
+      expect(section.getByText("No tickets.")).toBeInTheDocument();
+      expect(section.queryByTestId(/^board-ticket-/)).not.toBeInTheDocument();
+    }
+  });
+
   it("shows a loading state, then an explicit error instead of partial columns on failure", async () => {
     stubTickets([], 503);
     render(<TicketBoard onUnauthenticated={() => {}} />);
