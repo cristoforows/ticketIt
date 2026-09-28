@@ -9,3 +9,14 @@
 .ticket-board-columns > section {
   min-width: 0;
 }
+
+.ticket-detail-dialog {
+  width: min(40rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+.ticket-detail-dialog::backdrop {
+  background: rgb(0 0 0 / 55%);
+}

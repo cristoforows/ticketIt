@@ -204,6 +204,16 @@ compares the list's full order to that same response, checks direct
 session. `run.sh` registers and checks its exit code after the restart
 phase, while Galley is running.
 
+## Ticket detail modal
+
+`tests/ticket-modal.spec.ts` opens Tickets below the fold from both list
+and board, checks canonical URL, retained scroll/focus after Escape,
+Close and Back, Forward reopening, inert background, direct/reloaded
+full-page detail, and Open full page. Edits, assignment, Accept, and a
+board Status move use the real modal controls; after close the
+underlying view is checked against live Galley `GET /api/tickets` data.
+`run.sh` registers this spec and checks its exit code.
+
 ## The failure-mode spec
 
 `tests/backend-failure.spec.ts` runs *after* `run.sh` stops Galley, and

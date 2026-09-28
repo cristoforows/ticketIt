@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { UnauthenticatedError } from "../api/session";
 import { fetchTickets, type Ticket } from "../api/tickets";
+import { openTicketModal } from "../router";
 import { Link } from "./Link";
 
 const statuses: { value: Ticket["status"]; label: string }[] = [
@@ -14,10 +15,10 @@ const statuses: { value: Ticket["status"]; label: string }[] = [
 
 type BoardState =
   | { kind: "loading" }
-  | { kind: "loaded"; tickets: Ticket[] }
+  | { kind: "loaded"; tickets: Ticket[]; refreshKey: number }
   | { kind: "error"; message: string };
 
-export function TicketBoard({ onUnauthenticated }: { onUnauthenticated: () => void }) {
+export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }: { onUnauthenticated: () => void; refreshKey?: number; focusTicketId?: string }) {
   const [state, setState] = useState<BoardState>({ kind: "loading" });
 
   useEffect(() => {
@@ -27,7 +28,7 @@ export function TicketBoard({ onUnauthenticated }: { onUnauthenticated: () => vo
         if (tickets.some((ticket) => !statuses.some(({ value }) => value === ticket.status))) {
           throw new Error("Galley returned a Ticket with an unknown Status.");
         }
-        if (!cancelled) setState({ kind: "loaded", tickets });
+        if (!cancelled) setState({ kind: "loaded", tickets, refreshKey });
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -38,7 +39,13 @@ export function TicketBoard({ onUnauthenticated }: { onUnauthenticated: () => vo
         setState({ kind: "error", message: error instanceof Error ? error.message : "Unknown error loading tickets." });
       });
     return () => { cancelled = true; };
-  }, [onUnauthenticated]);
+  }, [onUnauthenticated, refreshKey]);
+
+  useEffect(() => {
+    if (refreshKey > 0 && state.kind === "loaded" && state.refreshKey === refreshKey && focusTicketId) {
+      document.querySelector<HTMLElement>(`[data-testid="board-ticket-${focusTicketId}"] a`)?.focus({ preventScroll: true });
+    }
+  }, [state, refreshKey, focusTicketId]);
 
   return (
     <section data-testid="ticket-board">
@@ -61,7 +68,11 @@ export function TicketBoard({ onUnauthenticated }: { onUnauthenticated: () => vo
                   <ul>
                     {tickets.map((ticket) => (
                       <li key={ticket.id} data-testid={`board-ticket-${ticket.id}`}>
-                        <Link to={`/tickets/${encodeURIComponent(ticket.id)}`}>{ticket.title}</Link>
+                        <Link to={`/tickets/${encodeURIComponent(ticket.id)}`} onClick={(event) => {
+                          if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                          event.preventDefault();
+                          openTicketModal(ticket.id, "board");
+                        }}>{ticket.title}</Link>
                         <p>Template: {ticket.template}</p>
                       </li>
                     ))}

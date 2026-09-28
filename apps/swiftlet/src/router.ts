@@ -1,13 +1,27 @@
 import { useSyncExternalStore } from "react";
 
-export type Route = { name: "backlog" } | { name: "board" } | { name: "ticket-detail"; ticketId: string };
+export type CollectionRoute = "backlog" | "board";
+export type Route = { name: CollectionRoute } | { name: "ticket-detail"; ticketId: string; background?: CollectionRoute };
 
-function parseRoute(pathname: string): Route {
+const pageLoadId = crypto.randomUUID();
+
+interface ModalHistoryState {
+  ticketModal: { pageLoadId: string; background: CollectionRoute };
+}
+
+function modalBackground(): CollectionRoute | undefined {
+  const state = window.history.state as Partial<ModalHistoryState> | null;
+  const modal = state?.ticketModal;
+  if (modal?.pageLoadId !== pageLoadId) return undefined;
+  return modal.background === "backlog" || modal.background === "board" ? modal.background : undefined;
+}
+
+function parseRoute(pathname: string, background?: CollectionRoute): Route {
   if (pathname === "/board") return { name: "board" };
   const detailMatch = pathname.match(/^\/tickets\/([^/]+)\/?$/);
   if (detailMatch) {
     try {
-      return { name: "ticket-detail", ticketId: decodeURIComponent(detailMatch[1]) };
+      return { name: "ticket-detail", ticketId: decodeURIComponent(detailMatch[1]), background };
     } catch (error) {
       if (!(error instanceof URIError)) throw error;
     }
@@ -21,13 +35,24 @@ function subscribe(callback: () => void): () => void {
 }
 
 function getSnapshot(): string {
-  return window.location.pathname;
+  return JSON.stringify([window.location.pathname, modalBackground()]);
 }
 
 /** Re-renders on browser back/forward and on navigate()'s own synthetic "popstate". */
 export function useRoute(): Route {
-  const pathname = useSyncExternalStore(subscribe, getSnapshot);
-  return parseRoute(pathname);
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot);
+  const [pathname, background] = JSON.parse(snapshot) as [string, CollectionRoute | undefined];
+  return parseRoute(pathname, background);
+}
+
+export function openTicketModal(ticketId: string, background: CollectionRoute): void {
+  window.history.pushState({ ticketModal: { pageLoadId, background } } satisfies ModalHistoryState, "", `/tickets/${encodeURIComponent(ticketId)}`);
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
+export function openTicketFullPage(ticketId: string): void {
+  window.history.replaceState({}, "", `/tickets/${encodeURIComponent(ticketId)}`);
+  window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
 /**

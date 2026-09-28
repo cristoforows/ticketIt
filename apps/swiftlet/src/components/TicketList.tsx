@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { UnauthenticatedError } from "../api/session";
 import { createTicket, fetchTickets, TICKET_TEMPLATES, TICKET_TITLE_MAX_LENGTH, type Ticket } from "../api/tickets";
+import { openTicketModal } from "../router";
 import { Link } from "./Link";
 
 type ListState =
   | { kind: "loading" }
-  | { kind: "loaded"; tickets: Ticket[] }
+  | { kind: "loaded"; tickets: Ticket[]; refreshKey: number }
   | { kind: "error"; message: string };
 
 /**
@@ -16,7 +17,7 @@ type ListState =
  * decides where the new Ticket sorts -- apps/galley/README.md, "Ticket
  * ordering") so a captured Ticket appears with no manual reload.
  */
-export function TicketList({ onUnauthenticated }: { onUnauthenticated: () => void }) {
+export function TicketList({ onUnauthenticated, refreshKey = 0, focusTicketId }: { onUnauthenticated: () => void; refreshKey?: number; focusTicketId?: string }) {
   const [state, setState] = useState<ListState>({ kind: "loading" });
   const [title, setTitle] = useState("");
   const [template, setTemplate] = useState<Ticket["template"]>("Basic");
@@ -25,12 +26,12 @@ export function TicketList({ onUnauthenticated }: { onUnauthenticated: () => voi
   const requestId = useRef(0);
   const mounted = useRef(false);
 
-  const load = useCallback(() => {
+  const load = useCallback((keepExisting = false, refreshKey = 0) => {
     const id = ++requestId.current;
-    setState({ kind: "loading" });
+    if (!keepExisting) setState({ kind: "loading" });
     fetchTickets()
       .then((tickets) => {
-        if (id === requestId.current) setState({ kind: "loaded", tickets });
+        if (id === requestId.current) setState({ kind: "loaded", tickets, refreshKey });
       })
       .catch((error: unknown) => {
         if (error instanceof UnauthenticatedError) {
@@ -45,12 +46,18 @@ export function TicketList({ onUnauthenticated }: { onUnauthenticated: () => voi
 
   useEffect(() => {
     mounted.current = true;
-    load();
+    load(refreshKey > 0, refreshKey);
     return () => {
       mounted.current = false;
       requestId.current += 1;
     };
-  }, [load]);
+  }, [load, refreshKey]);
+
+  useEffect(() => {
+    if (refreshKey > 0 && state.kind === "loaded" && state.refreshKey === refreshKey && focusTicketId) {
+      document.querySelector<HTMLElement>(`[data-testid="ticket-item-${focusTicketId}"] a`)?.focus({ preventScroll: true });
+    }
+  }, [state, refreshKey, focusTicketId]);
 
   async function handleCapture(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -131,7 +138,11 @@ export function TicketList({ onUnauthenticated }: { onUnauthenticated: () => voi
         <ul data-testid="ticket-list-items">
           {state.tickets.map((ticket) => (
             <li key={ticket.id} data-testid={`ticket-item-${ticket.id}`}>
-              <Link to={`/tickets/${encodeURIComponent(ticket.id)}`} data-testid="ticket-title">
+              <Link to={`/tickets/${encodeURIComponent(ticket.id)}`} data-testid="ticket-title" onClick={(event) => {
+                if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                event.preventDefault();
+                openTicketModal(ticket.id, "backlog");
+              }}>
                 {ticket.title}
               </Link>{" "}
               <span data-testid="ticket-status">{ticket.status}</span>

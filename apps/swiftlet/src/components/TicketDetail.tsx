@@ -7,7 +7,7 @@ interface TicketDetailProps {
    * Performs the actual PATCH (apps/swiftlet/src/api/tickets.ts's
    * updateTicket) and returns the updated Ticket, or throws Galley's
    * own rejection. Supplied by whichever container renders this
-   * component -- TicketDetailPage today, M3's modal container later --
+   * component -- TicketDetailPage in either presentation --
    * so this component still neither fetches nor routes itself
    * (issue #57's split, preserved by issue #58).
    */
@@ -15,8 +15,7 @@ interface TicketDetailProps {
   /**
    * Owner commands arrive as props, like onSave, rather than this
    * component importing src/api/tickets.ts: that is what lets M3's
-   * modal container supply its own and render this component
-   * unchanged. Each throws Galley's rejection verbatim.
+   * modal use the same callbacks. Each throws Galley's rejection verbatim.
    */
   onChangeStatus: (status: Ticket["status"]) => Promise<Ticket>;
   onAccept: () => Promise<Ticket>;
@@ -76,9 +75,8 @@ const OWNER_ASSIGNEE_TYPE = "owner";
  *
  * Saving delegates to the `onSave` prop rather than calling
  * updateTicket itself, so this component still neither fetches nor
- * routes -- only the container does -- which is what lets M3's modal
- * render this exact component with its own container, unchanged,
- * exactly as issue #57 already established for the read-only view.
+ * routes -- only the container does -- so the modal renders these
+ * same controls.
  */
 export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssign, onUnassign }: TicketDetailProps) {
   const [current, setCurrent] = useState(ticket);
