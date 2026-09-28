@@ -212,6 +212,10 @@ Close and Back, Forward reopening, inert background, direct/reloaded
 full-page detail, and Open full page. Edits, assignment, Accept, and a
 board Status move use the real modal controls; after close the
 underlying view is checked against live Galley `GET /api/tickets` data.
+Deferred Save/Status requests cover completion after Close/Back; a
+failed refresh retains rows, scroll and focus in both views. View
+switching must not refocus a Ticket from the previous collection, and
+Open full page preserves an edited Goal and Assignee controls.
 `run.sh` registers this spec and checks its exit code.
 
 ## The failure-mode spec

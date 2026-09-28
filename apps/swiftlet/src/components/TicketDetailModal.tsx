@@ -1,14 +1,16 @@
 import { useLayoutEffect, useRef } from "react";
 import { openTicketFullPage } from "../router";
+import { isPlainLinkClick } from "./Link";
 import { TicketDetailPage } from "./TicketDetailPage";
 
 interface TicketDetailModalProps {
   ticketId: string;
   onClose: () => void;
   onUnauthenticated: () => void;
+  onCommandSucceeded: () => void;
 }
 
-export function TicketDetailModal({ ticketId, onClose, onUnauthenticated }: TicketDetailModalProps) {
+export function TicketDetailModal({ ticketId, onClose, onUnauthenticated, onCommandSucceeded }: TicketDetailModalProps) {
   const dialog = useRef<HTMLDialogElement>(null);
 
   useLayoutEffect(() => {
@@ -31,11 +33,11 @@ export function TicketDetailModal({ ticketId, onClose, onUnauthenticated }: Tick
     >
       <button type="button" autoFocus onClick={onClose}>Close</button>{" "}
       <a href={`/tickets/${encodeURIComponent(ticketId)}`} onClick={(event) => {
-        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        if (!isPlainLinkClick(event)) return;
         event.preventDefault();
         openTicketFullPage(ticketId);
       }}>Open full page</a>
-      <TicketDetailPage ticketId={ticketId} onUnauthenticated={onUnauthenticated} presentation="modal" />
+      <TicketDetailPage ticketId={ticketId} onUnauthenticated={onUnauthenticated} onCommandSucceeded={onCommandSucceeded} presentation="modal" />
     </dialog>
   );
 }

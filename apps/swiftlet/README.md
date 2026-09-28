@@ -527,8 +527,13 @@ and owner-command implementation supplies both presentations with the
 same `TicketDetail` fields and controls. On return, the still-mounted
 list or board re-fetches `GET /api/tickets` without removing its rows
 while loading; Galley determines the Ticket's current title, Status,
-ordering, and placement. No API or workflow change was needed. Run
-`npm test && npm run build` here and `cd e2e && ./run.sh` from repo
+ordering, and placement. A failed refresh shows an error beside the
+last-good rows, retaining scroll and focus. A command that finishes
+after Close or Back triggers another Galley refresh, superseding any
+response fetched before that command committed. Refocus is limited to
+the originating collection, not later view navigation. No API or
+workflow change was needed. Run `npm test && npm run build` here and
+`cd e2e && ./run.sh` from repo
 root; `e2e/tests/ticket-modal.spec.ts` covers both views and mutations.
 
 ## Browser-to-backend suite

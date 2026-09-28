@@ -5,6 +5,10 @@ interface LinkProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
   to: string;
 }
 
+export function isPlainLinkClick(event: MouseEvent<HTMLAnchorElement>): boolean {
+  return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+}
+
 /**
  * A same-app navigation link: a real <a href> (so middle-click, ctrl/
  * cmd-click, and "open in new tab" keep working exactly as a browser
@@ -14,7 +18,7 @@ interface LinkProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
 export function Link({ to, onClick, children, ...rest }: LinkProps) {
   function handleClick(event: MouseEvent<HTMLAnchorElement>) {
     onClick?.(event);
-    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+    if (event.defaultPrevented || !isPlainLinkClick(event)) {
       return;
     }
     event.preventDefault();

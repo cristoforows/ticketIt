@@ -18,6 +18,7 @@ interface TicketDetailPageProps {
   ticketId: string;
   onUnauthenticated: () => void;
   presentation?: "page" | "modal";
+  onCommandSucceeded?: () => void;
 }
 
 type DetailState =
@@ -26,7 +27,7 @@ type DetailState =
   | { kind: "not-found" }
   | { kind: "error"; message: string };
 
-export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "page" }: TicketDetailPageProps) {
+export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "page", onCommandSucceeded }: TicketDetailPageProps) {
   const [state, setState] = useState<DetailState>({ kind: "loading" });
 
   useEffect(() => {
@@ -62,7 +63,9 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
 
   async function runCommand(command: () => Promise<Ticket>): Promise<Ticket> {
     try {
-      return await command();
+      const ticket = await command();
+      onCommandSucceeded?.();
+      return ticket;
     } catch (error) {
       if (error instanceof UnauthenticatedError) onUnauthenticated();
       throw error;

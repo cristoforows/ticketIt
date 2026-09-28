@@ -2,11 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { UnauthenticatedError } from "../api/session";
 import { createTicket, fetchTickets, TICKET_TEMPLATES, TICKET_TITLE_MAX_LENGTH, type Ticket } from "../api/tickets";
 import { openTicketModal } from "../router";
-import { Link } from "./Link";
+import { isPlainLinkClick, Link } from "./Link";
 
 type ListState =
   | { kind: "loading" }
-  | { kind: "loaded"; tickets: Ticket[]; refreshKey: number }
+  | { kind: "loaded"; tickets: Ticket[]; refreshKey: number; refreshError?: string }
   | { kind: "error"; message: string };
 
 /**
@@ -40,7 +40,9 @@ export function TicketList({ onUnauthenticated, refreshKey = 0, focusTicketId }:
         }
         if (id !== requestId.current) return;
         const message = error instanceof Error ? error.message : "Unknown error loading tickets.";
-        setState({ kind: "error", message });
+        setState((current) => current.kind === "loaded"
+          ? { ...current, refreshError: message }
+          : { kind: "error", message });
       });
   }, [onUnauthenticated]);
 
@@ -139,7 +141,7 @@ export function TicketList({ onUnauthenticated, refreshKey = 0, focusTicketId }:
           {state.tickets.map((ticket) => (
             <li key={ticket.id} data-testid={`ticket-item-${ticket.id}`}>
               <Link to={`/tickets/${encodeURIComponent(ticket.id)}`} data-testid="ticket-title" onClick={(event) => {
-                if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                if (!isPlainLinkClick(event)) return;
                 event.preventDefault();
                 openTicketModal(ticket.id, "backlog");
               }}>
@@ -149,6 +151,12 @@ export function TicketList({ onUnauthenticated, refreshKey = 0, focusTicketId }:
             </li>
           ))}
         </ul>
+      )}
+      {state.kind === "loaded" && state.refreshError && (
+        <div role="alert" data-testid="ticket-list-error">
+          <p>Unable to refresh tickets.</p>
+          <p data-testid="ticket-list-error-message">{state.refreshError}</p>
+        </div>
       )}
     </section>
   );

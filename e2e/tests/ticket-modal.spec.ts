@@ -123,3 +123,113 @@ test("list: modal edit and Accept refresh the list from Galley", async ({ page, 
   await expect(row.getByTestId("ticket-status")).toHaveText("Done");
   await expect(row.getByRole("link")).toBeFocused();
 });
+
+for (const view of ["list", "board"] as const) {
+  test(`${view}: failed close-time refresh retains rows, scroll and origin focus`, async ({ page, request }) => {
+    await signIn(page, request, "owner");
+    const tickets = await populate(page);
+    const ticket = view === "list" ? tickets[0] : tickets[12];
+    await page.goto(view === "list" ? "/" : "/board");
+    const row = page.getByTestId(`${view === "list" ? "ticket-item" : "board-ticket"}-${ticket.id}`);
+    await row.getByRole("link").scrollIntoViewIfNeeded();
+    const before = await page.evaluate(() => window.scrollY);
+    expect(before).toBeGreaterThan(0);
+    await row.getByRole("link").click();
+    await expect(page.getByRole("dialog", { name: "Ticket details" })).toBeVisible();
+    await page.route("**/api/tickets", (route) => route.fulfill({ status: 503, body: "unavailable" }));
+    await page.getByRole("dialog").getByRole("button", { name: "Close" }).click();
+    await expect(page.getByTestId(view === "list" ? "ticket-list-error" : "ticket-board-error")).toBeVisible();
+    await expect(row.getByRole("link")).toBeVisible();
+    await expect(row.getByRole("link")).toBeFocused();
+    expect(await page.evaluate(() => window.scrollY)).toBe(before);
+  });
+}
+
+test("list: Save completing after modal closes re-fetches Galley", async ({ page, request }) => {
+  await signIn(page, request, "owner");
+  const ticket = await createTicket(page, `deferred modal edit ${Date.now()}`);
+  await page.goto("/");
+  const row = page.getByTestId(`ticket-item-${ticket.id}`);
+  await row.getByRole("link").click();
+  const modal = page.getByRole("dialog", { name: "Ticket details" });
+  await modal.getByTestId("ticket-detail-edit-button").click();
+  await modal.getByTestId("ticket-detail-input-title").fill(`${ticket.title} saved`);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let intercepted!: () => void;
+  const started = new Promise<void>((resolve) => { intercepted = resolve; });
+  await page.route(`**/api/tickets/${ticket.id}`, async (route) => {
+    if (route.request().method() !== "PATCH") return route.continue();
+    intercepted();
+    await gate;
+    await route.continue();
+  });
+  await modal.getByTestId("ticket-detail-save-button").click();
+  await started;
+  const staleResponse = page.waitForResponse((response) => response.url().endsWith("/api/tickets") && response.ok());
+  await modal.getByRole("button", { name: "Close" }).click();
+  const stale = await staleResponse;
+  expect((await stale.json() as { tickets: Ticket[] }).tickets.find(({ id }) => id === ticket.id)?.title).toBe(ticket.title);
+  release();
+  await expect(row.getByRole("link")).toHaveText(`${ticket.title} saved`, { timeout: 5000 });
+});
+
+test("board: Status change completing after Back re-fetches Galley", async ({ page, request }) => {
+  await signIn(page, request, "owner");
+  const ticket = await createTicket(page, `deferred modal Status ${Date.now()}`);
+  await page.goto("/board");
+  const card = page.getByTestId(`board-ticket-${ticket.id}`);
+  await card.getByRole("link").click();
+  const modal = page.getByRole("dialog", { name: "Ticket details" });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let intercepted!: () => void;
+  const started = new Promise<void>((resolve) => { intercepted = resolve; });
+  await page.route(`**/api/tickets/${ticket.id}/status`, async (route) => {
+    intercepted();
+    await gate;
+    await route.continue();
+  });
+  await modal.getByTestId("ticket-detail-status-button-Ready").click();
+  await started;
+  const staleResponse = page.waitForResponse((response) => response.url().endsWith("/api/tickets") && response.ok());
+  await page.goBack();
+  await expect(modal).toHaveCount(0);
+  const stale = await staleResponse;
+  expect((await stale.json() as { tickets: Ticket[] }).tickets.find(({ id }) => id === ticket.id)?.status).toBe("Backlog");
+  release();
+  await expect(page.getByTestId("board-status-Ready").getByTestId(`board-ticket-${ticket.id}`)).toBeVisible({ timeout: 5000 });
+});
+
+test("navigating to board after closing list modal keeps focus on board navigation", async ({ page, request }) => {
+  await signIn(page, request, "owner");
+  const ticket = await createTicket(page, `focus origin ${Date.now()}`);
+  await page.goto("/");
+  await page.getByTestId(`ticket-item-${ticket.id}`).getByRole("link").click();
+  await page.getByRole("dialog", { name: "Ticket details" }).getByRole("button", { name: "Close" }).click();
+  await expect(page.getByTestId(`ticket-item-${ticket.id}`).getByRole("link")).toBeFocused();
+  const boardLink = page.getByRole("navigation", { name: "Ticket views" }).getByRole("link", { name: "Board" });
+  await boardLink.click();
+  await expect(page.getByTestId(`board-ticket-${ticket.id}`)).toBeVisible();
+  await expect(boardLink).toBeFocused();
+});
+
+test("Open full page retains modal edits and workflow controls", async ({ page, request }) => {
+  await signIn(page, request, "owner");
+  const ticket = await createTicket(page, `modal parity ${Date.now()}`, "Coding");
+  await page.goto("/board");
+  await page.getByTestId(`board-ticket-${ticket.id}`).getByRole("link").click();
+  const modal = page.getByRole("dialog", { name: "Ticket details" });
+  await modal.getByTestId("ticket-detail-edit-button").click();
+  await modal.getByTestId("ticket-detail-textarea-goal").fill("Goal edited in modal");
+  await modal.getByTestId("ticket-detail-save-button").click();
+  await expect(modal.getByTestId("ticket-detail-field-goal")).toHaveText("Goal edited in modal");
+  await modal.getByTestId("ticket-detail-assign-button").click();
+  await expect(modal.getByTestId("ticket-detail-assignee")).toHaveText("Owner");
+  await modal.getByRole("link", { name: "Open full page" }).click();
+  const detail = page.getByTestId("ticket-detail-page");
+  await expect(detail.getByTestId("ticket-detail-field-goal")).toHaveText("Goal edited in modal");
+  await expect(detail.getByTestId("ticket-detail-assignee")).toHaveText("Owner");
+  await expect(detail.getByTestId("ticket-detail-unassign-button")).toBeVisible();
+  await expect(detail.getByTestId("ticket-detail-pr-section")).toBeVisible();
+});

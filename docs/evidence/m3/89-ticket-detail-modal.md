@@ -12,8 +12,9 @@ The reviewed M3.2 branch at `fee6df8` had `/` and `/board` over the same Galley 
 
 - Both collection links open `TicketDetailModal` with a canonical `/tickets/:id` address. The modal renders `TicketDetailPage` in modal mode, which uses the same `TicketDetail` and the same fetch/save/status/Accept/assign/unassign command callbacks as the full page; only the surrounding navigation chrome differs. No Galley workflow or API rule changed.
 - `router.ts` carries `{ ticketModal: { background, pageLoadId } }` in the pushed history entry. `useRoute()` observes both path and that state; Back/Forward retain the mounted collection and reopen the modal. A page load creates a new `pageLoadId`, so reloads, bookmarks and new tabs discard stale modal context and show the full page. Open full page replaces the modal entry's state while keeping its URL. Standard modified link clicks remain browser navigation.
-- Native `showModal()` provides top-layer focus/inert background and Escape cancellation. The close control receives focus on opening. The dialog cleanup restores body scrolling and browser focus; the collection's refreshed Ticket link is refocused even when a Status move relocates its board card. Collections stay mounted during the modal and retain rows during re-fetch on return, keeping scroll position stable. A failed re-fetch exposes its existing error state; no optimistic list/card mutation is used.
+- Native `showModal()` provides top-layer focus/inert background and Escape cancellation. The close control receives focus on opening. The dialog cleanup restores body scrolling and browser focus; the collection's refreshed Ticket link is refocused even when a Status move relocates its board card. Collections stay mounted during the modal and retain rows during re-fetch on return, keeping scroll position stable. No optimistic list/card mutation is used.
 - `e2e/tests/ticket-modal.spec.ts` covers below-fold list/board entry, scroll/focus, inert background, Escape/Close/Back/Forward, reload/direct full-page presentation, Open full page, edit/assignment/Accept and board Status move against Galley API data. `e2e/run.sh` registers and checks it. Existing board/detail browser assertions now expect modal entry. Swiftlet and e2e READMEs describe behavior and commands.
+- Review follow-up: a successful modal command notifies the shell even after the modal unmounts. If a collection is visible, it re-fetches from Galley and supersedes a close-time GET that raced ahead of the command. A refresh failure retains last-good list rows or board cards with a visible error, leaving position/focus intact. Refocus applies only to the returning source view; switching to another view clears it. One `isPlainLinkClick` guard replaces duplicated modifier checks; obsolete `TicketDetail` narration was removed. Browser regressions defer Save and Status requests past Close/Back, force collection GET failures, check navigation focus, and compare edited Goal/Assignee controls across modal and full page.
 
 Future open-Round Status rules extend Galley's `decidePlainStatusChange` / `decideAccept` decision points in M4/M5; this view introduces no rule.
 
@@ -41,21 +42,21 @@ Test Files  9 passed (9)
      Tests  89 passed (89)
 vite v8.3.0 building client environment for production...
 ✓ 29 modules transformed.
-✓ built in 90ms
+✓ built in 97ms
 ```
 
-The first full browser run caught a test fixture whose selected list row was above the fold (`scrollY = 0`); the fixture now selects the bottom row. The next full run exited 0:
+The original #89 browser run caught a test fixture whose selected list row was above the fold (`scrollY = 0`); the fixture selects the bottom row. Review regressions were run against commit `90f60b1` before fixing: five failed as expected (two failed-refresh row removals, two late-command stale collections, one navigation focus steal); full-page parity passed. After the fixes, the full runner exited 0:
 
 ```text
 [run.sh] applying migrations to 'ticketit_e2e'
 migrations applied: schema version 7
 [run.sh] running tests/ticket-modal.spec.ts against the restarted galley
-  4 passed (3.4s)
+  10 passed (6.4s)
 [run.sh] ticket-modal.spec.ts exit code: 0
 [run.sh] SUITE PASSED
 ```
 
-All 19 registered spec invocations returned 0 (39 Chromium tests), including restart and stopped-backend phases. The four modal tests opened real Tickets from both views and asserted Galley-sourced changes to list rows and board Status sections after closing. No new HTTP endpoint is served by this slice; the existing `GET /api/tickets` and Ticket commands were exercised against live Galley by the browser suite.
+All 19 registered spec invocations returned 0 (45 Chromium tests), including restart and stopped-backend phases. The ten modal tests opened real Tickets from both views, asserted Galley-sourced changes after closing, and checked pending-command/refresh-error timing. No new HTTP endpoint is served by this slice; the existing `GET /api/tickets` and Ticket commands were exercised against live Galley by the browser suite.
 
 ## Implementation limitations and follow-ups
 

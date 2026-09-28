@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { UnauthenticatedError } from "../api/session";
 import { fetchTickets, type Ticket } from "../api/tickets";
 import { openTicketModal } from "../router";
-import { Link } from "./Link";
+import { isPlainLinkClick, Link } from "./Link";
 
 const statuses: { value: Ticket["status"]; label: string }[] = [
   { value: "Backlog", label: "Backlog" },
@@ -15,7 +15,7 @@ const statuses: { value: Ticket["status"]; label: string }[] = [
 
 type BoardState =
   | { kind: "loading" }
-  | { kind: "loaded"; tickets: Ticket[]; refreshKey: number }
+  | { kind: "loaded"; tickets: Ticket[]; refreshKey: number; refreshError?: string }
   | { kind: "error"; message: string };
 
 export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }: { onUnauthenticated: () => void; refreshKey?: number; focusTicketId?: string }) {
@@ -36,7 +36,10 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
           onUnauthenticated();
           return;
         }
-        setState({ kind: "error", message: error instanceof Error ? error.message : "Unknown error loading tickets." });
+        const message = error instanceof Error ? error.message : "Unknown error loading tickets.";
+        setState((current) => current.kind === "loaded"
+          ? { ...current, refreshError: message }
+          : { kind: "error", message });
       });
     return () => { cancelled = true; };
   }, [onUnauthenticated, refreshKey]);
@@ -69,7 +72,7 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
                     {tickets.map((ticket) => (
                       <li key={ticket.id} data-testid={`board-ticket-${ticket.id}`}>
                         <Link to={`/tickets/${encodeURIComponent(ticket.id)}`} onClick={(event) => {
-                          if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                          if (!isPlainLinkClick(event)) return;
                           event.preventDefault();
                           openTicketModal(ticket.id, "board");
                         }}>{ticket.title}</Link>
@@ -81,6 +84,12 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
               </section>
             );
           })}
+        </div>
+      )}
+      {state.kind === "loaded" && state.refreshError && (
+        <div role="alert" data-testid="ticket-board-error">
+          <p>Unable to refresh tickets.</p>
+          <p>{state.refreshError}</p>
         </div>
       )}
     </section>

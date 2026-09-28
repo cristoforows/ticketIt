@@ -3,20 +3,7 @@ import type { Ticket, TicketUpdate } from "../api/tickets";
 
 interface TicketDetailProps {
   ticket: Ticket;
-  /**
-   * Performs the actual PATCH (apps/swiftlet/src/api/tickets.ts's
-   * updateTicket) and returns the updated Ticket, or throws Galley's
-   * own rejection. Supplied by whichever container renders this
-   * component -- TicketDetailPage in either presentation --
-   * so this component still neither fetches nor routes itself
-   * (issue #57's split, preserved by issue #58).
-   */
   onSave: (update: TicketUpdate) => Promise<Ticket>;
-  /**
-   * Owner commands arrive as props, like onSave, rather than this
-   * component importing src/api/tickets.ts: that is what lets M3's
-   * modal use the same callbacks. Each throws Galley's rejection verbatim.
-   */
   onChangeStatus: (status: Ticket["status"]) => Promise<Ticket>;
   onAccept: () => Promise<Ticket>;
   onAssign: () => Promise<Ticket>;
@@ -57,27 +44,6 @@ function completionConditionLabel(condition: Ticket["completionCondition"]): str
 /** The only non-empty assignee_type M2 writes; there is no Agent Assignee kind yet. */
 const OWNER_ASSIGNEE_TYPE = "owner";
 
-/**
- * Pure presentation of one already-fetched Ticket's detail content,
- * now including manual refinement (issue #58) and Templates (issue
- * #59). View mode shows title, Status, Template, the retained
- * completion condition, timestamps, the refinement fields and
- * repository reference (an explicit "Not set" placeholder for whichever
- * are still empty), and -- only for a Coding-template Ticket -- a Pull
- * Request section with an honest empty state (no PR exists until M8).
- * Edit mode offers title, the four refinement fields, and repository as
- * plain-text inputs -- never Markdown (M7 owns report rendering) --
- * plus Save and Cancel. Template itself has no edit control here:
- * changing it after creation is out of scope for M2 (D4, M8), and
- * completionCondition has no control at all -- it is never sent in any
- * update this component makes. No AI of any kind: Save submits only
- * changed fields and triggers nothing else.
- *
- * Saving delegates to the `onSave` prop rather than calling
- * updateTicket itself, so this component still neither fetches nor
- * routes -- only the container does -- so the modal renders these
- * same controls.
- */
 export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssign, onUnassign }: TicketDetailProps) {
   const [current, setCurrent] = useState(ticket);
   const [mode, setMode] = useState<"view" | "editing">("view");
