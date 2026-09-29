@@ -53,6 +53,29 @@ A single-commit PR squashes under the commit subject rather than the PR
 title, so give that commit the same prefix — otherwise the milestone is
 missing from `git log`.
 
+## Context loading
+
+Start a task with this file only. Open nothing under `docs/` or
+`experiments/`, and do not read `CONTEXT.md` whole, until the task,
+issue, or diff points at it. This overrides "Before exploring" in
+`docs/agents/domain.md`.
+
+- `CONTEXT.md`: grep for the term; read whole only when naming a new
+  domain concept.
+- `docs/adr/`: list filenames; open an ADR only when its title matches
+  the area touched.
+- `docs/open-decisions.md`, `integration-feasibility.md`,
+  `implementation-plan.md`, `agent-execution.md`, `v1-scope.md`,
+  `acceptance-scenarios.md`, `deployment.md`, `docs/evidence/`: open
+  only when the issue or PR links them, and read the linked section.
+- `experiments/`: out of scope for `apps/` and `contracts/` work.
+- `apps/galley` and `apps/swiftlet`: stay in the app the task names.
+- `contracts/openapi.yaml`: open only when the API surface changes.
+- `api.gen.go`, `schema.d.ts`, lockfiles: skip in review; review the
+  contract change instead.
+- PR review: `gh pr diff --name-only` first, then hunks, then only the
+  extra files a hunk depends on.
+
 ## Agent skills
 
 ### Issue tracker
@@ -68,5 +91,5 @@ See `docs/agents/classify-labels.md`.
 
 ### Domain docs
 
-Single-context layout: root `CONTEXT.md` and `docs/adr/`.
-See `docs/agents/domain.md`.
+Single-context layout: root `CONTEXT.md` and `docs/adr/`, loaded on
+demand per "Context loading". See `docs/agents/domain.md`.
