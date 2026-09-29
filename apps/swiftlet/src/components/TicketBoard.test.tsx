@@ -18,6 +18,7 @@ const ticket = (id: string, status: string, template = "Basic") => ({
   createdAt: "2026-09-22T10:00:00Z",
   updatedAt: "2026-09-22T10:00:00Z",
   badges: [],
+  archivedAt: null,
 });
 
 function stubTickets(tickets: unknown[], status = 200) {
@@ -57,7 +58,7 @@ describe("TicketBoard", () => {
       "board-ticket-new-blocked", "board-ticket-old-blocked",
     ]);
     expect(screen.getAllByTestId(/^board-ticket-/)).toHaveLength(tickets.length);
-    expect(within(sections[3]).getByRole("link", { name: "Ticket new-blocked" })).toHaveAttribute("href", "/tickets/new-blocked");
+    expect(within(sections[3]).getByRole("link", { name: "Ticket new-blocked" })).toHaveAttribute("href", "/tickets/new-blocked?from=board");
     expect(within(sections[3]).getByTestId("board-ticket-new-blocked")).toHaveTextContent("Coding");
     expect(fetch).toHaveBeenCalledWith("/api/tickets", undefined);
   });

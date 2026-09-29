@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Badge, Ticket, TicketUpdate } from "../api/tickets";
 
 interface TicketDetailProps {
@@ -12,6 +12,8 @@ interface TicketDetailProps {
   onCreateBadge: (name: string) => Promise<Badge>;
   onAttachBadge: (badgeId: string) => Promise<Ticket>;
   onDetachBadge: (badgeId: string) => Promise<Ticket>;
+  onArchive: () => Promise<Ticket>;
+  onArchived?: () => void;
 }
 
 interface EditableFields {
@@ -48,7 +50,8 @@ function completionConditionLabel(condition: Ticket["completionCondition"]): str
 /** The only non-empty assignee_type M2 writes; there is no Agent Assignee kind yet. */
 const OWNER_ASSIGNEE_TYPE = "owner";
 
-export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssign, onUnassign, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge }: TicketDetailProps) {
+export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssign, onUnassign, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge, onArchive, onArchived }: TicketDetailProps) {
+  const previousTicket = useRef(ticket);
   const [current, setCurrent] = useState(ticket);
   const [mode, setMode] = useState<"view" | "editing">("view");
   const [fields, setFields] = useState<EditableFields>(() => fieldsFrom(ticket));
@@ -57,10 +60,9 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
   const [actionPending, setActionPending] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  // A new Ticket prop (e.g. the container fetched a different one)
-  // always wins over any in-progress local edit -- resets back to a
-  // clean view of whatever was just fetched.
   useEffect(() => {
+    if (previousTicket.current === ticket) return;
+    previousTicket.current = ticket;
     setCurrent(ticket);
     setFields(fieldsFrom(ticket));
     setMode("view");
@@ -80,6 +82,20 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
       setCurrent(updated);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Failed to update the ticket.");
+    } finally {
+      setActionPending(false);
+    }
+  }
+
+  async function handleArchive() {
+    if (!window.confirm("Archive this Ticket?")) return;
+    setActionError(null);
+    setActionPending(true);
+    try {
+      setCurrent(await onArchive());
+      onArchived?.();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Failed to archive the ticket.");
     } finally {
       setActionPending(false);
     }
@@ -130,6 +146,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
       {mode === "view" && (
         <>
           <h2 data-testid="ticket-detail-title">{current.title}</h2>
+          {current.archivedAt && <p data-testid="ticket-detail-archived">Archived {current.archivedAt}. {current.allowedActions.accept.reason?.message}</p>}
           <dl>
             <dt>Status</dt>
             <dd data-testid="ticket-detail-status">{current.status}</dd>
@@ -146,8 +163,8 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
           </dl>
           <section aria-label="Badges" data-testid="ticket-detail-badges">
             <h3>Badges</h3>
-            <ul>{current.badges.map((badge) => <li key={badge.id}><span>{badge.name}</span> <button type="button" disabled={actionPending} onClick={() => runAction(() => onDetachBadge(badge.id))} aria-label={`Remove ${badge.name}`}>Remove</button></li>)}</ul>
-            <BadgePicker ticket={current} onAttached={setCurrent} onLoad={onLoadBadges} onCreate={onCreateBadge} onAttach={onAttachBadge} />
+            <ul>{current.badges.map((badge) => <li key={badge.id}><span>{badge.name}</span> <button type="button" disabled={actionPending || !!current.archivedAt} title={current.archivedAt ? current.allowedActions.accept.reason?.message : undefined} onClick={() => runAction(() => onDetachBadge(badge.id))} aria-label={`Remove ${badge.name}`}>Remove</button></li>)}</ul>
+            <BadgePicker ticket={current} disabled={!!current.archivedAt} reason={current.allowedActions.accept.reason?.message} onAttached={setCurrent} onLoad={onLoadBadges} onCreate={onCreateBadge} onAttach={onAttachBadge} />
           </section>
           <section aria-label="Refinement">
             <RefinementValue label="Goal" testId="goal" value={current.goal} />
@@ -179,7 +196,8 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
                 type="button"
                 data-testid="ticket-detail-unassign-button"
                 onClick={() => runAction(onUnassign)}
-                disabled={actionPending}
+                disabled={actionPending || !!current.archivedAt}
+                title={current.archivedAt ? current.allowedActions.accept.reason?.message : undefined}
               >
                 Unassign
               </button>
@@ -188,7 +206,8 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
                 type="button"
                 data-testid="ticket-detail-assign-button"
                 onClick={() => runAction(onAssign)}
-                disabled={actionPending}
+                disabled={actionPending || !!current.archivedAt}
+                title={current.archivedAt ? current.allowedActions.accept.reason?.message : undefined}
               >
                 Assign to me
               </button>
@@ -202,7 +221,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
                     type="button"
                     data-testid={`ticket-detail-status-button-${target}`}
                     onClick={() => runAction(() => onChangeStatus(target))}
-                    disabled={actionPending}
+                    disabled={actionPending || !!current.archivedAt}
                   >
                     {target}
                   </button>
@@ -215,7 +234,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
                 type="button"
                 data-testid="ticket-detail-accept-button"
                 onClick={() => runAction(onAccept)}
-                disabled={actionPending}
+                disabled={actionPending || !!current.archivedAt}
               >
                 Accept
               </button>
@@ -229,9 +248,10 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
               </p>
             )}
           </section>
-          <button type="button" data-testid="ticket-detail-edit-button" onClick={startEditing}>
+          <button type="button" data-testid="ticket-detail-edit-button" onClick={startEditing} disabled={!!current.archivedAt} title={current.archivedAt ? current.allowedActions.accept.reason?.message : undefined}>
             Edit
           </button>
+          <button type="button" data-testid="ticket-detail-archive-button" onClick={() => void handleArchive()} disabled={actionPending || !!current.archivedAt} title={current.archivedAt ? current.allowedActions.accept.reason?.message : undefined}>Archive</button>
         </>
       )}
       {mode === "editing" && (
@@ -310,8 +330,10 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
   );
 }
 
-function BadgePicker({ ticket, onAttached, onLoad, onCreate, onAttach }: {
+function BadgePicker({ ticket, disabled, reason, onAttached, onLoad, onCreate, onAttach }: {
   ticket: Ticket;
+  disabled: boolean;
+  reason?: string;
   onAttached: (ticket: Ticket) => void;
   onLoad: () => Promise<Badge[]>;
   onCreate: (name: string) => Promise<Badge>;
@@ -380,7 +402,7 @@ function BadgePicker({ ticket, onAttached, onLoad, onCreate, onAttach }: {
   }
 
   return <>
-    <button type="button" onClick={() => setOpen((value) => !value)} data-testid="badge-picker-toggle">{open ? "Close badge picker" : "Add badge"}</button>
+    <button type="button" onClick={() => setOpen((value) => !value)} disabled={disabled} title={disabled ? reason : undefined} data-testid="badge-picker-toggle">{open ? "Close badge picker" : "Add badge"}</button>
     {open && <div data-testid="badge-picker">
       <form onSubmit={attach}>
         <label htmlFor="existing-badge">Existing badge</label>

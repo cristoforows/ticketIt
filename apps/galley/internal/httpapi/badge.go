@@ -123,7 +123,16 @@ func (s *server) AttachTicketBadge(w http.ResponseWriter, r *http.Request, id, b
 		return
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
-	found, err := attachBadgeForOwner(ctx, tx, owner.ID, id, badgeId)
+	found, err := lockTicketForMutation(ctx, tx, owner.ID, id, false)
+	if err != nil {
+		writeMutationError(w, err, "failed to attach the badge")
+		return
+	}
+	if !found {
+		writeBadgeNotFound(w)
+		return
+	}
+	found, err = attachBadgeForOwner(ctx, tx, owner.ID, id, badgeId)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to attach the badge")
 		return
@@ -187,6 +196,15 @@ func (s *server) DetachTicketBadge(w http.ResponseWriter, r *http.Request, id, b
 		return
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
+	found, err := lockTicketForMutation(ctx, tx, owner.ID, id, false)
+	if err != nil {
+		writeMutationError(w, err, "failed to detach the badge")
+		return
+	}
+	if !found {
+		writeBadgeNotFound(w)
+		return
+	}
 	var ticketRowID, badgeRowID int64
 	err = tx.QueryRow(ctx, `SELECT t.id, b.id FROM tickets t CROSS JOIN badges b
 		WHERE t.owner_id = $1 AND t.public_id = $2::uuid AND b.owner_id = $1 AND b.public_id = $3::uuid

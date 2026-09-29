@@ -95,8 +95,12 @@ func containsStatus(statuses []TicketStatus, target TicketStatus) bool {
 
 var statusTargets = []TicketStatus{Backlog, Ready, InProgress, Blocked, InReview, Done}
 
-func allowedActionsForTicket(status TicketStatus, condition TicketCompletionCondition) TicketAllowedActions {
+func allowedActionsForTicket(status TicketStatus, condition TicketCompletionCondition, archived bool) TicketAllowedActions {
 	actions := TicketAllowedActions{StatusChanges: []TicketStatus{}}
+	if archived {
+		actions.Accept.Reason = &ErrorDetail{Code: archivedTicketCode, Message: archivedTicketMessage}
+		return actions
+	}
 	for _, target := range statusTargets {
 		if decidePlainStatusChange(status, target) == nil {
 			actions.StatusChanges = append(actions.StatusChanges, target)
@@ -134,9 +138,16 @@ func applyTicketTransition(
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
 
+	found, err = lockTicketForMutation(ctx, tx, ownerID, publicID, false)
+	if errors.Is(err, errArchivedTicket) {
+		return Ticket{}, true, &transitionRejection{code: archivedTicketCode, message: archivedTicketMessage}, nil
+	}
+	if err != nil || !found {
+		return Ticket{}, found, nil, err
+	}
 	var statusStr, conditionStr string
 	err = tx.QueryRow(ctx,
-		`SELECT status, completion_condition FROM tickets WHERE owner_id = $1 AND public_id = $2::uuid FOR UPDATE`,
+		`SELECT status, completion_condition FROM tickets WHERE owner_id = $1 AND public_id = $2::uuid`,
 		ownerID, publicID,
 	).Scan(&statusStr, &conditionStr)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -276,6 +287,10 @@ func setTicketAssigneeForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID 
 		return Ticket{}, false, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
+	found, err := lockTicketForMutation(ctx, tx, ownerID, publicID, false)
+	if err != nil || !found {
+		return Ticket{}, found, err
+	}
 	row := tx.QueryRow(ctx,
 		`UPDATE tickets SET assignee_type = $3, updated_at = now()
 		  WHERE owner_id = $1 AND public_id = $2::uuid
@@ -321,7 +336,7 @@ func (s *server) AssignTicketOwner(w http.ResponseWriter, r *http.Request, id st
 	assigneeType := assigneeTypeOwnerValue
 	ticket, found, err := setTicketAssigneeForOwner(ctx, s.pool, owner.ID, id, &assigneeType)
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to assign the ticket")
+		writeMutationError(w, err, "failed to assign the ticket")
 		return
 	}
 	if !found {
@@ -347,7 +362,7 @@ func (s *server) UnassignTicket(w http.ResponseWriter, r *http.Request, id strin
 
 	ticket, found, err := setTicketAssigneeForOwner(ctx, s.pool, owner.ID, id, nil)
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to unassign the ticket")
+		writeMutationError(w, err, "failed to unassign the ticket")
 		return
 	}
 	if !found {

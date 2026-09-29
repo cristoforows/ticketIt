@@ -55,6 +55,7 @@ const TICKET = {
   createdAt: "2026-09-22T10:00:00Z",
   updatedAt: "2026-09-22T10:00:00Z",
   badges: [],
+  archivedAt: null,
 };
 
 const SIGNED_IN = jsonResponse({ owner: { id: 1, login: "ticketit-test-owner" } });

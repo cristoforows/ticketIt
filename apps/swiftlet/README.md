@@ -591,6 +591,20 @@ returned Ticket after detach. Closing the modal refreshes the filtered
 collection, so a Ticket that no longer matches disappears. Run
 `npm test && npm run build` here and `cd e2e && ./run.sh` at the root.
 
+## Archive a Ticket (issue #93)
+
+Detail and modal offer **Archive** with confirmation. Galley returns the
+retained Ticket; the modal closes to its original view, which refreshes
+without the archived Ticket. Full-page Archive returns to the view the
+Ticket was opened from, keeping any Badge filter: Board Ticket links
+carry `from=board` in their URL, so the origin survives a new tab and
+reload. A detail URL without it returns to the List. A direct Ticket URL remains readable with
+its Status, fields, Badges and Archived timestamp. Edit, Assignee, Badge
+and Archive controls are disabled and show Galley's read-only reason.
+The board and default list exclude archived Tickets, including while a
+Badge filter is selected. The Archived filter and Restore arrive in #94.
+Run `npm test && npm run build` here and `cd e2e && ./run.sh` at the root.
+
 ## Browser-to-backend suite
 
 The tests above stub `fetch`, so they never exercise the real proxy or
