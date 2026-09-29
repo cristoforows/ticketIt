@@ -13,6 +13,7 @@ interface TicketDetailProps {
   onAttachBadge: (badgeId: string) => Promise<Ticket>;
   onDetachBadge: (badgeId: string) => Promise<Ticket>;
   onArchive: () => Promise<Ticket>;
+  onRestore: () => Promise<Ticket>;
   onArchived?: () => void;
 }
 
@@ -50,7 +51,7 @@ function completionConditionLabel(condition: Ticket["completionCondition"]): str
 /** The only non-empty assignee_type M2 writes; there is no Agent Assignee kind yet. */
 const OWNER_ASSIGNEE_TYPE = "owner";
 
-export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssign, onUnassign, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge, onArchive, onArchived }: TicketDetailProps) {
+export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssign, onUnassign, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge, onArchive, onRestore, onArchived }: TicketDetailProps) {
   const previousTicket = useRef(ticket);
   const [current, setCurrent] = useState(ticket);
   const [mode, setMode] = useState<"view" | "editing">("view");
@@ -252,6 +253,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
             Edit
           </button>
           <button type="button" data-testid="ticket-detail-archive-button" onClick={() => void handleArchive()} disabled={actionPending || !!current.archivedAt} title={current.archivedAt ? current.allowedActions.accept.reason?.message : undefined}>Archive</button>
+          {current.archivedAt && <button type="button" data-testid="ticket-detail-restore-button" onClick={() => runAction(onRestore)} disabled={actionPending}>Restore</button>}
         </>
       )}
       {mode === "editing" && (

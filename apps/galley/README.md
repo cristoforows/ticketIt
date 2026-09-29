@@ -1019,6 +1019,26 @@ Round is open (M4/M5). Archive does not insert execution artefacts.
 Run `go test ./...`, `go vet ./...`, `go build ./...` and
 `./scripts/check-contract-drift.sh` here after generating/staging types.
 
+## Archived filtering and Restore (issue #94)
+
+`GET /api/tickets?archived=true` selects archived Tickets instead of
+unarchived Tickets. Repeated `badgeId` parameters still match any Badge;
+Archived and Badge filtering compose, with newest-first ordering and no
+duplicate Tickets. `archived=false` or omission selects active Tickets.
+The board always requests the active collection, regardless of the
+list's Archived URL parameter.
+
+`POST /api/tickets/{id}/restore` runs in a row-locked transaction using
+the same mutation decision point as Archive. A retained Ready Ticket
+returns to Backlog; all other Status values, including Done, stay put.
+Badges, refinement fields and completion condition are unchanged. A
+Ticket that is not archived returns `400 not_archived`, and unknown,
+malformed or foreign ids return the shared `404`. Restore does not create
+execution artefacts or request work. The tests cover the Status grid,
+owner scope, a concurrent Archive/Restore race against PostgreSQL and
+persistence after a process restart. Run `go test ./...`, `go vet ./...`,
+`go build ./...` and `./scripts/check-contract-drift.sh` here.
+
 ## Error shape
 
 `ErrorBody`/`ErrorDetail` are generated from

@@ -51,9 +51,24 @@ export function useBadgeFilter(): string[] {
   return new URLSearchParams(search).getAll("badgeId");
 }
 
+export function useArchivedFilter(): boolean {
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot);
+  const [, search] = JSON.parse(snapshot) as [string, string];
+  return new URLSearchParams(search).get("archived") === "true";
+}
+
+export function setArchivedFilter(archived: boolean): void {
+  const query = new URLSearchParams(window.location.search);
+  if (archived) query.set("archived", "true");
+  else query.delete("archived");
+  navigate(`${window.location.pathname}${query.size ? `?${query}` : ""}`);
+}
+
 export function collectionQuery(): string {
   const query = new URLSearchParams();
-  new URLSearchParams(window.location.search).getAll("badgeId").forEach((id) => query.append("badgeId", id));
+  const current = new URLSearchParams(window.location.search);
+  current.getAll("badgeId").forEach((id) => query.append("badgeId", id));
+  if (current.get("archived") === "true") query.set("archived", "true");
   return query.size ? `?${query}` : "";
 }
 

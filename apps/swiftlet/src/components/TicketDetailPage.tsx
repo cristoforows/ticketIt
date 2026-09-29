@@ -11,6 +11,7 @@ import {
   attachTicketBadge,
   detachTicketBadge,
   archiveTicket,
+  restoreTicket,
   fetchBadges,
   TicketNotFoundError,
   type Ticket,
@@ -154,6 +155,7 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
           onAttachBadge={(badgeId) => runCommand(() => attachTicketBadge(ticketId, badgeId))}
           onDetachBadge={(badgeId) => runCommand(() => detachTicketBadge(ticketId, badgeId))}
           onArchive={() => runCommand(() => archiveTicket(ticketId))}
+          onRestore={() => runCommand(() => restoreTicket(ticketId))}
           onArchived={() => (onArchiveSucceeded ? onArchiveSucceeded() : navigate(fullPageReturnPath()))}
         />
       )}

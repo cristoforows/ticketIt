@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { signOut, type Owner } from "../api/session";
-import { collectionQuery, useBadgeFilter, useRoute, type CollectionRoute } from "../router";
+import { collectionQuery, setArchivedFilter, useArchivedFilter, useBadgeFilter, useRoute, type CollectionRoute } from "../router";
 import { BadgeFilter } from "./BadgeFilter";
 import { Link } from "./Link";
 import { StatusView } from "./StatusView";
@@ -28,7 +28,8 @@ export function AppShell({ owner, onSignedOut, onUnauthenticated }: AppShellProp
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const route = useRoute();
   const badgeIds = useBadgeFilter();
-  const filterKey = badgeIds.join(",");
+  const archived = useArchivedFilter();
+  const filterKey = `${badgeIds.join(",")}:${archived}`;
   const currentRoute = useRef(route);
   useLayoutEffect(() => { currentRoute.current = route; }, [route]);
   const background: CollectionRoute | undefined = route.name === "ticket-detail" ? route.background : route.name;
@@ -89,7 +90,8 @@ export function AppShell({ owner, onSignedOut, onUnauthenticated }: AppShellProp
       {background && <BadgeFilter selected={badgeIds} onUnauthenticated={onUnauthenticated} refreshKey={refresh.key} />}
       {background === "backlog" && (
         <>
-          <TicketList key={filterKey} badgeIds={badgeIds} onUnauthenticated={onUnauthenticated} refreshKey={refresh.key} focusTicketId={refresh.view === "backlog" ? refresh.ticketId : undefined} />
+          <label><input type="checkbox" data-testid="archived-filter" checked={archived} onChange={(event) => setArchivedFilter(event.target.checked)} /> Archived</label>
+          <TicketList key={filterKey} badgeIds={badgeIds} archived={archived} onUnauthenticated={onUnauthenticated} refreshKey={refresh.key} focusTicketId={refresh.view === "backlog" ? refresh.ticketId : undefined} />
           <StatusView />
         </>
       )}

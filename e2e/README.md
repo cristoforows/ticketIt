@@ -253,6 +253,12 @@ and Galley's direct API rejection. It then archives from full-page detail
 opened from the filtered Board, both in place and in a new tab, and
 expects to land on that filtered Board. `run.sh` checks its exit code.
 
+`tests/ticket-restore-before.spec.ts` combines Archived and Badge filters
+in the list, restores Ready and Done in the modal, and sees them return
+to their Galley Status columns on the board. `ticket-restore-after.spec.ts`
+checks the same Status, Badge and fields after a real Galley restart.
+Both are registered in `run.sh` with their exit codes checked.
+
 ## The failure-mode spec
 
 `tests/backend-failure.spec.ts` runs *after* `run.sh` stops Galley, and

@@ -181,7 +181,8 @@ paths:
       summary: List the signed-in Owner's Tickets
       tags: [tickets]
       description: >-
-        Returns the signed-in Owner's unarchived Tickets, optionally matching any
+        Returns the signed-in Owner's unarchived Tickets by default, or
+        archived Tickets when archived=true, optionally matching any
         selected Badge (OR, with each Ticket returned once). Unknown,
         malformed, or foreign Badge ids return 400 invalid_request.
         Results are ordered by createdAt descending with id descending as
@@ -189,6 +190,10 @@ paths:
         see apps/galley/README.md, "Ticket ordering"). Requires a
         valid session; returns `401 unauthenticated` otherwise.
       parameters:
+        - name: archived
+          in: query
+          description: True selects archived Tickets instead of unarchived Tickets.
+          schema: {type: boolean, default: false}
         - name: badgeId
           in: query
           description: Repeat to match any selected Badge; omit for all Tickets.
@@ -632,6 +637,33 @@ paths:
       responses:
         "200":
           description: The archived Ticket.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+  /api/tickets/{id}/restore:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid, x-go-type: string}
+    post:
+      operationId: restoreTicket
+      summary: Restore an archived Ticket
+      tags: [tickets]
+      description: >-
+        Restoring Ready changes Status to Backlog; every other Status is
+        retained. A Ticket not archived returns 400 not_archived; an unknown,
+        malformed or foreign id returns the shared 404. Does not start work.
+      responses:
+        "200":
+          description: The restored Ticket.
           content:
             application/json:
               schema:

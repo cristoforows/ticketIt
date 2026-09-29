@@ -168,8 +168,9 @@ function errorMessage(payload: unknown): string | undefined {
  * off-contract shape -- so callers render an explicit state rather
  * than a partial or stale list.
  */
-export async function fetchTickets(badgeIds: string[] = []): Promise<Ticket[]> {
+export async function fetchTickets(badgeIds: string[] = [], archived = false): Promise<Ticket[]> {
   const query = new URLSearchParams();
+  if (archived) query.set("archived", "true");
   badgeIds.forEach((id) => query.append("badgeId", id));
   const response = await authenticatedFetch(`${TICKETS_ENDPOINT}${query.size ? `?${query}` : ""}`);
   if (!response.ok) {
@@ -369,4 +370,8 @@ export async function detachTicketBadge(ticketId: string, badgeId: string): Prom
 
 export async function archiveTicket(id: string): Promise<Ticket> {
   return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(id)}/archive`, { method: "POST" });
+}
+
+export async function restoreTicket(id: string): Promise<Ticket> {
+  return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(id)}/restore`, { method: "POST" });
 }

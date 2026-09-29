@@ -106,6 +106,15 @@ describe("TicketList", () => {
     expect(screen.queryByTestId("ticket-list-items")).not.toBeInTheDocument();
   });
 
+  it("requests only archived Tickets from Galley and hides capture while browsing them", async () => {
+    const archive = { ...TICKET_A, archivedAt: "2026-09-29T10:00:00Z" };
+    stubFetch({ "GET /api/tickets?archived=true&badgeId=selected": jsonResponse({ tickets: [archive] }) });
+    render(<TicketList archived badgeIds={["selected"]} onUnauthenticated={() => {}} />);
+    expect(await screen.findByTestId(`ticket-item-${archive.id}`)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Archived Tickets" })).toBeInTheDocument();
+    expect(screen.queryByTestId("ticket-capture-form")).not.toBeInTheDocument();
+  });
+
   it("renders every Ticket Galley returns, in the order returned", async () => {
     stubFetch({ "GET /api/tickets": jsonResponse({ tickets: [TICKET_A, TICKET_B] }) });
 
