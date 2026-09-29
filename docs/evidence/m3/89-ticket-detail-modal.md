@@ -12,7 +12,7 @@ The reviewed M3.2 branch at `fee6df8` had `/` and `/board` over the same Galley 
 
 - Both collection links open `TicketDetailModal` with a canonical `/tickets/:id` address. The modal renders `TicketDetailPage` in modal mode, which uses the same `TicketDetail` and the same fetch/save/status/Accept/assign/unassign command callbacks as the full page; only the surrounding navigation chrome differs. No Galley workflow or API rule changed.
 - `router.ts` carries `{ ticketModal: { background, pageLoadId } }` in the pushed history entry. `useRoute()` observes both path and that state; Back/Forward retain the mounted collection and reopen the modal. A page load creates a new `pageLoadId`, so reloads, bookmarks and new tabs discard stale modal context and show the full page. Open full page replaces the modal entry's state while keeping its URL. Standard modified link clicks remain browser navigation.
-- Native `showModal()` provides top-layer focus/inert background and Escape cancellation. The close control receives focus on opening. The dialog cleanup restores body scrolling and browser focus; the collection's refreshed Ticket link is refocused even when a Status move relocates its board card. Collections stay mounted during the modal and retain rows during re-fetch on return, keeping scroll position stable. No optimistic list/card mutation is used.
+- Radix UI Dialog replaced the initial native `showModal()` implementation at the Owner's request. Its portal, focus scope, and background `aria-hidden` handle modal focus, keyboard navigation, and Escape; close-time focus returns to the originating Ticket link, including when a refresh fails. Collections stay mounted and retain rows during re-fetch, keeping scroll position stable. No optimistic list/card mutation is used. Tailwind CSS 4 via Vite replaces the board/modal CSS with utilities; Preflight is omitted to retain native typography and form styles.
 - `e2e/tests/ticket-modal.spec.ts` covers below-fold list/board entry, scroll/focus, inert background, Escape/Close/Back/Forward, reload/direct full-page presentation, Open full page, edit/assignment/Accept and board Status move against Galley API data. `e2e/run.sh` registers and checks it. Existing board/detail browser assertions now expect modal entry. Swiftlet and e2e READMEs describe behavior and commands.
 - Review follow-up: a successful modal command notifies the shell even after the modal unmounts. If a collection is visible, it re-fetches from Galley and supersedes a close-time GET that raced ahead of the command. A refresh failure retains last-good list rows or board cards with a visible error, leaving position/focus intact. Refocus applies only to the returning source view; switching to another view clears it. One `isPlainLinkClick` guard replaces duplicated modifier checks; obsolete `TicketDetail` narration was removed. Browser regressions defer Save and Status requests past Close/Back, force collection GET failures, check navigation focus, and compare edited Goal/Assignee controls across modal and full page.
 
@@ -20,7 +20,7 @@ Future open-Round Status rules extend Galley's `decidePlainStatusChange` / `deci
 
 ## Exact versions and toolchain
 
-`apps/galley/go.mod`: Go 1.27.1 (local 1.27.1). `apps/swiftlet/package-lock.json` / `package.json`: React 19.3.0, TypeScript 7.0.2, Vite 8.3.0, Vitest 5.0.1. `e2e/package-lock.json` / `package.json`: Playwright 1.63.0. Both Node apps declare Node 26.9.0; final checks used Node 26.9.0 and npm 11.19.1. Local PostgreSQL was 18.1 (Docker container) with Playwright's Chromium headless shell.
+`apps/galley/go.mod`: Go 1.27.1 (local 1.27.1). `apps/swiftlet/package-lock.json` / `package.json`: React 19.3.0, TypeScript 7.0.2, Vite 8.3.0, Vitest 5.0.1, Tailwind CSS and `@tailwindcss/vite` 4.3.3, Radix Dialog 1.1.23. `e2e/package-lock.json` / `package.json`: Playwright 1.63.0. Both Node apps declare Node 26.9.0; final checks used Node 26.9.0 and npm 11.19.1. Local PostgreSQL was 18.1 (Docker container) with Playwright's Chromium headless shell.
 
 ## Reproducible commands
 
@@ -58,13 +58,15 @@ migrations applied: schema version 7
 
 All 19 registered spec invocations returned 0 (45 Chromium tests), including restart and stopped-backend phases. The ten modal tests opened real Tickets from both views, asserted Galley-sourced changes after closing, and checked pending-command/refresh-error timing. No new HTTP endpoint is served by this slice; the existing `GET /api/tickets` and Ticket commands were exercised against live Galley by the browser suite.
 
+After the Tailwind/Radix change, `npm ci && npm test && npm run build` exited 0 (`9 passed` test files, `89 passed` tests; Vite transformed 83 modules). `e2e/run.sh` again reported `10 passed` for `ticket-modal.spec.ts`, all 19 spec invocations exited 0, and `SUITE PASSED` (45 Chromium tests). The browser checked the compiled board grid, fixed-position dialog, background `aria-hidden`, trapped Tab navigation, and originating-link focus after closing.
+
 ## Implementation limitations and follow-ups
 
 No required #89 behavior remains unimplemented. M5 owns active-Round locking/presentation, and M8 owns `reviewedPrMerge` completion under open D2; the modal shares the full page's existing controls without introducing either feature.
 
 ## Outstanding checks and owning milestone
 
-The M3 gate-report slice owns evidence-index and gate-doc reconciliation. Cross-browser behavior beyond Chromium is not in this browser harness; M3 browser coverage uses its documented Chromium-only runner. PR #100's external approval and merge are outside this branch's work.
+The M3 gate-report slice owns evidence-index and gate-doc reconciliation. Cross-browser behavior beyond Chromium is not in this browser harness; M3 browser coverage uses its documented Chromium-only runner.
 
 ## Decision impacts (open-decision IDs)
 
