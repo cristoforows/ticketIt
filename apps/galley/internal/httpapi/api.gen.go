@@ -194,6 +194,21 @@ type CreateDiagnosticNoteRequest struct {
 
 // CreateTicketRequest defines model for CreateTicketRequest.
 type CreateTicketRequest struct {
+	// Constraints Same as `goal`.
+	Constraints *string `json:"constraints,omitempty"`
+
+	// Context Same as `goal`.
+	Context *string `json:"context,omitempty"`
+
+	// Goal Same trimming and limit as `UpdateTicketRequest.goal`; omitted or empty leaves it unset.
+	Goal *string `json:"goal,omitempty"`
+
+	// Repository Same as `goal`.
+	Repository *string `json:"repository,omitempty"`
+
+	// SuccessCriteria Same as `goal`.
+	SuccessCriteria *string `json:"successCriteria,omitempty"`
+
 	// Template A Ticket's built-in Template (issue #59), chosen at capture (default Basic). Under the accepted D3 decision (docs/decisions/d3-agent-template-compatibility.md), a Template supplies presentation, required information, and a *default* completion condition only -- it never restricts which Agent or execution engine may be assigned (docs/ticket-creation.md, "Flexible ticket structure"). Changing a Ticket's Template after creation is out of scope for M2: post-delivery Template/repository change is D4, owned by M8.
 	Template *TicketTemplate `json:"template,omitempty"`
 
@@ -457,7 +472,7 @@ type ServerInterface interface {
 	// ListTickets List the signed-in Owner's Tickets
 	// (GET /api/tickets)
 	ListTickets(w http.ResponseWriter, r *http.Request, params ListTicketsParams)
-	// CreateTicket Capture a Ticket from a title alone
+	// CreateTicket Capture a Ticket from a title, optionally with details
 	// (POST /api/tickets)
 	CreateTicket(w http.ResponseWriter, r *http.Request)
 	// GetTicket Get one Ticket by its identifier

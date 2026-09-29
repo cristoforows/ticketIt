@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { signIn } from "../support/sign-in";
-import { createTicket, changeTicketStatusDirect, acceptTicketDirect } from "../support/tickets";
+import { createTicket, changeTicketStatusDirect, acceptTicketDirect, openCapture } from "../support/tickets";
 
 // Swiftlet enforces no workflow rule of its own (ADR 0001), so every
 // assertion here either drives the real controls end to end, or proves
@@ -15,6 +15,7 @@ test.describe("ticket lifecycle controls", () => {
     const title = `ticket-lifecycle: full path ${Date.now()}`;
 
     await page.goto("/");
+    await openCapture(page);
     await page.getByTestId("ticket-title-input").fill(title);
     await page.getByTestId("ticket-capture-submit").click();
     await page.getByRole("link", { name: title, exact: true }).click();

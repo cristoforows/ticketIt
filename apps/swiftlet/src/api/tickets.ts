@@ -23,6 +23,8 @@ export type Badge = components["schemas"]["Badge"];
  */
 export type TicketUpdate = components["schemas"]["UpdateTicketRequest"];
 
+export type TicketDetails = Omit<components["schemas"]["CreateTicketRequest"], "title" | "template">;
+
 const TICKETS_ENDPOINT = "/api/tickets";
 
 /**
@@ -208,9 +210,10 @@ export async function fetchTicket(id: string): Promise<Ticket> {
 export const TICKET_TEMPLATES: Ticket["template"][] = ["Basic", "Coding"];
 
 /**
- * Captures a Ticket from a title alone, optionally naming a Template
- * (issue #59) -- defaulting to Basic when omitted, exactly like
- * Galley's own CreateTicketRequest.template. A title alone remains
+ * Captures a Ticket from a title, optionally naming a Template
+ * (issue #59) and the manual refinement fields -- the Template
+ * defaults to Basic when omitted, exactly like Galley's own
+ * CreateTicketRequest.template. A title alone remains
  * sufficient to capture either Template (docs/ticket-creation.md,
  * "Quick capture"); completionCondition is derived from the chosen
  * Template's default by Galley, once, at creation, and is never sent
@@ -220,11 +223,12 @@ export const TICKET_TEMPLATES: Ticket["template"][] = ["Basic", "Coding"];
  * generic status line, since the caller is a form the Owner is
  * actively filling in.
  */
-export async function createTicket(title: string, template: Ticket["template"] = "Basic"): Promise<Ticket> {
+export async function createTicket(title: string, template: Ticket["template"] = "Basic", details: TicketDetails = {}): Promise<Ticket> {
+  const filled = Object.fromEntries(Object.entries(details).filter(([, value]) => (value ?? "").trim() !== ""));
   const response = await authenticatedFetch(TICKETS_ENDPOINT, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title, template }),
+    body: JSON.stringify({ title, template, ...filled }),
   });
   if (!response.ok) {
     const payload: unknown = await response.json();

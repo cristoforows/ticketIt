@@ -3,13 +3,14 @@ import { signOut, type Owner } from "../api/session";
 import { collectionQuery, setArchivedFilter, useArchivedFilter, useBadgeFilter, useRoute, type CollectionRoute } from "../router";
 import { BadgeFilter } from "./BadgeFilter";
 import { Link } from "./Link";
+import { NewOrderBar } from "./NewOrderBar";
 import { AppHeader } from "./AppHeader";
 import { StatusView } from "./StatusView";
 import { TicketBoard } from "./TicketBoard";
 import { TicketDetailPage } from "./TicketDetailPage";
 import { TicketDetailModal } from "./TicketDetailModal";
 import { TicketList } from "./TicketList";
-import { ErrorMessage, Paper, Rule, SecondaryButton } from "./ui";
+import { ErrorMessage, FilterToggle, Paper, SecondaryButton } from "./ui";
 
 interface AppShellProps {
   owner: Owner;
@@ -74,7 +75,6 @@ export function AppShell({ owner, onSignedOut, onUnauthenticated }: AppShellProp
     }
   }
 
-  const Surface = background === "board" ? "div" : Paper;
   const navLink = "px-3 py-1.5 text-label font-bold tracking-label text-dim uppercase no-underline ring-1 ring-dim hover:text-paper aria-[current=page]:bg-amber aria-[current=page]:text-ink aria-[current=page]:ring-amber";
 
   return (
@@ -100,18 +100,29 @@ export function AppShell({ owner, onSignedOut, onUnauthenticated }: AppShellProp
         {route.name === "ticket-detail" && !route.background && (
           <TicketDetailPage key={route.ticketId} ticketId={route.ticketId} onUnauthenticated={onUnauthenticated} />
         )}
-        {background && <Surface className={background === "board" ? undefined : "p-6"}>
-          <BadgeFilter tone={background === "board" ? "ground" : "paper"} selected={badgeIds} onUnauthenticated={onUnauthenticated} refreshKey={refresh.key} />
-          {background === "backlog" && (
-            <>
-          <label><input type="checkbox" data-testid="archived-filter" checked={archived} onChange={(event) => setArchivedFilter(event.target.checked)} /> Archived</label>
-          <TicketList key={filterKey} badgeIds={badgeIds} archived={archived} onUnauthenticated={onUnauthenticated} refreshKey={refresh.key} focusTicketId={refresh.view === "backlog" ? refresh.ticketId : undefined} />
-          <Rule />
-          <StatusView />
-            </>
-          )}
-          {background === "board" && <TicketBoard key={filterKey} badgeIds={badgeIds} onUnauthenticated={onUnauthenticated} refreshKey={refresh.key} focusTicketId={refresh.view === "board" ? refresh.ticketId : undefined} />}
-        </Surface>}
+        {background && (
+          <div className={background === "backlog" ? "mx-auto max-w-(--size-log)" : undefined}>
+            {background === "backlog" && !archived && (
+              <NewOrderBar onUnauthenticated={onUnauthenticated} onCreated={() => setRefresh((current) => ({ key: current.key + 1 }))} />
+            )}
+            <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-2">
+              <BadgeFilter tone="ground" selected={badgeIds} onUnauthenticated={onUnauthenticated} refreshKey={refresh.key} />
+              {background === "backlog" && (
+                <FilterToggle tone="ground" data-testid="archived-filter" checked={archived} onChange={(event) => setArchivedFilter(event.target.checked)}>Archived</FilterToggle>
+              )}
+            </div>
+            {background === "backlog" && (
+              <>
+                <TicketList key={filterKey} badgeIds={badgeIds} archived={archived} onUnauthenticated={onUnauthenticated} refreshKey={refresh.key} focusTicketId={refresh.view === "backlog" ? refresh.ticketId : undefined} />
+                <Paper as="footer" className="mt-6 p-4">
+                  <h2 className="m-0 mb-2 text-label font-bold tracking-label text-muted uppercase">Galley status</h2>
+                  <StatusView />
+                </Paper>
+              </>
+            )}
+            {background === "board" && <TicketBoard key={filterKey} badgeIds={badgeIds} onUnauthenticated={onUnauthenticated} refreshKey={refresh.key} focusTicketId={refresh.view === "board" ? refresh.ticketId : undefined} />}
+          </div>
+        )}
       </main>
       {modalTicketId && background && (
         <TicketDetailModal key={modalTicketId} ticketId={modalTicketId} background={background} onUnauthenticated={onUnauthenticated} onClose={() => window.history.back()} onCommandSucceeded={() => refreshAfterModalCommand(modalTicketId)} />

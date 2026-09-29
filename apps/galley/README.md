@@ -662,6 +662,13 @@ non-owning caller and a Ticket that exists.
 
 ### Manual refinement fields (issue #58)
 
+`POST /api/tickets` also accepts the optional `goal`, `context`,
+`successCriteria`, `constraints`, and `repository`, validated by the
+same `validateRefinementFields` as `PATCH` and stored in the same
+`INSERT` as the Ticket. Omitted, `""`, and whitespace-only values are
+stored as `NULL` (unset); a value over its limit is rejected with
+`invalid_request` and nothing is created.
+
 `PATCH /api/tickets/{id}` (`internal/httpapi/ticket.go`'s
 `UpdateTicket`) edits a Ticket's `title`, `goal`, `context`,
 `successCriteria`, and `constraints` by hand

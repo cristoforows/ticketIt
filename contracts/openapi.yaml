@@ -217,7 +217,7 @@ paths:
                 $ref: "#/components/schemas/ErrorBody"
     post:
       operationId: createTicket
-      summary: Capture a Ticket from a title alone
+      summary: Capture a Ticket from a title, optionally with details
       tags: [tickets]
       description: >-
         Creates a Ticket owned by the signed-in Owner, in Backlog
@@ -236,6 +236,10 @@ paths:
         `completionCondition` is derived from the chosen Template's
         default exactly once, here at creation, and stored as its own
         field -- see `TicketCompletionCondition`.
+
+
+        The manual refinement fields are optional and stored in the same
+        insert; an invalid one creates nothing.
       requestBody:
         required: true
         content:
@@ -991,6 +995,26 @@ components:
           maxLength: 200
         template:
           $ref: "#/components/schemas/TicketTemplate"
+        goal:
+          type: string
+          description: Same trimming and limit as `UpdateTicketRequest.goal`; omitted or empty leaves it unset.
+          maxLength: 2000
+        context:
+          type: string
+          description: Same as `goal`.
+          maxLength: 10000
+        successCriteria:
+          type: string
+          description: Same as `goal`.
+          maxLength: 2000
+        constraints:
+          type: string
+          description: Same as `goal`.
+          maxLength: 2000
+        repository:
+          type: string
+          description: Same as `goal`.
+          maxLength: 500
     UpdateTicketRequest:
       type: object
       description: >-

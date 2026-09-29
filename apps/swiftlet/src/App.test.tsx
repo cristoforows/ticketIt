@@ -135,6 +135,7 @@ describe("App", () => {
     render(<App />);
     await screen.findByTestId("ticket-list-empty");
 
+    fireEvent.click(screen.getByTestId("new-order-button"));
     fireEvent.change(screen.getByTestId("ticket-title-input"), { target: { value: "New ticket" } });
     fireEvent.click(screen.getByTestId("ticket-capture-submit"));
 
@@ -159,6 +160,7 @@ describe("App", () => {
     render(<App />);
     await screen.findByTestId("ticket-list-empty");
 
+    fireEvent.click(screen.getByTestId("new-order-button"));
     fireEvent.change(screen.getByTestId("ticket-title-input"), { target: { value: TICKET.title } });
     fireEvent.click(screen.getByTestId("ticket-capture-submit"));
 
@@ -185,6 +187,7 @@ describe("App", () => {
     render(<App />);
     await screen.findByTestId("ticket-list-loading");
 
+    fireEvent.click(screen.getByTestId("new-order-button"));
     fireEvent.change(screen.getByTestId("ticket-title-input"), { target: { value: TICKET.title } });
     fireEvent.click(screen.getByTestId("ticket-capture-submit"));
     await screen.findByTestId(`ticket-item-${TICKET.id}`);

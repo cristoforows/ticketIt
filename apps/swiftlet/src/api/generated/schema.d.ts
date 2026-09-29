@@ -102,10 +102,12 @@ export interface paths {
         get: operations["listTickets"];
         put?: never;
         /**
-         * Capture a Ticket from a title alone
+         * Capture a Ticket from a title, optionally with details
          * @description Creates a Ticket owned by the signed-in Owner, in Backlog (issue #56: title-only quick capture -- docs/ticket-creation.md, "Quick capture"). `title` is required, is trimmed of leading/trailing whitespace, and must be non-empty and at most 200 characters after trimming; violations return `invalid_request`. No work-type or category is accepted or stored -- Tickets stay generic (docs/ticket-creation.md, "Flexible ticket structure"). Requires a valid session; returns `401 unauthenticated` otherwise.
          *
          *     `template` (issue #59) is optional and defaults to `Basic` when absent; a title alone is sufficient to capture either Template. `completionCondition` is derived from the chosen Template's default exactly once, here at creation, and stored as its own field -- see `TicketCompletionCondition`.
+         *
+         *     The manual refinement fields are optional and stored in the same insert; an invalid one creates nothing.
          */
         post: operations["createTicket"];
         delete?: never;
@@ -452,6 +454,16 @@ export interface components {
             /** @description Trimmed of leading/trailing whitespace before validation. Must be non-empty and at most 200 characters after trimming. */
             title: string;
             template?: components["schemas"]["TicketTemplate"];
+            /** @description Same trimming and limit as `UpdateTicketRequest.goal`; omitted or empty leaves it unset. */
+            goal?: string;
+            /** @description Same as `goal`. */
+            context?: string;
+            /** @description Same as `goal`. */
+            successCriteria?: string;
+            /** @description Same as `goal`. */
+            constraints?: string;
+            /** @description Same as `goal`. */
+            repository?: string;
         };
         /** @description Manual refinement (issue #58): a genuine partial update. Every property is optional -- none are listed under `required` -- so a client can distinguish "this property was not part of the request" (leave unchanged) from "this property was sent as an empty string" (clear it, title excepted). See the `patch /api/tickets/{id}` operation above for the full rule, including why title cannot be cleared, and apps/galley/README.md, "Manual refinement fields," for the concurrent-edit (last-write-wins) rule. Trimmed of leading/trailing whitespace the same way CreateTicketRequest.title is; the maxLength values below apply after trimming and are counted in characters (code points), not bytes -- see apps/galley/README.md, "Tickets," "Title validation." */
         UpdateTicketRequest: {

@@ -62,6 +62,7 @@
   --size-page: 72rem;
   --size-narrow: 28rem;
   --size-receipt: 32rem;
+  --size-log: 48rem;
 }
 
 @layer components {
