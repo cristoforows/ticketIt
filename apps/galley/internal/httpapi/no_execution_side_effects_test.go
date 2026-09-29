@@ -99,6 +99,18 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 	if resp := unassignHTTP(t, client, baseURL, created.Id); resp.status != http.StatusOK {
 		t.Fatalf("unassign: status = %d, want 200; error=%+v", resp.status, resp.errBody)
 	}
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/tickets/"+created.Id+"/archive", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("archive: status = %d, want 200", res.StatusCode)
+	}
 
 	tablesAfter := publicTableNames(t, pool)
 	wantTables := append([]string(nil), knownPublicTables...)

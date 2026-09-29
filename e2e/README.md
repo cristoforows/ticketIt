@@ -246,6 +246,11 @@ detached Ticket leaves the view on close, keeps the filter through Open
 full page and Back to Backlog, and returns after clearing the filter.
 `run.sh` checks its exit code.
 
+`tests/ticket-archive.spec.ts` archives Ready and Done Tickets from the
+modal while filtered by Badge, verifies both leave everyday views, then
+loads direct detail to assert retained Status, Badge, read-only controls,
+and Galley's direct API rejection. `run.sh` checks its exit code.
+
 ## The failure-mode spec
 
 `tests/backend-failure.spec.ts` runs *after* `run.sh` stops Galley, and

@@ -66,13 +66,18 @@ export function collectionPath(view: CollectionRoute): string {
   return view === "board" ? "/board" : "/";
 }
 
+export function fullPageReturnPath(): string {
+  const state = window.history.state as { fullPageBackground?: CollectionRoute } | null;
+  return state?.fullPageBackground === "board" ? "/board" : "/";
+}
+
 export function openTicketModal(ticketId: string, background: CollectionRoute): void {
   window.history.pushState({ ticketModal: { pageLoadId, background } } satisfies ModalHistoryState, "", `/tickets/${encodeURIComponent(ticketId)}${collectionQuery()}`);
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
 export function openTicketFullPage(ticketId: string): void {
-  window.history.replaceState({}, "", `/tickets/${encodeURIComponent(ticketId)}${collectionQuery()}`);
+  window.history.replaceState({ fullPageBackground: modalBackground() }, "", `/tickets/${encodeURIComponent(ticketId)}${collectionQuery()}`);
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 

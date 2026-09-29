@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/oapi-codegen/runtime"
 )
@@ -284,6 +285,9 @@ type StatusResponseStatus string
 type Ticket struct {
 	AllowedActions TicketAllowedActions `json:"allowedActions"`
 
+	// ArchivedAt Null for an active Ticket; RFC3339 UTC archive timestamp otherwise. Status is retained separately.
+	ArchivedAt *time.Time `json:"archivedAt"`
+
 	// AssigneeType The kind of Assignee responsible for a Ticket (CONTEXT.md, "Assignee"). "" means unassigned, always present on the wire, matching `goal`'s convention. `owner` is the only non-empty value in M2: there is no Agent Assignee yet.
 	AssigneeType TicketAssigneeType `json:"assigneeType"`
 
@@ -462,6 +466,9 @@ type ServerInterface interface {
 	// AcceptTicket Accept a Ticket's delivered work, completing it
 	// (POST /api/tickets/{id}/accept)
 	AcceptTicket(w http.ResponseWriter, r *http.Request, id string)
+	// ArchiveTicket Archive a Ticket
+	// (POST /api/tickets/{id}/archive)
+	ArchiveTicket(w http.ResponseWriter, r *http.Request, id string)
 	// UnassignTicket Clear a Ticket's Assignee
 	// (DELETE /api/tickets/{id}/assignee)
 	UnassignTicket(w http.ResponseWriter, r *http.Request, id string)
@@ -784,6 +791,32 @@ func (siw *ServerInterfaceWrapper) AcceptTicket(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// ArchiveTicket operation middleware
+func (siw *ServerInterfaceWrapper) ArchiveTicket(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ArchiveTicket(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // UnassignTicket operation middleware
 func (siw *ServerInterfaceWrapper) UnassignTicket(w http.ResponseWriter, r *http.Request) {
 
@@ -1069,6 +1102,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/badges", wrapper.CreateBadge)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/tickets/{id}/badges/{badgeId}", wrapper.DetachTicketBadge)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/tickets/{id}/badges/{badgeId}", wrapper.AttachTicketBadge)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/archive", wrapper.ArchiveTicket)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/session", wrapper.SignOut)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/session", wrapper.GetSession)
 

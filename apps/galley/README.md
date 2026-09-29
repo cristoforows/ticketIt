@@ -998,6 +998,27 @@ foreign id returns `400 invalid_request`. The `EXISTS` predicate keeps
 one Ticket row per match and preserves newest-first `created_at DESC, id
 DESC` ordering. Later visibility filters can join this same query.
 
+## Archiving Tickets (issue #93)
+
+Migration `000009_archive_tickets.up.sql` adds nullable `tickets.archived_at`.
+`POST /api/tickets/{id}/archive` records a timestamp while retaining Status,
+fields, Badge links and the Ticket itself. Default `GET /api/tickets`,
+including Badge-filtered results, excludes archived Tickets; a direct
+`GET /api/tickets/{id}` still returns them, with `archivedAt` set. Another
+archive is rejected with `400 archived_ticket`. Unknown or foreign ids
+return the shared `404`.
+
+`lockTicketForMutation` is the one row-locked decision point consulted
+inside every Ticket mutation: fields, Status, Accept, Assignee, Badge
+attach/detach and archive. Once archived, every command rejects with
+`archived_ticket`, leaving the row unchanged. Published allowed actions
+contain no Status targets and an unavailable Accept carrying that reason.
+The `archived_at` field is the eligibility check M4's claim path must
+exclude; the same decision point can later reject mutations while a
+Round is open (M4/M5). Archive does not insert execution artefacts.
+Run `go test ./...`, `go vet ./...`, `go build ./...` and
+`./scripts/check-contract-drift.sh` here after generating/staging types.
+
 ## Error shape
 
 `ErrorBody`/`ErrorDetail` are generated from

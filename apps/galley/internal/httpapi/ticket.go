@@ -240,7 +240,7 @@ func (s *server) UpdateTicket(w http.ResponseWriter, r *http.Request, id string)
 		repository:      repository,
 	})
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to update the ticket")
+		writeMutationError(w, err, "failed to update the ticket")
 		return
 	}
 	if !found {
@@ -378,7 +378,7 @@ func defaultCompletionCondition(template TicketTemplate) TicketCompletionConditi
 // getTicketForOwner's and listTicketsForOwner's SELECT, and
 // updateTicketForOwner's RETURNING -- so the column list and
 // scanTicketRow's scan targets can never drift against each other.
-const ticketSelectColumns = `public_id::text, title, status, template, completion_condition, assignee_type, goal, context, success_criteria, constraints, repository, created_at, updated_at`
+const ticketSelectColumns = `public_id::text, title, status, template, completion_condition, assignee_type, goal, context, success_criteria, constraints, repository, created_at, updated_at, archived_at`
 
 // ticketRowScanner is satisfied by both pgx.Row (QueryRow) and pgx.Rows
 // (Query) -- both expose Scan(dest ...any) error with this signature,
@@ -402,18 +402,23 @@ func scanTicketRow(row ticketRowScanner) (Ticket, error) {
 		assigneeType                                             sql.NullString
 		goal, ctxField, successCriteria, constraints, repository sql.NullString
 		createdAt, updatedAt                                     time.Time
+		archivedAt                                               sql.NullTime
 	)
 	if err := row.Scan(
 		&ticket.Id, &ticket.Title, &status, &template, &completionCondition, &assigneeType,
 		&goal, &ctxField, &successCriteria, &constraints, &repository,
-		&createdAt, &updatedAt,
+		&createdAt, &updatedAt, &archivedAt,
 	); err != nil {
 		return Ticket{}, err
 	}
 	ticket.Status = TicketStatus(status)
 	ticket.Template = TicketTemplate(template)
 	ticket.CompletionCondition = TicketCompletionCondition(completionCondition)
-	ticket.AllowedActions = allowedActionsForTicket(ticket.Status, ticket.CompletionCondition)
+	if archivedAt.Valid {
+		at := archivedAt.Time.UTC()
+		ticket.ArchivedAt = &at
+	}
+	ticket.AllowedActions = allowedActionsForTicket(ticket.Status, ticket.CompletionCondition, ticket.ArchivedAt != nil)
 	// NULL means "never assigned", surfaced as "" on the wire -- the
 	// same convention goal/context already use.
 	ticket.AssigneeType = TicketAssigneeType(assigneeType.String)
@@ -526,6 +531,10 @@ func updateTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64
 		return Ticket{}, false, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
+	found, err := lockTicketForMutation(ctx, tx, ownerID, publicID, false)
+	if err != nil || !found {
+		return Ticket{}, found, err
+	}
 	row := tx.QueryRow(ctx,
 		`UPDATE tickets
 		    SET title = COALESCE($3, title),
@@ -569,7 +578,7 @@ func listTicketsForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64,
 	rows, err := pool.Query(ctx,
 		`SELECT `+ticketSelectColumns+`
 		   FROM tickets
-		  WHERE owner_id = $1 AND (cardinality($2::text[]) = 0 OR EXISTS (
+		  WHERE owner_id = $1 AND archived_at IS NULL AND (cardinality($2::text[]) = 0 OR EXISTS (
 		    SELECT 1 FROM ticket_badges tb JOIN badges b ON b.id = tb.badge_id AND b.owner_id = tb.owner_id
 		    WHERE tb.owner_id = $1 AND tb.ticket_id = tickets.id AND b.public_id::text = ANY($2::text[])
 		  ))

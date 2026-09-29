@@ -32,7 +32,7 @@ export function TicketDetailModal({ ticketId, background, onClose, onUnauthentic
             event.preventDefault();
             openTicketFullPage(ticketId);
           }}>Open full page</a>
-          <TicketDetailPage ticketId={ticketId} onUnauthenticated={onUnauthenticated} onCommandSucceeded={onCommandSucceeded} presentation="modal" />
+          <TicketDetailPage ticketId={ticketId} onUnauthenticated={onUnauthenticated} onCommandSucceeded={onCommandSucceeded} onArchiveSucceeded={onClose} presentation="modal" />
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

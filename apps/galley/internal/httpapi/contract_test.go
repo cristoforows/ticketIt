@@ -367,6 +367,30 @@ func TestBadges_ResponsesMatchContractAndMethod405(t *testing.T) {
 	}
 }
 
+func TestArchive_ResponsesMatchContractAndMethod405(t *testing.T) {
+	handler, _, cookie := badgeTestHandler(t)
+	router, err := legacy.NewRouter(loadContract(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, _, _ := badgeRequest(t, handler, cookie, http.MethodPost, "/api/tickets", `{"title":"archive contract"}`, http.StatusCreated)
+	path := "/api/tickets/" + created.(map[string]any)["id"].(string) + "/archive"
+	_, rec, req := badgeRequest(t, handler, cookie, http.MethodPost, path, "", http.StatusOK)
+	validateAgainstContract(t, router, req, rec)
+	_, rec, req = badgeRequest(t, handler, cookie, http.MethodPost, path, "", http.StatusBadRequest)
+	validateAgainstContract(t, router, req, rec)
+	_, rec, req = badgeRequest(t, handler, cookie, http.MethodPost, "/api/tickets/"+uuid.NewString()+"/archive", "", http.StatusNotFound)
+	validateAgainstContract(t, router, req, rec)
+	_, rec, req = badgeRequest(t, handler, cookie, http.MethodGet, "/api/tickets/"+created.(map[string]any)["id"].(string), "", http.StatusOK)
+	validateAgainstContract(t, router, req, rec)
+	_, rec, req = badgeRequest(t, handler, cookie, http.MethodGet, "/api/tickets", "", http.StatusOK)
+	validateAgainstContract(t, router, req, rec)
+	_, rec, _ = badgeRequest(t, handler, cookie, http.MethodDelete, path, "", http.StatusMethodNotAllowed)
+	if rec.Header().Get("Allow") != "POST" {
+		t.Fatalf("archive Allow = %q, want POST", rec.Header().Get("Allow"))
+	}
+}
+
 func TestTicketAcceptAvailability_ResponseContractRejectsInvalidCombinations(t *testing.T) {
 	pool := postgres.NewTestPool(t)
 	router, err := legacy.NewRouter(loadContract(t))

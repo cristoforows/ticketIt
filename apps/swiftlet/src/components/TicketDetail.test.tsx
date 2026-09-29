@@ -19,6 +19,7 @@ const TICKET: Ticket = {
   createdAt: "2026-09-22T10:00:00Z",
   updatedAt: "2026-09-22T10:05:00Z",
   badges: [],
+  archivedAt: null,
 };
 
 const CODING_TICKET: Ticket = {
@@ -48,6 +49,7 @@ function noopActions() {
     onCreateBadge: vi.fn<(name: string) => Promise<import("../api/tickets").Badge>>(),
     onAttachBadge: vi.fn<(id: string) => Promise<Ticket>>(),
     onDetachBadge: vi.fn<(id: string) => Promise<Ticket>>(),
+    onArchive: vi.fn<() => Promise<Ticket>>(),
   };
 }
 
@@ -127,6 +129,34 @@ describe("Badge picker", () => {
     await waitFor(() => expect(actions.onAttachBadge).toHaveBeenCalledWith(BADGE.id));
     resolveLoad([]);
     expect(await screen.findByRole("option", { name: BADGE.name })).toBeInTheDocument();
+  });
+});
+
+describe("archive presentation", () => {
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+  it("keeps archived Tickets readable and disables their mutating controls with Galley's reason", () => {
+    const reason = { code: "archived_ticket", message: "archived tickets are read-only" };
+    render(<TicketDetail ticket={{ ...TICKET, archivedAt: "2026-09-29T10:00:00Z", badges: [{ id: BADGE.id, name: BADGE.name }], allowedActions: { statusChanges: [], accept: { available: false, reason } } }} onSave={vi.fn()} {...noopActions()} />);
+    expect(screen.getByTestId("ticket-detail-archived")).toHaveTextContent(reason.message);
+    expect(screen.getByTestId("ticket-detail-badges")).toHaveTextContent(BADGE.name);
+    for (const name of ["Edit", "Archive", "Add badge", "Remove Urgent", "Assign to me"]) {
+      expect(screen.getByRole("button", { name })).toBeDisabled();
+      expect(screen.getByRole("button", { name })).toHaveAttribute("title", reason.message);
+    }
+  });
+
+  it("asks before archiving and only navigates after Galley confirms", async () => {
+    const confirm = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);
+    vi.stubGlobal("confirm", confirm);
+    const onArchive = vi.fn().mockResolvedValue({ ...TICKET, archivedAt: "2026-09-29T10:00:00Z" });
+    const onArchived = vi.fn();
+    render(<TicketDetail ticket={TICKET} onSave={vi.fn()} {...noopActions()} onArchive={onArchive} onArchived={onArchived} />);
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    expect(onArchive).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    await waitFor(() => expect(onArchived).toHaveBeenCalledTimes(1));
+    expect(onArchive).toHaveBeenCalledTimes(1);
   });
 });
 

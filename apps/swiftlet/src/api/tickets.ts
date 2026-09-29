@@ -92,6 +92,7 @@ function parseTicket(payload: unknown): Ticket {
     typeof record.successCriteria !== "string" ||
     typeof record.constraints !== "string" ||
     typeof record.repository !== "string" ||
+    !(record.archivedAt === null || typeof record.archivedAt === "string") ||
     typeof record.createdAt !== "string" ||
     typeof record.updatedAt !== "string" ||
     !Array.isArray(record.badges) ||
@@ -125,6 +126,7 @@ function parseTicket(payload: unknown): Ticket {
     completionCondition: record.completionCondition as Ticket["completionCondition"],
     assigneeType: record.assigneeType as Ticket["assigneeType"],
     badges: record.badges as Ticket["badges"],
+    archivedAt: record.archivedAt,
     goal: record.goal,
     context: record.context,
     successCriteria: record.successCriteria,
@@ -363,4 +365,8 @@ export async function attachTicketBadge(ticketId: string, badgeId: string): Prom
 
 export async function detachTicketBadge(ticketId: string, badgeId: string): Promise<Ticket> {
   return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(ticketId)}/badges/${encodeURIComponent(badgeId)}`, { method: "DELETE" }, "response");
+}
+
+export async function archiveTicket(id: string): Promise<Ticket> {
+  return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(id)}/archive`, { method: "POST" });
 }

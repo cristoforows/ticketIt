@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
-import { navigate, openTicketFullPage, openTicketModal, setBadgeFilter, useBadgeFilter, useRoute } from "./router";
+import { fullPageReturnPath, navigate, openTicketFullPage, openTicketModal, setBadgeFilter, useBadgeFilter, useRoute } from "./router";
 
 function RouteProbe() {
   const route = useRoute();
@@ -115,6 +115,14 @@ describe("router", () => {
 
     expect(window.history.length).toBe(length);
     expect(screen.getByTestId("route")).toHaveTextContent("ticket-detail:abc-123:page");
+  });
+
+  it("keeps the origin view for Archive after opening full-page detail from the board", () => {
+    window.history.pushState({}, "", "/board");
+    render(<RouteProbe />);
+    act(() => openTicketModal("abc-123", "board"));
+    act(() => openTicketFullPage("abc-123"));
+    expect(fullPageReturnPath()).toBe("/board");
   });
 
   it("keeps selected Badges across modal navigation and reacts to query changes", () => {

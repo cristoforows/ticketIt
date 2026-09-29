@@ -181,7 +181,7 @@ paths:
       summary: List the signed-in Owner's Tickets
       tags: [tickets]
       description: >-
-        Returns the signed-in Owner's Tickets, optionally matching any
+        Returns the signed-in Owner's unarchived Tickets, optionally matching any
         selected Badge (OR, with each Ticket returned once). Unknown,
         malformed, or foreign Badge ids return 400 invalid_request.
         Results are ordered by createdAt descending with id descending as
@@ -615,6 +615,33 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorBody"
+  /api/tickets/{id}/archive:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid, x-go-type: string}
+    post:
+      operationId: archiveTicket
+      summary: Archive a Ticket
+      tags: [tickets]
+      description: >-
+        Retains the Ticket, its Status and Badges while removing it from
+        default collections. A second archive is rejected with
+        archived_ticket; an unknown, malformed or foreign id returns 404.
+      responses:
+        "200":
+          description: The archived Ticket.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
   /api/session:
     get:
       operationId: getSession
@@ -739,6 +766,7 @@ components:
           status,
           allowedActions,
           badges,
+          archivedAt,
           template,
           completionCondition,
           assigneeType,
@@ -777,6 +805,10 @@ components:
           description: Ordered by case-insensitive name ascending, then id ascending. Empty when none attached.
           items:
             $ref: "#/components/schemas/TicketBadge"
+        archivedAt:
+          type: [string, "null"]
+          format: date-time
+          description: Null for an active Ticket; RFC3339 UTC archive timestamp otherwise. Status is retained separately.
         template:
           $ref: "#/components/schemas/TicketTemplate"
         assigneeType:

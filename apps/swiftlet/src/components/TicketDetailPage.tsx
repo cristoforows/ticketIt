@@ -10,6 +10,7 @@ import {
   createBadge,
   attachTicketBadge,
   detachTicketBadge,
+  archiveTicket,
   fetchBadges,
   TicketNotFoundError,
   type Ticket,
@@ -19,12 +20,14 @@ import {
 import { collectionQuery } from "../router";
 import { Link } from "./Link";
 import { TicketDetail } from "./TicketDetail";
+import { collectionQuery, fullPageReturnPath, navigate } from "../router";
 
 interface TicketDetailPageProps {
   ticketId: string;
   onUnauthenticated: () => void;
   presentation?: "page" | "modal";
   onCommandSucceeded?: () => void;
+  onArchiveSucceeded?: () => void;
 }
 
 type DetailState =
@@ -33,7 +36,7 @@ type DetailState =
   | { kind: "not-found" }
   | { kind: "error"; message: string };
 
-export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "page", onCommandSucceeded }: TicketDetailPageProps) {
+export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "page", onCommandSucceeded, onArchiveSucceeded }: TicketDetailPageProps) {
   const [state, setState] = useState<DetailState>({ kind: "loading" });
 
   useEffect(() => {
@@ -151,6 +154,8 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
           onLoadBadges={loadBadges}
           onAttachBadge={(badgeId) => runCommand(() => attachTicketBadge(ticketId, badgeId))}
           onDetachBadge={(badgeId) => runCommand(() => detachTicketBadge(ticketId, badgeId))}
+          onArchive={() => runCommand(() => archiveTicket(ticketId))}
+          onArchived={() => (onArchiveSucceeded ? onArchiveSucceeded() : navigate(`${fullPageReturnPath()}${collectionQuery()}`))}
         />
       )}
     </section>
