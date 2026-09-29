@@ -1,3 +1,173 @@
 @layer theme, base, components, utilities;
 @import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
 @import "tailwindcss/utilities.css" layer(utilities);
+
+@theme static {
+  --font-sans: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-mono: var(--font-sans);
+
+  --color-ground: #23201d;
+  --color-header: #1a1816;
+  --color-amber: #e9a23b;
+  --color-paper: #fffdf7;
+  --color-ink: #292524;
+  --color-muted: #736c66;
+  --color-dim: #a8a29e;
+  --color-rule: #d6d3d1;
+  --color-scrim: #00000073;
+
+  --color-status-backlog: #8a817c;
+  --color-status-backlog-text: #918984;
+  --color-status-backlog-deep: #79716c;
+  --color-status-ready: #2a9d8f;
+  --color-status-ready-text: #2a9d8f;
+  --color-status-ready-deep: #227f74;
+  --color-status-in-progress: #e9a23b;
+  --color-status-in-progress-text: #e9a23b;
+  --color-status-in-progress-deep: #9f6612;
+  --color-status-blocked: #d62828;
+  --color-status-blocked-text: #e26161;
+  --color-status-blocked-deep: #d62828;
+  --color-status-in-review: #6a4c93;
+  --color-status-in-review-text: #9a80bd;
+  --color-status-in-review-deep: #6a4c93;
+  --color-status-done: #43aa8b;
+  --color-status-done-text: #43aa8b;
+  --color-status-done-deep: #327e67;
+
+  --text-label: 0.6875rem;
+  --text-label--line-height: 1.4;
+  --text-body: 0.8125rem;
+  --text-body--line-height: 1.55;
+  --text-title: 1.25rem;
+  --text-title--line-height: 1.2;
+  --text-display: 1.75rem;
+  --text-display--line-height: 1.1;
+  --tracking-label: 0.18em;
+  --tracking-wordmark: 0.24em;
+  --tracking-button: 0.03em;
+
+  --radius-tag: 0.125rem;
+  --radius-pill: 9999px;
+
+  --shadow-paper: 0 2px 0 #0000000d, 0 12px 24px -12px #00000066;
+  --shadow-slip: 0 2px 0 #0000000d, 0 8px 16px -8px #00000040;
+
+  --rule-thick: 4px;
+  --rule-thin: 1px;
+  --size-page: 72rem;
+  --size-narrow: 28rem;
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+    --focus: var(--color-amber);
+    --status: var(--color-status-backlog);
+    --status-text: var(--color-status-backlog-text);
+    --status-deep: var(--color-status-backlog-deep);
+  }
+
+  [data-status="Backlog"] {
+    --status: var(--color-status-backlog);
+    --status-text: var(--color-status-backlog-text);
+    --status-deep: var(--color-status-backlog-deep);
+  }
+  [data-status="Ready"] {
+    --status: var(--color-status-ready);
+    --status-text: var(--color-status-ready-text);
+    --status-deep: var(--color-status-ready-deep);
+  }
+  [data-status="InProgress"] {
+    --status: var(--color-status-in-progress);
+    --status-text: var(--color-status-in-progress-text);
+    --status-deep: var(--color-status-in-progress-deep);
+  }
+  [data-status="Blocked"] {
+    --status: var(--color-status-blocked);
+    --status-text: var(--color-status-blocked-text);
+    --status-deep: var(--color-status-blocked-deep);
+  }
+  [data-status="InReview"] {
+    --status: var(--color-status-in-review);
+    --status-text: var(--color-status-in-review-text);
+    --status-deep: var(--color-status-in-review-deep);
+  }
+  [data-status="Done"] {
+    --status: var(--color-status-done);
+    --status-text: var(--color-status-done-text);
+    --status-deep: var(--color-status-done-deep);
+  }
+
+  body {
+    background-color: var(--color-ground);
+    background-image: radial-gradient(#ffffff08 1px, transparent 1px);
+    background-size: 16px 16px;
+    color: var(--color-paper);
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+  [data-surface="paper"],
+  [role="dialog"],
+  [role="menu"] {
+    --focus: var(--color-ink);
+    color: var(--color-ink);
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-weight: 700;
+  }
+  a {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  button, select, textarea, input:not([type="checkbox"], [type="radio"]) {
+    border: var(--rule-thin) solid var(--color-ink);
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+    padding: 0.125rem 0.5rem;
+  }
+  button {
+    cursor: pointer;
+  }
+  :disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+  label {
+    display: inline-block;
+    margin-inline-end: 0.75rem;
+  }
+  :where([data-surface="paper"], [role="dialog"]) :where(button:not([class]), select:not([class]), input:not([class], [type="checkbox"], [type="radio"])) {
+    margin-inline-end: 0.5rem;
+  }
+  :where([data-surface="paper"], [role="dialog"]) :where(input:not([class])[type="checkbox"], input:not([class])[type="radio"]) {
+    margin-inline-end: 0.375rem;
+  }
+
+  :is([data-surface="paper"], [role="dialog"]) :where(h2, h3, p, ul, ol, dl, form) {
+    margin-block: 0.5rem;
+  }
+  :is([data-surface="paper"], [role="dialog"]) li + li {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: var(--rule-thin) dashed var(--color-rule);
+  }
+  [role="menu"] li + li {
+    border-top: 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation: none !important;
+      transition: none !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}

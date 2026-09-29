@@ -10,6 +10,8 @@ Each milestone spans multiple implementation sessions. Before implementing it, s
 
 Make foundational work explicit: boot the browser/API path, establish persistence, then add authentication and Ticket behavior. Likewise, connect Michelin before claiming work, then add execution start, progress, and delivery. Touching several applications is acceptable when the change reuses established boundaries; building several foundations and a feature in one task is not the intended unit of work.
 
+New Swiftlet screens use the order-rail design tokens (`apps/swiftlet/src/styles.css`) and shared components (`apps/swiftlet/src/components/ui/`) instead of one-off values; see [#114](https://github.com/cristoforows/ticketIt/issues/114).
+
 | Milestone | Published issue | Blocked by |
 | --- | --- | --- |
 | M1 | [#2 — Foundational decisions and integration proofs](https://github.com/cristoforows/ticketIt/issues/2) | None |
@@ -67,7 +69,7 @@ Work the frontier: a milestone can start when its blockers are complete. M5 and 
 
 **Output:** a consistent everyday tracker with board/list navigation, Badges, and archival behavior.
 
-**Status:** #87–#94 locally gate-verified at [M3.9 #95](evidence/m3/README.md) against real PostgreSQL and the full browser suite. Board/list/modal/full-page consistency, reusable Badge workflows, archived visibility and Ready/Done Restore are demonstrated. Archive exclusion from future execution claims and open-Round editing/archive locks remain M4/M5 checks because M3 has no execution path. PRs #105–#107 are open with all three existing CI jobs green; browser CI coverage is routed to [#109](https://github.com/cristoforows/ticketIt/issues/109). Manual Ticket priority/order policy is assigned to [#108](https://github.com/cristoforows/ticketIt/issues/108) for M4.
+**Status:** #87–#94 locally gate-verified at [M3.9 #95](evidence/m3/README.md) against real PostgreSQL and the full browser suite. Board/list/modal/full-page consistency, reusable Badge workflows, archived visibility and Ready/Done Restore are demonstrated. Archive exclusion from future execution claims and open-Round editing/archive locks remain M4/M5 checks because M3 has no execution path. PRs #105–#107 are open with all three existing CI jobs green; browser CI coverage is routed to [#109](https://github.com/cristoforows/ticketIt/issues/109). Manual Ticket priority/order policy is assigned to [#108](https://github.com/cristoforows/ticketIt/issues/108) for M4. The order-rail visual foundation ([#114](https://github.com/cristoforows/ticketIt/issues/114), M3.10–M3.14) follows: [#115](https://github.com/cristoforows/ticketIt/issues/115) adds the tokens, shared components, app shell and sign-in; the Board, Backlog and Ticket detail restyles come in M3.11–M3.13, with the Owner smoothing review in M3.14.
 
 - Add a status-column board over the same Ticket collection and authoritative transition commands.
 - Open details in a modal from board/list, preserving position; retain direct full-page URLs and Open full page.

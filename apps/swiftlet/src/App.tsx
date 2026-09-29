@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { fetchSession, UnauthenticatedError, type Owner } from "./api/session";
 import { AppShell } from "./components/AppShell";
+import { AppHeader } from "./components/AppHeader";
 import { SignInPage } from "./components/SignInPage";
+import { ErrorMessage, LoadingMessage } from "./components/ui";
 
 type SessionState =
   | { kind: "loading" }
@@ -46,25 +48,23 @@ function App() {
 
   const returnToSignIn = () => setState({ kind: "signedOut" });
 
+  if (state.kind === "signedIn") {
+    return <AppShell owner={state.owner} onSignedOut={returnToSignIn} onUnauthenticated={returnToSignIn} />;
+  }
+
   return (
-    <main>
-      <h1>Swiftlet</h1>
-      {state.kind === "loading" && (
-        <p role="status" data-testid="session-loading">
-          Checking session…
-        </p>
-      )}
-      {state.kind === "error" && (
-        <div role="alert" data-testid="session-error">
-          <p>Unable to check the current session.</p>
-          <p data-testid="session-error-message">{state.message}</p>
-        </div>
-      )}
-      {state.kind === "signedOut" && <SignInPage />}
-      {state.kind === "signedIn" && (
-        <AppShell owner={state.owner} onSignedOut={returnToSignIn} onUnauthenticated={returnToSignIn} />
-      )}
-    </main>
+    <>
+      <AppHeader />
+      <main className="mx-auto max-w-(--size-page) px-6 py-8">
+        {state.kind === "loading" && <LoadingMessage data-testid="session-loading">Checking session…</LoadingMessage>}
+        {state.kind === "error" && (
+          <ErrorMessage title="Unable to check the current session." data-testid="session-error">
+            <p data-testid="session-error-message">{state.message}</p>
+          </ErrorMessage>
+        )}
+        {state.kind === "signedOut" && <SignInPage />}
+      </main>
+    </>
   );
 }
 
