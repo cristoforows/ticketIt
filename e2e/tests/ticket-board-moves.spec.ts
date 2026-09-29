@@ -116,6 +116,26 @@ test("stale move shows Galley's rejection and retains the original card", async 
   expect((await readTicket(page, created.id)).status).toBe("Ready");
 });
 
+test("a rejected keyboard move returns focus to the card's Move to… control", async ({ page, request }) => {
+  await signIn(page, request, "owner");
+  const created = await createTicket(page, `stale keyboard move ${Date.now()}`);
+  await page.goto("/board");
+  const source = getCardInStatus(page, "Backlog", created.id);
+  await expect(source).toBeVisible();
+  expect((await changeTicketStatusDirect(page, created.id, "Ready")).ok).toBe(true);
+  const rejection = await changeTicketStatusDirect(page, created.id, "Ready");
+  expect(rejection.ok).toBe(false);
+
+  const control = source.getByText("Move to…");
+  await control.focus();
+  await page.keyboard.press("Enter");
+  await page.getByRole("menuitem", { name: "Ready" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("ticket-board-move-error")).toHaveText(rejection.errorMessage!);
+  await expect(source).toBeVisible();
+  await expect(control).toBeFocused();
+});
+
 test("a pending board move blocks plain detail entry until Galley's returned Ticket is available", async ({ page, request }) => {
   await signIn(page, request, "owner");
   const created = await createTicket(page, `pending detail ${Date.now()}`);

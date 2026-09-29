@@ -519,8 +519,9 @@ and replacing its offered moves; a rejection keeps the last displayed
 card in place and shows Galley's message. During a pending move, its
 card reports `aria-busy`, and its detail link is `aria-disabled` and
 cannot open a stale modal through a plain click. It becomes available
-again after success or rejection. After a keyboard move, focus returns
-to the relocated card's `Move to…` control. A successful command also
+again after success or rejection. After a keyboard move settles, either
+way, focus returns to that card's `Move to…` control; a later collection
+read does not move it back to a Ticket whose modal closed earlier. A successful command also
 starts a fresh collection read: an overlapping modal-close GET cannot
 lose edits to other Tickets or replace the returned Ticket. Native drag
 events need no new dependency and are driven by Playwright's `dragTo` in

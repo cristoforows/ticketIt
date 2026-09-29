@@ -207,7 +207,8 @@ phase, while Galley is running.
 `tests/ticket-board-moves.spec.ts` drives native drag and the keyboard
 `Move to…` Radix UI menu, checks persisted Status and returned allowed
 actions after reload, proves disallowed and Done drops send no command, and
-compares a stale move's visible rejection with Galley's live error. It
+compares a stale move's visible rejection with Galley's live error,
+including focus returning to `Move to…` after a rejected keyboard move. It
 also defers the Status request to check that plain detail entry is
 unavailable until the move settles, and holds a modal-close GET
 containing another Ticket's edit while a card moves: the board must

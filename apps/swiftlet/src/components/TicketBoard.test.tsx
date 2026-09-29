@@ -173,5 +173,28 @@ describe("TicketBoard", () => {
     expect(await screen.findByTestId("ticket-board-move-error")).toHaveTextContent("Galley stale move reason");
     expect(screen.getByTestId("board-status-Backlog")).toContainElement(card);
     expect(within(card).getByRole("link")).not.toHaveAttribute("aria-disabled", "true");
+    await vi.waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("keeps focus on a moved card after the follow-up read, not on the Ticket whose modal closed earlier", async () => {
+    const actions = { statusChanges: ["Ready"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } } };
+    const closed = { ...ticket("closed", "Backlog"), allowedActions: actions };
+    const moving = { ...ticket("moving", "Backlog"), allowedActions: actions };
+    const changed = { ...moving, status: "Ready", allowedActions: { ...actions, statusChanges: ["Backlog"] } };
+    const fetchStub = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ tickets: [closed, moving] }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => changed })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ tickets: [closed, changed] }) });
+    vi.stubGlobal("fetch", fetchStub);
+    render(<TicketBoard onUnauthenticated={() => {}} refreshKey={1} focusTicketId="closed" />);
+    await vi.waitFor(() => expect(within(screen.getByTestId("board-ticket-closed")).getByRole("link")).toHaveFocus());
+    const trigger = within(screen.getByTestId("board-ticket-moving")).getByRole("button", { name: "Move to…" });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Ready" }));
+    await vi.waitFor(() => expect(fetchStub).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(screen.getByTestId("board-status-Ready")).toContainElement(screen.getByTestId("board-ticket-moving")));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(within(screen.getByTestId("board-ticket-moving")).getByRole("button", { name: "Move to…" })).toHaveFocus();
   });
 });

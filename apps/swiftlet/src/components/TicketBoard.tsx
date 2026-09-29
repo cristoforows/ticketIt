@@ -27,6 +27,7 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
   const commandPending = useRef(false);
   const requestId = useRef(0);
   const focusMovedTicketId = useRef<string | null>(null);
+  const focusedRefreshKey = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,7 +54,8 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
   }, [onUnauthenticated, refreshKey, moveRefreshKey]);
 
   useEffect(() => {
-    if (refreshKey > 0 && state.kind === "loaded" && state.refreshKey === refreshKey && focusTicketId) {
+    if (refreshKey > focusedRefreshKey.current && state.kind === "loaded" && state.refreshKey === refreshKey && focusTicketId) {
+      focusedRefreshKey.current = refreshKey;
       refocusTicketRowIfFocusLost("board", focusTicketId);
     }
   }, [state, refreshKey, focusTicketId]);
@@ -64,11 +66,12 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
     focusMovedTicketId.current = null;
     const card = document.querySelector<HTMLElement>(`[data-testid="board-ticket-${id}"]`);
     (card?.querySelector<HTMLElement>('[data-testid="move-to-trigger"]') ?? card?.querySelector<HTMLElement>("a"))?.focus({ preventScroll: true });
-  }, [state]);
+  }, [state, pendingId]);
 
   const draggingTicket = state.kind === "loaded" ? state.tickets.find((ticket) => ticket.id === draggingId) : undefined;
-  const canMove = (ticket: Ticket, target: Ticket["status"]) =>
-    target !== "Done" && ticket.allowedActions.statusChanges.includes(target);
+  const moveTargets = (ticket: Ticket): Ticket["status"][] =>
+    ticket.allowedActions.statusChanges.filter((target) => target !== "Done");
+  const canMove = (ticket: Ticket, target: Ticket["status"]) => moveTargets(ticket).includes(target);
 
   async function moveTicket(ticket: Ticket, target: Ticket["status"]) {
     if (commandPending.current || !canMove(ticket, target)) return;
@@ -88,6 +91,7 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
         onUnauthenticated();
         return;
       }
+      focusMovedTicketId.current = ticket.id;
       setMoveError(error instanceof Error ? error.message : "Failed to move the ticket.");
     } finally {
       commandPending.current = false;
@@ -109,15 +113,16 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
         <div data-testid="board-columns" className="grid grid-flow-col auto-cols-[minmax(12rem,1fr)] gap-4 overflow-x-auto">
           {statuses.map(({ value, label }) => {
             const tickets = state.tickets.filter((ticket) => ticket.status === value);
+            const isDropTarget = draggingTicket !== undefined && canMove(draggingTicket, value);
             return (
               <section
                 key={value}
                 data-testid={`board-status-${value}`}
-                data-drop-target={draggingTicket && canMove(draggingTicket, value) ? "true" : undefined}
-                className={`min-w-0${draggingTicket && canMove(draggingTicket, value) ? " -outline-offset-2 bg-blue-600/10 outline-2 outline-dashed outline-current" : ""}`}
+                data-drop-target={isDropTarget ? "true" : undefined}
+                className={`min-w-0${isDropTarget ? " -outline-offset-2 bg-blue-600/10 outline-2 outline-dashed outline-current" : ""}`}
                 aria-labelledby={`board-heading-${value}`}
                 onDragOver={(event) => {
-                  if (!draggingTicket || !canMove(draggingTicket, value)) return;
+                  if (!isDropTarget) return;
                   event.preventDefault();
                   event.dataTransfer.dropEffect = "move";
                 }}
@@ -131,14 +136,15 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
                 {tickets.length === 0 ? <p>No tickets.</p> : (
                   <ul>
                     {tickets.map((ticket) => {
-                      const eligibleTargets = ticket.allowedActions.statusChanges.filter((target) => target !== "Done");
+                      const eligibleTargets = moveTargets(ticket);
+                      const pending = pendingId === ticket.id;
                       return (
                         <li
                           key={ticket.id}
                           data-testid={ticketRowTestId("board", ticket.id)}
-                          aria-busy={pendingId === ticket.id}
-                          draggable={pendingId !== ticket.id}
-                          className={pendingId === ticket.id ? undefined : "cursor-grab"}
+                          aria-busy={pending}
+                          draggable={!pending}
+                          className={pending ? undefined : "cursor-grab"}
                           onDragStart={(event) => {
                             if (commandPending.current) {
                               event.preventDefault();
@@ -150,9 +156,9 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
                           }}
                           onDragEnd={() => setDraggingId(null)}
                         >
-                          <TicketModalLink ticketId={ticket.id} view="board" disabled={pendingId === ticket.id}>{ticket.title}</TicketModalLink>
+                          <TicketModalLink ticketId={ticket.id} view="board" disabled={pending}>{ticket.title}</TicketModalLink>
                           <p>Template: {ticket.template}</p>
-                          {pendingId === ticket.id && <span role="status">Moving…</span>}
+                          {pending && <span role="status">Moving…</span>}
                           {eligibleTargets.length > 0 && (
                             <DropdownMenu.Root modal={false}>
                               <DropdownMenu.Trigger data-testid="move-to-trigger" disabled={pendingId !== null}>Move to…</DropdownMenu.Trigger>
