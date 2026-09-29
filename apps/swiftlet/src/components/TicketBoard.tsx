@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { UnauthenticatedError } from "../api/session";
 import { fetchTickets, type Ticket } from "../api/tickets";
-import { openTicketModal } from "../router";
-import { isPlainLinkClick, Link } from "./Link";
+import { refocusTicketRowIfFocusLost, TicketModalLink, ticketRowTestId } from "./TicketModalLink";
 
 const statuses: { value: Ticket["status"]; label: string }[] = [
   { value: "Backlog", label: "Backlog" },
@@ -46,7 +45,7 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
 
   useEffect(() => {
     if (refreshKey > 0 && state.kind === "loaded" && state.refreshKey === refreshKey && focusTicketId) {
-      document.querySelector<HTMLElement>(`[data-testid="board-ticket-${focusTicketId}"] a`)?.focus({ preventScroll: true });
+      refocusTicketRowIfFocusLost("board", focusTicketId);
     }
   }, [state, refreshKey, focusTicketId]);
 
@@ -57,11 +56,11 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
       {state.kind === "error" && (
         <div role="alert" data-testid="ticket-board-error">
           <p>Unable to load tickets.</p>
-          <p>{state.message}</p>
+          <p data-testid="ticket-board-error-message">{state.message}</p>
         </div>
       )}
       {state.kind === "loaded" && (
-        <div className="grid grid-flow-col auto-cols-[minmax(12rem,1fr)] gap-4 overflow-x-auto">
+        <div data-testid="board-columns" className="grid grid-flow-col auto-cols-[minmax(12rem,1fr)] gap-4 overflow-x-auto">
           {statuses.map(({ value, label }) => {
             const tickets = state.tickets.filter((ticket) => ticket.status === value);
             return (
@@ -70,12 +69,8 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
                 {tickets.length === 0 ? <p>No tickets.</p> : (
                   <ul>
                     {tickets.map((ticket) => (
-                      <li key={ticket.id} data-testid={`board-ticket-${ticket.id}`}>
-                        <Link to={`/tickets/${encodeURIComponent(ticket.id)}`} onClick={(event) => {
-                          if (!isPlainLinkClick(event)) return;
-                          event.preventDefault();
-                          openTicketModal(ticket.id, "board");
-                        }}>{ticket.title}</Link>
+                      <li key={ticket.id} data-testid={ticketRowTestId("board", ticket.id)}>
+                        <TicketModalLink ticketId={ticket.id} view="board">{ticket.title}</TicketModalLink>
                         <p>Template: {ticket.template}</p>
                       </li>
                     ))}
@@ -87,9 +82,9 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
         </div>
       )}
       {state.kind === "loaded" && state.refreshError && (
-        <div role="alert" data-testid="ticket-board-error">
+        <div role="alert" data-testid="ticket-board-refresh-error">
           <p>Unable to refresh tickets.</p>
-          <p>{state.refreshError}</p>
+          <p data-testid="ticket-board-refresh-error-message">{state.refreshError}</p>
         </div>
       )}
     </section>

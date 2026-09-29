@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
-import { navigate, useRoute } from "./router";
+import { navigate, openTicketFullPage, openTicketModal, useRoute } from "./router";
 
 function RouteProbe() {
   const route = useRoute();
   return (
     <p data-testid="route">
-      {route.name === "ticket-detail" ? `ticket-detail:${route.ticketId}` : route.name}
+      {route.name === "ticket-detail" ? `ticket-detail:${route.ticketId}:${route.background ?? "page"}` : route.name}
     </p>
   );
 }
@@ -30,7 +30,7 @@ describe("router", () => {
 
     render(<RouteProbe />);
 
-    expect(screen.getByTestId("route")).toHaveTextContent("ticket-detail:abc-123");
+    expect(screen.getByTestId("route")).toHaveTextContent("ticket-detail:abc-123:page");
   });
 
   it("reads /board on direct load and reacts to navigation back to it", () => {
@@ -73,7 +73,7 @@ describe("router", () => {
     });
 
     expect(window.location.pathname).toBe("/tickets/xyz-789");
-    expect(screen.getByTestId("route")).toHaveTextContent("ticket-detail:xyz-789");
+    expect(screen.getByTestId("route")).toHaveTextContent("ticket-detail:xyz-789:page");
   });
 
   it("reacts to browser back/forward (a real popstate event), not only navigate()", () => {
@@ -85,6 +85,36 @@ describe("router", () => {
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
 
-    expect(screen.getByTestId("route")).toHaveTextContent("ticket-detail:back-forward-test");
+    expect(screen.getByTestId("route")).toHaveTextContent("ticket-detail:back-forward-test:page");
+  });
+
+  it("openTicketModal() keeps the canonical Ticket URL and records the view underneath", () => {
+    window.history.pushState({}, "", "/board");
+    render(<RouteProbe />);
+
+    act(() => openTicketModal("a/b", "board"));
+
+    expect(window.location.pathname).toBe("/tickets/a%2Fb");
+    expect(screen.getByTestId("route")).toHaveTextContent("ticket-detail:a/b:board");
+  });
+
+  it("ignores modal history state written by an earlier page load", () => {
+    window.history.pushState({ ticketModal: { pageLoadId: "earlier-load", background: "backlog" } }, "", "/tickets/abc-123");
+
+    render(<RouteProbe />);
+
+    expect(screen.getByTestId("route")).toHaveTextContent("ticket-detail:abc-123:page");
+  });
+
+  it("openTicketFullPage() replaces the modal entry with the full page", () => {
+    window.history.pushState({}, "", "/");
+    render(<RouteProbe />);
+    act(() => openTicketModal("abc-123", "backlog"));
+    const length = window.history.length;
+
+    act(() => openTicketFullPage("abc-123"));
+
+    expect(window.history.length).toBe(length);
+    expect(screen.getByTestId("route")).toHaveTextContent("ticket-detail:abc-123:page");
   });
 });

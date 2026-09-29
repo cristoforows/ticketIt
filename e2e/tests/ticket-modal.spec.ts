@@ -140,7 +140,7 @@ for (const view of ["list", "board"] as const) {
     await expect(page.getByRole("dialog", { name: "Ticket details" })).toBeVisible();
     await page.route("**/api/tickets", (route) => route.fulfill({ status: 503, body: "unavailable" }));
     await page.getByRole("dialog").getByRole("button", { name: "Close" }).click();
-    await expect(page.getByTestId(view === "list" ? "ticket-list-error" : "ticket-board-error")).toBeVisible();
+    await expect(page.getByTestId(view === "list" ? "ticket-list-refresh-error" : "ticket-board-refresh-error")).toBeVisible();
     await expect(row.getByRole("link")).toBeVisible();
     await expect(row.getByRole("link")).toBeFocused();
     expect(await page.evaluate(() => window.scrollY)).toBe(before);

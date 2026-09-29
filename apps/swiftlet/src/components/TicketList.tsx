@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { UnauthenticatedError } from "../api/session";
 import { createTicket, fetchTickets, TICKET_TEMPLATES, TICKET_TITLE_MAX_LENGTH, type Ticket } from "../api/tickets";
-import { openTicketModal } from "../router";
-import { isPlainLinkClick, Link } from "./Link";
+import { refocusTicketRowIfFocusLost, TicketModalLink, ticketRowTestId } from "./TicketModalLink";
 
 type ListState =
   | { kind: "loading" }
@@ -57,7 +56,7 @@ export function TicketList({ onUnauthenticated, refreshKey = 0, focusTicketId }:
 
   useEffect(() => {
     if (refreshKey > 0 && state.kind === "loaded" && state.refreshKey === refreshKey && focusTicketId) {
-      document.querySelector<HTMLElement>(`[data-testid="ticket-item-${focusTicketId}"] a`)?.focus({ preventScroll: true });
+      refocusTicketRowIfFocusLost("backlog", focusTicketId);
     }
   }, [state, refreshKey, focusTicketId]);
 
@@ -139,23 +138,19 @@ export function TicketList({ onUnauthenticated, refreshKey = 0, focusTicketId }:
       {state.kind === "loaded" && state.tickets.length > 0 && (
         <ul data-testid="ticket-list-items">
           {state.tickets.map((ticket) => (
-            <li key={ticket.id} data-testid={`ticket-item-${ticket.id}`}>
-              <Link to={`/tickets/${encodeURIComponent(ticket.id)}`} data-testid="ticket-title" onClick={(event) => {
-                if (!isPlainLinkClick(event)) return;
-                event.preventDefault();
-                openTicketModal(ticket.id, "backlog");
-              }}>
+            <li key={ticket.id} data-testid={ticketRowTestId("backlog", ticket.id)}>
+              <TicketModalLink ticketId={ticket.id} view="backlog" data-testid="ticket-title">
                 {ticket.title}
-              </Link>{" "}
+              </TicketModalLink>{" "}
               <span data-testid="ticket-status">{ticket.status}</span>
             </li>
           ))}
         </ul>
       )}
       {state.kind === "loaded" && state.refreshError && (
-        <div role="alert" data-testid="ticket-list-error">
+        <div role="alert" data-testid="ticket-list-refresh-error">
           <p>Unable to refresh tickets.</p>
-          <p data-testid="ticket-list-error-message">{state.refreshError}</p>
+          <p data-testid="ticket-list-refresh-error-message">{state.refreshError}</p>
         </div>
       )}
     </section>

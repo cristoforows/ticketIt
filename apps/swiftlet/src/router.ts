@@ -3,7 +3,8 @@ import { useSyncExternalStore } from "react";
 export type CollectionRoute = "backlog" | "board";
 export type Route = { name: CollectionRoute } | { name: "ticket-detail"; ticketId: string; background?: CollectionRoute };
 
-const pageLoadId = crypto.randomUUID();
+// crypto.randomUUID is undefined outside secure contexts, e.g. a LAN IP over HTTP.
+const pageLoadId = `${performance.timeOrigin}:${Math.random()}`;
 
 interface ModalHistoryState {
   ticketModal: { pageLoadId: string; background: CollectionRoute };
@@ -38,11 +39,14 @@ function getSnapshot(): string {
   return JSON.stringify([window.location.pathname, modalBackground()]);
 }
 
-/** Re-renders on browser back/forward and on navigate()'s own synthetic "popstate". */
 export function useRoute(): Route {
   const snapshot = useSyncExternalStore(subscribe, getSnapshot);
   const [pathname, background] = JSON.parse(snapshot) as [string, CollectionRoute | undefined];
   return parseRoute(pathname, background);
+}
+
+export function collectionPath(view: CollectionRoute): string {
+  return view === "board" ? "/board" : "/";
 }
 
 export function openTicketModal(ticketId: string, background: CollectionRoute): void {

@@ -56,9 +56,6 @@ test.describe("ticket detail page", () => {
     await expect(page.getByTestId("ticket-detail-error")).toHaveCount(0);
   });
 
-  // The in-app Link calls history.pushState, which fires no event of its
-  // own -- router.ts dispatches a synthetic popstate so that the browser's
-  // own back button and in-app navigation share one subscription.
   test("the browser back button returns to the Backlog from a Ticket's modal", async ({ page }) => {
     const title = `ticket-detail: browser back ${Date.now()}`;
     const ticket = await createTicket(page, title);

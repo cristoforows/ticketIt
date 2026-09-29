@@ -208,7 +208,7 @@ phase, while Galley is running.
 
 `tests/ticket-modal.spec.ts` opens Tickets below the fold from both list
 and board, checks canonical URL, retained scroll/focus after Escape,
-Close and Back, Forward reopening, inert background, direct/reloaded
+Close and Back, Forward reopening, `aria-hidden` background, direct/reloaded
 full-page detail, and Open full page. Edits, assignment, Accept, and a
 board Status move use the real modal controls; after close the
 underlying view is checked against live Galley `GET /api/tickets` data.

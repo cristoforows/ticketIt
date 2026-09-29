@@ -503,8 +503,6 @@ Styling uses Tailwind CSS 4 through `@tailwindcss/vite`. `src/styles.css`
 imports its theme and utilities, without Preflight, so the existing
 native typography and form styles remain. Board layout and modal
 presentation use utility classes; there is no separate board stylesheet.
-Run `npm ci && npm test && npm run build` here; `cd e2e && ./run.sh`
-verifies the rendered board and modal in a browser.
 
 ## Ticket detail modal (issue #89)
 
@@ -517,8 +515,9 @@ the modal. Modified clicks/new tabs remain ordinary links. A page
 reload or direct navigation has a new page-load identifier, so the
 same URL renders the dedicated full page. "Open full page" replaces the
 modal history entry with the full-page presentation (its URL stays the
-same). The dialog moves focus inside, traps keyboard focus, and marks
-the background inert; closing returns focus to the originating Ticket
+same). The dialog moves focus inside, traps keyboard focus, hides the
+background from assistive technology (`aria-hidden`) and blocks its
+pointer events; closing returns focus to the originating Ticket
 link, including its new board position after a Status change.
 
 `TicketDetailModal` renders `TicketDetailPage` in modal mode: one fetch
@@ -530,7 +529,8 @@ ordering, and placement. A failed refresh shows an error beside the
 last-good rows, retaining scroll and focus. A command that finishes
 after Close or Back triggers another Galley refresh, superseding any
 response fetched before that command committed. Refocus is limited to
-the originating collection, not later view navigation. No API or
+the originating collection, not later view navigation, and never takes
+focus the Owner has already moved elsewhere. No API or
 workflow change was needed. Run `npm test && npm run build` here and
 `cd e2e && ./run.sh` from repo
 root; `e2e/tests/ticket-modal.spec.ts` covers both views and mutations.

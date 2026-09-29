@@ -1,7 +1,8 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { openTicketFullPage, type CollectionRoute } from "../router";
+import { collectionPath, openTicketFullPage, type CollectionRoute } from "../router";
 import { isPlainLinkClick } from "./Link";
 import { TicketDetailPage } from "./TicketDetailPage";
+import { focusTicketRow } from "./TicketModalLink";
 
 interface TicketDetailModalProps {
   ticketId: string;
@@ -20,9 +21,7 @@ export function TicketDetailModal({ ticketId, background, onClose, onUnauthentic
           aria-describedby={undefined}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
-            if (window.location.pathname !== (background === "board" ? "/board" : "/")) return;
-            const row = background === "board" ? `board-ticket-${ticketId}` : `ticket-item-${ticketId}`;
-            document.querySelector<HTMLElement>(`[data-testid="${row}"] a`)?.focus({ preventScroll: true });
+            if (window.location.pathname === collectionPath(background)) focusTicketRow(background, ticketId);
           }}
           className="fixed top-1/2 left-1/2 z-50 box-border w-[min(40rem,calc(100vw-2rem))] max-h-[calc(100vh-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto border-2 border-solid border-current bg-[Canvas] p-4 text-[CanvasText]"
         >

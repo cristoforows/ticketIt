@@ -123,6 +123,41 @@ describe("TicketList", () => {
     expect(await screen.findByTestId("ticket-title")).toHaveAttribute("href", `/tickets/${TICKET_A.id}`);
   });
 
+  it("refocuses the closed modal's Ticket after a refresh when focus was lost", async () => {
+    stubFetch({ "GET /api/tickets": jsonResponse({ tickets: [TICKET_A, TICKET_B] }) });
+    const { rerender } = renderTicketList();
+    await screen.findAllByTestId("ticket-title");
+
+    rerender(<TicketList onUnauthenticated={() => {}} refreshKey={1} focusTicketId={TICKET_B.id} />);
+
+    await vi.waitFor(() => expect(screen.getAllByTestId("ticket-title")[1]).toHaveFocus());
+  });
+
+  it("does not take focus from where the Owner moved it before a late refresh settles", async () => {
+    stubFetch({ "GET /api/tickets": jsonResponse({ tickets: [TICKET_A, TICKET_B] }) });
+    const { rerender } = renderTicketList();
+    await screen.findAllByTestId("ticket-title");
+    screen.getByTestId("ticket-title-input").focus();
+
+    rerender(<TicketList onUnauthenticated={() => {}} refreshKey={1} focusTicketId={TICKET_B.id} />);
+    await act(async () => {});
+
+    expect(screen.getByTestId("ticket-title-input")).toHaveFocus();
+  });
+
+  it("keeps the last loaded Tickets and reports a failed refresh separately", async () => {
+    const api = stubFetch({ "GET /api/tickets": jsonResponse({ tickets: [TICKET_A] }) });
+    const { rerender } = renderTicketList();
+    await screen.findByTestId("ticket-title");
+    api.set("GET /api/tickets", jsonResponse({ error: "boom" }, 503, "Service Unavailable"));
+
+    rerender(<TicketList onUnauthenticated={() => {}} refreshKey={1} />);
+
+    expect(await screen.findByTestId("ticket-list-refresh-error-message")).toHaveTextContent("503");
+    expect(screen.getByTestId("ticket-title")).toHaveTextContent(TICKET_A.title);
+    expect(screen.queryByTestId("ticket-list-error")).not.toBeInTheDocument();
+  });
+
   it("renders an explicit error state when the initial fetch fails", async () => {
     stubFetch({ "GET /api/tickets": jsonResponse({ error: "boom" }, 503, "Service Unavailable") });
 
