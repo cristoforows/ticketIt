@@ -118,8 +118,11 @@ describe("TicketBoard", () => {
     stubTickets([{ ...ticket("moving", "Backlog"), allowedActions: { statusChanges: ["Ready", "Blocked", "Done"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } } } }]);
     render(<TicketBoard onUnauthenticated={() => {}} />);
     const card = await screen.findByTestId("board-ticket-moving");
-    fireEvent.click(within(card).getByText("Move to…"));
-    expect(within(card).getAllByRole("button").map((button) => button.getAttribute("data-move-target"))).toEqual(["Ready", "Blocked"]);
+    const trigger = within(card).getByRole("button", { name: "Move to…" });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    expect((await screen.findAllByRole("menuitem")).map((item) => item.getAttribute("data-move-target"))).toEqual(["Ready", "Blocked"]);
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
     fireEvent.dragStart(card, { dataTransfer: { setData: vi.fn(), effectAllowed: "move" } });
     expect(screen.getByTestId("board-status-Ready")).toHaveAttribute("data-drop-target", "true");
     expect(screen.getByTestId("board-status-Blocked")).toHaveAttribute("data-drop-target", "true");
@@ -139,17 +142,21 @@ describe("TicketBoard", () => {
     vi.stubGlobal("fetch", fetchStub);
     render(<TicketBoard onUnauthenticated={() => {}} />);
     const card = await screen.findByTestId("board-ticket-moving");
-    fireEvent.click(within(card).getByText("Move to…"));
-    fireEvent.click(within(card).getByRole("button", { name: "Ready" }));
+    const trigger = within(card).getByRole("button", { name: "Move to…" });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Ready" }));
     expect(screen.getByTestId("board-status-Backlog")).toContainElement(card);
     await vi.waitFor(() => expect(fetchStub).toHaveBeenCalledTimes(2));
     expect(fetchStub).toHaveBeenLastCalledWith("/api/tickets/moving/status", expect.objectContaining({ method: "POST", body: JSON.stringify({ status: "Ready" }) }));
     resolveCommand({ ok: true, status: 200, json: async () => changed });
     await vi.waitFor(() => expect(screen.getByTestId("board-status-Ready")).toContainElement(screen.getByTestId("board-ticket-moving")));
     const moved = screen.getByTestId("board-ticket-moving");
-    await vi.waitFor(() => expect(within(moved).getByText("Move to…")).toHaveFocus());
-    fireEvent.click(within(moved).getByText("Move to…"));
-    expect(within(moved).getAllByRole("button").map((button) => button.textContent)).toEqual(["Backlog", "In Progress"]);
+    await vi.waitFor(() => expect(within(moved).getByRole("button", { name: "Move to…" })).toHaveFocus());
+    const nextTrigger = within(moved).getByRole("button", { name: "Move to…" });
+    nextTrigger.focus();
+    fireEvent.keyDown(nextTrigger, { key: "Enter" });
+    expect((await screen.findAllByRole("menuitem")).map((item) => item.textContent)).toEqual(["Backlog", "In Progress"]);
   });
 
   it("shows Galley's rejection verbatim without moving the card", async () => {
@@ -159,8 +166,10 @@ describe("TicketBoard", () => {
       .mockResolvedValueOnce({ ok: false, status: 400, json: async () => ({ error: { code: "invalid_transition", message: "Galley stale move reason" } }) }));
     render(<TicketBoard onUnauthenticated={() => {}} />);
     const card = await screen.findByTestId("board-ticket-stale");
-    fireEvent.click(within(card).getByText("Move to…"));
-    fireEvent.click(within(card).getByRole("button", { name: "Ready" }));
+    const trigger = within(card).getByRole("button", { name: "Move to…" });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Ready" }));
     expect(await screen.findByTestId("ticket-board-move-error")).toHaveTextContent("Galley stale move reason");
     expect(screen.getByTestId("board-status-Backlog")).toContainElement(card);
     expect(within(card).getByRole("link")).not.toHaveAttribute("aria-disabled", "true");

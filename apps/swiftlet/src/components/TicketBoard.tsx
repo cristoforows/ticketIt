@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { UnauthenticatedError } from "../api/session";
 import { changeTicketStatus, fetchTickets, type Ticket } from "../api/tickets";
 import { refocusTicketRowIfFocusLost, TicketModalLink, ticketRowTestId } from "./TicketModalLink";
@@ -62,7 +63,7 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
     const id = focusMovedTicketId.current;
     focusMovedTicketId.current = null;
     const card = document.querySelector<HTMLElement>(`[data-testid="board-ticket-${id}"]`);
-    (card?.querySelector<HTMLElement>("summary") ?? card?.querySelector<HTMLElement>("a"))?.focus({ preventScroll: true });
+    (card?.querySelector<HTMLElement>('[data-testid="move-to-trigger"]') ?? card?.querySelector<HTMLElement>("a"))?.focus({ preventScroll: true });
   }, [state]);
 
   const draggingTicket = state.kind === "loaded" ? state.tickets.find((ticket) => ticket.id === draggingId) : undefined;
@@ -153,14 +154,23 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
                           <p>Template: {ticket.template}</p>
                           {pendingId === ticket.id && <span role="status">Moving…</span>}
                           {eligibleTargets.length > 0 && (
-                            <details>
-                              <summary>Move to…</summary>
-                              {eligibleTargets.map((target) => (
-                                <button key={target} type="button" data-move-target={target} disabled={pendingId !== null} onClick={() => void moveTicket(ticket, target)}>
-                                  {statuses.find(({ value }) => value === target)?.label ?? target}
-                                </button>
-                              ))}
-                            </details>
+                            <DropdownMenu.Root modal={false}>
+                              <DropdownMenu.Trigger data-testid="move-to-trigger" disabled={pendingId !== null}>Move to…</DropdownMenu.Trigger>
+                              <DropdownMenu.Portal>
+                                <DropdownMenu.Content align="start" sideOffset={4} className="z-50 min-w-32 rounded border border-solid border-gray-400 bg-[Canvas] p-1 text-[CanvasText] shadow-lg">
+                                  {eligibleTargets.map((target) => (
+                                    <DropdownMenu.Item
+                                      key={target}
+                                      data-move-target={target}
+                                      className="cursor-pointer rounded px-2 py-1 outline-none data-[highlighted]:bg-blue-600/10"
+                                      onSelect={() => void moveTicket(ticket, target)}
+                                    >
+                                      {statuses.find(({ value }) => value === target)?.label ?? target}
+                                    </DropdownMenu.Item>
+                                  ))}
+                                </DropdownMenu.Content>
+                              </DropdownMenu.Portal>
+                            </DropdownMenu.Root>
                           )}
                         </li>
                       );

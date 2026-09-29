@@ -28,7 +28,7 @@ test("drag Backlog to an advertised target, update offered moves, and persist af
 
   const moved = getCardInStatus(page, saved.status, created.id);
   await moved.getByText("Move to…").click();
-  expect(await moved.getByRole("button").evaluateAll((buttons) => buttons.map((button) => button.getAttribute("data-move-target")))).toEqual(saved.allowedActions.statusChanges);
+  expect(await page.getByRole("menuitem").evaluateAll((items) => items.map((item) => item.getAttribute("data-move-target")))).toEqual(saved.allowedActions.statusChanges);
   await page.reload();
   await expect(getCardInStatus(page, saved.status, created.id)).toBeVisible();
   expect((await readTicket(page, created.id)).status).toBe(saved.status);
@@ -47,8 +47,8 @@ test("keyboard Move to… uses advertised actions for In Progress to In Review a
   const control = source.getByText("Move to…");
   await control.focus();
   await page.keyboard.press("Enter");
-  expect(await source.getByRole("button").evaluateAll((buttons) => buttons.map((button) => button.getAttribute("data-move-target")))).toEqual(before.allowedActions.statusChanges);
-  const target = source.getByRole("button", { name: "In Review" });
+  expect(await page.getByRole("menuitem").evaluateAll((items) => items.map((item) => item.getAttribute("data-move-target")))).toEqual(before.allowedActions.statusChanges);
+  const target = page.getByRole("menuitem", { name: "In Review" });
   await target.focus();
   await Promise.all([
     page.waitForResponse((response) => response.url().includes(`/api/tickets/${created.id}/status`) && response.request().method() === "POST"),
@@ -90,7 +90,8 @@ test("disallowed drop sends no command; Done is never offered as a drop or Move 
   commands.length = 0;
   await reviewing.getByText("Move to…").click();
   expect((await readTicket(page, created.id)).allowedActions.statusChanges).not.toContain("Done");
-  await expect(reviewing.getByRole("button", { name: "Done" })).toHaveCount(0);
+  await expect(page.getByRole("menuitem", { name: "Done" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
   await reviewing.dragTo(page.getByTestId("board-status-Done").getByRole("heading"));
   await expect(reviewing).toBeVisible();
   expect(commands).toEqual([]);
@@ -132,7 +133,7 @@ test("a pending board move blocks plain detail entry until Galley's returned Tic
     await route.continue();
   });
   await source.getByText("Move to…").click();
-  await source.getByRole("button", { name: "Ready" }).click();
+  await page.getByRole("menuitem", { name: "Ready" }).click();
   await started;
 
   const link = source.getByRole("link", { name: created.title });
@@ -194,7 +195,7 @@ test("a move reconciles a modal-close GET, including another Ticket's edits", as
   await expect(getCardInStatus(page, "Backlog", edited.id).getByRole("link")).toHaveText(edited.title);
   await source.getByText("Move to…").click();
   const command = page.waitForResponse((response) => response.url().endsWith(`/api/tickets/${moving.id}/status`) && response.request().method() === "POST");
-  await source.getByRole("button", { name: "Ready" }).click();
+  await page.getByRole("menuitem", { name: "Ready" }).click();
   expect((await command).ok()).toBe(true);
 
   const lateResponse = page.waitForResponse((response) => response.request() === staleRequest);

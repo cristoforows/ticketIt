@@ -204,9 +204,9 @@ compares the list's full order to that same response, checks direct
 session. `run.sh` registers and checks its exit code after the restart
 phase, while Galley is running.
 
-`tests/ticket-board-moves.spec.ts` drives native drag and a keyboard
-`Move to…` control, checks persisted Status and returned allowed actions
-after reload, proves disallowed and Done drops send no command, and
+`tests/ticket-board-moves.spec.ts` drives native drag and the keyboard
+`Move to…` Radix UI menu, checks persisted Status and returned allowed
+actions after reload, proves disallowed and Done drops send no command, and
 compares a stale move's visible rejection with Galley's live error. It
 also defers the Status request to check that plain detail entry is
 unavailable until the move settles, and holds a modal-close GET

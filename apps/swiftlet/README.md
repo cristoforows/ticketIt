@@ -507,7 +507,7 @@ presentation use utility classes; there is no separate board stylesheet.
 ## Board moves (issue #90)
 
 Board cards support native HTML5 drag-and-drop and a keyboard-operable
-`Move to…` disclosure with buttons. Both submit the same
+Radix UI Dropdown Menu for `Move to…`. Both submit the same
 `changeTicketStatus` command (`POST /api/tickets/:id/status`). Drop
 highlights and buttons follow that Ticket's `allowedActions.statusChanges`
 from Galley. Done is excluded from both targets; only the explicit
