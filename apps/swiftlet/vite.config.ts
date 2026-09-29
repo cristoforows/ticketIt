@@ -1,6 +1,7 @@
 import { loadEnv } from "vite";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 // Single documented place for Galley's dev-proxy target (acceptance
 // criterion: "Dev-server proxying of /api/* is configured and
@@ -21,7 +22,7 @@ export default defineConfig(({ mode }) => {
   const galleyProxyTarget = env.GALLEY_PROXY_TARGET || DEFAULT_GALLEY_PROXY_TARGET;
 
   return {
-    plugins: [react()],
+    plugins: [react(), tailwindcss()],
     server: {
       proxy: {
         "/api": {

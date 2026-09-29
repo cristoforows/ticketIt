@@ -11,7 +11,7 @@ test.describe("ticket detail page", () => {
     await signIn(page, request, "owner");
   });
 
-  test("opening a Ticket from the list shows its full page, and a reload renders the same content", async ({
+  test("opening a Ticket from the list shows its modal, and a reload renders the full page", async ({
     page,
   }) => {
     const title = `ticket-detail: opened from the list ${Date.now()}`;
@@ -21,7 +21,7 @@ test.describe("ticket detail page", () => {
     await page.getByTestId(`ticket-item-${ticket.id}`).getByTestId("ticket-title").click();
 
     expect(new URL(page.url()).pathname).toBe(`/tickets/${ticket.id}`);
-    await expect(page.getByTestId("ticket-detail-title")).toHaveText(title);
+    await expect(page.getByRole("dialog", { name: "Ticket details" }).getByTestId("ticket-detail-title")).toHaveText(title);
     await expect(page.getByTestId("ticket-detail-status")).toHaveText(ticket.status);
     await expect(page.getByTestId("ticket-detail-created-at")).toHaveText(ticket.createdAt);
 
@@ -30,6 +30,8 @@ test.describe("ticket detail page", () => {
     // 404 -- a reload must render the same page directly, not a blank
     // screen or the server's own error page.
     await page.reload();
+    await expect(page.getByTestId("ticket-detail-page")).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page.getByTestId("ticket-detail-title")).toHaveText(title);
     await expect(page.getByTestId("ticket-detail-status")).toHaveText(ticket.status);
   });
@@ -54,11 +56,7 @@ test.describe("ticket detail page", () => {
     await expect(page.getByTestId("ticket-detail-error")).toHaveCount(0);
   });
 
-  // The in-app Link calls history.pushState, which fires no event of its
-  // own -- router.ts dispatches a synthetic popstate so that the browser's
-  // own back button and in-app navigation share one subscription. Nothing
-  // else in the suite exercises real browser history.
-  test("the browser back button returns to the Backlog from a Ticket's page", async ({ page }) => {
+  test("the browser back button returns to the Backlog from a Ticket's modal", async ({ page }) => {
     const title = `ticket-detail: browser back ${Date.now()}`;
     const ticket = await createTicket(page, title);
 

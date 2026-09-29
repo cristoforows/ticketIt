@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { UnauthenticatedError } from "../api/session";
 import { createTicket, fetchTickets, TICKET_TEMPLATES, TICKET_TITLE_MAX_LENGTH, type Ticket } from "../api/tickets";
-import { Link } from "./Link";
+import { refocusTicketRowIfFocusLost, TicketModalLink, ticketRowTestId } from "./TicketModalLink";
 
 type ListState =
   | { kind: "loading" }
-  | { kind: "loaded"; tickets: Ticket[] }
+  | { kind: "loaded"; tickets: Ticket[]; refreshKey: number; refreshError?: string }
   | { kind: "error"; message: string };
 
 /**
@@ -16,7 +16,7 @@ type ListState =
  * decides where the new Ticket sorts -- apps/galley/README.md, "Ticket
  * ordering") so a captured Ticket appears with no manual reload.
  */
-export function TicketList({ onUnauthenticated }: { onUnauthenticated: () => void }) {
+export function TicketList({ onUnauthenticated, refreshKey = 0, focusTicketId }: { onUnauthenticated: () => void; refreshKey?: number; focusTicketId?: string }) {
   const [state, setState] = useState<ListState>({ kind: "loading" });
   const [title, setTitle] = useState("");
   const [template, setTemplate] = useState<Ticket["template"]>("Basic");
@@ -25,12 +25,12 @@ export function TicketList({ onUnauthenticated }: { onUnauthenticated: () => voi
   const requestId = useRef(0);
   const mounted = useRef(false);
 
-  const load = useCallback(() => {
+  const load = useCallback((keepExisting = false, refreshKey = 0) => {
     const id = ++requestId.current;
-    setState({ kind: "loading" });
+    if (!keepExisting) setState({ kind: "loading" });
     fetchTickets()
       .then((tickets) => {
-        if (id === requestId.current) setState({ kind: "loaded", tickets });
+        if (id === requestId.current) setState({ kind: "loaded", tickets, refreshKey });
       })
       .catch((error: unknown) => {
         if (error instanceof UnauthenticatedError) {
@@ -39,18 +39,26 @@ export function TicketList({ onUnauthenticated }: { onUnauthenticated: () => voi
         }
         if (id !== requestId.current) return;
         const message = error instanceof Error ? error.message : "Unknown error loading tickets.";
-        setState({ kind: "error", message });
+        setState((current) => current.kind === "loaded"
+          ? { ...current, refreshError: message }
+          : { kind: "error", message });
       });
   }, [onUnauthenticated]);
 
   useEffect(() => {
     mounted.current = true;
-    load();
+    load(refreshKey > 0, refreshKey);
     return () => {
       mounted.current = false;
       requestId.current += 1;
     };
-  }, [load]);
+  }, [load, refreshKey]);
+
+  useEffect(() => {
+    if (refreshKey > 0 && state.kind === "loaded" && state.refreshKey === refreshKey && focusTicketId) {
+      refocusTicketRowIfFocusLost("backlog", focusTicketId);
+    }
+  }, [state, refreshKey, focusTicketId]);
 
   async function handleCapture(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -130,14 +138,20 @@ export function TicketList({ onUnauthenticated }: { onUnauthenticated: () => voi
       {state.kind === "loaded" && state.tickets.length > 0 && (
         <ul data-testid="ticket-list-items">
           {state.tickets.map((ticket) => (
-            <li key={ticket.id} data-testid={`ticket-item-${ticket.id}`}>
-              <Link to={`/tickets/${encodeURIComponent(ticket.id)}`} data-testid="ticket-title">
+            <li key={ticket.id} data-testid={ticketRowTestId("backlog", ticket.id)}>
+              <TicketModalLink ticketId={ticket.id} view="backlog" data-testid="ticket-title">
                 {ticket.title}
-              </Link>{" "}
+              </TicketModalLink>{" "}
               <span data-testid="ticket-status">{ticket.status}</span>
             </li>
           ))}
         </ul>
+      )}
+      {state.kind === "loaded" && state.refreshError && (
+        <div role="alert" data-testid="ticket-list-refresh-error">
+          <p>Unable to refresh tickets.</p>
+          <p data-testid="ticket-list-refresh-error-message">{state.refreshError}</p>
+        </div>
       )}
     </section>
   );

@@ -34,6 +34,7 @@ test("board and list render the same live Tickets in Galley order, with reloadab
 
   await page.goto("/board");
   await expect(page.getByTestId("ticket-board")).toBeVisible();
+  await expect(page.getByTestId("board-columns")).toHaveCSS("display", "grid");
   await page.reload();
   await expect(page.getByTestId("signed-in-owner")).toBeVisible();
   await expect(page.getByTestId("board-status-Done")).toBeVisible();
@@ -66,6 +67,6 @@ test("board and list render the same live Tickets in Galley order, with reloadab
   const blocked = placements[placements.length - 1].ticket;
   await expect(page.getByTestId("board-status-Blocked").getByTestId(`board-ticket-${blocked.id}`)).toBeVisible();
   await page.getByTestId(`board-ticket-${blocked.id}`).getByRole("link").click();
-  await expect(page.getByTestId("ticket-detail-page")).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Ticket details" })).toBeVisible();
   expect(new URL(page.url()).pathname).toBe(`/tickets/${blocked.id}`);
 });

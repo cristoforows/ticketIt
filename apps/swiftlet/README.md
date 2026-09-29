@@ -283,12 +283,10 @@ mux` for "a handful of fixed routes with per-method dispatch") — revisit
 this choice explicitly, the same way that section asks Galley's own
 routing decision to be revisited as routing needs grow.
 
-**M3.2 (#88) reevaluation:** `/board` is a third fixed route. The
-upcoming detail modal (#89) can preserve its underlying view using
-navigation state without adding a new URL pattern. The existing router
-still fits: path matching and browser-history subscription stay small;
-there are no nested routes, guards, or data loaders. Revisit if modal
-navigation or later routes require more complex history/state handling.
+**M3.2 (#88) reevaluation:** `/board` is a third fixed route. M3.3
+(#89) adds modal background state to the existing history subscription
+without a new URL pattern. There are still no nested routes, guards, or
+data loaders; revisit the router choice if later routes demand them.
 
 `useRoute()` reads `window.location.pathname` via `useSyncExternalStore`,
 subscribed to the browser's native `popstate` event; `navigate(path)`
@@ -335,18 +333,10 @@ a raw error for an unknown identifier, per the issue's own acceptance
 criterion. Switching between detail URLs remounts the page so the prior
 Ticket is hidden while the new one loads.
 
-**This container/presentation split is what issue #57 requires for
-M3's modal to reuse this content "without a second implementation."**
-M3's ticket-detail modal will need its own container (it will read the
-Ticket to show from wherever the modal was opened — a board card, a
-list row — rather than from a route parameter, and it will not need
-`Link`'s "Back to Backlog" affordance a full page needs), but it can
-render the exact same `TicketDetail` component this slice wrote, with
-the exact same `Ticket` prop shape, inside that different container.
-Nothing about `TicketDetail` itself is specific to being a full page —
-it renders no navigation, no route awareness, and no fetch of its own,
-which is precisely what makes it as usable inside a modal's chrome as
-inside `TicketDetailPage`'s `<section>`.
+**M3.3 reuses this split:** `TicketDetailModal` wraps the same
+`TicketDetailPage` fetch/command container with modal presentation; both
+presentations render the same `TicketDetail` and all its controls.
+Only the full-page presentation shows "Back to Backlog."
 
 `src/api/tickets.ts`'s `fetchTicket(id)` mirrors `fetchTickets`'s and
 `createTicket`'s existing conventions exactly: `UnauthenticatedError`
@@ -509,13 +499,41 @@ Status or reorder Tickets. An unrecognized Status produces an error
 instead of silently dropping a Ticket. Load, non-2xx, and expired
 session use the same conventions as the list.
 
-Styling uses one plain `src/board.css` linked in `index.html`, bundled
-by Vite: a horizontally scrollable six-column CSS grid. This supplies
-side-by-side layout without introducing a design-system dependency or
-changing TypeScript configuration. `npm test && npm run build` checks
-the app; `cd e2e && ./run.sh` verifies direct load, reload, view
-switching, Status placement, ordering, and list/board identities in a
-real browser against Galley.
+Styling uses Tailwind CSS 4 through `@tailwindcss/vite`. `src/styles.css`
+imports its theme and utilities, without Preflight, so the existing
+native typography and form styles remain. Board layout and modal
+presentation use utility classes; there is no separate board stylesheet.
+
+## Ticket detail modal (issue #89)
+
+Clicking a Ticket link in `/` or `/board` opens its detail in a Radix UI
+Dialog over the mounted collection. Address bar shows canonical
+`/tickets/:id`; an unmodified click pushes a history entry carrying the
+background view and a page-load identifier. Back, Escape, or Close
+returns to that view at its existing scroll position; Forward reopens
+the modal. Modified clicks/new tabs remain ordinary links. A page
+reload or direct navigation has a new page-load identifier, so the
+same URL renders the dedicated full page. "Open full page" replaces the
+modal history entry with the full-page presentation (its URL stays the
+same). The dialog moves focus inside, traps keyboard focus, hides the
+background from assistive technology (`aria-hidden`) and blocks its
+pointer events; closing returns focus to the originating Ticket
+link, including its new board position after a Status change.
+
+`TicketDetailModal` renders `TicketDetailPage` in modal mode: one fetch
+and owner-command implementation supplies both presentations with the
+same `TicketDetail` fields and controls. On return, the still-mounted
+list or board re-fetches `GET /api/tickets` without removing its rows
+while loading; Galley determines the Ticket's current title, Status,
+ordering, and placement. A failed refresh shows an error beside the
+last-good rows, retaining scroll and focus. A command that finishes
+after Close or Back triggers another Galley refresh, superseding any
+response fetched before that command committed. Refocus is limited to
+the originating collection, not later view navigation, and never takes
+focus the Owner has already moved elsewhere. No API or
+workflow change was needed. Run `npm test && npm run build` here and
+`cd e2e && ./run.sh` from repo
+root; `e2e/tests/ticket-modal.spec.ts` covers both views and mutations.
 
 ## Browser-to-backend suite
 
