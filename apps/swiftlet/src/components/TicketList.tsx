@@ -142,7 +142,10 @@ export function TicketList({ onUnauthenticated, refreshKey = 0, focusTicketId }:
               <TicketModalLink ticketId={ticket.id} view="backlog" data-testid="ticket-title">
                 {ticket.title}
               </TicketModalLink>{" "}
-              <span data-testid="ticket-status">{ticket.status}</span>
+              <span data-testid="ticket-status">{ticket.status}</span>{" "}
+              <span data-testid="ticket-badges" aria-label={`Badges: ${ticket.badges.map((badge) => badge.name).join(", ") || "none"}`}>
+                {ticket.badges.map((badge) => badge.name).join(", ")}
+              </span>
             </li>
           ))}
         </ul>

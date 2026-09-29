@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { UnauthenticatedError } from "../api/session";
 import {
   fetchTicket,
@@ -7,8 +7,12 @@ import {
   acceptTicket,
   assignTicketOwner,
   unassignTicket,
+  createBadge,
+  attachTicketBadge,
+  fetchBadges,
   TicketNotFoundError,
   type Ticket,
+  type Badge,
   type TicketUpdate,
 } from "../api/tickets";
 import { Link } from "./Link";
@@ -92,6 +96,24 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
     return runCommand(() => unassignTicket(ticketId));
   }
 
+  async function createNewBadge(name: string): Promise<Badge> {
+    try {
+      return await createBadge(name);
+    } catch (error) {
+      if (error instanceof UnauthenticatedError) onUnauthenticated();
+      throw error;
+    }
+  }
+
+  const loadBadges = useCallback(async (): Promise<Badge[]> => {
+    try {
+      return await fetchBadges();
+    } catch (error) {
+      if (error instanceof UnauthenticatedError) onUnauthenticated();
+      throw error;
+    }
+  }, [onUnauthenticated]);
+
   return (
     <section data-testid={presentation === "page" ? "ticket-detail-page" : "ticket-detail-modal-content"}>
       {presentation === "page" && <p>
@@ -123,6 +145,9 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
           onAccept={accept}
           onAssign={assign}
           onUnassign={unassign}
+          onCreateBadge={createNewBadge}
+          onLoadBadges={loadBadges}
+          onAttachBadge={(badgeId) => runCommand(() => attachTicketBadge(ticketId, badgeId))}
         />
       )}
     </section>

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { TicketList } from "./TicketList";
 
 type MockResponse = Pick<Response, "ok" | "status" | "statusText" | "json">;
@@ -28,6 +28,7 @@ const TICKET_A = {
   repository: "",
   createdAt: "2026-09-22T10:01:00Z",
   updatedAt: "2026-09-22T10:01:00Z",
+  badges: [],
 };
 const TICKET_B = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -44,6 +45,7 @@ const TICKET_B = {
   repository: "",
   createdAt: "2026-09-22T10:00:00Z",
   updatedAt: "2026-09-22T10:00:00Z",
+  badges: [],
 };
 const CODING_TICKET = {
   ...TICKET_B,
@@ -113,6 +115,19 @@ describe("TicketList", () => {
     expect(items[1]).toHaveAttribute("data-testid", `ticket-item-${TICKET_B.id}`);
     expect(screen.getAllByTestId("ticket-title")[0]).toHaveTextContent(TICKET_A.title);
     expect(screen.getAllByTestId("ticket-status")[0]).toHaveTextContent("Backlog");
+  });
+
+  it("renders Badge names with an accessible label", async () => {
+    const ticket = { ...TICKET_A, badges: [{ id: "badge-1", name: "Urgent" }] };
+    stubFetch({ "GET /api/tickets": jsonResponse({ tickets: [ticket] }) });
+
+    renderTicketList();
+
+    const item = await screen.findByTestId(`ticket-item-${ticket.id}`);
+    expect(within(item).getByTestId("ticket-status")).toHaveTextContent("Backlog");
+    expect(within(item).getByTestId("ticket-badges")).toHaveTextContent("Urgent");
+    expect(within(item).getByLabelText("Badges: Urgent")).toBeInTheDocument();
+    expect(item.textContent).toContain("Backlog Urgent");
   });
 
   it("links each Ticket's title to its full-page detail route", async () => {

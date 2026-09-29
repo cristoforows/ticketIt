@@ -158,6 +158,9 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
                         >
                           <TicketModalLink ticketId={ticket.id} view="board" disabled={pending}>{ticket.title}</TicketModalLink>
                           <p>Template: {ticket.template}</p>
+                          <p data-testid="board-badges" aria-label={`Badges: ${ticket.badges.map((badge) => badge.name).join(", ") || "none"}`}>
+                            {ticket.badges.map((badge) => badge.name).join(", ")}
+                          </p>
                           {pending && <span role="status">Moving…</span>}
                           {eligibleTargets.length > 0 && (
                             <DropdownMenu.Root modal={false}>

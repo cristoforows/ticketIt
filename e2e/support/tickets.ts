@@ -8,6 +8,7 @@ export interface Ticket {
   id: string;
   title: string;
   status: TicketStatus;
+  badges: { id: string; name: string }[];
   allowedActions: {
     statusChanges: TicketStatus[];
     accept: { available: boolean; reason?: { code: string; message: string } };

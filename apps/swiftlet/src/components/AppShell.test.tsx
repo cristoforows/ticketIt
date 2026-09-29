@@ -98,6 +98,7 @@ describe("AppShell", () => {
         repository: "",
         createdAt: "2026-09-22T10:00:00Z",
         updatedAt: "2026-09-22T10:00:00Z",
+        badges: [],
       }),
     });
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Ticket, TicketUpdate } from "../api/tickets";
+import type { Badge, Ticket, TicketUpdate } from "../api/tickets";
 
 interface TicketDetailProps {
   ticket: Ticket;
@@ -8,6 +8,9 @@ interface TicketDetailProps {
   onAccept: () => Promise<Ticket>;
   onAssign: () => Promise<Ticket>;
   onUnassign: () => Promise<Ticket>;
+  onLoadBadges: () => Promise<Badge[]>;
+  onCreateBadge: (name: string) => Promise<Badge>;
+  onAttachBadge: (badgeId: string) => Promise<Ticket>;
 }
 
 interface EditableFields {
@@ -44,7 +47,7 @@ function completionConditionLabel(condition: Ticket["completionCondition"]): str
 /** The only non-empty assignee_type M2 writes; there is no Agent Assignee kind yet. */
 const OWNER_ASSIGNEE_TYPE = "owner";
 
-export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssign, onUnassign }: TicketDetailProps) {
+export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssign, onUnassign, onLoadBadges, onCreateBadge, onAttachBadge }: TicketDetailProps) {
   const [current, setCurrent] = useState(ticket);
   const [mode, setMode] = useState<"view" | "editing">("view");
   const [fields, setFields] = useState<EditableFields>(() => fieldsFrom(ticket));
@@ -140,6 +143,11 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
             <dt>Updated</dt>
             <dd data-testid="ticket-detail-updated-at">{current.updatedAt}</dd>
           </dl>
+          <section aria-label="Badges" data-testid="ticket-detail-badges">
+            <h3>Badges</h3>
+            <ul>{current.badges.map((badge) => <li key={badge.id}>{badge.name}</li>)}</ul>
+            <BadgePicker ticket={current} onAttached={setCurrent} onLoad={onLoadBadges} onCreate={onCreateBadge} onAttach={onAttachBadge} />
+          </section>
           <section aria-label="Refinement">
             <RefinementValue label="Goal" testId="goal" value={current.goal} />
             <RefinementValue label="Context" testId="context" value={current.context} />
@@ -299,6 +307,96 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
       )}
     </article>
   );
+}
+
+function BadgePicker({ ticket, onAttached, onLoad, onCreate, onAttach }: {
+  ticket: Ticket;
+  onAttached: (ticket: Ticket) => void;
+  onLoad: () => Promise<Badge[]>;
+  onCreate: (name: string) => Promise<Badge>;
+  onAttach: (badgeId: string) => Promise<Ticket>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [badges, setBadges] = useState<Badge[]>([]);
+  const [selected, setSelected] = useState("");
+  const [name, setName] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setError(null);
+    onLoad().then((available) => {
+      if (!cancelled) {
+        setBadges((current) => {
+          const merged = new Map(available.map((badge) => [badge.id, badge]));
+          for (const badge of current) {
+            if (!merged.has(badge.id)) merged.set(badge.id, badge);
+          }
+          return [...merged.values()];
+        });
+        setError(null);
+      }
+    }).catch((cause: unknown) => {
+      if (!cancelled) setError(cause instanceof Error ? cause.message : "Failed to load badges.");
+    });
+    return () => { cancelled = true; };
+  }, [open, onLoad]);
+
+  const available = badges.filter((badge) => !ticket.badges.some((attached) => attached.id === badge.id));
+
+  async function attach(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setPending(true);
+    try {
+      const updated = await onAttach(selected);
+      onAttached(updated);
+      setSelected("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Failed to attach badge.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function createAndAttach(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setPending(true);
+    try {
+      const created = await onCreate(name);
+      setBadges((current) => [...current, created]);
+      const updated = await onAttach(created.id);
+      onAttached(updated);
+      setName("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Failed to create badge.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return <>
+    <button type="button" onClick={() => setOpen((value) => !value)} data-testid="badge-picker-toggle">{open ? "Close badge picker" : "Add badge"}</button>
+    {open && <div data-testid="badge-picker">
+      <form onSubmit={attach}>
+        <label htmlFor="existing-badge">Existing badge</label>
+        <select id="existing-badge" data-testid="badge-picker-select" value={selected} onChange={(event) => setSelected(event.target.value)} disabled={pending}>
+          <option value="">Choose a badge</option>
+          {available.map((badge) => <option key={badge.id} value={badge.id}>{badge.name}</option>)}
+        </select>
+        <button type="submit" disabled={pending || !selected}>Attach badge</button>
+      </form>
+      <form onSubmit={createAndAttach}>
+        <label htmlFor="new-badge-name">New badge name</label>
+        <input id="new-badge-name" data-testid="new-badge-name" value={name} onChange={(event) => setName(event.target.value)} disabled={pending} />
+        <button type="submit" disabled={pending}>Create and attach</button>
+      </form>
+      {error && <p role="alert" data-testid="badge-picker-error">{error}</p>}
+    </div>}
+  </>;
 }
 
 function RefinementValue({ label, testId, value }: { label: string; testId: string; value: string }) {

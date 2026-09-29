@@ -29,6 +29,7 @@ const TICKET = {
   repository: "",
   createdAt: "2026-09-22T10:00:00Z",
   updatedAt: "2026-09-22T10:00:00Z",
+  badges: [],
 };
 
 const onUnauthenticated = () => {};
@@ -91,6 +92,38 @@ describe("TicketDetailPage", () => {
     expect(await screen.findByTestId("ticket-detail-error")).toBeInTheDocument();
     expect(screen.getByTestId("ticket-detail-error-message")).toHaveTextContent("503");
     expect(screen.queryByTestId("ticket-detail-not-found")).not.toBeInTheDocument();
+  });
+
+  it("shows Galley's Badge-specific 404 reason for a rejected attach", async () => {
+    const badge = { id: "11111111-1111-4111-8111-111111111111", name: "Review", createdAt: TICKET.createdAt };
+    const rejection = "no ticket or badge with that identifier";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(TICKET))
+      .mockResolvedValueOnce(jsonResponse({ badges: [badge] }))
+      .mockResolvedValueOnce(jsonResponse({ error: { code: "not_found", message: rejection } }, 404));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+    await screen.findByTestId("ticket-detail-title");
+    fireEvent.click(screen.getByTestId("badge-picker-toggle"));
+    await screen.findByRole("option", { name: badge.name });
+    fireEvent.change(screen.getByTestId("badge-picker-select"), { target: { value: badge.id } });
+    fireEvent.click(screen.getByRole("button", { name: "Attach badge" }));
+
+    expect(await screen.findByTestId("badge-picker-error")).toHaveTextContent(rejection);
+    expect(screen.getByTestId("ticket-detail-badges").querySelectorAll("li")).toHaveLength(0);
+    expect(fetchMock).toHaveBeenLastCalledWith(`/api/tickets/${TICKET_ID}/badges/${badge.id}`, { method: "PUT" });
+  });
+
+  it("retains established non-Badge command 404 semantics", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(TICKET))
+      .mockResolvedValueOnce(jsonResponse({ error: { code: "not_found", message: "a different Galley reason" } }, 404));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+    await screen.findByTestId("ticket-detail-title");
+    fireEvent.click(screen.getByTestId("ticket-detail-status-button-Ready"));
+    expect(await screen.findByTestId("ticket-detail-action-error")).toHaveTextContent("Galley reported no ticket with that identifier.");
   });
 
   it("offers a link back to the Backlog", async () => {

@@ -7,6 +7,7 @@ import type { components } from "./generated/schema";
 import { UnauthenticatedError } from "./session";
 
 export type Ticket = components["schemas"]["Ticket"];
+export type Badge = components["schemas"]["Badge"];
 
 /**
  * Manual refinement (issue #58): a genuine partial update. A field
@@ -93,6 +94,10 @@ function parseTicket(payload: unknown): Ticket {
     typeof record.repository !== "string" ||
     typeof record.createdAt !== "string" ||
     typeof record.updatedAt !== "string" ||
+    !Array.isArray(record.badges) ||
+    !record.badges.every((badge: unknown) => typeof badge === "object" && badge !== null &&
+      typeof (badge as Record<string, unknown>).id === "string" &&
+      typeof (badge as Record<string, unknown>).name === "string") ||
     !actions ||
     typeof actions !== "object" ||
     !Array.isArray(actions.statusChanges) ||
@@ -119,6 +124,7 @@ function parseTicket(payload: unknown): Ticket {
     template: record.template as Ticket["template"],
     completionCondition: record.completionCondition as Ticket["completionCondition"],
     assigneeType: record.assigneeType as Ticket["assigneeType"],
+    badges: record.badges as Ticket["badges"],
     goal: record.goal,
     context: record.context,
     successCriteria: record.successCriteria,
@@ -229,15 +235,16 @@ export async function createTicket(title: string, template: Ticket["template"] =
 /**
  * Shared response handling for every id-scoped Ticket command below
  * (issue #61) plus updateTicket: Galley's shared 404 becomes
- * TicketNotFoundError, any other non-2xx becomes an Error carrying
+ * TicketNotFoundError except for Badge attachment, whose 404 can mean
+ * either a missing Ticket or a missing Badge. Any other non-2xx becomes an Error carrying
  * Galley's own message verbatim (never a friendlier substitute -- see
  * docs/adr/0001-single-authority-galley.md), and success parses the
  * returned Ticket the same way every other call in this file already
  * does.
  */
-async function ticketCommand(path: string, init?: RequestInit): Promise<Ticket> {
+async function ticketCommand(path: string, init?: RequestInit, notFound: "ticket" | "response" = "ticket"): Promise<Ticket> {
   const response = await authenticatedFetch(path, init);
-  if (response.status === 404) {
+  if (response.status === 404 && notFound === "ticket") {
     throw new TicketNotFoundError();
   }
   if (!response.ok) {
@@ -312,4 +319,42 @@ export async function assignTicketOwner(id: string): Promise<Ticket> {
 /** Clears a Ticket's Assignee (issue #61). Idempotent, matching Galley's own DELETE semantics. */
 export async function unassignTicket(id: string): Promise<Ticket> {
   return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(id)}/assignee`, { method: "DELETE" });
+}
+
+export async function fetchBadges(): Promise<Badge[]> {
+  const response = await authenticatedFetch("/api/badges");
+  if (!response.ok) {
+    const payload: unknown = await response.json();
+    throw new Error(errorMessage(payload) ?? `Galley returned ${response.status} ${response.statusText}`);
+  }
+  const payload: unknown = await response.json();
+  if (typeof payload !== "object" || payload === null || !Array.isArray((payload as { badges?: unknown }).badges)) {
+    throw new Error("Galley's Badge list was missing badges.");
+  }
+  const badges = (payload as { badges: unknown[] }).badges;
+  if (!badges.every((badge) => typeof badge === "object" && badge !== null &&
+    typeof (badge as Record<string, unknown>).id === "string" &&
+    typeof (badge as Record<string, unknown>).name === "string" &&
+    typeof (badge as Record<string, unknown>).createdAt === "string")) {
+    throw new Error("Galley's Badge list contained an invalid Badge.");
+  }
+  return badges as Badge[];
+}
+
+export async function createBadge(name: string): Promise<Badge> {
+  const response = await authenticatedFetch("/api/badges", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }),
+  });
+  const payload: unknown = await response.json();
+  if (!response.ok) throw new Error(errorMessage(payload) ?? `Galley returned ${response.status} ${response.statusText}`);
+  if (typeof payload !== "object" || payload === null ||
+    typeof (payload as Badge).id !== "string" || typeof (payload as Badge).name !== "string" ||
+    typeof (payload as Badge).createdAt !== "string") {
+    throw new Error("Galley's Badge response was missing a required field.");
+  }
+  return payload as Badge;
+}
+
+export async function attachTicketBadge(ticketId: string, badgeId: string): Promise<Ticket> {
+  return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(ticketId)}/badges/${encodeURIComponent(badgeId)}`, { method: "PUT" }, "response");
 }

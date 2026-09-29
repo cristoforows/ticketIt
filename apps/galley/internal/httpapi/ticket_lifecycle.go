@@ -163,6 +163,9 @@ func applyTicketTransition(
 	if err != nil {
 		return Ticket{}, true, nil, fmt.Errorf("failed to apply the ticket's new status: %w", err)
 	}
+	if err := loadTicketBadges(ctx, tx, ownerID, &ticket); err != nil {
+		return Ticket{}, true, nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return Ticket{}, true, nil, fmt.Errorf("failed to commit the transition: %w", err)
 	}
@@ -265,10 +268,15 @@ func (s *server) AcceptTicket(w http.ResponseWriter, r *http.Request, id string)
 // setTicketAssigneeForOwner unconditionally sets assignee_type; nil
 // binds SQL NULL (unassigned). D3 places no current-Status
 // precondition on human assignment, and M2 never has an open Round to
-// lock the field, so unlike applyTicketTransition this needs no
-// transaction -- there is no persisted state it could conflict with.
+// lock the field. The transaction keeps the mutation and Badge hydration
+// atomic for the response.
 func setTicketAssigneeForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, publicID string, assigneeType *string) (Ticket, bool, error) {
-	row := pool.QueryRow(ctx,
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return Ticket{}, false, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
+	row := tx.QueryRow(ctx,
 		`UPDATE tickets SET assignee_type = $3, updated_at = now()
 		  WHERE owner_id = $1 AND public_id = $2::uuid
 		  RETURNING `+ticketSelectColumns,
@@ -279,6 +287,12 @@ func setTicketAssigneeForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID 
 		return Ticket{}, false, nil
 	}
 	if err != nil {
+		return Ticket{}, false, err
+	}
+	if err := loadTicketBadges(ctx, tx, ownerID, &ticket); err != nil {
+		return Ticket{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return Ticket{}, false, err
 	}
 	return ticket, true, nil

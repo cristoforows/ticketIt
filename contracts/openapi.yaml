@@ -507,6 +507,82 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorBody"
+  /api/badges:
+    get:
+      operationId: listBadges
+      summary: List the Owner's Badges
+      tags: [badges]
+      description: Ordered by case-insensitive name ascending, then id ascending.
+      responses:
+        "200":
+          description: The Owner's reusable Badges.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BadgeList"
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+    post:
+      operationId: createBadge
+      summary: Create a reusable Badge
+      tags: [badges]
+      description: >-
+        Names are trimmed, non-empty, at most 80 characters after trimming,
+        and unique per Owner case-insensitively. Duplicate names return
+        409 duplicate_badge_name, including under concurrent creation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBadgeRequest"
+      responses:
+        "201":
+          description: The created Badge.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Badge"
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+  /api/tickets/{id}/badges/{badgeId}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid, x-go-type: string}
+      - name: badgeId
+        in: path
+        required: true
+        schema: {type: string, format: uuid, x-go-type: string}
+    put:
+      operationId: attachTicketBadge
+      summary: Attach an existing Badge to a Ticket
+      tags: [badges, tickets]
+      description: >-
+        Idempotent. Returns the Ticket with its Badges; an unknown, malformed,
+        or foreign Ticket or Badge id returns the shared 404 not_found.
+      responses:
+        "200":
+          description: The Ticket with the Badge attached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
   /api/session:
     get:
       operationId: getSession
@@ -630,6 +706,7 @@ components:
           title,
           status,
           allowedActions,
+          badges,
           template,
           completionCondition,
           assigneeType,
@@ -663,6 +740,11 @@ components:
           $ref: "#/components/schemas/TicketStatus"
         allowedActions:
           $ref: "#/components/schemas/TicketAllowedActions"
+        badges:
+          type: array
+          description: Ordered by case-insensitive name ascending, then id ascending. Empty when none attached.
+          items:
+            $ref: "#/components/schemas/TicketBadge"
         template:
           $ref: "#/components/schemas/TicketTemplate"
         assigneeType:
@@ -735,6 +817,36 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Ticket"
+    TicketBadge:
+      type: object
+      additionalProperties: false
+      required: [id, name]
+      properties:
+        id: {type: string, format: uuid, x-go-type: string}
+        name: {type: string}
+    Badge:
+      type: object
+      additionalProperties: false
+      required: [id, name, createdAt]
+      properties:
+        id: {type: string, format: uuid, x-go-type: string}
+        name: {type: string}
+        createdAt: {type: string, format: date-time, x-go-type: string}
+    BadgeList:
+      type: object
+      additionalProperties: false
+      required: [badges]
+      properties:
+        badges:
+          type: array
+          items:
+            $ref: "#/components/schemas/Badge"
+    CreateBadgeRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
     TicketAllowedActions:
       type: object
       additionalProperties: false

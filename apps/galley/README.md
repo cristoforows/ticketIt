@@ -938,6 +938,49 @@ PR" caveat (unresolved, still M8); reviewed-merge evidence transport
 [`docs/evidence/m2/60-lifecycle-transitions.md`](../../docs/evidence/m2/60-lifecycle-transitions.md)
 for the full reasoning and every captured command/result.
 
+## Badges (issue #91)
+
+`000008_create_badges.up.sql` adds Owner-scoped `badges` with opaque UUID
+public ids, names and creation timestamps, plus `ticket_badges` with a
+composite primary key and Owner-matching foreign keys to both tables.
+Run the migration before starting Galley with this schema:
+
+```sh
+DATABASE_URL=postgres://localhost:5432/ticketit_dev?sslmode=disable go run ./cmd/migrate
+```
+
+`GET /api/badges` lists names case-insensitively ascending, public id
+ascending for ties; `POST /api/badges` accepts only `name`. Names are
+trimmed, non-empty, at most 80 Unicode code points after trimming and
+immutable. PostgreSQL's `(owner_id, lower(name))` unique index arbitrates
+concurrent creates. A duplicate returns `409 duplicate_badge_name`, not
+the existing Badge. `PUT /api/tickets/{id}/badges/{badgeId}` attaches an
+existing Badge idempotently and returns the Ticket. Both identifiers
+must resolve under the session Owner; malformed, unknown, or foreign
+ones return shared `404 not_found`. All Ticket responses, including
+capture, list, detail, edit, Status and Assignee commands, contain
+`badges: [{id, name}]`, ordered like the Badge list (empty array when
+none). Attachment does not change the Ticket's `updatedAt` because
+no Ticket column changes. No detach, filter, rename, or delete endpoint
+exists in this slice. Check with `go test ./...`, `go vet ./...`, and
+`./scripts/check-contract-drift.sh` from this directory.
+
+The two added tables are included in the fixed known-table guardrail;
+the lifecycle actions still leave both row counts unchanged.
+
+Every Ticket-returning storage path except creation enriches its scanned
+row with `loadTicketBadges`; a new Ticket starts with an empty `badges`
+array. Mutations hydrate inside their transaction before commit, so a
+hydration failure rolls the change back rather than reporting `503` for
+a committed write. The list closes its cursor and loads all its Tickets'
+Badges in one query. `scanTicketRow` cannot do this without a query per
+row and a nested database read while list rows remain open. A new Ticket
+return path must perform the same enrichment before writing JSON.
+`TestBadges_ActualOwnersAreIsolatedThroughHTTP` exercises foreign ids
+and same-name Badge definitions through real sessions for two Owners in
+an isolated test database (the second row uses `singleton=false`, not a
+production sign-in path).
+
 ## Error shape
 
 `ErrorBody`/`ErrorDetail` are generated from
@@ -970,6 +1013,7 @@ uses this shared JSON shape:
 | Sign-in identity is not the configured Owner (#54) | `403` | `owner_mismatch`      |
 | A Status transition is not on D3 S2's table (#60)  | `400` | `invalid_transition`   |
 | Accept attempted on a `reviewedPrMerge` Ticket (#60, D2/M8 limitation) | `400` | `reviewed_pr_merge_not_implemented` |
+| Badge name already exists for the Owner (#91) | `409` | `duplicate_badge_name` |
 
 A `405` response also carries an `Allow` header naming the accepted
 method(s).

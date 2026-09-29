@@ -17,6 +17,7 @@ const ticket = (id: string, status: string, template = "Basic") => ({
   repository: "",
   createdAt: "2026-09-22T10:00:00Z",
   updatedAt: "2026-09-22T10:00:00Z",
+  badges: [],
 });
 
 function stubTickets(tickets: unknown[], status = 200) {
@@ -59,6 +60,17 @@ describe("TicketBoard", () => {
     expect(within(sections[3]).getByRole("link", { name: "Ticket new-blocked" })).toHaveAttribute("href", "/tickets/new-blocked");
     expect(within(sections[3]).getByTestId("board-ticket-new-blocked")).toHaveTextContent("Coding");
     expect(fetch).toHaveBeenCalledWith("/api/tickets", undefined);
+  });
+
+  it("renders Badge names with an accessible label", async () => {
+    const ticketWithBadge = { ...ticket("badged", "Backlog"), badges: [{ id: "badge-1", name: "Urgent" }] };
+    stubTickets([ticketWithBadge]);
+
+    render(<TicketBoard onUnauthenticated={() => {}} />);
+
+    const card = await screen.findByTestId("board-ticket-badged");
+    expect(within(card).getByTestId("board-badges")).toHaveTextContent("Urgent");
+    expect(within(card).getByLabelText("Badges: Urgent")).toBeInTheDocument();
   });
 
   it("shows empty sections even when there are no Tickets", async () => {

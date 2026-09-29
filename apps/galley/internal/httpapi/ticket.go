@@ -424,7 +424,12 @@ func insertTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64, title 
 		 RETURNING `+ticketSelectColumns,
 		ownerID, title, string(Backlog), publicID, string(template), string(completionCondition),
 	)
-	return scanTicketRow(row)
+	ticket, err := scanTicketRow(row)
+	if err != nil {
+		return Ticket{}, err
+	}
+	ticket.Badges = []TicketBadge{}
+	return ticket, nil
 }
 
 // getTicketForOwner looks up one Ticket by its public identifier,
@@ -435,8 +440,8 @@ func insertTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64, title 
 // publicID must already be a validated UUID string (GetTicket checks
 // this before calling in) -- an invalid one would fail the ::uuid cast
 // as a query error, not a "no rows" miss.
-func getTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, publicID string) (Ticket, bool, error) {
-	row := pool.QueryRow(ctx,
+func getTicketForOwner(ctx context.Context, db ticketDB, ownerID int64, publicID string) (Ticket, bool, error) {
+	row := db.QueryRow(ctx,
 		`SELECT `+ticketSelectColumns+`
 		   FROM tickets
 		  WHERE owner_id = $1 AND public_id = $2::uuid`,
@@ -447,6 +452,9 @@ func getTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, p
 		return Ticket{}, false, nil
 	}
 	if err != nil {
+		return Ticket{}, false, err
+	}
+	if err := loadTicketBadges(ctx, db, ownerID, &ticket); err != nil {
 		return Ticket{}, false, err
 	}
 	return ticket, true, nil
@@ -485,7 +493,12 @@ type ticketUpdate struct {
 // caller of this function -- today or in the future -- can make it
 // recompute or overwrite them.
 func updateTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, publicID string, update ticketUpdate) (Ticket, bool, error) {
-	row := pool.QueryRow(ctx,
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return Ticket{}, false, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
+	row := tx.QueryRow(ctx,
 		`UPDATE tickets
 		    SET title = COALESCE($3, title),
 		        goal = COALESCE($4, goal),
@@ -503,6 +516,12 @@ func updateTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64
 		return Ticket{}, false, nil
 	}
 	if err != nil {
+		return Ticket{}, false, err
+	}
+	if err := loadTicketBadges(ctx, tx, ownerID, &ticket); err != nil {
+		return Ticket{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return Ticket{}, false, err
 	}
 	return ticket, true, nil
@@ -526,17 +545,25 @@ func listTicketsForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
 	tickets := []Ticket{}
 	for rows.Next() {
 		ticket, err := scanTicketRow(rows)
 		if err != nil {
+			rows.Close()
 			return nil, err
 		}
 		tickets = append(tickets, ticket)
 	}
 	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	refs := make([]*Ticket, len(tickets))
+	for i := range tickets {
+		refs[i] = &tickets[i]
+	}
+	if err := loadTicketBadges(ctx, pool, ownerID, refs...); err != nil {
 		return nil, err
 	}
 	return tickets, nil
