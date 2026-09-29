@@ -4,18 +4,22 @@
 
 Use a continuous flow of tickets rather than time-boxed sprints. Both views present the same shared collection and ticket identities:
 
-- **List view:** quick capture, prioritization, and filtering.
+- **List view:** quick capture and filtering; current ordering is newest first, not manual priority ordering. [#108](https://github.com/cristoforows/ticketIt/issues/108) routes the v1 priority/queue-order choice to M4.
 - **Board view:** tickets arranged by status.
 
 Backlog holds captured work that is not ready to begin. Title-only tickets can be refined here. Agent execution becomes eligible when a ticket is Ready and assigned to an agent, with the goal and success criteria required by `ticket-creation.md`.
 
 Support custom badge creation, manual attachment/removal, and badge filtering in v1. Booth membership is defined in [CONTEXT.md](../CONTEXT.md); Booth organization is deferred in [v1-scope.md](v1-scope.md).
 
+In M3, custom Badges have immutable names only. Selecting multiple Badges matches any selected Badge (OR) on both list and board. Badge rename, delete, and colour are not approved v1 behavior; the built-in Stopped Badge belongs to M5.
+
 ## Ticket details
 
 Give each ticket its own addressable detail page and support viewing the same ticket details in a modal. Reuse the detail content and behaviors across both presentations, including ticket information, the Grill Mode conversation, round activity, reports, and PR links.
 
 Opening a ticket from the board or list defaults to a modal, preserving the underlying view's position. Provide an Open full page action. Opening a direct ticket URL or bookmark renders the dedicated full-page view.
+
+M3's board allows advertised Status moves by drag or keyboard; Done is reachable only through Accept, not a plain board move. Galley computes available actions from the same rules its commands enforce. Modal links use canonical Ticket URLs; a reload presents the full page.
 
 ## Active ticket control
 
@@ -47,6 +51,8 @@ Require an open agent round to end before archiving its ticket. This includes ro
 A queued ticket can be archived immediately, withdrawing it from execution eligibility. Archived tickets must not start agent work.
 
 Expose archived tickets through an Archived filter in list view. Restoring a ticket preserves its previous status, except a previously Ready ticket returns to Backlog so restoration does not automatically launch agent work. Previously Done tickets remain Done.
+
+M3's archived Ticket details remain available directly and from the Archived list filter but are read-only until Restore; Galley rejects direct mutation requests too. Archived and Badge list filters compose, while the board continues showing only active Tickets. Exclusion from future execution claims and open-Round archive restrictions require M4/M5 enforcement.
 
 ## Future sprints
 

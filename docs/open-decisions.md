@@ -351,6 +351,37 @@ D4 is still owned by M8, and a future resolution can add the missing
 precondition to `ChangeTicketStatus`'s existing `Done` source-status
 entry without redesigning the transition mechanism itself.
 
+## What M3 observed, per decision
+
+[M3's local gate](evidence/m3/README.md) on #87–#94 resolves no open
+decision. D1 and D5–D9 are untouched: M3 adds neither execution nor a
+provider/hosting choice. Manual priority ordering is an Owner choice
+routed to [#108](https://github.com/cristoforows/ticketIt/issues/108)
+(M4), not an inferred queue policy.
+
+### D3 — Already accepted workflow, now advertised in Galley
+
+[#87](https://github.com/cristoforows/ticketIt/issues/87) publishes
+`allowedActions` using the same Galley decision functions as the Status
+and Accept commands; [#90](https://github.com/cristoforows/ticketIt/issues/90)
+uses those actions for board moves, excluding Done as a plain target.
+The Owner-approved Backlog → Blocked correction is recorded in D3 §2.
+This exercises the existing decision, without adding a new authority.
+
+### D2 / D4 — Coding completion and reopening remain open
+
+[#87](https://github.com/cristoforows/ticketIt/issues/87) continues to
+advertise Galley's `reviewed_pr_merge_not_implemented` Accept reason for
+Coding Tickets; neither board nor modal can bypass it. #93/#94 retain
+the Ticket's completion condition through Archive/Restore, without
+defining D2 review evidence or D4's already-merged-PR reopening rule.
+Both decisions remain with M8.
+
+M3's [#93](https://github.com/cristoforows/ticketIt/issues/93) supplies
+the row-locked mutation guard and #87 shares the action/command decision
+functions. M4/M5 must add persisted open-Round facts and archived claim
+exclusion before any execution-policy claim can be verified.
+
 ## Engineering decisions within the approved design
 
 These need implementation design and validation, but not new user-facing scope by default:
