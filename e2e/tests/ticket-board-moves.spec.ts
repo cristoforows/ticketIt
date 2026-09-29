@@ -1,6 +1,6 @@
 import { test, expect, type APIResponse, type Locator, type Page, type Request } from "@playwright/test";
 import { signIn } from "../support/sign-in";
-import { changeTicketStatusDirect, createTicket, type Ticket, type TicketStatus } from "../support/tickets";
+import { changeTicketStatusDirect, createTicket, type Ticket, type TicketStatus, statusLabel } from "../support/tickets";
 
 async function readTicket(page: Page, id: string): Promise<Ticket> {
   const response = await page.request.get(`/api/tickets/${id}`);
@@ -173,8 +173,8 @@ test("a pending board move blocks plain detail entry until Galley's returned Tic
   await moved.getByRole("link").click();
   const modal = page.getByRole("dialog", { name: "Ticket details" });
   const saved = await readTicket(page, created.id);
-  await expect(modal.getByTestId("ticket-detail-status")).toHaveText(saved.status);
-  expect(await modal.getByTestId("ticket-detail-status-actions").getByRole("button").allTextContents()).toEqual(saved.allowedActions.statusChanges);
+  await expect(modal.getByTestId("ticket-detail-status")).toHaveText(statusLabel(saved.status));
+  expect(await modal.getByTestId("ticket-detail-status-actions").getByRole("button").allTextContents()).toEqual(saved.allowedActions.statusChanges.map(statusLabel));
 });
 
 test("a move reconciles a modal-close GET, including another Ticket's edits", async ({ page, request }) => {

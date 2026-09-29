@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { signIn } from "../support/sign-in";
-import { changeTicketStatusDirect, createTicket, type Ticket } from "../support/tickets";
+import { changeTicketStatusDirect, createTicket, type Ticket, statusLabel } from "../support/tickets";
 
 async function populate(page: Page): Promise<Ticket[]> {
   const tickets: Ticket[] = [];
@@ -27,7 +27,7 @@ for (const view of ["list", "board"] as const) {
     await expect(modal).toHaveCSS("position", "fixed");
     await expect(modal.getByTestId("ticket-detail-title")).toHaveText(ticket.title);
     await expect(modal.getByTestId("ticket-detail-template")).toHaveText(ticket.template);
-    await expect(modal.getByTestId("ticket-detail-status")).toHaveText(ticket.status);
+    await expect(modal.getByTestId("ticket-detail-status")).toHaveText(statusLabel(ticket.status));
     expect(new URL(page.url()).pathname).toBe(`/tickets/${ticket.id}`);
     await expect(page.getByTestId(view === "list" ? "ticket-list" : "ticket-board")).toBeVisible();
     expect(await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')))).toBe(true);

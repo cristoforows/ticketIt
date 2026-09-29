@@ -97,3 +97,7 @@ export async function changeTicketStatusDirect(page: Page, id: string, status: T
 export async function acceptTicketDirect(page: Page, id: string): Promise<TicketCommandResult> {
   return ticketCommand(page, "POST", `/api/tickets/${id}/accept`);
 }
+
+export function statusLabel(status: TicketStatus): string {
+  return status.replace(/(?<=[a-z])(?=[A-Z])/g, " ");
+}

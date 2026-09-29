@@ -97,8 +97,11 @@ export function AppShell({ owner, onSignedOut, onUnauthenticated }: AppShellProp
         )}
       </AppHeader>
       <main className="mx-auto max-w-(--size-page) px-6 py-8">
-        <Surface className={background === "board" ? undefined : "p-6"}>
-          {background && <BadgeFilter tone={background === "board" ? "ground" : "paper"} selected={badgeIds} onUnauthenticated={onUnauthenticated} refreshKey={refresh.key} />}
+        {route.name === "ticket-detail" && !route.background && (
+          <TicketDetailPage key={route.ticketId} ticketId={route.ticketId} onUnauthenticated={onUnauthenticated} />
+        )}
+        {background && <Surface className={background === "board" ? undefined : "p-6"}>
+          <BadgeFilter tone={background === "board" ? "ground" : "paper"} selected={badgeIds} onUnauthenticated={onUnauthenticated} refreshKey={refresh.key} />
           {background === "backlog" && (
             <>
           <label><input type="checkbox" data-testid="archived-filter" checked={archived} onChange={(event) => setArchivedFilter(event.target.checked)} /> Archived</label>
@@ -108,10 +111,7 @@ export function AppShell({ owner, onSignedOut, onUnauthenticated }: AppShellProp
             </>
           )}
           {background === "board" && <TicketBoard key={filterKey} badgeIds={badgeIds} onUnauthenticated={onUnauthenticated} refreshKey={refresh.key} focusTicketId={refresh.view === "board" ? refresh.ticketId : undefined} />}
-          {route.name === "ticket-detail" && !route.background && (
-            <TicketDetailPage key={route.ticketId} ticketId={route.ticketId} onUnauthenticated={onUnauthenticated} />
-          )}
-        </Surface>
+        </Surface>}
       </main>
       {modalTicketId && background && (
         <TicketDetailModal key={modalTicketId} ticketId={modalTicketId} background={background} onUnauthenticated={onUnauthenticated} onClose={() => window.history.back()} onCommandSucceeded={() => refreshAfterModalCommand(modalTicketId)} />

@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { useLayoutEffect } from "react";
 import { TicketDetail } from "./TicketDetail";
 import type { Badge, Ticket, TicketUpdate } from "../api/tickets";
+import { statusLabel } from "./ui";
 
 const TICKET: Ticket = {
   id: "33333333-3333-4333-8333-333333333333",
@@ -213,7 +214,7 @@ describe("TicketDetail", () => {
     render(<TicketDetail ticket={TICKET} onSave={vi.fn()} {...noopActions()} />);
 
     expect(screen.getByTestId("ticket-detail-title")).toHaveTextContent(TICKET.title);
-    expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent(TICKET.status);
+    expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent(statusLabel(TICKET.status));
     expect(screen.getByTestId("ticket-detail-template")).toHaveTextContent("Basic");
     expect(screen.getByTestId("ticket-detail-completion-condition")).toHaveTextContent("Human acceptance");
     expect(screen.getByTestId("ticket-detail-created-at")).toHaveTextContent(TICKET.createdAt);
