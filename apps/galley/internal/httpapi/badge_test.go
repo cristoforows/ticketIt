@@ -313,7 +313,7 @@ func TestBadges_FilterMatchesAnyWithoutDuplicatesAndKeepsOrder(t *testing.T) {
 	third := createTicket("both", a, b)
 	query := url.Values{"badgeId": {a, b, a}}
 	result, filteredRec, _ := badgeRequest(t, handler, cookie, http.MethodGet, "/api/tickets?"+query.Encode(), "", http.StatusOK)
-	t.Logf("GET /api/tickets?%s -> HTTP %d; matching Tickets=%d", query.Encode(), filteredRec.Code, len(result.(map[string]any)["tickets"].([]any)))
+	t.Logf("GET /api/tickets?%s -> HTTP %d %s", query.Encode(), filteredRec.Code, strings.TrimSpace(filteredRec.Body.String()))
 	items := result.(map[string]any)["tickets"].([]any)
 	got := []string{}
 	for _, item := range items {
@@ -323,7 +323,8 @@ func TestBadges_FilterMatchesAnyWithoutDuplicatesAndKeepsOrder(t *testing.T) {
 		t.Fatalf("OR filtered order = %v, want %v", got, want)
 	}
 	for _, value := range []string{"bad", uuid.NewString(), ""} {
-		result, _, _ := badgeRequest(t, handler, cookie, http.MethodGet, "/api/tickets?badgeId="+value, "", http.StatusBadRequest)
+		result, rejectedRec, _ := badgeRequest(t, handler, cookie, http.MethodGet, "/api/tickets?badgeId="+value, "", http.StatusBadRequest)
+		t.Logf("GET /api/tickets?badgeId=%s -> HTTP %d %s", value, rejectedRec.Code, strings.TrimSpace(rejectedRec.Body.String()))
 		if result.(map[string]any)["error"].(map[string]any)["code"] != "invalid_request" {
 			t.Fatalf("invalid Badge filter = %v", result)
 		}

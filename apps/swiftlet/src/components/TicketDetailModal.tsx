@@ -1,5 +1,5 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { collectionPath, openTicketFullPage, type CollectionRoute } from "../router";
+import { collectionPath, collectionQuery, openTicketFullPage, type CollectionRoute } from "../router";
 import { isPlainLinkClick } from "./Link";
 import { TicketDetailPage } from "./TicketDetailPage";
 import { focusTicketRow } from "./TicketModalLink";
@@ -27,7 +27,7 @@ export function TicketDetailModal({ ticketId, background, onClose, onUnauthentic
         >
           <Dialog.Title className="sr-only">Ticket details</Dialog.Title>
           <Dialog.Close asChild><button type="button" autoFocus>Close</button></Dialog.Close>{" "}
-          <a href={`/tickets/${encodeURIComponent(ticketId)}`} onClick={(event) => {
+          <a href={`/tickets/${encodeURIComponent(ticketId)}${collectionQuery()}`} onClick={(event) => {
             if (!isPlainLinkClick(event)) return;
             event.preventDefault();
             openTicketFullPage(ticketId);

@@ -582,9 +582,10 @@ clears the old error when the retry starts.
 List and board share a multi-select **Filter by Badge** control. Each
 selection adds a repeated `badgeId` query parameter; Galley returns
 Tickets carrying any selected Badge. The query stays in the URL across
-reload, List/Board navigation and modal open/close. **Clear filter**
-removes the selected Badges. An empty match displays an explicit empty
-state; the capture form remains available. Full-page detail and modal
+reload, List/Board navigation, modal open/close, and Open full page
+followed by Back to Backlog. **Clear filter** removes the selected
+Badges. An empty match displays an explicit empty state; the capture
+form remains available. Full-page detail and modal
 each offer **Remove** beside attached Badges and display Galley's
 returned Ticket after detach. Closing the modal refreshes the filtered
 collection, so a Ticket that no longer matches disappears. Run

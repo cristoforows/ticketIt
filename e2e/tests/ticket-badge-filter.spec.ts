@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { signIn } from "../support/sign-in";
 import { createTicket, type Ticket } from "../support/tickets";
 
-test("Badge OR filter survives reload and board switch; detaching in modal removes the matching Ticket", async ({ page, request }) => {
+test("Badge OR filter survives reload, board switch and full-page return; detaching in modal removes the matching Ticket", async ({ page, request }) => {
   await signIn(page, request, "owner");
   const createBadge = async (name: string): Promise<{ id: string; name: string }> => {
     const response = await page.request.post("/api/badges", { data: { name } });
@@ -49,7 +49,20 @@ test("Badge OR filter survives reload and board switch; detaching in modal remov
   await expect(page.getByTestId(`board-ticket-${second.id}`)).toHaveCount(0);
   await expect(page.getByTestId(`board-ticket-${first.id}`)).toBeVisible();
   expect(new URL(page.url()).searchParams.getAll("badgeId")).toEqual([a.id, b.id]);
+
+  await page.getByTestId(`board-ticket-${first.id}`).getByRole("link").click();
+  await modal.getByRole("link", { name: "Open full page" }).click();
+  await expect(page.getByTestId("ticket-detail-page")).toBeVisible();
+  await page.getByTestId("back-to-backlog-link").click();
+  expect(new URL(page.url()).pathname).toBe("/");
+  expect(new URL(page.url()).searchParams.getAll("badgeId")).toEqual([a.id, b.id]);
+  await expect(filter.getByRole("checkbox", { name: a.name })).toBeChecked();
+  await expect(page.getByTestId(`ticket-item-${first.id}`)).toBeVisible();
+  await expect(page.getByTestId(`ticket-item-${none.id}`)).toHaveCount(0);
+  await expect(page.getByTestId(`ticket-item-${second.id}`)).toHaveCount(0);
+
   await filter.getByRole("button", { name: "Clear filter" }).click();
-  await expect(page.getByTestId(`board-ticket-${second.id}`)).toBeVisible();
+  await expect(page.getByTestId(`ticket-item-${second.id}`)).toBeVisible();
+  await expect(page.getByTestId(`ticket-item-${none.id}`)).toBeVisible();
   expect(new URL(page.url()).search).toBe("");
 });
