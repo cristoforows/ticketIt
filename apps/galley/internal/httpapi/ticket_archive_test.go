@@ -129,6 +129,13 @@ func TestArchive_OwnerScope(t *testing.T) {
 			t.Fatalf("archive revealed a foreign Ticket: %v", result)
 		}
 	}
+	badgeRequest(t, handler, cookie, http.MethodPost, "/api/tickets/"+id+"/archive", "", http.StatusOK)
+	for _, value := range []string{id, uuid.NewString(), "bad"} {
+		result, _, _ := badgeRequest(t, handler, foreign, http.MethodPost, "/api/tickets/"+value+"/restore", "", http.StatusNotFound)
+		if result.(map[string]any)["error"].(map[string]any)["code"] != "not_found" {
+			t.Fatalf("restore revealed a foreign Ticket: %v", result)
+		}
+	}
 }
 
 func TestArchive_ConcurrentDoubleSubmitOnlyOneSucceeds(t *testing.T) {

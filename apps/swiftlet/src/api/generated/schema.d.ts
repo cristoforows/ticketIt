@@ -97,7 +97,7 @@ export interface paths {
         };
         /**
          * List the signed-in Owner's Tickets
-         * @description Returns the signed-in Owner's unarchived Tickets, optionally matching any selected Badge (OR, with each Ticket returned once). Unknown, malformed, or foreign Badge ids return 400 invalid_request. Results are ordered by createdAt descending with id descending as the deterministic tiebreak (createdAt alone is not unique -- see apps/galley/README.md, "Ticket ordering"). Requires a valid session; returns `401 unauthenticated` otherwise.
+         * @description Returns the signed-in Owner's unarchived Tickets by default, or archived Tickets when archived=true, optionally matching any selected Badge (OR, with each Ticket returned once). Unknown, malformed, or foreign Badge ids return 400 invalid_request. Results are ordered by createdAt descending with id descending as the deterministic tiebreak (createdAt alone is not unique -- see apps/galley/README.md, "Ticket ordering"). Requires a valid session; returns `401 unauthenticated` otherwise.
          */
         get: operations["listTickets"];
         put?: never;
@@ -289,6 +289,28 @@ export interface paths {
          * @description Retains the Ticket, its Status and Badges while removing it from default collections. A second archive is rejected with archived_ticket; an unknown, malformed or foreign id returns 404.
          */
         post: operations["archiveTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tickets/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore an archived Ticket
+         * @description Restoring Ready changes Status to Backlog; every other Status is retained. A Ticket not archived returns 400 not_archived; an unknown, malformed or foreign id returns the shared 404. Does not start work.
+         */
+        post: operations["restoreTicket"];
         delete?: never;
         options?: never;
         head?: never;
@@ -667,6 +689,8 @@ export interface operations {
     listTickets: {
         parameters: {
             query?: {
+                /** @description True selects archived Tickets instead of unarchived Tickets. */
+                archived?: boolean;
                 /** @description Repeat to match any selected Badge; omit for all Tickets. */
                 badgeId?: string[];
             };
@@ -1061,6 +1085,37 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description The archived Ticket. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ticket"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    restoreTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The restored Ticket. */
             200: {
                 headers: {
                     [name: string]: unknown;

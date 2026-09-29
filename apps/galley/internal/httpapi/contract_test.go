@@ -385,9 +385,21 @@ func TestArchive_ResponsesMatchContractAndMethod405(t *testing.T) {
 	validateAgainstContract(t, router, req, rec)
 	_, rec, req = badgeRequest(t, handler, cookie, http.MethodGet, "/api/tickets", "", http.StatusOK)
 	validateAgainstContract(t, router, req, rec)
+	_, rec, req = badgeRequest(t, handler, cookie, http.MethodGet, "/api/tickets?archived=true", "", http.StatusOK)
+	validateAgainstContract(t, router, req, rec)
+	_, rec, req = badgeRequest(t, handler, cookie, http.MethodPost, "/api/tickets/"+created.(map[string]any)["id"].(string)+"/restore", "", http.StatusOK)
+	validateAgainstContract(t, router, req, rec)
+	_, rec, req = badgeRequest(t, handler, cookie, http.MethodPost, "/api/tickets/"+created.(map[string]any)["id"].(string)+"/restore", "", http.StatusBadRequest)
+	validateAgainstContract(t, router, req, rec)
+	_, rec, req = badgeRequest(t, handler, cookie, http.MethodPost, "/api/tickets/"+uuid.NewString()+"/restore", "", http.StatusNotFound)
+	validateAgainstContract(t, router, req, rec)
 	_, rec, _ = badgeRequest(t, handler, cookie, http.MethodDelete, path, "", http.StatusMethodNotAllowed)
 	if rec.Header().Get("Allow") != "POST" {
 		t.Fatalf("archive Allow = %q, want POST", rec.Header().Get("Allow"))
+	}
+	_, rec, _ = badgeRequest(t, handler, cookie, http.MethodDelete, "/api/tickets/"+created.(map[string]any)["id"].(string)+"/restore", "", http.StatusMethodNotAllowed)
+	if rec.Header().Get("Allow") != "POST" {
+		t.Fatalf("restore Allow = %q, want POST", rec.Header().Get("Allow"))
 	}
 }
 

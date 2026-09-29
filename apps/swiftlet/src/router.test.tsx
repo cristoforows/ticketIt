@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
-import { collectionQuery, fullPageReturnPath, navigate, ticketDetailPath, openTicketFullPage, openTicketModal, setBadgeFilter, useBadgeFilter, useRoute } from "./router";
+import { collectionQuery, fullPageReturnPath, navigate, ticketDetailPath, openTicketFullPage, openTicketModal, setArchivedFilter, setBadgeFilter, useArchivedFilter, useBadgeFilter, useRoute } from "./router";
 
 function RouteProbe() {
   const route = useRoute();
   const badgeIds = useBadgeFilter();
+  const archived = useArchivedFilter();
   return (
-    <><p data-testid="route">{route.name === "ticket-detail" ? `ticket-detail:${route.ticketId}:${route.background ?? "page"}` : route.name}</p><p data-testid="filter">{badgeIds.join(",")}</p></>
+    <><p data-testid="route">{route.name === "ticket-detail" ? `ticket-detail:${route.ticketId}:${route.background ?? "page"}` : route.name}</p><p data-testid="filter">{badgeIds.join(",")}</p><p data-testid="archived">{String(archived)}</p></>
   );
 }
 
@@ -141,6 +142,15 @@ describe("router", () => {
     expect(fullPageReturnPath()).toBe("/?badgeId=first");
   });
 
+  it("returns a full-page Archived detail to the Archived list with its Badges", () => {
+    window.history.pushState({}, "", "/?badgeId=first&archived=true");
+    const href = ticketDetailPath("abc-123", "backlog");
+    window.history.pushState(null, "", href);
+
+    expect(href).toBe("/tickets/abc-123?badgeId=first&archived=true");
+    expect(fullPageReturnPath()).toBe("/?badgeId=first&archived=true");
+  });
+
   it("keeps selected Badges across modal navigation and reacts to query changes", () => {
     window.history.pushState({}, "", "/?badgeId=first");
     render(<RouteProbe />);
@@ -150,5 +160,17 @@ describe("router", () => {
     act(() => openTicketModal("id", "backlog"));
     expect(window.location.search).toBe("?badgeId=first&badgeId=second");
     expect(screen.getByTestId("filter")).toHaveTextContent("first,second");
+  });
+
+  it("preserves Badge selection when toggling Archived and keeps it across a modal", () => {
+    window.history.pushState({}, "", "/?badgeId=first");
+    render(<RouteProbe />);
+    act(() => setArchivedFilter(true));
+    expect(window.location.search).toBe("?badgeId=first&archived=true");
+    expect(screen.getByTestId("archived")).toHaveTextContent("true");
+    act(() => openTicketModal("id", "backlog"));
+    expect(screen.getByTestId("archived")).toHaveTextContent("true");
+    act(() => setArchivedFilter(false));
+    expect(window.location.search).toBe("?badgeId=first");
   });
 });

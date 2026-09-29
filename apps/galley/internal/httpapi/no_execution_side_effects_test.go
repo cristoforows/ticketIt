@@ -111,6 +111,18 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("archive: status = %d, want 200", res.StatusCode)
 	}
+	req, err = http.NewRequest(http.MethodPost, baseURL+"/api/tickets/"+created.Id+"/restore", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("restore: status = %d, want 200", res.StatusCode)
+	}
 
 	tablesAfter := publicTableNames(t, pool)
 	wantTables := append([]string(nil), knownPublicTables...)

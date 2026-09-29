@@ -403,6 +403,9 @@ type CompleteGithubOAuthParams struct {
 
 // ListTicketsParams defines parameters for ListTickets.
 type ListTicketsParams struct {
+	// Archived True selects archived Tickets instead of unarchived Tickets.
+	Archived *bool `form:"archived,omitempty" json:"archived,omitempty"`
+
 	// BadgeId Repeat to match any selected Badge; omit for all Tickets.
 	BadgeId *[]string `form:"badgeId,omitempty" json:"badgeId,omitempty"`
 }
@@ -481,6 +484,9 @@ type ServerInterface interface {
 	// AttachTicketBadge Attach an existing Badge to a Ticket
 	// (PUT /api/tickets/{id}/badges/{badgeId})
 	AttachTicketBadge(w http.ResponseWriter, r *http.Request, id string, badgeId string)
+	// RestoreTicket Restore an archived Ticket
+	// (POST /api/tickets/{id}/restore)
+	RestoreTicket(w http.ResponseWriter, r *http.Request, id string)
 	// ChangeTicketStatus Change a Ticket's Status
 	// (POST /api/tickets/{id}/status)
 	ChangeTicketStatus(w http.ResponseWriter, r *http.Request, id string)
@@ -674,6 +680,19 @@ func (siw *ServerInterfaceWrapper) ListTickets(w http.ResponseWriter, r *http.Re
 
 	// Parameter object where we will unmarshal all parameters from the context
 	var params ListTicketsParams
+
+	// ------------- Optional query parameter "archived" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "archived", r.URL.Query(), &params.Archived, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "archived"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "archived", Err: err})
+		}
+		return
+	}
 
 	// ------------- Optional query parameter "badgeId" -------------
 
@@ -939,6 +958,32 @@ func (siw *ServerInterfaceWrapper) AttachTicketBadge(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// RestoreTicket operation middleware
+func (siw *ServerInterfaceWrapper) RestoreTicket(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RestoreTicket(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ChangeTicketStatus operation middleware
 func (siw *ServerInterfaceWrapper) ChangeTicketStatus(w http.ResponseWriter, r *http.Request) {
 
@@ -1103,6 +1148,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/tickets/{id}/badges/{badgeId}", wrapper.DetachTicketBadge)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/tickets/{id}/badges/{badgeId}", wrapper.AttachTicketBadge)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/archive", wrapper.ArchiveTicket)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/restore", wrapper.RestoreTicket)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/session", wrapper.SignOut)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/session", wrapper.GetSession)
 

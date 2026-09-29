@@ -605,6 +605,18 @@ The board and default list exclude archived Tickets, including while a
 Badge filter is selected. The Archived filter and Restore arrive in #94.
 Run `npm test && npm run build` here and `cd e2e && ./run.sh` at the root.
 
+## Archived filter and Restore (issue #94)
+
+The list's **Archived** checkbox stores `archived=true` in the URL and
+loads archived Tickets from Galley. It composes with the multi-Badge
+filter and survives reload. The board still shows unarchived Tickets
+even when its URL carries `archived=true`, so switching back to the list
+keeps the Owner's Archived selection. Archived detail and modal offer
+**Restore**; Galley's returned Ticket replaces the displayed state,
+including Ready becoming Backlog. On modal close, the archived collection
+refreshes and the restored Ticket leaves that view. Use
+`npm test && npm run build` here and `cd e2e && ./run.sh` at the root.
+
 ## Browser-to-backend suite
 
 The tests above stub `fetch`, so they never exercise the real proxy or

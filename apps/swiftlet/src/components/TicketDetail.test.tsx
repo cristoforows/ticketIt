@@ -51,6 +51,7 @@ function noopActions() {
     onAttachBadge: vi.fn<(id: string) => Promise<Ticket>>(),
     onDetachBadge: vi.fn<(id: string) => Promise<Ticket>>(),
     onArchive: vi.fn<() => Promise<Ticket>>(),
+    onRestore: vi.fn<() => Promise<Ticket>>(),
   };
 }
 
@@ -187,6 +188,19 @@ describe("archive presentation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));
     await waitFor(() => expect(onArchived).toHaveBeenCalledTimes(1));
     expect(onArchive).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows Ready becoming Backlog after Restore and unlocks editing", async () => {
+    const reason = { code: "archived_ticket", message: "archived tickets are read-only" };
+    const archived = { ...TICKET, status: "Ready" as const, archivedAt: "2026-09-29T10:00:00Z", allowedActions: { statusChanges: [] as Ticket["status"][], accept: { available: false, reason } } };
+    const restored: Ticket = { ...TICKET, status: "Backlog", archivedAt: null };
+    const onRestore = vi.fn().mockResolvedValue(restored);
+    render(<TicketDetail ticket={archived} onSave={vi.fn()} {...noopActions()} onRestore={onRestore} />);
+    fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+    await waitFor(() => expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("Backlog"));
+    expect(onRestore).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("ticket-detail-edit-button")).toBeEnabled();
+    expect(screen.queryByTestId("ticket-detail-restore-button")).not.toBeInTheDocument();
   });
 });
 

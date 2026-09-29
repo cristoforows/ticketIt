@@ -96,7 +96,8 @@ func (s *server) ListTickets(w http.ResponseWriter, r *http.Request, params List
 			return
 		}
 	}
-	tickets, err := listTicketsForOwner(ctx, s.pool, owner.ID, badgeIDs...)
+	archived := params.Archived != nil && *params.Archived
+	tickets, err := listTicketsForOwnerWithVisibility(ctx, s.pool, owner.ID, archived, badgeIDs...)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to read tickets")
 		return
@@ -572,18 +573,22 @@ func updateTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64
 // resolution the database clock offers. See
 // apps/galley/README.md, "Ticket ordering".
 func listTicketsForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, badgeIDs ...string) ([]Ticket, error) {
+	return listTicketsForOwnerWithVisibility(ctx, pool, ownerID, false, badgeIDs...)
+}
+
+func listTicketsForOwnerWithVisibility(ctx context.Context, pool *pgxpool.Pool, ownerID int64, archived bool, badgeIDs ...string) ([]Ticket, error) {
 	if badgeIDs == nil {
 		badgeIDs = []string{}
 	}
 	rows, err := pool.Query(ctx,
 		`SELECT `+ticketSelectColumns+`
 		   FROM tickets
-		  WHERE owner_id = $1 AND archived_at IS NULL AND (cardinality($2::text[]) = 0 OR EXISTS (
+		  WHERE owner_id = $1 AND (archived_at IS NOT NULL) = $3 AND (cardinality($2::text[]) = 0 OR EXISTS (
 		    SELECT 1 FROM ticket_badges tb JOIN badges b ON b.id = tb.badge_id AND b.owner_id = tb.owner_id
 		    WHERE tb.owner_id = $1 AND tb.ticket_id = tickets.id AND b.public_id::text = ANY($2::text[])
 		  ))
 		  ORDER BY created_at DESC, id DESC`,
-		ownerID, badgeIDs,
+		ownerID, badgeIDs, archived,
 	)
 	if err != nil {
 		return nil, err
