@@ -968,8 +968,11 @@ exists in this slice. Check with `go test ./...`, `go vet ./...`, and
 The two added tables are included in the fixed known-table guardrail;
 the lifecycle actions still leave both row counts unchanged.
 
-Every Ticket-returning storage path enriches its scanned row with
-`loadTicketBadges`; the list closes its cursor and loads all its Tickets'
+Every Ticket-returning storage path except creation enriches its scanned
+row with `loadTicketBadges`; a new Ticket starts with an empty `badges`
+array. Mutations hydrate inside their transaction before commit, so a
+hydration failure rolls the change back rather than reporting `503` for
+a committed write. The list closes its cursor and loads all its Tickets'
 Badges in one query. `scanTicketRow` cannot do this without a query per
 row and a nested database read while list rows remain open. A new Ticket
 return path must perform the same enrichment before writing JSON.

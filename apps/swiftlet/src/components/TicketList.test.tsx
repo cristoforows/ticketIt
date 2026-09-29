@@ -127,6 +127,7 @@ describe("TicketList", () => {
     expect(within(item).getByTestId("ticket-status")).toHaveTextContent("Backlog");
     expect(within(item).getByTestId("ticket-badges")).toHaveTextContent("Urgent");
     expect(within(item).getByLabelText("Badges: Urgent")).toBeInTheDocument();
+    expect(item.textContent).toContain("Backlog Urgent");
   });
 
   it("links each Ticket's title to its full-page detail route", async () => {
