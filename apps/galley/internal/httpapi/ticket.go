@@ -428,9 +428,7 @@ func insertTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64, title 
 	if err != nil {
 		return Ticket{}, err
 	}
-	if err := loadTicketBadges(ctx, pool, ownerID, &ticket); err != nil {
-		return Ticket{}, err
-	}
+	ticket.Badges = []TicketBadge{}
 	return ticket, nil
 }
 
@@ -442,8 +440,8 @@ func insertTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64, title 
 // publicID must already be a validated UUID string (GetTicket checks
 // this before calling in) -- an invalid one would fail the ::uuid cast
 // as a query error, not a "no rows" miss.
-func getTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, publicID string) (Ticket, bool, error) {
-	row := pool.QueryRow(ctx,
+func getTicketForOwner(ctx context.Context, db ticketDB, ownerID int64, publicID string) (Ticket, bool, error) {
+	row := db.QueryRow(ctx,
 		`SELECT `+ticketSelectColumns+`
 		   FROM tickets
 		  WHERE owner_id = $1 AND public_id = $2::uuid`,
@@ -456,7 +454,7 @@ func getTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, p
 	if err != nil {
 		return Ticket{}, false, err
 	}
-	if err := loadTicketBadges(ctx, pool, ownerID, &ticket); err != nil {
+	if err := loadTicketBadges(ctx, db, ownerID, &ticket); err != nil {
 		return Ticket{}, false, err
 	}
 	return ticket, true, nil
@@ -495,7 +493,12 @@ type ticketUpdate struct {
 // caller of this function -- today or in the future -- can make it
 // recompute or overwrite them.
 func updateTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, publicID string, update ticketUpdate) (Ticket, bool, error) {
-	row := pool.QueryRow(ctx,
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return Ticket{}, false, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
+	row := tx.QueryRow(ctx,
 		`UPDATE tickets
 		    SET title = COALESCE($3, title),
 		        goal = COALESCE($4, goal),
@@ -515,7 +518,10 @@ func updateTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64
 	if err != nil {
 		return Ticket{}, false, err
 	}
-	if err := loadTicketBadges(ctx, pool, ownerID, &ticket); err != nil {
+	if err := loadTicketBadges(ctx, tx, ownerID, &ticket); err != nil {
+		return Ticket{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return Ticket{}, false, err
 	}
 	return ticket, true, nil

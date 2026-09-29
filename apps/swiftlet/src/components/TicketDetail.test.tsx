@@ -97,6 +97,24 @@ describe("Badge picker", () => {
     await screen.findByRole("option", { name: BADGE.name });
     expect(screen.queryByTestId("badge-picker-error")).not.toBeInTheDocument();
   });
+
+  it("keeps a created Badge when the initial catalog request resolves later", async () => {
+    let resolveLoad!: (badges: Badge[]) => void;
+    const onLoadBadges = vi.fn(() => new Promise<Badge[]>((resolve) => { resolveLoad = resolve; }));
+    const actions = {
+      ...noopActions(),
+      onLoadBadges,
+      onCreateBadge: vi.fn().mockResolvedValue(BADGE),
+      onAttachBadge: vi.fn().mockRejectedValue(new Error("attach failed")),
+    };
+    render(<TicketDetail ticket={TICKET} onSave={vi.fn()} {...actions} />);
+    fireEvent.click(screen.getByTestId("badge-picker-toggle"));
+    fireEvent.change(screen.getByTestId("new-badge-name"), { target: { value: BADGE.name } });
+    fireEvent.click(screen.getByRole("button", { name: "Create and attach" }));
+    await waitFor(() => expect(actions.onAttachBadge).toHaveBeenCalledWith(BADGE.id));
+    resolveLoad([]);
+    expect(await screen.findByRole("option", { name: BADGE.name })).toBeInTheDocument();
+  });
 });
 
 describe("TicketDetail", () => {

@@ -17,6 +17,11 @@ import (
 
 const badgeNameMaxLength = 80
 
+type ticketDB interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
 func (s *server) ListBadges(w http.ResponseWriter, r *http.Request) {
 	owner, ok := s.requireSession(w, r)
 	if !ok {
@@ -112,7 +117,13 @@ func (s *server) AttachTicketBadge(w http.ResponseWriter, r *http.Request, id, b
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
-	found, err := attachBadgeForOwner(ctx, s.pool, owner.ID, id, badgeId)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to attach the badge")
+		return
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
+	found, err := attachBadgeForOwner(ctx, tx, owner.ID, id, badgeId)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to attach the badge")
 		return
@@ -121,7 +132,7 @@ func (s *server) AttachTicketBadge(w http.ResponseWriter, r *http.Request, id, b
 		writeBadgeNotFound(w)
 		return
 	}
-	ticket, found, err := getTicketForOwner(ctx, s.pool, owner.ID, id)
+	ticket, found, err := getTicketForOwner(ctx, tx, owner.ID, id)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to read the ticket")
 		return
@@ -130,12 +141,16 @@ func (s *server) AttachTicketBadge(w http.ResponseWriter, r *http.Request, id, b
 		writeBadgeNotFound(w)
 		return
 	}
+	if err := tx.Commit(ctx); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to attach the badge")
+		return
+	}
 	writeJSON(w, http.StatusOK, ticket)
 }
 
-func attachBadgeForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, ticketID, badgeID string) (bool, error) {
+func attachBadgeForOwner(ctx context.Context, db ticketDB, ownerID int64, ticketID, badgeID string) (bool, error) {
 	var linked int64
-	err := pool.QueryRow(ctx, `INSERT INTO ticket_badges (owner_id, ticket_id, badge_id)
+	err := db.QueryRow(ctx, `INSERT INTO ticket_badges (owner_id, ticket_id, badge_id)
 		SELECT $1, t.id, b.id FROM tickets t CROSS JOIN badges b
 		WHERE t.owner_id = $1 AND b.owner_id = $1 AND t.public_id = $2::uuid AND b.public_id = $3::uuid
 		ON CONFLICT (ticket_id, badge_id) DO UPDATE SET owner_id = EXCLUDED.owner_id
@@ -149,7 +164,7 @@ func attachBadgeForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64,
 	return true, nil
 }
 
-func loadTicketBadges(ctx context.Context, pool *pgxpool.Pool, ownerID int64, tickets ...*Ticket) error {
+func loadTicketBadges(ctx context.Context, db ticketDB, ownerID int64, tickets ...*Ticket) error {
 	byID := make(map[string]*Ticket, len(tickets))
 	ids := make([]string, 0, len(tickets))
 	for _, ticket := range tickets {
@@ -160,7 +175,7 @@ func loadTicketBadges(ctx context.Context, pool *pgxpool.Pool, ownerID int64, ti
 	if len(tickets) == 0 {
 		return nil
 	}
-	rows, err := pool.Query(ctx, `SELECT t.public_id::text, b.public_id::text, b.name
+	rows, err := db.Query(ctx, `SELECT t.public_id::text, b.public_id::text, b.name
 		FROM ticket_badges tb JOIN tickets t ON t.id = tb.ticket_id AND t.owner_id = tb.owner_id
 		JOIN badges b ON b.id = tb.badge_id AND b.owner_id = tb.owner_id
 		WHERE tb.owner_id = $1 AND t.public_id::text = ANY($2::text[])

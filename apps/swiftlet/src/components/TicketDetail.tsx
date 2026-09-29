@@ -329,7 +329,13 @@ function BadgePicker({ ticket, onAttached, onLoad, onCreate, onAttach }: {
     setError(null);
     onLoad().then((available) => {
       if (!cancelled) {
-        setBadges(available);
+        setBadges((current) => {
+          const merged = new Map(available.map((badge) => [badge.id, badge]));
+          for (const badge of current) {
+            if (!merged.has(badge.id)) merged.set(badge.id, badge);
+          }
+          return [...merged.values()];
+        });
         setError(null);
       }
     }).catch((cause: unknown) => {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { TicketList } from "./TicketList";
 
 type MockResponse = Pick<Response, "ok" | "status" | "statusText" | "json">;
@@ -115,6 +115,18 @@ describe("TicketList", () => {
     expect(items[1]).toHaveAttribute("data-testid", `ticket-item-${TICKET_B.id}`);
     expect(screen.getAllByTestId("ticket-title")[0]).toHaveTextContent(TICKET_A.title);
     expect(screen.getAllByTestId("ticket-status")[0]).toHaveTextContent("Backlog");
+  });
+
+  it("renders Badge names with an accessible label", async () => {
+    const ticket = { ...TICKET_A, badges: [{ id: "badge-1", name: "Urgent" }] };
+    stubFetch({ "GET /api/tickets": jsonResponse({ tickets: [ticket] }) });
+
+    renderTicketList();
+
+    const item = await screen.findByTestId(`ticket-item-${ticket.id}`);
+    expect(within(item).getByTestId("ticket-status")).toHaveTextContent("Backlog");
+    expect(within(item).getByTestId("ticket-badges")).toHaveTextContent("Urgent");
+    expect(within(item).getByLabelText("Badges: Urgent")).toBeInTheDocument();
   });
 
   it("links each Ticket's title to its full-page detail route", async () => {

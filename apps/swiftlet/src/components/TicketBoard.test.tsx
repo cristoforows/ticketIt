@@ -62,6 +62,17 @@ describe("TicketBoard", () => {
     expect(fetch).toHaveBeenCalledWith("/api/tickets", undefined);
   });
 
+  it("renders Badge names with an accessible label", async () => {
+    const ticketWithBadge = { ...ticket("badged", "Backlog"), badges: [{ id: "badge-1", name: "Urgent" }] };
+    stubTickets([ticketWithBadge]);
+
+    render(<TicketBoard onUnauthenticated={() => {}} />);
+
+    const card = await screen.findByTestId("board-ticket-badged");
+    expect(within(card).getByTestId("board-badges")).toHaveTextContent("Urgent");
+    expect(within(card).getByLabelText("Badges: Urgent")).toBeInTheDocument();
+  });
+
   it("shows empty sections even when there are no Tickets", async () => {
     stubTickets([]);
     render(<TicketBoard onUnauthenticated={() => {}} />);
