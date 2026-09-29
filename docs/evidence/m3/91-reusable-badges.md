@@ -6,7 +6,7 @@
 
 ## What already existed
 
-M3.3 PR #101 provides the modal over shared list/board/detail Ticket data, persistent Owner sessions, and Ticket lifecycle commands. This slice builds directly on that PR. No Badge table, endpoint or UI existed.
+M3.3 PR #101 provides the modal over shared list/board/detail Ticket data, persistent Owner sessions, and Ticket lifecycle commands. M3.4 PR #102 adds board moves. No Badge table, endpoint or UI existed.
 
 ## What this slice added
 
