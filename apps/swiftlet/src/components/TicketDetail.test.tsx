@@ -47,6 +47,7 @@ function noopActions() {
     onLoadBadges: vi.fn<() => Promise<import("../api/tickets").Badge[]>>().mockResolvedValue([]),
     onCreateBadge: vi.fn<(name: string) => Promise<import("../api/tickets").Badge>>(),
     onAttachBadge: vi.fn<(id: string) => Promise<Ticket>>(),
+    onDetachBadge: vi.fn<(id: string) => Promise<Ticket>>(),
   };
 }
 
@@ -54,6 +55,18 @@ const BADGE: Badge = { id: "11111111-1111-4111-8111-111111111111", name: "Urgent
 
 describe("Badge picker", () => {
   afterEach(cleanup);
+
+  it("removes an attached Badge only after Galley confirms detach", async () => {
+    let resolve!: (ticket: Ticket) => void;
+    const detached = new Promise<Ticket>((done) => { resolve = done; });
+    const onDetachBadge = vi.fn().mockReturnValue(detached);
+    render(<TicketDetail ticket={{ ...TICKET, badges: [{ id: BADGE.id, name: BADGE.name }] }} onSave={vi.fn()} {...noopActions()} onDetachBadge={onDetachBadge} />);
+    fireEvent.click(screen.getByRole("button", { name: "Remove Urgent" }));
+    expect(onDetachBadge).toHaveBeenCalledWith(BADGE.id);
+    expect(screen.getByTestId("ticket-detail-badges")).toHaveTextContent("Urgent");
+    resolve({ ...TICKET, badges: [] });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Remove Urgent" })).not.toBeInTheDocument());
+  });
 
   it("creates and attaches inline, then offers another Ticket the existing Badge", async () => {
     const onCreateBadge = vi.fn().mockResolvedValue(BADGE);

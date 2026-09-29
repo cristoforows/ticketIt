@@ -135,6 +135,17 @@ describe("TicketDetailPage", () => {
     expect(screen.getByTestId("back-to-backlog-link")).toHaveAttribute("href", "/");
   });
 
+  it("returns to the Backlog with the selected Badge filter", async () => {
+    window.history.pushState({}, "", `/tickets/${TICKET_ID}?badgeId=first&badgeId=second`);
+    stubFetch(jsonResponse(TICKET));
+
+    render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+    await screen.findByTestId("ticket-detail-title");
+
+    expect(screen.getByTestId("back-to-backlog-link")).toHaveAttribute("href", "/?badgeId=first&badgeId=second");
+    window.history.pushState({}, "", "/");
+  });
+
   it("re-fetches when the ticketId prop changes", async () => {
     stubFetch(jsonResponse(TICKET));
     const { rerender } = render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);

@@ -181,11 +181,22 @@ paths:
       summary: List the signed-in Owner's Tickets
       tags: [tickets]
       description: >-
-        Returns every Ticket belonging to the signed-in Owner, newest
-        first: ordered by createdAt descending with id descending as
+        Returns the signed-in Owner's Tickets, optionally matching any
+        selected Badge (OR, with each Ticket returned once). Unknown,
+        malformed, or foreign Badge ids return 400 invalid_request.
+        Results are ordered by createdAt descending with id descending as
         the deterministic tiebreak (createdAt alone is not unique --
         see apps/galley/README.md, "Ticket ordering"). Requires a
         valid session; returns `401 unauthenticated` otherwise.
+      parameters:
+        - name: badgeId
+          in: query
+          description: Repeat to match any selected Badge; omit for all Tickets.
+          schema:
+            type: array
+            items: {type: string, format: uuid, x-go-type: string}
+          style: form
+          explode: true
       responses:
         "200":
           description: The Owner's Tickets, newest first.
@@ -573,6 +584,27 @@ paths:
       responses:
         "200":
           description: The Ticket with the Badge attached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+    delete:
+      operationId: detachTicketBadge
+      summary: Remove a Badge from a Ticket
+      tags: [badges, tickets]
+      description: >-
+        Idempotent if the Ticket does not carry the Badge. The reusable Badge
+        remains in the library. An unknown, malformed, or foreign Ticket or
+        Badge id returns the shared 404 not_found.
+      responses:
+        "200":
+          description: The Ticket after removing the Badge.
           content:
             application/json:
               schema:

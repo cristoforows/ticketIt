@@ -961,8 +961,8 @@ ones return shared `404 not_found`. All Ticket responses, including
 capture, list, detail, edit, Status and Assignee commands, contain
 `badges: [{id, name}]`, ordered like the Badge list (empty array when
 none). Attachment does not change the Ticket's `updatedAt` because
-no Ticket column changes. No detach, filter, rename, or delete endpoint
-exists in this slice. Check with `go test ./...`, `go vet ./...`, and
+no Ticket column changes. No rename or delete endpoint exists. Check with
+`go test ./...`, `go vet ./...`, and
 `./scripts/check-contract-drift.sh` from this directory.
 
 The two added tables are included in the fixed known-table guardrail;
@@ -980,6 +980,23 @@ return path must perform the same enrichment before writing JSON.
 and same-name Badge definitions through real sessions for two Owners in
 an isolated test database (the second row uses `singleton=false`, not a
 production sign-in path).
+
+## Badge detach and Ticket filtering (issue #92)
+
+`DELETE /api/tickets/{id}/badges/{badgeId}` removes the link and returns
+the updated Ticket. It is idempotent for an owned Badge absent from an
+owned Ticket; the Badge definition remains available in `GET /api/badges`.
+Unknown, malformed, and foreign identifiers return the same `404` as
+attachment. The command runs in a transaction and locks the Ticket row
+before removing the link and reading the updated response.
+
+`GET /api/tickets?badgeId=<uuid>&badgeId=<uuid>` selects Tickets carrying
+any of the Owner's selected Badges. Omit the parameter for all Tickets;
+repeating an id does not duplicate a Ticket. Galley validates that every
+selected id belongs to the Owner; an empty, malformed, unknown, or
+foreign id returns `400 invalid_request`. The `EXISTS` predicate keeps
+one Ticket row per match and preserves newest-first `created_at DESC, id
+DESC` ordering. Later visibility filters can join this same query.
 
 ## Error shape
 

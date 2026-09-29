@@ -36,13 +36,30 @@ function subscribe(callback: () => void): () => void {
 }
 
 function getSnapshot(): string {
-  return JSON.stringify([window.location.pathname, modalBackground()]);
+  return JSON.stringify([window.location.pathname, window.location.search, modalBackground()]);
 }
 
 export function useRoute(): Route {
   const snapshot = useSyncExternalStore(subscribe, getSnapshot);
-  const [pathname, background] = JSON.parse(snapshot) as [string, CollectionRoute | undefined];
+  const [pathname, , background] = JSON.parse(snapshot) as [string, string, CollectionRoute | undefined];
   return parseRoute(pathname, background);
+}
+
+export function useBadgeFilter(): string[] {
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot);
+  const [, search] = JSON.parse(snapshot) as [string, string];
+  return new URLSearchParams(search).getAll("badgeId");
+}
+
+export function collectionQuery(): string {
+  return window.location.search;
+}
+
+export function setBadgeFilter(ids: string[]): void {
+  const query = new URLSearchParams(window.location.search);
+  query.delete("badgeId");
+  ids.forEach((id) => query.append("badgeId", id));
+  navigate(`${window.location.pathname}${query.size ? `?${query}` : ""}`);
 }
 
 export function collectionPath(view: CollectionRoute): string {
@@ -50,12 +67,12 @@ export function collectionPath(view: CollectionRoute): string {
 }
 
 export function openTicketModal(ticketId: string, background: CollectionRoute): void {
-  window.history.pushState({ ticketModal: { pageLoadId, background } } satisfies ModalHistoryState, "", `/tickets/${encodeURIComponent(ticketId)}`);
+  window.history.pushState({ ticketModal: { pageLoadId, background } } satisfies ModalHistoryState, "", `/tickets/${encodeURIComponent(ticketId)}${collectionQuery()}`);
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
 export function openTicketFullPage(ticketId: string): void {
-  window.history.replaceState({}, "", `/tickets/${encodeURIComponent(ticketId)}`);
+  window.history.replaceState({}, "", `/tickets/${encodeURIComponent(ticketId)}${collectionQuery()}`);
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 

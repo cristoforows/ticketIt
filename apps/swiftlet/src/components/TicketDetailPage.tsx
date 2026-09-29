@@ -9,12 +9,14 @@ import {
   unassignTicket,
   createBadge,
   attachTicketBadge,
+  detachTicketBadge,
   fetchBadges,
   TicketNotFoundError,
   type Ticket,
   type Badge,
   type TicketUpdate,
 } from "../api/tickets";
+import { collectionQuery } from "../router";
 import { Link } from "./Link";
 import { TicketDetail } from "./TicketDetail";
 
@@ -117,7 +119,7 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
   return (
     <section data-testid={presentation === "page" ? "ticket-detail-page" : "ticket-detail-modal-content"}>
       {presentation === "page" && <p>
-        <Link to="/" data-testid="back-to-backlog-link">
+        <Link to={`/${collectionQuery()}`} data-testid="back-to-backlog-link">
           Back to Backlog
         </Link>
       </p>}
@@ -148,6 +150,7 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
           onCreateBadge={createNewBadge}
           onLoadBadges={loadBadges}
           onAttachBadge={(badgeId) => runCommand(() => attachTicketBadge(ticketId, badgeId))}
+          onDetachBadge={(badgeId) => runCommand(() => detachTicketBadge(ticketId, badgeId))}
         />
       )}
     </section>

@@ -18,7 +18,7 @@ type BoardState =
   | { kind: "loaded"; tickets: Ticket[]; refreshKey: number; refreshError?: string }
   | { kind: "error"; message: string };
 
-export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }: { onUnauthenticated: () => void; refreshKey?: number; focusTicketId?: string }) {
+export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, badgeIds = [] }: { onUnauthenticated: () => void; refreshKey?: number; focusTicketId?: string; badgeIds?: string[] }) {
   const [state, setState] = useState<BoardState>({ kind: "loading" });
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
@@ -32,7 +32,7 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
   useEffect(() => {
     let cancelled = false;
     const id = ++requestId.current;
-    fetchTickets()
+    fetchTickets(badgeIds)
       .then((tickets) => {
         if (tickets.some((ticket) => !statuses.some(({ value }) => value === ticket.status))) {
           throw new Error("Galley returned a Ticket with an unknown Status.");
@@ -51,7 +51,7 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
           : { kind: "error", message });
       });
     return () => { cancelled = true; };
-  }, [onUnauthenticated, refreshKey, moveRefreshKey]);
+  }, [onUnauthenticated, refreshKey, moveRefreshKey, badgeIds.join(",")]);
 
   useEffect(() => {
     if (refreshKey > focusedRefreshKey.current && state.kind === "loaded" && state.refreshKey === refreshKey && focusTicketId) {
@@ -108,6 +108,9 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
           <p>Unable to load tickets.</p>
           <p data-testid="ticket-board-error-message">{state.message}</p>
         </div>
+      )}
+      {state.kind === "loaded" && (
+        state.tickets.length === 0 && badgeIds.length > 0 && <p data-testid="ticket-board-filter-empty">No tickets match the selected Badges.</p>
       )}
       {state.kind === "loaded" && (
         <div data-testid="board-columns" className="grid grid-flow-col auto-cols-[minmax(12rem,1fr)] gap-4 overflow-x-auto">

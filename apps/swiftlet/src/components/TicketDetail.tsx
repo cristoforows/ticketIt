@@ -11,6 +11,7 @@ interface TicketDetailProps {
   onLoadBadges: () => Promise<Badge[]>;
   onCreateBadge: (name: string) => Promise<Badge>;
   onAttachBadge: (badgeId: string) => Promise<Ticket>;
+  onDetachBadge: (badgeId: string) => Promise<Ticket>;
 }
 
 interface EditableFields {
@@ -47,7 +48,7 @@ function completionConditionLabel(condition: Ticket["completionCondition"]): str
 /** The only non-empty assignee_type M2 writes; there is no Agent Assignee kind yet. */
 const OWNER_ASSIGNEE_TYPE = "owner";
 
-export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssign, onUnassign, onLoadBadges, onCreateBadge, onAttachBadge }: TicketDetailProps) {
+export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssign, onUnassign, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge }: TicketDetailProps) {
   const [current, setCurrent] = useState(ticket);
   const [mode, setMode] = useState<"view" | "editing">("view");
   const [fields, setFields] = useState<EditableFields>(() => fieldsFrom(ticket));
@@ -145,7 +146,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
           </dl>
           <section aria-label="Badges" data-testid="ticket-detail-badges">
             <h3>Badges</h3>
-            <ul>{current.badges.map((badge) => <li key={badge.id}>{badge.name}</li>)}</ul>
+            <ul>{current.badges.map((badge) => <li key={badge.id}><span>{badge.name}</span> <button type="button" disabled={actionPending} onClick={() => runAction(() => onDetachBadge(badge.id))} aria-label={`Remove ${badge.name}`}>Remove</button></li>)}</ul>
             <BadgePicker ticket={current} onAttached={setCurrent} onLoad={onLoadBadges} onCreate={onCreateBadge} onAttach={onAttachBadge} />
           </section>
           <section aria-label="Refinement">

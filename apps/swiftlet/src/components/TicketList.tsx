@@ -16,7 +16,7 @@ type ListState =
  * decides where the new Ticket sorts -- apps/galley/README.md, "Ticket
  * ordering") so a captured Ticket appears with no manual reload.
  */
-export function TicketList({ onUnauthenticated, refreshKey = 0, focusTicketId }: { onUnauthenticated: () => void; refreshKey?: number; focusTicketId?: string }) {
+export function TicketList({ onUnauthenticated, refreshKey = 0, focusTicketId, badgeIds = [] }: { onUnauthenticated: () => void; refreshKey?: number; focusTicketId?: string; badgeIds?: string[] }) {
   const [state, setState] = useState<ListState>({ kind: "loading" });
   const [title, setTitle] = useState("");
   const [template, setTemplate] = useState<Ticket["template"]>("Basic");
@@ -28,7 +28,7 @@ export function TicketList({ onUnauthenticated, refreshKey = 0, focusTicketId }:
   const load = useCallback((keepExisting = false, refreshKey = 0) => {
     const id = ++requestId.current;
     if (!keepExisting) setState({ kind: "loading" });
-    fetchTickets()
+    fetchTickets(badgeIds)
       .then((tickets) => {
         if (id === requestId.current) setState({ kind: "loaded", tickets, refreshKey });
       })
@@ -43,7 +43,7 @@ export function TicketList({ onUnauthenticated, refreshKey = 0, focusTicketId }:
           ? { ...current, refreshError: message }
           : { kind: "error", message });
       });
-  }, [onUnauthenticated]);
+  }, [onUnauthenticated, badgeIds.join(",")]);
 
   useEffect(() => {
     mounted.current = true;
@@ -133,7 +133,7 @@ export function TicketList({ onUnauthenticated, refreshKey = 0, focusTicketId }:
         </div>
       )}
       {state.kind === "loaded" && state.tickets.length === 0 && (
-        <p data-testid="ticket-list-empty">No tickets yet. Capture your first one above.</p>
+        <p data-testid="ticket-list-empty">{badgeIds.length ? "No tickets match the selected Badges." : "No tickets yet. Capture your first one above."}</p>
       )}
       {state.kind === "loaded" && state.tickets.length > 0 && (
         <ul data-testid="ticket-list-items">

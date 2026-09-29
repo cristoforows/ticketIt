@@ -239,6 +239,13 @@ switching must not refocus a Ticket from the previous collection, and
 Open full page preserves an edited Goal and Assignee controls.
 `run.sh` registers this spec and checks its exit code.
 
+`tests/ticket-badge-filter.spec.ts` selects two Badges from the list,
+reloads, switches to the board, and detaches one in the modal. It compares
+Galley's filtered response with rendered Tickets, then verifies the
+detached Ticket leaves the view on close, keeps the filter through Open
+full page and Back to Backlog, and returns after clearing the filter.
+`run.sh` checks its exit code.
+
 ## The failure-mode spec
 
 `tests/backend-failure.spec.ts` runs *after* `run.sh` stops Galley, and
