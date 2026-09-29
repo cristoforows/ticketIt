@@ -18,15 +18,18 @@ export function refocusTicketRowIfFocusLost(view: CollectionRoute, ticketId: str
 interface TicketModalLinkProps extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href" | "onClick"> {
   ticketId: string;
   view: CollectionRoute;
+  disabled?: boolean;
 }
 
-export function TicketModalLink({ ticketId, view, children, ...rest }: TicketModalLinkProps) {
+export function TicketModalLink({ ticketId, view, disabled = false, children, ...rest }: TicketModalLinkProps) {
   return (
     <Link
       to={`/tickets/${encodeURIComponent(ticketId)}`}
+      aria-disabled={disabled || undefined}
       onClick={(event) => {
         if (!isPlainLinkClick(event)) return;
         event.preventDefault();
+        if (disabled) return;
         openTicketModal(ticketId, view);
       }}
       {...rest}

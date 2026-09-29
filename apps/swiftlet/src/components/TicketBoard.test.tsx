@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { TicketBoard } from "./TicketBoard";
 
 const ticket = (id: string, status: string, template = "Basic") => ({
@@ -112,5 +112,89 @@ describe("TicketBoard", () => {
     render(<TicketBoard onUnauthenticated={onUnauthenticated} />);
 
     await vi.waitFor(() => expect(onUnauthenticated).toHaveBeenCalledOnce());
+  });
+
+  it("highlights only advertised drag targets and sends no disallowed or Done command", async () => {
+    stubTickets([{ ...ticket("moving", "Backlog"), allowedActions: { statusChanges: ["Ready", "Blocked", "Done"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } } } }]);
+    render(<TicketBoard onUnauthenticated={() => {}} />);
+    const card = await screen.findByTestId("board-ticket-moving");
+    const trigger = within(card).getByRole("button", { name: "Move to…" });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    expect((await screen.findAllByRole("menuitem")).map((item) => item.getAttribute("data-move-target"))).toEqual(["Ready", "Blocked"]);
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    fireEvent.dragStart(card, { dataTransfer: { setData: vi.fn(), effectAllowed: "move" } });
+    expect(screen.getByTestId("board-status-Ready")).toHaveAttribute("data-drop-target", "true");
+    expect(screen.getByTestId("board-status-Blocked")).toHaveAttribute("data-drop-target", "true");
+    expect(screen.getByTestId("board-status-InReview")).not.toHaveAttribute("data-drop-target", "true");
+    expect(screen.getByTestId("board-status-Done")).not.toHaveAttribute("data-drop-target", "true");
+    fireEvent.drop(screen.getByTestId("board-status-InReview"));
+    fireEvent.drop(screen.getByTestId("board-status-Done"));
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for Galley's response before moving and uses returned actions", async () => {
+    const original = { ...ticket("moving", "Backlog"), allowedActions: { statusChanges: ["Ready"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } } } };
+    const changed = { ...original, status: "Ready", allowedActions: { ...original.allowedActions, statusChanges: ["Backlog", "InProgress"] } };
+    let resolveCommand!: (response: unknown) => void;
+    const fetchStub = vi.fn().mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ tickets: [original] }) })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveCommand = resolve; }));
+    vi.stubGlobal("fetch", fetchStub);
+    render(<TicketBoard onUnauthenticated={() => {}} />);
+    const card = await screen.findByTestId("board-ticket-moving");
+    const trigger = within(card).getByRole("button", { name: "Move to…" });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Ready" }));
+    expect(screen.getByTestId("board-status-Backlog")).toContainElement(card);
+    await vi.waitFor(() => expect(fetchStub).toHaveBeenCalledTimes(2));
+    expect(fetchStub).toHaveBeenLastCalledWith("/api/tickets/moving/status", expect.objectContaining({ method: "POST", body: JSON.stringify({ status: "Ready" }) }));
+    resolveCommand({ ok: true, status: 200, json: async () => changed });
+    await vi.waitFor(() => expect(screen.getByTestId("board-status-Ready")).toContainElement(screen.getByTestId("board-ticket-moving")));
+    const moved = screen.getByTestId("board-ticket-moving");
+    await vi.waitFor(() => expect(within(moved).getByRole("button", { name: "Move to…" })).toHaveFocus());
+    const nextTrigger = within(moved).getByRole("button", { name: "Move to…" });
+    nextTrigger.focus();
+    fireEvent.keyDown(nextTrigger, { key: "Enter" });
+    expect((await screen.findAllByRole("menuitem")).map((item) => item.textContent)).toEqual(["Backlog", "In Progress"]);
+  });
+
+  it("shows Galley's rejection verbatim without moving the card", async () => {
+    const original = { ...ticket("stale", "Backlog"), allowedActions: { statusChanges: ["Ready"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } } } };
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ tickets: [original] }) })
+      .mockResolvedValueOnce({ ok: false, status: 400, json: async () => ({ error: { code: "invalid_transition", message: "Galley stale move reason" } }) }));
+    render(<TicketBoard onUnauthenticated={() => {}} />);
+    const card = await screen.findByTestId("board-ticket-stale");
+    const trigger = within(card).getByRole("button", { name: "Move to…" });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Ready" }));
+    expect(await screen.findByTestId("ticket-board-move-error")).toHaveTextContent("Galley stale move reason");
+    expect(screen.getByTestId("board-status-Backlog")).toContainElement(card);
+    expect(within(card).getByRole("link")).not.toHaveAttribute("aria-disabled", "true");
+    await vi.waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("keeps focus on a moved card after the follow-up read, not on the Ticket whose modal closed earlier", async () => {
+    const actions = { statusChanges: ["Ready"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } } };
+    const closed = { ...ticket("closed", "Backlog"), allowedActions: actions };
+    const moving = { ...ticket("moving", "Backlog"), allowedActions: actions };
+    const changed = { ...moving, status: "Ready", allowedActions: { ...actions, statusChanges: ["Backlog"] } };
+    const fetchStub = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ tickets: [closed, moving] }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => changed })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ tickets: [closed, changed] }) });
+    vi.stubGlobal("fetch", fetchStub);
+    render(<TicketBoard onUnauthenticated={() => {}} refreshKey={1} focusTicketId="closed" />);
+    await vi.waitFor(() => expect(within(screen.getByTestId("board-ticket-closed")).getByRole("link")).toHaveFocus());
+    const trigger = within(screen.getByTestId("board-ticket-moving")).getByRole("button", { name: "Move to…" });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Ready" }));
+    await vi.waitFor(() => expect(fetchStub).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(screen.getByTestId("board-status-Ready")).toContainElement(screen.getByTestId("board-ticket-moving")));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(within(screen.getByTestId("board-ticket-moving")).getByRole("button", { name: "Move to…" })).toHaveFocus();
   });
 });

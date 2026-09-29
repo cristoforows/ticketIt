@@ -204,6 +204,17 @@ compares the list's full order to that same response, checks direct
 session. `run.sh` registers and checks its exit code after the restart
 phase, while Galley is running.
 
+`tests/ticket-board-moves.spec.ts` drives native drag and the keyboard
+`Move to…` Radix UI menu, checks persisted Status and returned allowed
+actions after reload, proves disallowed and Done drops send no command, and
+compares a stale move's visible rejection with Galley's live error,
+including focus returning to `Move to…` after a rejected keyboard move. It
+also defers the Status request to check that plain detail entry is
+unavailable until the move settles, and holds a modal-close GET
+containing another Ticket's edit while a card moves: the board must
+retain both Galley's returned move and the other Ticket's edit. It is
+registered in `run.sh` while Galley is running.
+
 ## Ticket detail modal
 
 `tests/ticket-modal.spec.ts` opens Tickets below the fold from both list

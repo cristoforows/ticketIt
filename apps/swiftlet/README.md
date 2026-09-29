@@ -504,6 +504,30 @@ imports its theme and utilities, without Preflight, so the existing
 native typography and form styles remain. Board layout and modal
 presentation use utility classes; there is no separate board stylesheet.
 
+## Board moves (issue #90)
+
+Board cards support native HTML5 drag-and-drop and a keyboard-operable
+Radix UI Dropdown Menu for `Move to…`. Both submit the same
+`changeTicketStatus` command (`POST /api/tickets/:id/status`). Drop
+highlights and buttons follow that Ticket's `allowedActions.statusChanges`
+from Galley. Done is excluded from both targets; only the explicit
+Accept command in Ticket detail reaches Done. No reordering or Stop
+command is attached to dragging.
+
+The board waits for Galley's returned Ticket before relocating a card
+and replacing its offered moves; a rejection keeps the last displayed
+card in place and shows Galley's message. During a pending move, its
+card reports `aria-busy`, and its detail link is `aria-disabled` and
+cannot open a stale modal through a plain click. It becomes available
+again after success or rejection. After a keyboard move settles, either
+way, focus returns to that card's `Move to…` control; a later collection
+read does not move it back to a Ticket whose modal closed earlier. A successful command also
+starts a fresh collection read: an overlapping modal-close GET cannot
+lose edits to other Tickets or replace the returned Ticket. Native drag
+events need no new dependency and are driven by Playwright's `dragTo` in
+`e2e/tests/ticket-board-moves.spec.ts`. Run `npm test && npm run build`
+here and `cd e2e && ./run.sh` from the repo root.
+
 ## Ticket detail modal (issue #89)
 
 Clicking a Ticket link in `/` or `/board` opens its detail in a Radix UI
