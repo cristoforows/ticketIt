@@ -115,14 +115,14 @@ describe("AppShell", () => {
 
     render(<AppShell owner={OWNER} onSignedOut={() => {}} onUnauthenticated={() => {}} />);
 
-    expect(await screen.findAllByText("No tickets.")).toHaveLength(6);
+    expect(await screen.findAllByText("— no orders —")).toHaveLength(6);
     expect(screen.queryByTestId("ticket-capture-form")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Board" })).toHaveAttribute("aria-current", "page");
     fireEvent.click(screen.getByRole("link", { name: "List" }));
     expect(await screen.findByTestId("ticket-list-empty")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "List" })).toHaveAttribute("aria-current", "page");
     fireEvent.click(screen.getByRole("link", { name: "Board" }));
-    expect(await screen.findAllByText("No tickets.")).toHaveLength(6);
+    expect(await screen.findAllByText("— no orders —")).toHaveLength(6);
     expect(screen.getByTestId("signed-in-owner")).toHaveTextContent(OWNER.login);
     expect(window.location.pathname).toBe("/board");
   });

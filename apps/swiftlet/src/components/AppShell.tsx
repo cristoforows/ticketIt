@@ -74,6 +74,7 @@ export function AppShell({ owner, onSignedOut, onUnauthenticated }: AppShellProp
     }
   }
 
+  const Surface = background === "board" ? "div" : Paper;
   const navLink = "px-3 py-1.5 text-label font-bold tracking-label text-dim uppercase no-underline ring-1 ring-dim hover:text-paper aria-[current=page]:bg-amber aria-[current=page]:text-ink aria-[current=page]:ring-amber";
 
   return (
@@ -96,8 +97,8 @@ export function AppShell({ owner, onSignedOut, onUnauthenticated }: AppShellProp
         )}
       </AppHeader>
       <main className="mx-auto max-w-(--size-page) px-6 py-8">
-        <Paper className="p-6">
-          {background && <BadgeFilter selected={badgeIds} onUnauthenticated={onUnauthenticated} refreshKey={refresh.key} />}
+        <Surface className={background === "board" ? undefined : "p-6"}>
+          {background && <BadgeFilter tone={background === "board" ? "ground" : "paper"} selected={badgeIds} onUnauthenticated={onUnauthenticated} refreshKey={refresh.key} />}
           {background === "backlog" && (
             <>
           <label><input type="checkbox" data-testid="archived-filter" checked={archived} onChange={(event) => setArchivedFilter(event.target.checked)} /> Archived</label>
@@ -110,7 +111,7 @@ export function AppShell({ owner, onSignedOut, onUnauthenticated }: AppShellProp
           {route.name === "ticket-detail" && !route.background && (
             <TicketDetailPage key={route.ticketId} ticketId={route.ticketId} onUnauthenticated={onUnauthenticated} />
           )}
-        </Paper>
+        </Surface>
       </main>
       {modalTicketId && background && (
         <TicketDetailModal key={modalTicketId} ticketId={modalTicketId} background={background} onUnauthenticated={onUnauthenticated} onClose={() => window.history.back()} onCommandSucceeded={() => refreshAfterModalCommand(modalTicketId)} />
