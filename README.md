@@ -2,7 +2,7 @@
 
 A personal ticket tracker with board/list views and configurable AI agents that carry out work in traceable rounds.
 
-**Status:** [v1 spec #1](https://github.com/cristoforows/ticketIt/issues/1) and ten milestone issues published. [M1's](https://github.com/cristoforows/ticketIt/issues/2) bounded adapter proofs are complete (see [docs/integration-feasibility.md](docs/integration-feasibility.md) and [docs/evidence/m1/](docs/evidence/m1/README.md)); the Owner has resolved [D3](docs/decisions/d3-agent-template-compatibility.md) in favor of owner-chosen Agents without template restrictions. [M2's](https://github.com/cristoforows/ticketIt/issues/3) thirteen implementation slices are complete and gate-reported at [#62](https://github.com/cristoforows/ticketIt/issues/62): the Owner can sign in, capture and refine a Ticket, and manage basic human-assigned work through Swiftlet and Galley against real PostgreSQL — see [docs/evidence/m2/](docs/evidence/m2/README.md) for the full slice index and verified acceptance criteria. M2 has no Agents, Rounds, execution, or Michelin, and no board, modal, Badges, archive, object storage, or hosting; M3 has not started.
+**Status:** [v1 spec #1](https://github.com/cristoforows/ticketIt/issues/1) and ten milestone issues published. [M1's](https://github.com/cristoforows/ticketIt/issues/2) bounded adapter proofs and [M2's](https://github.com/cristoforows/ticketIt/issues/3) persistent Owner workflow are gate-reported in [M1 evidence](docs/evidence/m1/README.md) and [M2 evidence](docs/evidence/m2/README.md). [M3's](https://github.com/cristoforows/ticketIt/issues/4) board/list, modal, Status moves, reusable Badges and Archive/Restore have a **local** clean-worktree gate report at [M3 evidence](docs/evidence/m3/README.md); execution-eligibility and open-Round checks await M4/M5. Stacked PRs #105–#107 remain open with Galley, Swiftlet and Contracts CI green; the browser suite passed locally and is not in CI. The Owner has resolved [D3](docs/decisions/d3-agent-template-compatibility.md); remaining choices are in [open decisions](docs/open-decisions.md).
 
 ## Applications
 
@@ -26,7 +26,7 @@ Start here:
 6. [Execution interface contract](docs/contracts/execution-interface.md) — Galley/Michelin execution contract and the Swiftlet→Galley owner-command boundary.
 7. [Architectural decision records](docs/adr/) — hard-to-reverse choices restating the approved design.
 
-[M1 — Foundational decisions and integration proofs (#2)](https://github.com/cristoforows/ticketIt/issues/2) has its experiment results and accepted [D3 rules](docs/decisions/d3-agent-template-compatibility.md); [M2 — Application foundations and persistent owner workflow (#3)](https://github.com/cristoforows/ticketIt/issues/3) is complete and gate-reported at [#62](https://github.com/cristoforows/ticketIt/issues/62); [M3 — Planning, navigation, and Ticket organization (#4)](https://github.com/cristoforows/ticketIt/issues/4) is next. Remaining integration gates are tracked in [open decisions](docs/open-decisions.md). Each milestone spans multiple sessions and is split into implementation-sized vertical slices when work begins. Manual workflows arrive in M2–M3, controlled Agent execution in M4, and real research/coding in M7/M8. Research and coding can proceed independently after their shared M5/M6 prerequisites.
+[M1 — Foundational decisions and integration proofs (#2)](https://github.com/cristoforows/ticketIt/issues/2) has its experiment results and accepted [D3 rules](docs/decisions/d3-agent-template-compatibility.md); [M2 — Application foundations and persistent owner workflow (#3)](https://github.com/cristoforows/ticketIt/issues/3) is complete and gate-reported at [#62](https://github.com/cristoforows/ticketIt/issues/62). [M3 — Planning, navigation, and Ticket organization (#4)](https://github.com/cristoforows/ticketIt/issues/4) has eight implementation slices locally gate-verified in [#95's report](docs/evidence/m3/README.md), pending stacked PR merge; app and drift CI passed. Remaining integration gates are tracked in [open decisions](docs/open-decisions.md). Each milestone spans multiple sessions and is split into implementation-sized vertical slices when work begins. Manual workflows arrive in M2–M3, controlled Agent execution in M4, and real research/coding in M7/M8. Research and coding can proceed independently after their shared M5/M6 prerequisites.
 
 [CONTEXT.md](CONTEXT.md) defines domain vocabulary. Implementation details belong in the design docs:
 
@@ -44,30 +44,25 @@ That developer CLI profile is separate from ticketIt's own runtime authenticatio
 
 ## Build, setup, and test
 
-Each application is independently buildable — a Swiftlet build needs no Go toolchain, and a Galley build needs no Node. See each application's own README for the full picture (configuration, endpoints, and design rationale); the commands below are the actually-run entry points.
+Each application is independently buildable — a Swiftlet build needs no Go toolchain, and a Galley build needs no Node. See each application's own README for configuration and endpoints. Run each group below independently from the repository root.
 
-**Prerequisites:** Go 1.27.1, Node 26.9.0/npm 11.19.1, and a local PostgreSQL 17 instance your user can `createdb` on (all documented, all local — see `docs/deployment.md`, "Provisioning requires explicit Owner approval": no hosted database or account is created here).
+**Prerequisites:** Go 1.27.1, Node 26.9.0/npm 11.19.1, and local PostgreSQL with `createdb`/`psql` available (M3 gates passed on PostgreSQL 17.11 and 18.1; see `docs/deployment.md`, "Provisioning requires explicit Owner approval").
 
 ```sh
-# Galley (apps/galley) — one-time local database setup, then build/test
+# Galley — one-time local database setup, then build/test
 createdb ticketit_dev && createdb ticketit_test
-cd apps/galley
-DATABASE_URL=postgres://localhost:5432/ticketit_dev?sslmode=disable go run ./cmd/migrate
-gofmt -l . && go vet ./... && go build ./... && go test ./...
+(cd apps/galley && DATABASE_URL=postgres://localhost:5432/ticketit_dev?sslmode=disable go run ./cmd/migrate)
+(cd apps/galley && gofmt -l . && go vet ./... && go build ./... && go test ./...)
 
-# Swiftlet (apps/swiftlet)
-cd apps/swiftlet
-npm ci && npm test && npm run build
+# Swiftlet
+(cd apps/swiftlet && npm ci && npm test && npm run build)
 
-# contracts/ — regenerate both clients and check for drift after editing contracts/openapi.yaml
-cd contracts
-npm ci && npm run generate:swiftlet
-cd ../apps/galley && ./scripts/check-contract-drift.sh
-cd ../../contracts && ./check-swiftlet-drift.sh
+# Contracts — check committed generated clients for drift
+(cd contracts && npm ci && npm run check:swiftlet-drift)
+(cd apps/galley && ./scripts/check-contract-drift.sh)
 
-# e2e/ — the full browser-to-backend suite (real Swiftlet build, real Galley, real PostgreSQL)
-cd e2e
-./run.sh
+# Browser-to-backend suite (dedicated ticketit_e2e database)
+(cd e2e && ./run.sh)
 ```
 
-`apps/galley/README.md` also documents running Galley itself (`go run ./cmd/galley`, requiring `GALLEY_OWNER_GITHUB_LOGIN`/OAuth client settings) and `apps/swiftlet/README.md` documents its dev server against a running Galley. For M1's integration-proof experiments, see [experiments/README.md](experiments/README.md).
+Galley's tests use `ticketit_test` by default; the M3 gate used a fresh `ticketit_m3_gate3_test` via `GALLEY_TEST_DATABASE_URL` (exact commands and output in [M3 evidence](docs/evidence/m3/README.md)). The browser runner resets only its dedicated database's `public` schema. Regeneration after editing `contracts/openapi.yaml` is documented in [contracts/README.md](contracts/README.md). `apps/galley/README.md` also documents running Galley itself (`go run ./cmd/galley`, requiring `GALLEY_OWNER_GITHUB_LOGIN`/OAuth client settings) and `apps/swiftlet/README.md` documents its dev server against a running Galley. For M1's integration-proof experiments, see [experiments/README.md](experiments/README.md).

@@ -1,6 +1,6 @@
 # V1 implementation plan
 
-**Status:** approved ten-milestone plan, published as issues #2–#11 against [v1 spec #1](https://github.com/cristoforows/ticketIt/issues/1). [M1's](https://github.com/cristoforows/ticketIt/issues/2) bounded adapter proofs are complete — see [integration-feasibility.md](integration-feasibility.md) and [docs/evidence/m1/](evidence/m1/README.md) — and the Owner has accepted [D3](decisions/d3-agent-template-compatibility.md). [M2's](https://github.com/cristoforows/ticketIt/issues/3) thirteen implementation slices (#49–#61) are complete and gate-reported at [#62](https://github.com/cristoforows/ticketIt/issues/62) — see [docs/evidence/m2/](evidence/m2/README.md) for the full slice index, the clean-checkout re-verification, and every acceptance criterion's evidence. M3 has not started. Remaining product choices and failed integration gates stay in [open-decisions.md](open-decisions.md).
+**Status:** approved ten-milestone plan, published as issues #2–#11 against [v1 spec #1](https://github.com/cristoforows/ticketIt/issues/1). [M1's](https://github.com/cristoforows/ticketIt/issues/2) bounded adapter proofs are complete — see [integration-feasibility.md](integration-feasibility.md) and [M1 evidence](evidence/m1/README.md) — and the Owner has accepted [D3](decisions/d3-agent-template-compatibility.md). [M2's](https://github.com/cristoforows/ticketIt/issues/3) thirteen implementation slices (#49–#61) are gate-reported at [#62](https://github.com/cristoforows/ticketIt/issues/62) — see [M2 evidence](evidence/m2/README.md). [M3's](https://github.com/cristoforows/ticketIt/issues/4) eight implementation slices (#87–#94) have a local clean-worktree gate report in [M3 evidence](evidence/m3/README.md) (#95); stacked PRs #105–#107 are open with Galley, Swiftlet and Contracts CI green. Remaining choices stay in [open-decisions.md](open-decisions.md).
 
 This document mirrors the published milestone scope and native blocking relationships. The linked issues hold acceptance checklists and current execution status; keep the plan and affected detail docs aligned when that scope or sequencing changes. [V1 scope](v1-scope.md) records the approved product behavior.
 
@@ -66,6 +66,8 @@ Work the frontier: a milestone can start when its blockers are complete. M5 and 
 ## M3 — Planning, navigation, and Ticket organization
 
 **Output:** a consistent everyday tracker with board/list navigation, Badges, and archival behavior.
+
+**Status:** #87–#94 locally gate-verified at [M3.9 #95](evidence/m3/README.md) against real PostgreSQL and the full browser suite. Board/list/modal/full-page consistency, reusable Badge workflows, archived visibility and Ready/Done Restore are demonstrated. Archive exclusion from future execution claims and open-Round editing/archive locks remain M4/M5 checks because M3 has no execution path. PRs #105–#107 are open with all three existing CI jobs green; browser CI coverage is routed to [#109](https://github.com/cristoforows/ticketIt/issues/109). Manual Ticket priority/order policy is assigned to [#108](https://github.com/cristoforows/ticketIt/issues/108) for M4.
 
 - Add a status-column board over the same Ticket collection and authoritative transition commands.
 - Open details in a modal from board/list, preserving position; retain direct full-page URLs and Open full page.

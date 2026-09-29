@@ -294,5 +294,6 @@ requirement.
 ## CI
 
 Not wired yet — [#68](https://github.com/cristoforows/ticketIt/issues/68)
-owns that. `run.sh` is a plain command with configurable ports and
+added the app and drift jobs only; the browser job is
+[#109](https://github.com/cristoforows/ticketIt/issues/109). `run.sh` is a plain command with configurable ports and
 database URL so CI can call it unchanged.
