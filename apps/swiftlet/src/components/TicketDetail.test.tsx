@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useLayoutEffect } from "react";
 import { TicketDetail } from "./TicketDetail";
 import type { Badge, Ticket, TicketUpdate } from "../api/tickets";
 
@@ -54,6 +55,35 @@ function noopActions() {
 }
 
 const BADGE: Badge = { id: "11111111-1111-4111-8111-111111111111", name: "Urgent", createdAt: "2026-09-22T10:00:00Z" };
+
+describe("initial detail interaction", () => {
+  afterEach(cleanup);
+
+  it("does not reset editing when the Owner opens it during the first mounted commit", () => {
+    function OpenEditOnMount() {
+      useLayoutEffect(() => {
+        document.querySelector<HTMLButtonElement>('[data-testid="ticket-detail-edit-button"]')?.click();
+      }, []);
+      return <TicketDetail ticket={TICKET} onSave={vi.fn()} {...noopActions()} />;
+    }
+    render(<OpenEditOnMount />);
+    expect(screen.getByTestId("ticket-detail-edit-form")).toBeInTheDocument();
+  });
+
+  it("resets an in-progress edit when the Ticket prop changes", () => {
+    const actions = noopActions();
+    const onSave = vi.fn();
+    const { rerender } = render(<TicketDetail ticket={TICKET} onSave={onSave} {...actions} />);
+    fireEvent.click(screen.getByTestId("ticket-detail-edit-button"));
+    fireEvent.change(screen.getByTestId("ticket-detail-textarea-goal"), { target: { value: "Draft goal" } });
+
+    const other = { ...TICKET, id: "55555555-5555-4555-8555-555555555555", title: "Another ticket" };
+    rerender(<TicketDetail ticket={other} onSave={onSave} {...actions} />);
+
+    expect(screen.queryByTestId("ticket-detail-edit-form")).not.toBeInTheDocument();
+    expect(screen.getByTestId("ticket-detail-title")).toHaveTextContent(other.title);
+  });
+});
 
 describe("Badge picker", () => {
   afterEach(cleanup);

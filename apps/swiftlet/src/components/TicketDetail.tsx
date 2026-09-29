@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Badge, Ticket, TicketUpdate } from "../api/tickets";
 
 interface TicketDetailProps {
@@ -51,6 +51,7 @@ function completionConditionLabel(condition: Ticket["completionCondition"]): str
 const OWNER_ASSIGNEE_TYPE = "owner";
 
 export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssign, onUnassign, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge, onArchive, onArchived }: TicketDetailProps) {
+  const previousTicket = useRef(ticket);
   const [current, setCurrent] = useState(ticket);
   const [mode, setMode] = useState<"view" | "editing">("view");
   const [fields, setFields] = useState<EditableFields>(() => fieldsFrom(ticket));
@@ -59,10 +60,9 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
   const [actionPending, setActionPending] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  // A new Ticket prop (e.g. the container fetched a different one)
-  // always wins over any in-progress local edit -- resets back to a
-  // clean view of whatever was just fetched.
   useEffect(() => {
+    if (previousTicket.current === ticket) return;
+    previousTicket.current = ticket;
     setCurrent(ticket);
     setFields(fieldsFrom(ticket));
     setMode("view");
