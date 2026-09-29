@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 
@@ -40,7 +41,8 @@ func TestRestore_EveryStatusPreservesFieldsBadgesAndRecomputesActions(t *testing
 				badgeRequest(t, handler, cookie, http.MethodPost, path+"/accept", "", http.StatusOK)
 			}
 			badgeRequest(t, handler, cookie, http.MethodPost, path+"/archive", "", http.StatusOK)
-			restored, _, _ := badgeRequest(t, handler, cookie, http.MethodPost, path+"/restore", "", http.StatusOK)
+			restored, restoreRec, _ := badgeRequest(t, handler, cookie, http.MethodPost, path+"/restore", "", http.StatusOK)
+			t.Logf("POST %s/restore -> HTTP %d %s", path, restoreRec.Code, strings.TrimSpace(restoreRec.Body.String()))
 			ticket := restored.(map[string]any)
 			if ticket["status"] != tc.want || ticket["archivedAt"] != nil || ticket["goal"] != "Retained goal" || len(ticket["badges"].([]any)) != 1 {
 				t.Fatalf("restored Ticket lost data: %v", ticket)
@@ -59,7 +61,8 @@ func TestRestore_EveryStatusPreservesFieldsBadgesAndRecomputesActions(t *testing
 				t.Fatal("restored Ticket absent from default list")
 			}
 			badgeRequest(t, handler, cookie, http.MethodPatch, path, `{"goal":"Editable again"}`, http.StatusOK)
-			rejected, _, _ := badgeRequest(t, handler, cookie, http.MethodPost, path+"/restore", "", http.StatusBadRequest)
+			rejected, rejectedRec, _ := badgeRequest(t, handler, cookie, http.MethodPost, path+"/restore", "", http.StatusBadRequest)
+			t.Logf("POST %s/restore -> HTTP %d %s", path, rejectedRec.Code, strings.TrimSpace(rejectedRec.Body.String()))
 			if rejected.(map[string]any)["error"].(map[string]any)["code"] != "not_archived" {
 				t.Fatalf("second restore = %v", rejected)
 			}
@@ -89,7 +92,8 @@ func TestRestore_ArchivedBadgeFilterIsConjunctiveWithORAndOrdered(t *testing.T) 
 	first := create([]string{a}, true)
 	second := create([]string{a, b}, true)
 	create(nil, true)
-	result, _, _ := badgeRequest(t, handler, cookie, http.MethodGet, "/api/tickets?archived=true&badgeId="+a+"&badgeId="+b, "", http.StatusOK)
+	result, listRec, listReq := badgeRequest(t, handler, cookie, http.MethodGet, "/api/tickets?archived=true&badgeId="+a+"&badgeId="+b, "", http.StatusOK)
+	t.Logf("GET %s -> HTTP %d %s", listReq.URL, listRec.Code, strings.TrimSpace(listRec.Body.String()))
 	ids := []string{}
 	for _, item := range result.(map[string]any)["tickets"].([]any) {
 		ids = append(ids, item.(map[string]any)["id"].(string))
