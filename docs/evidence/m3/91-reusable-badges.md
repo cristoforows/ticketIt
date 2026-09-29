@@ -6,7 +6,7 @@
 
 ## What already existed
 
-Base `bad7bbe` includes the #89 modal over shared list/board/detail Ticket data, persistent Owner sessions, and Ticket lifecycle commands. PR #101 is pending; this slice uses the reviewed base without assuming it has merged. No Badge table, endpoint or UI existed.
+M3.3 PR #101 provides the modal over shared list/board/detail Ticket data, persistent Owner sessions, and Ticket lifecycle commands. This slice builds directly on that PR. No Badge table, endpoint or UI existed.
 
 ## What this slice added
 
