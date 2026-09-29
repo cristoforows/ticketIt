@@ -6,7 +6,7 @@
 
 ## What already existed
 
-Reviewed M3.3 base `bad7bbe` provided the board, modal detail, Galley's `POST /api/tickets/{id}/status`, and per-Ticket `allowedActions.statusChanges`. The board only displayed Tickets; the modal and full-page detail already submitted Galley commands. Galley's direct-API tests `TestTicketAllowedActions_MatchCommands` and `TestChangeTicketStatus_D3S2Table` cover advertised transitions, forbidden plain Status changes to Done, and persistence of rejected requests. The browser runner built both apps against PostgreSQL and a substitute GitHub provider.
+M3.3 PR #101 provides the board, modal detail, Galley's `POST /api/tickets/{id}/status`, and per-Ticket `allowedActions.statusChanges`. The board only displayed Tickets; the modal and full-page detail already submitted Galley commands. Galley's direct-API tests `TestTicketAllowedActions_MatchCommands` and `TestChangeTicketStatus_D3S2Table` cover advertised transitions, forbidden plain Status changes to Done, and persistence of rejected requests. The browser runner built both apps against PostgreSQL and a substitute GitHub provider.
 
 ## What this slice added
 
