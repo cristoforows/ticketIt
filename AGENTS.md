@@ -56,9 +56,8 @@ missing from `git log`.
 ## Context loading
 
 Start a task with this file only. Open nothing under `docs/` or
-`experiments/`, and do not read `CONTEXT.md` whole, until the task,
-issue, or diff points at it. This overrides "Before exploring" in
-`docs/agents/domain.md`.
+`experiments/` until the task, issue, or diff points at it. This
+overrides "Before exploring" in `docs/agents/domain.md`.
 
 - `CONTEXT.md`: grep for the term; read whole only when naming a new
   domain concept.
