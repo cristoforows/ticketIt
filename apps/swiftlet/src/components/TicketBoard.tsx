@@ -61,11 +61,11 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId }
         </div>
       )}
       {state.kind === "loaded" && (
-        <div className="ticket-board-columns">
+        <div className="grid grid-flow-col auto-cols-[minmax(12rem,1fr)] gap-4 overflow-x-auto">
           {statuses.map(({ value, label }) => {
             const tickets = state.tickets.filter((ticket) => ticket.status === value);
             return (
-              <section key={value} data-testid={`board-status-${value}`} aria-labelledby={`board-heading-${value}`}>
+              <section key={value} data-testid={`board-status-${value}`} className="min-w-0" aria-labelledby={`board-heading-${value}`}>
                 <h3 id={`board-heading-${value}`}>{label}</h3>
                 {tickets.length === 0 ? <p>No tickets.</p> : (
                   <ul>

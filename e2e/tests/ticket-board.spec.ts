@@ -34,6 +34,7 @@ test("board and list render the same live Tickets in Galley order, with reloadab
 
   await page.goto("/board");
   await expect(page.getByTestId("ticket-board")).toBeVisible();
+  await expect(page.getByTestId("ticket-board").locator(".grid")).toHaveCSS("display", "grid");
   await page.reload();
   await expect(page.getByTestId("signed-in-owner")).toBeVisible();
   await expect(page.getByTestId("board-status-Done")).toBeVisible();

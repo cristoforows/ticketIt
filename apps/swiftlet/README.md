@@ -499,18 +499,17 @@ Status or reorder Tickets. An unrecognized Status produces an error
 instead of silently dropping a Ticket. Load, non-2xx, and expired
 session use the same conventions as the list.
 
-Styling uses one plain `src/board.css` linked in `index.html`, bundled
-by Vite: a horizontally scrollable six-column CSS grid. This supplies
-side-by-side layout without introducing a design-system dependency or
-changing TypeScript configuration. `npm test && npm run build` checks
-the app; `cd e2e && ./run.sh` verifies direct load, reload, view
-switching, Status placement, ordering, and list/board identities in a
-real browser against Galley.
+Styling uses Tailwind CSS 4 through `@tailwindcss/vite`. `src/styles.css`
+imports its theme and utilities, without Preflight, so the existing
+native typography and form styles remain. Board layout and modal
+presentation use utility classes; there is no separate board stylesheet.
+Run `npm ci && npm test && npm run build` here; `cd e2e && ./run.sh`
+verifies the rendered board and modal in a browser.
 
 ## Ticket detail modal (issue #89)
 
-Clicking a Ticket link in `/` or `/board` opens its detail in a native
-`<dialog>` over the mounted collection. Address bar shows canonical
+Clicking a Ticket link in `/` or `/board` opens its detail in a Radix UI
+Dialog over the mounted collection. Address bar shows canonical
 `/tickets/:id`; an unmodified click pushes a history entry carrying the
 background view and a page-load identifier. Back, Escape, or Close
 returns to that view at its existing scroll position; Forward reopens
@@ -518,9 +517,9 @@ the modal. Modified clicks/new tabs remain ordinary links. A page
 reload or direct navigation has a new page-load identifier, so the
 same URL renders the dedicated full page. "Open full page" replaces the
 modal history entry with the full-page presentation (its URL stays the
-same). The dialog moves focus inside, traps focus and makes background
-inert; closing returns focus to the originating Ticket link, including
-its new board position after a Status change.
+same). The dialog moves focus inside, traps keyboard focus, and marks
+the background inert; closing returns focus to the originating Ticket
+link, including its new board position after a Status change.
 
 `TicketDetailModal` renders `TicketDetailPage` in modal mode: one fetch
 and owner-command implementation supplies both presentations with the

@@ -93,8 +93,8 @@ export function AppShell({ owner, onSignedOut, onUnauthenticated }: AppShellProp
       {route.name === "ticket-detail" && !route.background && (
         <TicketDetailPage key={route.ticketId} ticketId={route.ticketId} onUnauthenticated={onUnauthenticated} />
       )}
-      {modalTicketId && (
-        <TicketDetailModal key={modalTicketId} ticketId={modalTicketId} onUnauthenticated={onUnauthenticated} onClose={() => window.history.back()} onCommandSucceeded={() => refreshAfterModalCommand(modalTicketId)} />
+      {modalTicketId && background && (
+        <TicketDetailModal key={modalTicketId} ticketId={modalTicketId} background={background} onUnauthenticated={onUnauthenticated} onClose={() => window.history.back()} onCommandSucceeded={() => refreshAfterModalCommand(modalTicketId)} />
       )}
     </div>
   );

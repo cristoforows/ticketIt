@@ -24,16 +24,18 @@ for (const view of ["list", "board"] as const) {
 
     const modal = page.getByRole("dialog", { name: "Ticket details" });
     await expect(modal).toBeVisible();
+    await expect(modal).toHaveCSS("position", "fixed");
     await expect(modal.getByTestId("ticket-detail-title")).toHaveText(ticket.title);
     await expect(modal.getByTestId("ticket-detail-template")).toHaveText(ticket.template);
     await expect(modal.getByTestId("ticket-detail-status")).toHaveText(ticket.status);
     expect(new URL(page.url()).pathname).toBe(`/tickets/${ticket.id}`);
     await expect(page.getByTestId(view === "list" ? "ticket-list" : "ticket-board")).toBeVisible();
-    expect(await page.evaluate(() => document.activeElement?.closest("dialog")?.open)).toBe(true);
-    expect(await page.evaluate(() => {
-      document.querySelector<HTMLElement>('[aria-label="Ticket views"] a')?.focus();
-      return document.activeElement?.closest("dialog")?.open;
-    })).toBe(true);
+    expect(await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')))).toBe(true);
+    await expect(page.locator("#root")).toHaveAttribute("aria-hidden", "true");
+    for (let index = 0; index < 5; index++) {
+      await page.keyboard.press("Tab");
+      expect(await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')))).toBe(true);
+    }
     await page.keyboard.press("Escape");
     await expect(modal).toHaveCount(0);
     expect(new URL(page.url()).pathname).toBe(view === "list" ? "/" : "/board");
