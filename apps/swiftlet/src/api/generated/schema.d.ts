@@ -97,7 +97,7 @@ export interface paths {
         };
         /**
          * List the signed-in Owner's Tickets
-         * @description Returns every Ticket belonging to the signed-in Owner, newest first: ordered by createdAt descending with id descending as the deterministic tiebreak (createdAt alone is not unique -- see apps/galley/README.md, "Ticket ordering"). Requires a valid session; returns `401 unauthenticated` otherwise.
+         * @description Returns the signed-in Owner's Tickets, optionally matching any selected Badge (OR, with each Ticket returned once). Unknown, malformed, or foreign Badge ids return 400 invalid_request. Results are ordered by createdAt descending with id descending as the deterministic tiebreak (createdAt alone is not unique -- see apps/galley/README.md, "Ticket ordering"). Requires a valid session; returns `401 unauthenticated` otherwise.
          */
         get: operations["listTickets"];
         put?: never;
@@ -263,7 +263,11 @@ export interface paths {
          */
         put: operations["attachTicketBadge"];
         post?: never;
-        delete?: never;
+        /**
+         * Remove a Badge from a Ticket
+         * @description Idempotent if the Ticket does not carry the Badge. The reusable Badge remains in the library. An unknown, malformed, or foreign Ticket or Badge id returns the shared 404 not_found.
+         */
+        delete: operations["detachTicketBadge"];
         options?: never;
         head?: never;
         patch?: never;
@@ -635,7 +639,10 @@ export interface operations {
     };
     listTickets: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Repeat to match any selected Badge; omit for all Tickets. */
+                badgeId?: string[];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -964,6 +971,38 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description The Ticket with the Badge attached. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ticket"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    detachTicketBadge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                badgeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Ticket after removing the Badge. */
             200: {
                 headers: {
                     [name: string]: unknown;

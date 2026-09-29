@@ -343,13 +343,19 @@ func TestBadges_ResponsesMatchContractAndMethod405(t *testing.T) {
 	path := "/api/tickets/" + created.(map[string]any)["id"].(string) + "/badges/" + badge.(map[string]any)["id"].(string)
 	_, rec, req = badgeRequest(t, handler, cookie, http.MethodPut, path, "", http.StatusOK)
 	validateAgainstContract(t, router, req, rec)
+	_, rec, req = badgeRequest(t, handler, cookie, http.MethodGet, "/api/tickets?badgeId="+badge.(map[string]any)["id"].(string), "", http.StatusOK)
+	validateAgainstContract(t, router, req, rec)
+	_, rec, req = badgeRequest(t, handler, cookie, http.MethodDelete, path, "", http.StatusOK)
+	validateAgainstContract(t, router, req, rec)
+	_, rec, req = badgeRequest(t, handler, cookie, http.MethodDelete, "/api/tickets/bad/badges/"+uuid.NewString(), "", http.StatusNotFound)
+	validateAgainstContract(t, router, req, rec)
 	_, rec, req = badgeRequest(t, handler, cookie, http.MethodPut, "/api/tickets/bad/badges/"+uuid.NewString(), "", http.StatusNotFound)
 	validateAgainstContract(t, router, req, rec)
 	_, rec, req = badgeRequest(t, handler, cookie, http.MethodPost, "/api/badges", fmt.Sprintf(`{"name":%q}`, badge.(map[string]any)["name"]), http.StatusConflict)
 	validateAgainstContract(t, router, req, rec)
 	for _, tc := range []struct{ method, path, allow string }{
 		{http.MethodDelete, "/api/badges", "GET, POST"},
-		{http.MethodPost, path, "PUT"},
+		{http.MethodPost, path, "PUT, DELETE"},
 	} {
 		result, rec, _ := badgeRequest(t, handler, cookie, tc.method, tc.path, "", http.StatusMethodNotAllowed)
 		if rec.Header().Get("Allow") != tc.allow || result.(map[string]any)["error"].(map[string]any)["code"] != "method_not_allowed" {

@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { signOut, type Owner } from "../api/session";
-import { useRoute, type CollectionRoute } from "../router";
+import { collectionQuery, useBadgeFilter, useRoute, type CollectionRoute } from "../router";
+import { BadgeFilter } from "./BadgeFilter";
 import { Link } from "./Link";
 import { StatusView } from "./StatusView";
 import { TicketBoard } from "./TicketBoard";
@@ -26,6 +27,8 @@ export function AppShell({ owner, onSignedOut, onUnauthenticated }: AppShellProp
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const route = useRoute();
+  const badgeIds = useBadgeFilter();
+  const filterKey = badgeIds.join(",");
   const currentRoute = useRef(route);
   useLayoutEffect(() => { currentRoute.current = route; }, [route]);
   const background: CollectionRoute | undefined = route.name === "ticket-detail" ? route.background : route.name;
@@ -80,16 +83,17 @@ export function AppShell({ owner, onSignedOut, onUnauthenticated }: AppShellProp
         </p>
       )}
       <nav aria-label="Ticket views">
-        <Link to="/" aria-current={background === "backlog" ? "page" : undefined}>List</Link>{" "}
-        <Link to="/board" aria-current={background === "board" ? "page" : undefined}>Board</Link>
+        <Link to={`/${collectionQuery()}`} aria-current={background === "backlog" ? "page" : undefined}>List</Link>{" "}
+        <Link to={`/board${collectionQuery()}`} aria-current={background === "board" ? "page" : undefined}>Board</Link>
       </nav>
+      {background && <BadgeFilter selected={badgeIds} onUnauthenticated={onUnauthenticated} refreshKey={refresh.key} />}
       {background === "backlog" && (
         <>
-          <TicketList onUnauthenticated={onUnauthenticated} refreshKey={refresh.key} focusTicketId={refresh.view === "backlog" ? refresh.ticketId : undefined} />
+          <TicketList key={filterKey} badgeIds={badgeIds} onUnauthenticated={onUnauthenticated} refreshKey={refresh.key} focusTicketId={refresh.view === "backlog" ? refresh.ticketId : undefined} />
           <StatusView />
         </>
       )}
-      {background === "board" && <TicketBoard onUnauthenticated={onUnauthenticated} refreshKey={refresh.key} focusTicketId={refresh.view === "board" ? refresh.ticketId : undefined} />}
+      {background === "board" && <TicketBoard key={filterKey} badgeIds={badgeIds} onUnauthenticated={onUnauthenticated} refreshKey={refresh.key} focusTicketId={refresh.view === "board" ? refresh.ticketId : undefined} />}
       {route.name === "ticket-detail" && !route.background && (
         <TicketDetailPage key={route.ticketId} ticketId={route.ticketId} onUnauthenticated={onUnauthenticated} />
       )}

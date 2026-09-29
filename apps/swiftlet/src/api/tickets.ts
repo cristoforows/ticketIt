@@ -166,8 +166,10 @@ function errorMessage(payload: unknown): string | undefined {
  * off-contract shape -- so callers render an explicit state rather
  * than a partial or stale list.
  */
-export async function fetchTickets(): Promise<Ticket[]> {
-  const response = await authenticatedFetch(TICKETS_ENDPOINT);
+export async function fetchTickets(badgeIds: string[] = []): Promise<Ticket[]> {
+  const query = new URLSearchParams();
+  badgeIds.forEach((id) => query.append("badgeId", id));
+  const response = await authenticatedFetch(`${TICKETS_ENDPOINT}${query.size ? `?${query}` : ""}`);
   if (!response.ok) {
     throw new Error(
       `Galley returned an error response: ${response.status} ${response.statusText}`.trim(),
@@ -357,4 +359,8 @@ export async function createBadge(name: string): Promise<Badge> {
 
 export async function attachTicketBadge(ticketId: string, badgeId: string): Promise<Ticket> {
   return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(ticketId)}/badges/${encodeURIComponent(badgeId)}`, { method: "PUT" }, "response");
+}
+
+export async function detachTicketBadge(ticketId: string, badgeId: string): Promise<Ticket> {
+  return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(ticketId)}/badges/${encodeURIComponent(badgeId)}`, { method: "DELETE" }, "response");
 }

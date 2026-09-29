@@ -34,7 +34,7 @@ test("Badge definitions and both Ticket attachments survive a Galley process res
   await expect(page.getByTestId(`ticket-item-${firstTicket.id}`).getByTestId("ticket-badges")).toHaveText(firstTicket.badges.map(({ name }) => name).join(", "));
   await expect(page.getByTestId(`ticket-item-${secondTicket.id}`).getByTestId("ticket-badges")).toHaveText(secondTicket.badges.map(({ name }) => name).join(", "));
   await page.getByTestId(`ticket-item-${firstTicket.id}`).getByRole("link").click();
-  await expect(page.getByRole("dialog").getByTestId("ticket-detail-badges").getByRole("listitem")).toHaveText(firstTicket.badges.map(({ name }) => name));
+  await expect(page.getByRole("dialog").getByTestId("ticket-detail-badges").getByRole("listitem").locator("span")).toHaveText(firstTicket.badges.map(({ name }) => name));
   await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
   await page.goto("/board");
   await expect(page.getByTestId(`board-ticket-${firstTicket.id}`).getByTestId("board-badges")).toHaveText(firstTicket.badges.map(({ name }) => name).join(", "));

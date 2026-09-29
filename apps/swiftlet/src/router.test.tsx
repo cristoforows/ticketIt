@@ -1,13 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
-import { navigate, openTicketFullPage, openTicketModal, useRoute } from "./router";
+import { navigate, openTicketFullPage, openTicketModal, setBadgeFilter, useBadgeFilter, useRoute } from "./router";
 
 function RouteProbe() {
   const route = useRoute();
+  const badgeIds = useBadgeFilter();
   return (
-    <p data-testid="route">
-      {route.name === "ticket-detail" ? `ticket-detail:${route.ticketId}:${route.background ?? "page"}` : route.name}
-    </p>
+    <><p data-testid="route">{route.name === "ticket-detail" ? `ticket-detail:${route.ticketId}:${route.background ?? "page"}` : route.name}</p><p data-testid="filter">{badgeIds.join(",")}</p></>
   );
 }
 
@@ -116,5 +115,16 @@ describe("router", () => {
 
     expect(window.history.length).toBe(length);
     expect(screen.getByTestId("route")).toHaveTextContent("ticket-detail:abc-123:page");
+  });
+
+  it("keeps selected Badges across modal navigation and reacts to query changes", () => {
+    window.history.pushState({}, "", "/?badgeId=first");
+    render(<RouteProbe />);
+    expect(screen.getByTestId("filter")).toHaveTextContent("first");
+    act(() => setBadgeFilter(["first", "second"]));
+    expect(screen.getByTestId("filter")).toHaveTextContent("first,second");
+    act(() => openTicketModal("id", "backlog"));
+    expect(window.location.search).toBe("?badgeId=first&badgeId=second");
+    expect(screen.getByTestId("filter")).toHaveTextContent("first,second");
   });
 });

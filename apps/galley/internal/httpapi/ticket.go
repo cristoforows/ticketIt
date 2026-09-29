@@ -59,7 +59,7 @@ const ticketRepositoryMaxLength = 500
 // session is rejected before any query runs (apps/galley/README.md,
 // "Authenticated routes").
 
-func (s *server) ListTickets(w http.ResponseWriter, r *http.Request) {
+func (s *server) ListTickets(w http.ResponseWriter, r *http.Request, params ListTicketsParams) {
 	owner, ok := s.requireSession(w, r)
 	if !ok {
 		return
@@ -68,7 +68,35 @@ func (s *server) ListTickets(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
 
-	tickets, err := listTicketsForOwner(ctx, s.pool, owner.ID)
+	selected := []string{}
+	if params.BadgeId != nil {
+		selected = *params.BadgeId
+	}
+	badgeIDs := make([]string, 0, len(selected))
+	seen := make(map[string]bool, len(selected))
+	for _, value := range selected {
+		id, valid := canonicalTicketID(value)
+		if !valid {
+			writeError(w, http.StatusBadRequest, "invalid_request", "badgeId must identify an owned Badge")
+			return
+		}
+		if !seen[id] {
+			badgeIDs = append(badgeIDs, id)
+			seen[id] = true
+		}
+	}
+	if len(badgeIDs) > 0 {
+		var count int
+		if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM badges WHERE owner_id = $1 AND public_id::text = ANY($2::text[])`, owner.ID, badgeIDs).Scan(&count); err != nil {
+			writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to read badges")
+			return
+		}
+		if count != len(badgeIDs) {
+			writeError(w, http.StatusBadRequest, "invalid_request", "badgeId must identify an owned Badge")
+			return
+		}
+	}
+	tickets, err := listTicketsForOwner(ctx, s.pool, owner.ID, badgeIDs...)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to read tickets")
 		return
@@ -534,13 +562,19 @@ func updateTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64
 // unlike created_at, which two requests can share at whatever
 // resolution the database clock offers. See
 // apps/galley/README.md, "Ticket ordering".
-func listTicketsForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64) ([]Ticket, error) {
+func listTicketsForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, badgeIDs ...string) ([]Ticket, error) {
+	if badgeIDs == nil {
+		badgeIDs = []string{}
+	}
 	rows, err := pool.Query(ctx,
 		`SELECT `+ticketSelectColumns+`
 		   FROM tickets
-		  WHERE owner_id = $1
+		  WHERE owner_id = $1 AND (cardinality($2::text[]) = 0 OR EXISTS (
+		    SELECT 1 FROM ticket_badges tb JOIN badges b ON b.id = tb.badge_id AND b.owner_id = tb.owner_id
+		    WHERE tb.owner_id = $1 AND tb.ticket_id = tickets.id AND b.public_id::text = ANY($2::text[])
+		  ))
 		  ORDER BY created_at DESC, id DESC`,
-		ownerID,
+		ownerID, badgeIDs,
 	)
 	if err != nil {
 		return nil, err

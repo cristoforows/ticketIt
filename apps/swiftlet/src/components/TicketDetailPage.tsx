@@ -9,6 +9,7 @@ import {
   unassignTicket,
   createBadge,
   attachTicketBadge,
+  detachTicketBadge,
   fetchBadges,
   TicketNotFoundError,
   type Ticket,
@@ -148,6 +149,7 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
           onCreateBadge={createNewBadge}
           onLoadBadges={loadBadges}
           onAttachBadge={(badgeId) => runCommand(() => attachTicketBadge(ticketId, badgeId))}
+          onDetachBadge={(badgeId) => runCommand(() => detachTicketBadge(ticketId, badgeId))}
         />
       )}
     </section>

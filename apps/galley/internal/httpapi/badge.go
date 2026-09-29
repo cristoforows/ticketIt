@@ -164,6 +164,57 @@ func attachBadgeForOwner(ctx context.Context, db ticketDB, ownerID int64, ticket
 	return true, nil
 }
 
+func (s *server) DetachTicketBadge(w http.ResponseWriter, r *http.Request, id, badgeId string) {
+	owner, ok := s.requireSession(w, r)
+	if !ok {
+		return
+	}
+	id, ok = canonicalTicketID(id)
+	if !ok {
+		writeBadgeNotFound(w)
+		return
+	}
+	badgeId, ok = canonicalTicketID(badgeId)
+	if !ok {
+		writeBadgeNotFound(w)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
+	defer cancel()
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to detach the badge")
+		return
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
+	var ticketRowID, badgeRowID int64
+	err = tx.QueryRow(ctx, `SELECT t.id, b.id FROM tickets t CROSS JOIN badges b
+		WHERE t.owner_id = $1 AND t.public_id = $2::uuid AND b.owner_id = $1 AND b.public_id = $3::uuid
+		FOR UPDATE OF t`, owner.ID, id, badgeId).Scan(&ticketRowID, &badgeRowID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeBadgeNotFound(w)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to detach the badge")
+		return
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM ticket_badges WHERE owner_id = $1 AND ticket_id = $2 AND badge_id = $3`, owner.ID, ticketRowID, badgeRowID); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to detach the badge")
+		return
+	}
+	ticket, found, err := getTicketForOwner(ctx, tx, owner.ID, id)
+	if err != nil || !found {
+		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to read the ticket")
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to detach the badge")
+		return
+	}
+	writeJSON(w, http.StatusOK, ticket)
+}
+
 func loadTicketBadges(ctx context.Context, db ticketDB, ownerID int64, tickets ...*Ticket) error {
 	byID := make(map[string]*Ticket, len(tickets))
 	ids := make([]string, 0, len(tickets))

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strings"
 	"sync"
@@ -248,6 +249,14 @@ func TestBadges_ActualOwnersAreIsolatedThroughHTTP(t *testing.T) {
 		if len(attached) != 1 || identifier(attached[0]) != tc.badgeID {
 			t.Fatalf("Owner's Ticket Badges = %v", attached)
 		}
+		filtered, _, _ := badgeRequest(t, handler, tc.cookie, http.MethodGet, "/api/tickets?badgeId="+tc.badgeID, "", http.StatusOK)
+		if tickets := filtered.(map[string]any)["tickets"].([]any); len(tickets) != 1 || identifier(tickets[0]) != tc.ticketID {
+			t.Fatalf("Owner's filtered Tickets = %v", tickets)
+		}
+		badFilter, _, _ := badgeRequest(t, handler, tc.cookie, http.MethodGet, "/api/tickets?badgeId="+tc.foreignBadge, "", http.StatusBadRequest)
+		if badFilter.(map[string]any)["error"].(map[string]any)["code"] != "invalid_request" {
+			t.Fatalf("foreign Badge filter = %v", badFilter)
+		}
 		for _, pair := range [][2]string{{tc.ticketID, tc.foreignBadge}, {tc.foreignID, tc.badgeID}} {
 			result, rejectedRec, _ := badgeRequest(t, handler, tc.cookie, http.MethodPut,
 				"/api/tickets/"+pair[0]+"/badges/"+pair[1], "", http.StatusNotFound)
@@ -257,12 +266,72 @@ func TestBadges_ActualOwnersAreIsolatedThroughHTTP(t *testing.T) {
 			if result.(map[string]any)["error"].(map[string]any)["code"] != "not_found" {
 				t.Fatalf("foreign attachment leaked: %v", result)
 			}
+			result, _, _ = badgeRequest(t, handler, tc.cookie, http.MethodDelete,
+				"/api/tickets/"+pair[0]+"/badges/"+pair[1], "", http.StatusNotFound)
+			if result.(map[string]any)["error"].(map[string]any)["code"] != "not_found" {
+				t.Fatalf("foreign detach leaked: %v", result)
+			}
 		}
 		badgeRequest(t, handler, tc.cookie, http.MethodGet, "/api/tickets/"+tc.foreignID, "", http.StatusNotFound)
 		listTickets, _, _ := badgeRequest(t, handler, tc.cookie, http.MethodGet, "/api/tickets", "", http.StatusOK)
 		visible := listTickets.(map[string]any)["tickets"].([]any)
 		if len(visible) != 1 || identifier(visible[0]) != tc.ticketID || len(visible[0].(map[string]any)["badges"].([]any)) != 1 {
 			t.Fatalf("Owner sees foreign Tickets or links: %v", visible)
+		}
+		for range 2 {
+			result, _, _ := badgeRequest(t, handler, tc.cookie, http.MethodDelete,
+				"/api/tickets/"+tc.ticketID+"/badges/"+tc.badgeID, "", http.StatusOK)
+			if len(result.(map[string]any)["badges"].([]any)) != 0 {
+				t.Fatalf("detach left Badge attached: %v", result)
+			}
+		}
+		library, _, _ := badgeRequest(t, handler, tc.cookie, http.MethodGet, "/api/badges", "", http.StatusOK)
+		if len(library.(map[string]any)["badges"].([]any)) != 1 {
+			t.Fatalf("detach removed reusable Badge: %v", library)
+		}
+	}
+}
+
+func TestBadges_FilterMatchesAnyWithoutDuplicatesAndKeepsOrder(t *testing.T) {
+	handler, _, cookie := badgeTestHandler(t)
+	createBadge := func() string {
+		result, _, _ := badgeRequest(t, handler, cookie, http.MethodPost, "/api/badges", fmt.Sprintf(`{"name":%q}`, uuid.NewString()), http.StatusCreated)
+		return result.(map[string]any)["id"].(string)
+	}
+	a, b := createBadge(), createBadge()
+	createTicket := func(title string, badges ...string) string {
+		result, _, _ := badgeRequest(t, handler, cookie, http.MethodPost, "/api/tickets", fmt.Sprintf(`{"title":%q}`, title), http.StatusCreated)
+		id := result.(map[string]any)["id"].(string)
+		for _, badge := range badges {
+			badgeRequest(t, handler, cookie, http.MethodPut, "/api/tickets/"+id+"/badges/"+badge, "", http.StatusOK)
+		}
+		return id
+	}
+	createTicket("none")
+	first := createTicket("only a", a)
+	second := createTicket("only b", b)
+	third := createTicket("both", a, b)
+	query := url.Values{"badgeId": {a, b, a}}
+	result, filteredRec, _ := badgeRequest(t, handler, cookie, http.MethodGet, "/api/tickets?"+query.Encode(), "", http.StatusOK)
+	t.Logf("GET /api/tickets?%s -> HTTP %d; matching Tickets=%d", query.Encode(), filteredRec.Code, len(result.(map[string]any)["tickets"].([]any)))
+	items := result.(map[string]any)["tickets"].([]any)
+	got := []string{}
+	for _, item := range items {
+		got = append(got, item.(map[string]any)["id"].(string))
+	}
+	if want := []string{third, second, first}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("OR filtered order = %v, want %v", got, want)
+	}
+	for _, value := range []string{"bad", uuid.NewString(), ""} {
+		result, _, _ := badgeRequest(t, handler, cookie, http.MethodGet, "/api/tickets?badgeId="+value, "", http.StatusBadRequest)
+		if result.(map[string]any)["error"].(map[string]any)["code"] != "invalid_request" {
+			t.Fatalf("invalid Badge filter = %v", result)
+		}
+	}
+	for _, pair := range [][2]string{{"bad", a}, {first, "bad"}, {uuid.NewString(), a}, {first, uuid.NewString()}} {
+		result, _, _ := badgeRequest(t, handler, cookie, http.MethodDelete, "/api/tickets/"+pair[0]+"/badges/"+pair[1], "", http.StatusNotFound)
+		if result.(map[string]any)["error"].(map[string]any)["code"] != "not_found" {
+			t.Fatalf("unknown detach = %v", result)
 		}
 	}
 }

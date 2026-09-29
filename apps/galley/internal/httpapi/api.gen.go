@@ -397,6 +397,12 @@ type CompleteGithubOAuthParams struct {
 	Error *string `form:"error,omitempty" json:"error,omitempty"`
 }
 
+// ListTicketsParams defines parameters for ListTickets.
+type ListTicketsParams struct {
+	// BadgeId Repeat to match any selected Badge; omit for all Tickets.
+	BadgeId *[]string `form:"badgeId,omitempty" json:"badgeId,omitempty"`
+}
+
 // CreateBadgeJSONRequestBody defines body for CreateBadge for application/json ContentType.
 type CreateBadgeJSONRequestBody = CreateBadgeRequest
 
@@ -443,7 +449,7 @@ type ServerInterface interface {
 	GetStatus(w http.ResponseWriter, r *http.Request)
 	// ListTickets List the signed-in Owner's Tickets
 	// (GET /api/tickets)
-	ListTickets(w http.ResponseWriter, r *http.Request)
+	ListTickets(w http.ResponseWriter, r *http.Request, params ListTicketsParams)
 	// CreateTicket Capture a Ticket from a title alone
 	// (POST /api/tickets)
 	CreateTicket(w http.ResponseWriter, r *http.Request)
@@ -462,6 +468,9 @@ type ServerInterface interface {
 	// AssignTicketOwner Assign the signed-in Owner as a Ticket's Assignee
 	// (PUT /api/tickets/{id}/assignee)
 	AssignTicketOwner(w http.ResponseWriter, r *http.Request, id string)
+	// DetachTicketBadge Remove a Badge from a Ticket
+	// (DELETE /api/tickets/{id}/badges/{badgeId})
+	DetachTicketBadge(w http.ResponseWriter, r *http.Request, id string, badgeId string)
 	// AttachTicketBadge Attach an existing Badge to a Ticket
 	// (PUT /api/tickets/{id}/badges/{badgeId})
 	AttachTicketBadge(w http.ResponseWriter, r *http.Request, id string, badgeId string)
@@ -653,8 +662,27 @@ func (siw *ServerInterfaceWrapper) GetStatus(w http.ResponseWriter, r *http.Requ
 // ListTickets operation middleware
 func (siw *ServerInterfaceWrapper) ListTickets(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListTicketsParams
+
+	// ------------- Optional query parameter "badgeId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "badgeId", r.URL.Query(), &params.BadgeId, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "badgeId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "badgeId", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListTickets(w, r)
+		siw.Handler.ListTickets(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -799,6 +827,41 @@ func (siw *ServerInterfaceWrapper) AssignTicketOwner(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.AssignTicketOwner(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DetachTicketBadge operation middleware
+func (siw *ServerInterfaceWrapper) DetachTicketBadge(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "badgeId" -------------
+	var badgeId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "badgeId", r.PathValue("badgeId"), &badgeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "badgeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DetachTicketBadge(w, r, id, badgeId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1004,6 +1067,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/tickets/{id}/assignee", wrapper.AssignTicketOwner)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/badges", wrapper.ListBadges)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/badges", wrapper.CreateBadge)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/tickets/{id}/badges/{badgeId}", wrapper.DetachTicketBadge)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/tickets/{id}/badges/{badgeId}", wrapper.AttachTicketBadge)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/session", wrapper.SignOut)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/session", wrapper.GetSession)

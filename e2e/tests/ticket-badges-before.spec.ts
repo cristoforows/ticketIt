@@ -41,7 +41,7 @@ test("creates two Badges, attaches one to two Tickets through modal and full-pag
   const firstDetailResponse = await page.request.get(`/api/tickets/${first.id}`);
   expect(firstDetailResponse.ok()).toBe(true);
   expect((await firstDetailResponse.json() as Ticket).badges).toEqual(firstFromList.badges);
-  await expect(modal.getByTestId("ticket-detail-badges").getByRole("listitem")).toHaveText(names(firstFromList));
+  await expect(modal.getByTestId("ticket-detail-badges").getByRole("listitem").locator("span")).toHaveText(names(firstFromList));
 
   const duplicate = await page.request.post("/api/badges", { data: { name: SHARED.toUpperCase() } });
   expect(duplicate.status()).toBe(409);
@@ -64,7 +64,7 @@ test("creates two Badges, attaches one to two Tickets through modal and full-pag
   const secondDetailResponse = await page.request.get(`/api/tickets/${second.id}`);
   expect(secondDetailResponse.ok()).toBe(true);
   expect((await secondDetailResponse.json() as Ticket).badges).toEqual(secondFromList.badges);
-  await expect(page.getByTestId("ticket-detail-badges").getByRole("listitem")).toHaveText(names(secondFromList));
+  await expect(page.getByTestId("ticket-detail-badges").getByRole("listitem").locator("span")).toHaveText(names(secondFromList));
   const attached = await page.request.put(`/api/tickets/${second.id}/badges/${secondFromList.badges[0].id}`);
   expect(attached.ok()).toBe(true);
   expect((await attached.json() as Ticket).badges).toEqual(secondFromList.badges);
