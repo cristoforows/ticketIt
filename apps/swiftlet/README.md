@@ -595,7 +595,10 @@ collection, so a Ticket that no longer matches disappears. Run
 
 Detail and modal offer **Archive** with confirmation. Galley returns the
 retained Ticket; the modal closes to its original view, which refreshes
-without the archived Ticket. A direct Ticket URL remains readable with
+without the archived Ticket. Full-page Archive returns to the view the
+Ticket was opened from, keeping any Badge filter: Board Ticket links
+carry `from=board` in their URL, so the origin survives a new tab and
+reload. A detail URL without it returns to the List. A direct Ticket URL remains readable with
 its Status, fields, Badges and Archived timestamp. Edit, Assignee, Badge
 and Archive controls are disabled and show Galley's read-only reason.
 The board and default list exclude archived Tickets, including while a

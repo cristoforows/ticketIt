@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -76,7 +77,8 @@ func TestArchive_AllMutationsRejectWithoutChangingTicket(t *testing.T) {
 	path := "/api/tickets/" + id
 	badgePath := path + "/badges/" + badgeID
 	badgeRequest(t, handler, cookie, http.MethodPut, badgePath, "", http.StatusOK)
-	before, _, _ := badgeRequest(t, handler, cookie, http.MethodPost, path+"/archive", "", http.StatusOK)
+	before, archiveRec, _ := badgeRequest(t, handler, cookie, http.MethodPost, path+"/archive", "", http.StatusOK)
+	t.Logf("POST %s/archive -> HTTP %d %s", path, archiveRec.Code, strings.TrimSpace(archiveRec.Body.String()))
 	for _, tc := range []struct{ name, method, path, body string }{
 		{"edit", http.MethodPatch, path, `{"title":"changed"}`},
 		{"status", http.MethodPost, path + "/status", `{"status":"Ready"}`},
@@ -88,7 +90,8 @@ func TestArchive_AllMutationsRejectWithoutChangingTicket(t *testing.T) {
 		{"archive again", http.MethodPost, path + "/archive", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rejected, _, _ := badgeRequest(t, handler, cookie, tc.method, tc.path, tc.body, http.StatusBadRequest)
+			rejected, rejectedRec, _ := badgeRequest(t, handler, cookie, tc.method, tc.path, tc.body, http.StatusBadRequest)
+			t.Logf("%s %s %s -> HTTP %d %s", tc.method, tc.path, tc.body, rejectedRec.Code, strings.TrimSpace(rejectedRec.Body.String()))
 			if rejected.(map[string]any)["error"].(map[string]any)["code"] != archivedTicketCode {
 				t.Fatalf("unexpected rejection: %v", rejected)
 			}

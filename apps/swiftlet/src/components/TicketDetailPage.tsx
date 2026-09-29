@@ -17,10 +17,9 @@ import {
   type Badge,
   type TicketUpdate,
 } from "../api/tickets";
-import { collectionQuery } from "../router";
+import { collectionQuery, fullPageReturnPath, navigate } from "../router";
 import { Link } from "./Link";
 import { TicketDetail } from "./TicketDetail";
-import { collectionQuery, fullPageReturnPath, navigate } from "../router";
 
 interface TicketDetailPageProps {
   ticketId: string;
@@ -155,7 +154,7 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
           onAttachBadge={(badgeId) => runCommand(() => attachTicketBadge(ticketId, badgeId))}
           onDetachBadge={(badgeId) => runCommand(() => detachTicketBadge(ticketId, badgeId))}
           onArchive={() => runCommand(() => archiveTicket(ticketId))}
-          onArchived={() => (onArchiveSucceeded ? onArchiveSucceeded() : navigate(`${fullPageReturnPath()}${collectionQuery()}`))}
+          onArchived={() => (onArchiveSucceeded ? onArchiveSucceeded() : navigate(fullPageReturnPath()))}
         />
       )}
     </section>

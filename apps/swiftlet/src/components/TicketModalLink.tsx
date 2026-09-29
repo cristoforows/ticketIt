@@ -1,5 +1,5 @@
 import type { AnchorHTMLAttributes } from "react";
-import { collectionQuery, openTicketModal, type CollectionRoute } from "../router";
+import { openTicketModal, ticketDetailPath, type CollectionRoute } from "../router";
 import { isPlainLinkClick, Link } from "./Link";
 
 export function ticketRowTestId(view: CollectionRoute, ticketId: string): string {
@@ -24,7 +24,7 @@ interface TicketModalLinkProps extends Omit<AnchorHTMLAttributes<HTMLAnchorEleme
 export function TicketModalLink({ ticketId, view, disabled = false, children, ...rest }: TicketModalLinkProps) {
   return (
     <Link
-      to={`/tickets/${encodeURIComponent(ticketId)}${collectionQuery()}`}
+      to={ticketDetailPath(ticketId, view)}
       aria-disabled={disabled || undefined}
       onClick={(event) => {
         if (!isPlainLinkClick(event)) return;

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
-import { fullPageReturnPath, navigate, openTicketFullPage, openTicketModal, setBadgeFilter, useBadgeFilter, useRoute } from "./router";
+import { collectionQuery, fullPageReturnPath, navigate, ticketDetailPath, openTicketFullPage, openTicketModal, setBadgeFilter, useBadgeFilter, useRoute } from "./router";
 
 function RouteProbe() {
   const route = useRoute();
@@ -123,6 +123,22 @@ describe("router", () => {
     act(() => openTicketModal("abc-123", "board"));
     act(() => openTicketFullPage("abc-123"));
     expect(fullPageReturnPath()).toBe("/board");
+  });
+
+  it("keeps the Board origin and Badge filter for a detail URL opened in a new tab", () => {
+    window.history.pushState({}, "", "/board?badgeId=first");
+    const href = ticketDetailPath("abc-123", "board");
+    window.history.pushState(null, "", href);
+
+    expect(href).toBe("/tickets/abc-123?badgeId=first&from=board");
+    expect(fullPageReturnPath()).toBe("/board?badgeId=first");
+    expect(collectionQuery()).toBe("?badgeId=first");
+  });
+
+  it("returns a direct detail URL without an origin to the Backlog", () => {
+    window.history.pushState(null, "", "/tickets/abc-123?badgeId=first");
+
+    expect(fullPageReturnPath()).toBe("/?badgeId=first");
   });
 
   it("keeps selected Badges across modal navigation and reacts to query changes", () => {

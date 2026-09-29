@@ -249,7 +249,9 @@ full page and Back to Backlog, and returns after clearing the filter.
 `tests/ticket-archive.spec.ts` archives Ready and Done Tickets from the
 modal while filtered by Badge, verifies both leave everyday views, then
 loads direct detail to assert retained Status, Badge, read-only controls,
-and Galley's direct API rejection. `run.sh` checks its exit code.
+and Galley's direct API rejection. It then archives from full-page detail
+opened from the filtered Board, both in place and in a new tab, and
+expects to land on that filtered Board. `run.sh` checks its exit code.
 
 ## The failure-mode spec
 

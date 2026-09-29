@@ -51,7 +51,7 @@ test("board and list render the same live Tickets in Galley order, with reloadab
     )).toEqual(expected.map((ticket) => ticket.id));
     for (const ticket of expected) {
       const card = column.getByTestId(`board-ticket-${ticket.id}`);
-      await expect(card.getByRole("link", { name: ticket.title })).toHaveAttribute("href", `/tickets/${ticket.id}`);
+      await expect(card.getByRole("link", { name: ticket.title })).toHaveAttribute("href", `/tickets/${ticket.id}?from=board`);
       await expect(card).toContainText(`Template: ${ticket.template}`);
     }
   }

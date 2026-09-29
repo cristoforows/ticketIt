@@ -52,7 +52,16 @@ export function useBadgeFilter(): string[] {
 }
 
 export function collectionQuery(): string {
-  return window.location.search;
+  const query = new URLSearchParams();
+  new URLSearchParams(window.location.search).getAll("badgeId").forEach((id) => query.append("badgeId", id));
+  return query.size ? `?${query}` : "";
+}
+
+// history.state is absent in a new tab, so the Board origin travels in the URL.
+export function ticketDetailPath(ticketId: string, origin: CollectionRoute): string {
+  const query = new URLSearchParams(collectionQuery());
+  if (origin === "board") query.set("from", "board");
+  return `/tickets/${encodeURIComponent(ticketId)}${query.size ? `?${query}` : ""}`;
 }
 
 export function setBadgeFilter(ids: string[]): void {
@@ -67,17 +76,17 @@ export function collectionPath(view: CollectionRoute): string {
 }
 
 export function fullPageReturnPath(): string {
-  const state = window.history.state as { fullPageBackground?: CollectionRoute } | null;
-  return state?.fullPageBackground === "board" ? "/board" : "/";
+  const origin = new URLSearchParams(window.location.search).get("from") === "board" ? "board" : "backlog";
+  return `${collectionPath(origin)}${collectionQuery()}`;
 }
 
 export function openTicketModal(ticketId: string, background: CollectionRoute): void {
-  window.history.pushState({ ticketModal: { pageLoadId, background } } satisfies ModalHistoryState, "", `/tickets/${encodeURIComponent(ticketId)}${collectionQuery()}`);
+  window.history.pushState({ ticketModal: { pageLoadId, background } } satisfies ModalHistoryState, "", ticketDetailPath(ticketId, background));
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
 export function openTicketFullPage(ticketId: string): void {
-  window.history.replaceState({ fullPageBackground: modalBackground() }, "", `/tickets/${encodeURIComponent(ticketId)}${collectionQuery()}`);
+  window.history.replaceState({}, "", ticketDetailPath(ticketId, modalBackground() ?? "backlog"));
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 

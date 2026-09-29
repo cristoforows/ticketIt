@@ -56,4 +56,18 @@ test("archive Ready and Done from modal; retain direct read-only detail and excl
   await page.getByTestId("ticket-detail-archive-button").click();
   await expect(page).toHaveURL(new RegExp(`/board\\?badgeId=${badge.id}$`));
   await expect(page.getByTestId(`board-ticket-${fromBoard.id}`)).toHaveCount(0);
+
+  const newTabTicket = await createTicket(page, `archive new tab ${Date.now()}`);
+  expect((await page.request.put(`/api/tickets/${newTabTicket.id}/badges/${badge.id}`)).ok()).toBe(true);
+  await page.reload();
+  const [newTab] = await Promise.all([
+    page.context().waitForEvent("page"),
+    page.getByTestId(`board-ticket-${newTabTicket.id}`).getByRole("link").click({ modifiers: ["ControlOrMeta"] }),
+  ]);
+  await expect(newTab.getByTestId("ticket-detail-page")).toBeVisible();
+  newTab.once("dialog", (dialog) => dialog.accept());
+  await newTab.getByTestId("ticket-detail-archive-button").click();
+  await expect(newTab).toHaveURL(new RegExp(`/board\\?badgeId=${badge.id}$`));
+  await expect(newTab.getByTestId(`board-ticket-${newTabTicket.id}`)).toHaveCount(0);
+  await newTab.close();
 });

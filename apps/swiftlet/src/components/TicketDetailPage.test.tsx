@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TicketDetailPage } from "./TicketDetailPage";
 
 type MockResponse = Pick<Response, "ok" | "status" | "statusText" | "json">;
@@ -144,6 +144,22 @@ describe("TicketDetailPage", () => {
     await screen.findByTestId("ticket-detail-title");
 
     expect(screen.getByTestId("back-to-backlog-link")).toHaveAttribute("href", "/?badgeId=first&badgeId=second");
+    window.history.pushState({}, "", "/");
+  });
+
+  it("returns an archive from a Board detail URL opened in a new tab to the filtered Board", async () => {
+    window.history.pushState(null, "", `/tickets/${TICKET_ID}?badgeId=first&from=board`);
+    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(jsonResponse(TICKET))
+      .mockResolvedValueOnce(jsonResponse({ ...TICKET, archivedAt: "2026-09-29T10:00:00Z" })));
+
+    render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+    await screen.findByTestId("ticket-detail-title");
+    expect(screen.getByTestId("back-to-backlog-link")).toHaveAttribute("href", "/?badgeId=first");
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+
+    await waitFor(() => expect(`${window.location.pathname}${window.location.search}`).toBe("/board?badgeId=first"));
     window.history.pushState({}, "", "/");
   });
 
