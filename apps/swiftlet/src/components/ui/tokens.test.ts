@@ -53,6 +53,9 @@ describe("token contrast (WCAG AA)", () => {
     it("deep colour is at least 4.5:1 against paper, as text and as a tag fill under paper text", () => {
       expect(contrast(token(`${name}-deep`), token("paper"))).toBeGreaterThanOrEqual(4.5);
     });
+    it("marker fill (text token) is at least 3:1 against the ground", () => {
+      expect(contrast(token(`${name}-text`), token("ground"))).toBeGreaterThanOrEqual(3);
+    });
     it("is declared in the data-status block", () => {
       expect(css).toContain(`[data-status="${value}"]`);
     });

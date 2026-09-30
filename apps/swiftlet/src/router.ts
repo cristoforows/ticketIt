@@ -57,6 +57,12 @@ export function useArchivedFilter(): boolean {
   return new URLSearchParams(search).get("archived") === "true";
 }
 
+export function useEditRequested(): boolean {
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot);
+  const [, search] = JSON.parse(snapshot) as [string, string];
+  return new URLSearchParams(search).get("edit") === "true";
+}
+
 export function setArchivedFilter(archived: boolean): void {
   const query = new URLSearchParams(window.location.search);
   if (archived) query.set("archived", "true");
@@ -73,9 +79,10 @@ export function collectionQuery(): string {
 }
 
 // history.state is absent in a new tab, so the Board origin travels in the URL.
-export function ticketDetailPath(ticketId: string, origin: CollectionRoute): string {
+export function ticketDetailPath(ticketId: string, origin: CollectionRoute, edit = false): string {
   const query = new URLSearchParams(collectionQuery());
   if (origin === "board") query.set("from", "board");
+  if (edit) query.set("edit", "true");
   return `/tickets/${encodeURIComponent(ticketId)}${query.size ? `?${query}` : ""}`;
 }
 
@@ -95,8 +102,8 @@ export function fullPageReturnPath(): string {
   return `${collectionPath(origin)}${collectionQuery()}`;
 }
 
-export function openTicketModal(ticketId: string, background: CollectionRoute): void {
-  window.history.pushState({ ticketModal: { pageLoadId, background } } satisfies ModalHistoryState, "", ticketDetailPath(ticketId, background));
+export function openTicketModal(ticketId: string, background: CollectionRoute, edit = false): void {
+  window.history.pushState({ ticketModal: { pageLoadId, background } } satisfies ModalHistoryState, "", ticketDetailPath(ticketId, background, edit));
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 

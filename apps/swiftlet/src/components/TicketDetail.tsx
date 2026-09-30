@@ -17,6 +17,7 @@ interface TicketDetailProps {
   onArchive: () => Promise<Ticket>;
   onRestore: () => Promise<Ticket>;
   onArchived?: () => void;
+  editRequested?: boolean;
 }
 
 interface EditableFields {
@@ -53,10 +54,10 @@ function completionConditionLabel(condition: Ticket["completionCondition"]): str
 /** The only non-empty assignee_type M2 writes; there is no Agent Assignee kind yet. */
 const OWNER_ASSIGNEE_TYPE = "owner";
 
-export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssign, onUnassign, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge, onArchive, onRestore, onArchived }: TicketDetailProps) {
+export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssign, onUnassign, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge, onArchive, onRestore, onArchived, editRequested = false }: TicketDetailProps) {
   const previousTicket = useRef(ticket);
   const [current, setCurrent] = useState(ticket);
-  const [mode, setMode] = useState<"view" | "editing">("view");
+  const [mode, setMode] = useState<"view" | "editing">(editRequested && !ticket.archivedAt ? "editing" : "view");
   const [fields, setFields] = useState<EditableFields>(() => fieldsFrom(ticket));
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);

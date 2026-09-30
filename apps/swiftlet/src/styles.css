@@ -66,14 +66,16 @@
 }
 
 @layer components {
-  .scroll-hint {
-    scrollbar-width: thin;
-    scrollbar-color: var(--color-dim) transparent;
-    background:
-      linear-gradient(to right, var(--color-ground) 1rem, transparent 2rem) 0 0 / 2rem 100% no-repeat local,
-      linear-gradient(to left, var(--color-ground) 1rem, transparent 2rem) 100% 0 / 2rem 100% no-repeat local,
-      linear-gradient(to right, var(--color-scroll-shadow), transparent) 0 0 / 1rem 100% no-repeat scroll,
-      linear-gradient(to left, var(--color-scroll-shadow), transparent) 100% 0 / 1rem 100% no-repeat scroll;
+  @media (min-width: 48rem) {
+    .scroll-hint {
+      scrollbar-width: thin;
+      scrollbar-color: var(--color-dim) transparent;
+      background:
+        linear-gradient(to right, var(--color-ground) 1rem, transparent 2rem) 0 0 / 2rem 100% no-repeat local,
+        linear-gradient(to left, var(--color-ground) 1rem, transparent 2rem) 100% 0 / 2rem 100% no-repeat local,
+        linear-gradient(to right, var(--color-scroll-shadow), transparent) 0 0 / 1rem 100% no-repeat scroll,
+        linear-gradient(to left, var(--color-scroll-shadow), transparent) 100% 0 / 1rem 100% no-repeat scroll;
+    }
   }
   .slip {
     rotate: var(--tilt, 0deg);
@@ -153,8 +155,7 @@
     outline-offset: 2px;
   }
   [data-surface="paper"],
-  [role="dialog"],
-  [role="menu"] {
+  [role="dialog"] {
     --focus: var(--color-ink);
     color: var(--color-ink);
   }
@@ -197,9 +198,6 @@
     margin-top: 0.5rem;
     padding-top: 0.5rem;
     border-top: var(--rule-thin) dashed var(--color-rule);
-  }
-  [role="menu"] li + li {
-    border-top: 0;
   }
 
   @media (prefers-reduced-motion: reduce) {

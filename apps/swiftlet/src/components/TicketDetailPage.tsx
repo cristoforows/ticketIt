@@ -18,7 +18,7 @@ import {
   type Badge,
   type TicketUpdate,
 } from "../api/tickets";
-import { collectionQuery, fullPageReturnPath, navigate } from "../router";
+import { collectionQuery, fullPageReturnPath, navigate, useEditRequested } from "../router";
 import { Link } from "./Link";
 import { TicketDetail } from "./TicketDetail";
 import { EmptyMessage, ErrorMessage, LoadingMessage, Paper } from "./ui";
@@ -39,6 +39,15 @@ type DetailState =
 
 export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "page", onCommandSucceeded, onArchiveSucceeded }: TicketDetailPageProps) {
   const [state, setState] = useState<DetailState>({ kind: "loading" });
+  const editRequested = useEditRequested();
+
+  const loaded = state.kind === "loaded";
+  useEffect(() => {
+    if (!loaded || !editRequested) return;
+    const query = new URLSearchParams(window.location.search);
+    query.delete("edit");
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${query.size ? `?${query}` : ""}`);
+  }, [loaded, editRequested]);
 
   useEffect(() => {
     let cancelled = false;
@@ -134,6 +143,7 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
       onDetachBadge={(badgeId) => runCommand(() => detachTicketBadge(ticketId, badgeId))}
       onArchive={() => runCommand(() => archiveTicket(ticketId))}
       onRestore={() => runCommand(() => restoreTicket(ticketId))}
+      editRequested={editRequested}
       onArchived={() => (onArchiveSucceeded ? onArchiveSucceeded() : navigate(fullPageReturnPath()))}
     />
   );
