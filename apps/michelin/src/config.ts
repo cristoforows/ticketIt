@@ -1,6 +1,10 @@
+import { resolveRunnerCredential, type RunnerCredential } from "./credentials.ts";
+
 export interface Config {
   galleyUrl: URL;
   statusIntervalMs: number;
+  heartbeatIntervalMs: number;
+  runnerCredential: RunnerCredential;
 }
 
 export class ConfigError extends Error {
@@ -14,18 +18,26 @@ export class ConfigError extends Error {
 }
 
 const DEFAULT_GALLEY_URL = "http://localhost:8080";
-const DEFAULT_STATUS_INTERVAL_MS = 10_000;
+const DEFAULT_INTERVAL_MS = 10_000;
 
 export function loadConfig(env: Readonly<Record<string, string | undefined>>): Config {
   const problems: string[] = [];
 
   const galleyUrl = parseGalleyUrl(env["GALLEY_URL"] ?? DEFAULT_GALLEY_URL, problems);
-  const statusIntervalMs = parseInterval(env["MICHELIN_STATUS_INTERVAL_MS"], problems);
+  const statusIntervalMs = parseInterval("MICHELIN_STATUS_INTERVAL_MS", env["MICHELIN_STATUS_INTERVAL_MS"], problems);
+  const heartbeatIntervalMs = parseInterval("MICHELIN_HEARTBEAT_INTERVAL_MS", env["MICHELIN_HEARTBEAT_INTERVAL_MS"], problems);
+  const runnerCredential = resolveRunnerCredential(env, problems);
 
-  if (problems.length > 0 || galleyUrl === undefined || statusIntervalMs === undefined) {
+  if (
+    problems.length > 0 ||
+    galleyUrl === undefined ||
+    statusIntervalMs === undefined ||
+    heartbeatIntervalMs === undefined ||
+    runnerCredential === undefined
+  ) {
     throw new ConfigError(problems);
   }
-  return { galleyUrl, statusIntervalMs };
+  return { galleyUrl, statusIntervalMs, heartbeatIntervalMs, runnerCredential };
 }
 
 function parseGalleyUrl(raw: string, problems: string[]): URL | undefined {
@@ -46,13 +58,13 @@ function parseGalleyUrl(raw: string, problems: string[]): URL | undefined {
   return url;
 }
 
-function parseInterval(raw: string | undefined, problems: string[]): number | undefined {
+function parseInterval(name: string, raw: string | undefined, problems: string[]): number | undefined {
   if (raw === undefined) {
-    return DEFAULT_STATUS_INTERVAL_MS;
+    return DEFAULT_INTERVAL_MS;
   }
   const value = /^\d+$/.test(raw) ? Number(raw) : NaN;
   if (!Number.isSafeInteger(value) || value <= 0) {
-    problems.push(`MICHELIN_STATUS_INTERVAL_MS must be a positive integer, got ${JSON.stringify(raw)}`);
+    problems.push(`${name} must be a positive integer, got ${JSON.stringify(raw)}`);
     return undefined;
   }
   return value;
