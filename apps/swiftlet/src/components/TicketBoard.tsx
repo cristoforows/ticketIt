@@ -1,10 +1,9 @@
-import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
-import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { UnauthenticatedError } from "../api/session";
 import { changeTicketStatus, fetchTickets, type Ticket } from "../api/tickets";
-import { BadgeTag, buttonClasses, cx, EmptyMessage, ErrorMessage, LoadingMessage, Rule, shortDate, slipTilt, statusLabel, statuses, statusTone, ticketSerial } from "./ui";
-import { refocusTicketRowIfFocusLost, TicketModalLink, ticketRowTestId } from "./TicketModalLink";
+import { cx, EmptyMessage, ErrorMessage, LoadingMessage, statuses, statusTone } from "./ui";
+import { refocusTicketRowIfFocusLost } from "./TicketModalLink";
+import { TicketSlip } from "./TicketSlip";
 
 type BoardState =
   | { kind: "loading" }
@@ -146,81 +145,27 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
                 <div aria-hidden="true" className={cx("mt-4 h-2 rounded-pill bg-linear-to-b from-rail to-rail-shade shadow-inner", blocked && "opacity-40")} />
                 {tickets.length === 0 ? <p className="pt-4 text-center text-label text-dim">— no orders —</p> : (
                   <ul className={cx("-mt-3 flex flex-col gap-4 px-1", blocked && "opacity-40")}>
-                    {tickets.map((ticket) => {
-                      const eligibleTargets = moveTargets(ticket);
-                      const pending = pendingId === ticket.id;
-                      const beingDragged = draggingId === ticket.id;
-                      return (
-                        <li
-                          key={ticket.id}
-                          data-testid={ticketRowTestId("board", ticket.id)}
-                          data-dragging={beingDragged ? "true" : undefined}
-                          aria-busy={pending}
-                          draggable={!pending}
-                          style={{ "--tilt": `${slipTilt(ticket.id)}deg` } as CSSProperties}
-                          className={cx("slip", !pending && "cursor-grab", beingDragged && "opacity-60")}
-                          onDragStart={(event) => {
-                            if (commandPending.current) {
-                              event.preventDefault();
-                              return;
-                            }
-                            event.dataTransfer.effectAllowed = "move";
-                            event.dataTransfer.setData("application/x-ticketit-ticket", ticket.id);
-                            setDraggingId(ticket.id);
-                          }}
-                          onDragEnd={() => setDraggingId(null)}
-                        >
-                          <div
-                            data-surface="paper"
-                            {...statusTone(ticket.status)}
-                            className={cx(
-                              "slip-paper flex flex-col gap-2 border-t-4 border-(--status) bg-paper px-3 pt-3 pb-5 text-ink",
-                              beingDragged && "outline-2 -outline-offset-4 outline-ink outline-dashed",
-                              pending && "opacity-70",
-                            )}
-                          >
-                            <div className="flex justify-between text-label text-muted">
-                              <span>{ticketSerial(ticket.id)}</span>
-                              <time dateTime={ticket.createdAt}>{shortDate(ticket.createdAt)}</time>
-                            </div>
-                            <TicketModalLink ticketId={ticket.id} view="board" disabled={pending} className="font-bold break-words text-ink">{ticket.title}</TicketModalLink>
-                            <Rule className="my-0!" />
-                            <div className="text-label">
-                              <p>Template: {ticket.template}</p>
-                              <p>Assignee: {ticket.assigneeType === "owner" ? "Owner" : "Unassigned"}</p>
-                            </div>
-                            <p data-testid="board-badges" aria-label={`Badges: ${ticket.badges.map((badge) => badge.name).join(", ") || "none"}`} className="flex flex-wrap gap-1 empty:hidden">
-                              {ticket.badges.map((badge, index) => (
-                                <span key={badge.id}>
-                                  {index > 0 && <span className="sr-only">, </span>}
-                                  <BadgeTag>{badge.name}</BadgeTag>
-                                </span>
-                              ))}
-                            </p>
-                            {pending && <span role="status" className="self-start rounded-tag bg-ink px-2 py-0.5 text-label font-bold tracking-label text-amber uppercase">Moving…</span>}
-                            {eligibleTargets.length > 0 && (
-                              <DropdownMenu.Root modal={false}>
-                                <DropdownMenu.Trigger data-testid="move-to-trigger" disabled={pendingId !== null} className={cx(buttonClasses("secondary"), "self-start px-2 py-1 text-label tracking-label uppercase")}>Move to…</DropdownMenu.Trigger>
-                                <DropdownMenu.Portal>
-                                  <DropdownMenu.Content align="start" sideOffset={4} className="z-50 min-w-40 border-2 border-ink bg-paper p-1 text-ink shadow-paper">
-                                    {eligibleTargets.map((target) => (
-                                      <DropdownMenu.Item
-                                        key={target}
-                                        data-move-target={target}
-                                        className="cursor-pointer px-2 py-1.5 text-body font-bold outline-none data-[highlighted]:bg-ink data-[highlighted]:text-amber data-[highlighted]:before:mr-1 data-[highlighted]:before:content-['▸']"
-                                        onSelect={() => void moveTicket(ticket, target)}
-                                      >
-                                        {statusLabel(target)}
-                                      </DropdownMenu.Item>
-                                    ))}
-                                  </DropdownMenu.Content>
-                                </DropdownMenu.Portal>
-                              </DropdownMenu.Root>
-                            )}
-                          </div>
-                        </li>
-                      );
-                    })}
+                    {tickets.map((ticket) => (
+                      <TicketSlip
+                        key={ticket.id}
+                        ticket={ticket}
+                        pending={pendingId === ticket.id}
+                        anyPending={pendingId !== null}
+                        beingDragged={draggingId === ticket.id}
+                        moveTargets={moveTargets(ticket)}
+                        onMove={(target) => void moveTicket(ticket, target)}
+                        onDragStart={(event) => {
+                          if (commandPending.current) {
+                            event.preventDefault();
+                            return;
+                          }
+                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.setData("application/x-ticketit-ticket", ticket.id);
+                          setDraggingId(ticket.id);
+                        }}
+                        onDragEnd={() => setDraggingId(null)}
+                      />
+                    ))}
                   </ul>
                 )}
               </section>
