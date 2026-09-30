@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ErrorMessage, LoadingMessage } from "./ui";
 import { fetchGalleyStatus, type GalleyStatus } from "../api/status";
 
 type FetchState =
@@ -39,40 +40,34 @@ export function StatusView() {
   }, []);
 
   if (state.kind === "loading") {
-    return (
-      <p role="status" data-testid="status-loading">
-        Loading status from Galley…
-      </p>
-    );
+    return <LoadingMessage data-testid="status-loading">Loading status from Galley…</LoadingMessage>;
   }
 
   if (state.kind === "error") {
     return (
-      <div role="alert" data-testid="status-error">
-        <p>Unable to load status from Galley.</p>
+      <ErrorMessage title="Unable to load status from Galley." data-testid="status-error">
         <p data-testid="status-error-message">{state.message}</p>
-      </div>
+      </ErrorMessage>
     );
   }
 
   const { application, status, version, environment, startedAt } = state.data;
+  const rows: Array<[string, string, string]> = [
+    ["Application", "status-application", application],
+    ["Status", "status-status", status],
+    ["Version", "status-version", version],
+    ["Environment", "status-environment", environment],
+    ["Started at", "status-started-at", startedAt],
+  ];
 
   return (
-    <dl data-testid="status-success">
-      <dt>Application</dt>
-      <dd data-testid="status-application">{application}</dd>
-
-      <dt>Status</dt>
-      <dd data-testid="status-status">{status}</dd>
-
-      <dt>Version</dt>
-      <dd data-testid="status-version">{version}</dd>
-
-      <dt>Environment</dt>
-      <dd data-testid="status-environment">{environment}</dd>
-
-      <dt>Started at</dt>
-      <dd data-testid="status-started-at">{startedAt}</dd>
+    <dl data-testid="status-success" className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1">
+      {rows.map(([label, testId, value]) => (
+        <div key={testId} className="col-span-2 grid grid-cols-subgrid border-b border-dashed border-rule py-1">
+          <dt className="text-label tracking-label text-muted uppercase">{label}</dt>
+          <dd data-testid={testId} className="text-right">{value}</dd>
+        </div>
+      ))}
     </dl>
   );
 }

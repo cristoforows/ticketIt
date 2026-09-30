@@ -1,3 +1,5 @@
+import { buttonClasses, Paper, Rule } from "./ui";
+
 /**
  * The signed-out application state: a single action that starts
  * Galley's own GitHub OAuth flow. This is a real navigation (an anchor,
@@ -7,11 +9,13 @@
  */
 export function SignInPage() {
   return (
-    <div data-testid="sign-in-page">
-      <p>Sign in to continue.</p>
-      <a data-testid="sign-in-with-github" href="/api/auth/github/start">
+    <Paper data-testid="sign-in-page" className="mx-auto w-full max-w-(--size-narrow) p-6">
+      <h2 className="text-center text-body font-bold tracking-label uppercase">Sign in</h2>
+      <p className="text-center text-muted">Sign in to continue.</p>
+      <Rule />
+      <a data-testid="sign-in-with-github" href="/api/auth/github/start" className={`${buttonClasses("primary")} w-full`}>
         Sign in with GitHub
       </a>
-    </div>
+    </Paper>
   );
 }
