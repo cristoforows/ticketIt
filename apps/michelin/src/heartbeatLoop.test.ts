@@ -129,6 +129,41 @@ describe("heartbeat loop", () => {
     up = false;
     await vi.advanceTimersByTimeAsync(1000);
     expect(records()[2]).toMatchObject({ level: "error", msg: "runner heartbeat failed", reason: "unreachable" });
+    up = true;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(records()[3]).toMatchObject({ msg: "runner heartbeat ok" });
+    expect(fetchFn.mock.calls.filter(([input]) => String(input).endsWith("/register"))).toHaveLength(2);
+    await loop.stop();
+  });
+
+  it.each([
+    ["an unreachable Galley", "unreachable"],
+    ["a server error", "http_status"],
+    ["a non-JSON body", "invalid_body"],
+    ["a timeout", "timeout"],
+  ])("keeps heartbeating, without registering again, after %s", async (_name, reason) => {
+    const refused = new TypeError("fetch failed", { cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:8080"), { code: "ECONNREFUSED" }) });
+    let heartbeats = 0;
+    const fetchFn = vi.fn<FetchFn>(async (input, init) => {
+      if (new URL(String(input)).pathname.endsWith("register")) return json({ registeredAt: "t" });
+      heartbeats += 1;
+      if (heartbeats > 1) return json({ lastSeenAt: "t" });
+      if (reason === "unreachable") throw refused;
+      if (reason === "http_status") return json({ error: { code: "database_unavailable", message: "x" } }, 503);
+      if (reason === "invalid_body") return new Response("<html>", { status: 200 });
+      return new Promise((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
+    });
+    const { loop, records } = setup(fetchFn);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(1000 + 300);
+    expect(records()[1]).toMatchObject({ level: "error", msg: "runner heartbeat failed", reason });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(fetchFn.mock.calls.map(([input]) => new URL(String(input)).pathname)).toEqual([
+      "/api/runner/register",
+      "/api/runner/heartbeat",
+      "/api/runner/heartbeat",
+    ]);
+    expect(records()[2]).toMatchObject({ msg: "runner heartbeat ok" });
     await loop.stop();
   });
 

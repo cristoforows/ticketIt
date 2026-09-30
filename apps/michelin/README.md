@@ -76,7 +76,10 @@ Two independent loops run side by side:
   host name) at start, then `POST /api/runner/heartbeat` every
   `MICHELIN_HEARTBEAT_INTERVAL_MS`. Galley shows the runner Connected
   while the last one is under 30 seconds old. Until a registration
-  succeeds, every attempt is a registration.
+  succeeds, every attempt is a registration. After that, only a `409`
+  or `401` leads back to registering; a timeout, an unreachable Galley
+  or another failed heartbeat is retried as a heartbeat, so Galley's
+  `registeredAt` stays the time Michelin first registered.
 
 Requests in one loop never overlap. Each request times out after 5
 seconds. Logs are one JSON object per line on stdout: `time`, `level`,

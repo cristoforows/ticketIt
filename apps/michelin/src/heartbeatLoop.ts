@@ -44,7 +44,10 @@ async function run(options: HeartbeatLoopOptions, signal: AbortSignal): Promise<
         logger.info("runner registered", { galleyUrl: galleyUrl.href, durationMs: result.durationMs, registeredAt: result.value, ...identity });
       }
     } else {
-      registered = false;
+      // Registering again rewrites registered_at in Galley, so only a lost registration or credential leads back to it.
+      if (result.failure.reason === "not_registered" || result.failure.reason === "credential_rejected") {
+        registered = false;
+      }
       if (result.failure.reason === "not_registered") {
         logger.warn("runner not registered with galley; registering again", { galleyUrl: galleyUrl.href });
         continue;
