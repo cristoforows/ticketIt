@@ -1,4 +1,4 @@
-import { cx, SecondaryButton, statusLabel, statusTone, type TicketStatus } from "./ui";
+import { SecondaryButton, StageLabel, StageStep, statusLabel, statusTone, type TicketStatus } from "./ui";
 
 export interface StageSummary {
   value: TicketStatus;
@@ -28,10 +28,10 @@ export function BoardStageSwitcher({ stages, current, onSelect }: BoardStageSwit
         >
           ◂
         </SecondaryButton>
-        <p data-testid="board-stage-current" aria-live="polite" className="m-0 flex items-center gap-2 text-body font-bold tracking-label text-(--status-text) uppercase">
+        <StageLabel data-testid="board-stage-current" aria-live="polite">
           <span>{stage.label}</span>
           <span aria-label={`${stage.count} orders`}>{stage.count}</span>
-        </p>
+        </StageLabel>
         <SecondaryButton
           tone="ground"
           data-testid="board-stage-next"
@@ -45,17 +45,13 @@ export function BoardStageSwitcher({ stages, current, onSelect }: BoardStageSwit
       <ol className="m-0 flex list-none gap-1 p-0">
         {stages.map((item, index) => (
           <li key={item.value} className="flex-1">
-            <button
-              type="button"
+            <StageStep
+              status={item.value}
               data-testid={`board-stage-step-${item.value}`}
               aria-label={`${statusLabel(item.value)}, ${item.count} orders`}
               aria-current={index === current ? "true" : undefined}
-              {...statusTone(item.value)}
-              className="flex h-6 w-full items-center border-0 bg-transparent p-0"
               onClick={() => onSelect(index)}
-            >
-              <span className={cx("block w-full rounded-pill", index === current ? "h-2.5 bg-(--status-text)" : "h-1.5 bg-dim opacity-60")} />
-            </button>
+            />
           </li>
         ))}
       </ol>

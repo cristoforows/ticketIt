@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Badge, Ticket, TicketUpdate } from "../api/tickets";
 import { refinementGuidance } from "./refinementGuidance";
-import { BadgeTag, cx, fieldLabelClasses, ErrorMessage, PrimaryButton, Rule, SecondaryButton, Select, StatusTag, statusLabel, TextInput, Textarea, ticketSerial } from "./ui";
+import { BadgeTag, ErrorMessage, FieldHint, FieldLabel, FieldNote, FieldValue, PrimaryButton, ReceiptLine, Rule, SecondaryButton, Select, StatusTag, statusLabel, TextInput, Textarea, ticketSerial } from "./ui";
 
 interface TicketDetailProps {
   ticket: Ticket;
@@ -163,32 +163,32 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
           <Rule />
           <section aria-label="Refinement" className="flex flex-col gap-3">
             <RefinementValue label="Goal" testId="goal" value={current.goal} />
-            <Rule className="my-0!" />
+            <Rule className="my-0" />
             <RefinementValue label="Context" testId="context" value={current.context} />
-            <Rule className="my-0!" />
+            <Rule className="my-0" />
             <RefinementValue label="Success Criteria" testId="success-criteria" value={current.successCriteria} />
-            <Rule className="my-0!" />
+            <Rule className="my-0" />
             <RefinementValue label="Constraints" testId="constraints" value={current.constraints} />
-            <Rule className="my-0!" />
+            <Rule className="my-0" />
             <RefinementValue label="Repository" testId="repository" value={current.repository} />
           </section>
           <Rule />
           <dl className="m-0 flex flex-col gap-1">
-            <ReceiptLine label="Template" testId="template">{current.template}</ReceiptLine>
-            <ReceiptLine label="Completion condition" testId="completion-condition">
+            <ReceiptLine label="Template" data-testid="ticket-detail-template">{current.template}</ReceiptLine>
+            <ReceiptLine label="Completion condition" data-testid="ticket-detail-completion-condition">
               {completionConditionLabel(current.completionCondition)}
             </ReceiptLine>
-            <ReceiptLine label="Assignee" testId="assignee">
+            <ReceiptLine label="Assignee" data-testid="ticket-detail-assignee">
               {current.assigneeType === OWNER_ASSIGNEE_TYPE ? "Owner" : "Unassigned"}
             </ReceiptLine>
-            <ReceiptLine label="Created" testId="created-at">{current.createdAt}</ReceiptLine>
-            <ReceiptLine label="Updated" testId="updated-at">{current.updatedAt}</ReceiptLine>
+            <ReceiptLine label="Created" data-testid="ticket-detail-created-at">{current.createdAt}</ReceiptLine>
+            <ReceiptLine label="Updated" data-testid="ticket-detail-updated-at">{current.updatedAt}</ReceiptLine>
           </dl>
           <Rule />
           <section aria-label="Badges" data-testid="ticket-detail-badges">
-            <h3 className={fieldLabelClasses}>Badges</h3>
+            <FieldLabel as="h3">Badges</FieldLabel>
             {current.badges.length === 0 ? (
-              <p className="my-1 text-muted italic">No badges.</p>
+              <FieldNote>No badges.</FieldNote>
             ) : (
               <ul className="my-2 flex list-none flex-wrap gap-2 p-0">
                 {current.badges.map((badge) => (
@@ -205,12 +205,12 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
             <>
               <Rule />
               <section aria-label="Pull Request" data-testid="ticket-detail-pr-section">
-                <h3 className={fieldLabelClasses}>Pull Request</h3>
+                <FieldLabel as="h3">Pull Request</FieldLabel>
                 {/* No PR exists until M8 -- there is nothing to fabricate a
                     field for; this is the section's own honest state. */}
-                <p data-testid="ticket-detail-pr-empty-state" className="my-1 text-muted italic">
+                <FieldNote data-testid="ticket-detail-pr-empty-state">
                   PR delivery arrives with coding execution -- no pull request exists yet.
-                </p>
+                </FieldNote>
               </section>
             </>
           )}
@@ -283,7 +283,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
         <form data-testid="ticket-detail-edit-form" onSubmit={handleSave} className="flex flex-col gap-4">
           <p className="text-label tracking-label text-muted">{ticketSerial(current.id)}</p>
           <div>
-            <label htmlFor="ticket-detail-input-title" className={fieldLabelClasses}>Title</label>
+            <FieldLabel htmlFor="ticket-detail-input-title">Title</FieldLabel>
             <TextInput
               id="ticket-detail-input-title"
               data-testid="ticket-detail-input-title"
@@ -325,7 +325,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
             disabled={saving}
           />
           <div>
-            <label htmlFor="ticket-detail-input-repository" className={fieldLabelClasses}>Repository</label>
+            <FieldLabel htmlFor="ticket-detail-input-repository">Repository</FieldLabel>
             <TextInput
               id="ticket-detail-input-repository"
               data-testid="ticket-detail-input-repository"
@@ -339,7 +339,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
               <p data-testid="ticket-detail-save-error" className="m-0">{saveError}</p>
             </ErrorMessage>
           )}
-          <Rule className="my-0!" />
+          <Rule className="my-0" />
           <div className="flex gap-2">
             <PrimaryButton type="submit" data-testid="ticket-detail-save-button" disabled={saving}>
               Save
@@ -358,15 +358,6 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
   );
 }
 
-
-function ReceiptLine({ label, testId, children }: { label: string; testId: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-baseline justify-between gap-4">
-      <dt className={fieldLabelClasses}>{label}</dt>
-      <dd data-testid={`ticket-detail-${testId}`} className="m-0 text-right break-words">{children}</dd>
-    </div>
-  );
-}
 
 function BadgePicker({ ticket, disabled, reason, onAttached, onLoad, onCreate, onAttach }: {
   ticket: Ticket;
@@ -444,7 +435,7 @@ function BadgePicker({ ticket, disabled, reason, onAttached, onLoad, onCreate, o
     {open && <div data-testid="badge-picker" className="mt-3 flex flex-col gap-3 border border-dashed border-rule p-3">
       <form onSubmit={attach} className="flex flex-wrap items-end gap-2">
         <div className="min-w-40 flex-1">
-          <label htmlFor="existing-badge" className={fieldLabelClasses}>Existing badge</label>
+          <FieldLabel htmlFor="existing-badge">Existing badge</FieldLabel>
           <Select id="existing-badge" data-testid="badge-picker-select" value={selected} onChange={(event) => setSelected(event.target.value)} disabled={pending}>
             <option value="">Choose a badge</option>
             {available.map((badge) => <option key={badge.id} value={badge.id}>{badge.name}</option>)}
@@ -454,7 +445,7 @@ function BadgePicker({ ticket, disabled, reason, onAttached, onLoad, onCreate, o
       </form>
       <form onSubmit={createAndAttach} className="flex flex-wrap items-end gap-2">
         <div className="min-w-40 flex-1">
-          <label htmlFor="new-badge-name" className={fieldLabelClasses}>New badge name</label>
+          <FieldLabel htmlFor="new-badge-name">New badge name</FieldLabel>
           <TextInput id="new-badge-name" data-testid="new-badge-name" value={name} onChange={(event) => setName(event.target.value)} disabled={pending} />
         </div>
         <PrimaryButton type="submit" disabled={pending}>Create and attach</PrimaryButton>
@@ -467,8 +458,8 @@ function BadgePicker({ ticket, disabled, reason, onAttached, onLoad, onCreate, o
 function RefinementValue({ label, testId, value }: { label: string; testId: string; value: string }) {
   return (
     <div>
-      <h3 className={fieldLabelClasses}>{label}</h3>
-      <p data-testid={`ticket-detail-field-${testId}`} className={cx("mt-1 mb-0 break-words whitespace-pre-wrap", value === "" && "text-muted italic")}>{value === "" ? "Not set." : value}</p>
+      <FieldLabel as="h3">{label}</FieldLabel>
+      <FieldValue data-testid={`ticket-detail-field-${testId}`} empty={value === ""}>{value === "" ? "Not set." : value}</FieldValue>
     </div>
   );
 }
@@ -486,8 +477,8 @@ function RefinementInput({ label, guidance, testId, value, onChange, disabled }:
   const inputId = `ticket-detail-textarea-${testId}`;
   return (
     <div>
-      <label htmlFor={inputId} className={fieldLabelClasses}>{label}</label>
-      <p data-testid={`ticket-detail-guidance-${testId}`} className="mt-0.5 mb-1 text-muted">{guidance}</p>
+      <FieldLabel htmlFor={inputId}>{label}</FieldLabel>
+      <FieldHint data-testid={`ticket-detail-guidance-${testId}`}>{guidance}</FieldHint>
       <Textarea
         id={inputId}
         data-testid={inputId}

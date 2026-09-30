@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { UnauthenticatedError } from "../api/session";
 import { changeTicketStatus, fetchTickets, type Ticket } from "../api/tickets";
-import { cx, EmptyMessage, ErrorMessage, LoadingMessage, statuses, statusTone } from "./ui";
+import { BoardColumn, BoardColumns, Caption, ColumnHeader, DropHint, EmptyMessage, ErrorMessage, LoadingMessage, Rail, SlipList, statuses, statusTone } from "./ui";
 import { BoardStageSwitcher } from "./BoardStageSwitcher";
 import { scrollBehavior, useIsPhone } from "./usePhone";
 import { focusTicketRow, refocusTicketRowIfFocusLost, ticketRowTestId } from "./TicketModalLink";
@@ -170,10 +170,9 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
     }
   }
 
-  const slipEdge = "text-label tracking-label uppercase";
   return (
     <section data-testid="ticket-board" className="min-w-0">
-      <h2 className="mb-3 text-label tracking-label text-dim uppercase">Board</h2>
+      <Caption as="h2" tone="ground" className="mb-3">Board</Caption>
       {state.kind === "loading" && <LoadingMessage data-testid="ticket-board-loading">Loading tickets…</LoadingMessage>}
       {state.kind === "error" && (
         <ErrorMessage title="Unable to load tickets." data-testid="ticket-board-error">
@@ -191,12 +190,7 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
         />
       )}
       {state.kind === "loaded" && (
-        <div
-          ref={columnsRef}
-          data-testid="board-columns"
-          onScroll={phone ? syncStageFromScroll : undefined}
-          className="scroll-hint grid grid-flow-col auto-cols-[minmax(10rem,1fr)] max-md:snap-x max-md:snap-mandatory max-md:auto-cols-[100%] gap-3 overflow-x-auto px-1 pt-3 pb-6"
-        >
+        <BoardColumns ref={columnsRef} data-testid="board-columns" onScroll={phone ? syncStageFromScroll : undefined}>
           {statuses.map(({ value, label }, columnIndex) => {
             const tickets = state.tickets.filter((ticket) => ticket.status === value);
             const dragging = draggingTicket !== undefined;
@@ -204,17 +198,13 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
             const isOrigin = dragging && draggingTicket.status === value;
             const isDropTarget = dragging && canMove(draggingTicket, value);
             return (
-              <section
+              <BoardColumn
                 key={value}
                 {...statusTone(value)}
                 inert={phone && columnIndex !== stage}
                 data-testid={`board-status-${value}`}
                 data-drop-target={isDropTarget ? "true" : undefined}
-                data-drop-blocked={dragging && !isDropTarget && !isOrigin ? "true" : undefined}
-                className={cx(
-                  "flex min-w-0 flex-col p-2 max-md:snap-start",
-                  isDropTarget && "bg-paper/10 outline-2 -outline-offset-2 outline-(--status-text) outline-dashed",
-                )}
+                data-drop-blocked={blocked ? "true" : undefined}
                 aria-labelledby={`board-heading-${value}`}
                 onDragOver={(event) => {
                   if (!isDropTarget) return;
@@ -227,16 +217,11 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
                   setDraggingId(null);
                 }}
               >
-                <div className="flex items-center justify-between border-b-2 border-(--status) pb-2 max-md:sr-only">
-                  <h3 id={`board-heading-${value}`} className="text-label font-bold tracking-label text-(--status-text) uppercase">{label}</h3>
-                  <span aria-hidden="true" className="grid size-6 place-items-center rounded-pill bg-(--status-text) text-label font-bold text-ground">{tickets.length}</span>
-                </div>
-                <p aria-hidden="true" className={cx("mt-2 min-h-4 text-center max-md:hidden", slipEdge, isDropTarget ? "font-bold text-(--status-text)" : "text-dim")}>
-                  {dragging && (isDropTarget ? "▾ Drop here" : isOrigin ? "● Current" : "✕ Not allowed")}
-                </p>
-                <div aria-hidden="true" className={cx("mt-4 h-2 rounded-pill bg-linear-to-b from-rail to-rail-shade shadow-inner", blocked && "opacity-40")} />
+                <ColumnHeader id={`board-heading-${value}`} label={label} count={tickets.length} />
+                <DropHint hint={dragging ? (isDropTarget ? "target" : isOrigin ? "origin" : "blocked") : undefined} />
+                <Rail />
                 {tickets.length === 0 ? <p className="pt-4 text-center text-label text-dim">— no orders —</p> : (
-                  <ul className={cx("-mt-3 flex flex-col gap-4 px-1", blocked && "opacity-40")}>
+                  <SlipList>
                     {tickets.map((ticket) => (
                       <TicketSlip
                         key={ticket.id}
@@ -262,12 +247,12 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
                         onDragEnd={() => setDraggingId(null)}
                       />
                     ))}
-                  </ul>
+                  </SlipList>
                 )}
-              </section>
+              </BoardColumn>
             );
           })}
-        </div>
+        </BoardColumns>
       )}
       {state.kind === "loaded" && state.refreshError && (
         <ErrorMessage title="Unable to refresh tickets." data-testid="ticket-board-refresh-error" className="mt-4">

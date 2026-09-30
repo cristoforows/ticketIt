@@ -3,7 +3,7 @@ import { useRef, useState } from "react";
 import { UnauthenticatedError } from "../api/session";
 import { createTicket, TICKET_TEMPLATES, TICKET_TITLE_MAX_LENGTH, type Ticket, type TicketDetails } from "../api/tickets";
 import { refinementGuidance } from "./refinementGuidance";
-import { ErrorMessage, fieldLabelClasses, PrimaryButton, Rule, SecondaryButton, Select, TextInput, Textarea } from "./ui";
+import { ErrorMessage, FieldHint, FieldLabel, PrimaryButton, ReceiptBody, ReceiptDialog, ReceiptFooter, ReceiptTitle, Rule, SecondaryButton, Select, TextInput, Textarea } from "./ui";
 
 interface CaptureModalProps {
   initialTitle: string;
@@ -49,100 +49,97 @@ export function CaptureModal({ initialTitle, onCreated, onUnauthenticated, onClo
   };
 
   return (
-    <Dialog.Portal>
-      <Dialog.Overlay className="fixed inset-0 z-40 bg-scrim" />
-      <Dialog.Content
-        aria-describedby={undefined}
-        onOpenAutoFocus={(event) => {
-          event.preventDefault();
-          const input = titleInput.current;
-          if (!input) return;
-          input.focus();
-          input.setSelectionRange(input.value.length, input.value.length);
-        }}
-        onEscapeKeyDown={keepOpenWhilePending}
-        onInteractOutside={keepOpenWhilePending}
-        className="fixed top-1/2 left-1/2 z-50 box-border flex max-h-[calc(100dvh-2rem)] w-[min(var(--size-receipt),calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden bg-paper text-ink shadow-paper"
-      >
-        <form data-testid="ticket-capture-form" onSubmit={handleSubmit} className="my-0 flex min-h-0 flex-col">
-          <div data-testid="ticket-capture-body" className="flex min-h-0 flex-col gap-3 overflow-y-auto p-5 pb-3">
-            <Dialog.Title className="m-0 text-center text-title font-bold tracking-wordmark uppercase">New order</Dialog.Title>
-            <Rule className="my-0!" weight="thick" />
-            <div className="grid gap-3 sm:grid-cols-[1fr_9rem]">
-              <div>
-                <label htmlFor="ticket-title-input" className={fieldLabelClasses}>Title</label>
-                <TextInput
-                  ref={titleInput}
-                  id="ticket-title-input"
-                  data-testid="ticket-title-input"
-                  value={title}
-                  maxLength={TICKET_TITLE_MAX_LENGTH}
-                  onChange={(event) => setTitle(event.target.value)}
-                  disabled={pending}
-                  aria-required="true"
-                  className="mt-1"
-                />
-              </div>
-              <div>
-                <label htmlFor="ticket-template-select" className={fieldLabelClasses}>Template</label>
-                <Select
-                  id="ticket-template-select"
-                  data-testid="ticket-template-select"
-                  value={template}
-                  onChange={(event) => setTemplate(event.target.value as Ticket["template"])}
-                  disabled={pending}
-                  className="mt-1"
-                >
-                  {TICKET_TEMPLATES.map((option) => (
-                    <option key={option} value={option}>{option}</option>
-                  ))}
-                </Select>
-              </div>
-            </div>
-            {detailFields.map(({ key, label, testId }) => (
-              <div key={key}>
-                <label htmlFor={`ticket-capture-${testId}`} className={fieldLabelClasses}>{label}</label>
-                <p data-testid={`ticket-capture-guidance-${testId}`} className="mt-0.5 mb-1 text-muted">{refinementGuidance[key]}</p>
-                <Textarea
-                  id={`ticket-capture-${testId}`}
-                  data-testid={`ticket-capture-${testId}`}
-                  value={details[key] ?? ""}
-                  onChange={(event) => setDetails((current) => ({ ...current, [key]: event.target.value }))}
-                  disabled={pending}
-                  rows={3}
-                  className="min-h-0!"
-                />
-              </div>
-            ))}
+    <ReceiptDialog
+      layout="stack"
+      aria-describedby={undefined}
+      onOpenAutoFocus={(event) => {
+        event.preventDefault();
+        const input = titleInput.current;
+        if (!input) return;
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+      }}
+      onEscapeKeyDown={keepOpenWhilePending}
+      onInteractOutside={keepOpenWhilePending}
+    >
+      <form data-testid="ticket-capture-form" onSubmit={handleSubmit} className="my-0 flex min-h-0 flex-col">
+        <ReceiptBody data-testid="ticket-capture-body">
+          <ReceiptTitle as={Dialog.Title}>New order</ReceiptTitle>
+          <Rule className="my-0" weight="thick" />
+          <div className="grid gap-3 sm:grid-cols-[1fr_9rem]">
             <div>
-              <label htmlFor="ticket-capture-repository" className={fieldLabelClasses}>Repository</label>
+              <FieldLabel htmlFor="ticket-title-input">Title</FieldLabel>
               <TextInput
-                id="ticket-capture-repository"
-                data-testid="ticket-capture-repository"
-                value={details.repository ?? ""}
-                onChange={(event) => setDetails((current) => ({ ...current, repository: event.target.value }))}
+                ref={titleInput}
+                id="ticket-title-input"
+                data-testid="ticket-title-input"
+                value={title}
+                maxLength={TICKET_TITLE_MAX_LENGTH}
+                onChange={(event) => setTitle(event.target.value)}
                 disabled={pending}
+                aria-required="true"
                 className="mt-1"
               />
             </div>
-          </div>
-          <div data-testid="ticket-capture-footer" className="flex shrink-0 flex-col gap-3 border-t border-dashed border-rule px-5 py-3">
-            {error && (
-              <ErrorMessage title="Could not capture the ticket.">
-                <p data-testid="ticket-capture-error" className="m-0">{error}</p>
-              </ErrorMessage>
-            )}
-            <div className="flex gap-2">
-              <PrimaryButton type="submit" data-testid="ticket-capture-submit" disabled={pending || title.trim() === ""}>
-                Capture
-              </PrimaryButton>
-              <SecondaryButton data-testid="ticket-capture-cancel" onClick={onClose} disabled={pending}>
-                Cancel
-              </SecondaryButton>
+            <div>
+              <FieldLabel htmlFor="ticket-template-select">Template</FieldLabel>
+              <Select
+                id="ticket-template-select"
+                data-testid="ticket-template-select"
+                value={template}
+                onChange={(event) => setTemplate(event.target.value as Ticket["template"])}
+                disabled={pending}
+                className="mt-1"
+              >
+                {TICKET_TEMPLATES.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </Select>
             </div>
           </div>
-        </form>
-      </Dialog.Content>
-    </Dialog.Portal>
+          {detailFields.map(({ key, label, testId }) => (
+            <div key={key}>
+              <FieldLabel htmlFor={`ticket-capture-${testId}`}>{label}</FieldLabel>
+              <FieldHint data-testid={`ticket-capture-guidance-${testId}`}>{refinementGuidance[key]}</FieldHint>
+              <Textarea
+                id={`ticket-capture-${testId}`}
+                data-testid={`ticket-capture-${testId}`}
+                value={details[key] ?? ""}
+                onChange={(event) => setDetails((current) => ({ ...current, [key]: event.target.value }))}
+                disabled={pending}
+                rows={3}
+                className="min-h-0"
+              />
+            </div>
+          ))}
+          <div>
+            <FieldLabel htmlFor="ticket-capture-repository">Repository</FieldLabel>
+            <TextInput
+              id="ticket-capture-repository"
+              data-testid="ticket-capture-repository"
+              value={details.repository ?? ""}
+              onChange={(event) => setDetails((current) => ({ ...current, repository: event.target.value }))}
+              disabled={pending}
+              className="mt-1"
+            />
+          </div>
+        </ReceiptBody>
+        <ReceiptFooter data-testid="ticket-capture-footer">
+          {error && (
+            <ErrorMessage title="Could not capture the ticket.">
+              <p data-testid="ticket-capture-error" className="m-0">{error}</p>
+            </ErrorMessage>
+          )}
+          <div className="flex gap-2">
+            <PrimaryButton type="submit" data-testid="ticket-capture-submit" disabled={pending || title.trim() === ""}>
+              Capture
+            </PrimaryButton>
+            <SecondaryButton data-testid="ticket-capture-cancel" onClick={onClose} disabled={pending}>
+              Cancel
+            </SecondaryButton>
+          </div>
+        </ReceiptFooter>
+      </form>
+    </ReceiptDialog>
   );
 }

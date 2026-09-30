@@ -21,7 +21,7 @@ import {
 import { collectionQuery, fullPageReturnPath, navigate, useEditRequested } from "../router";
 import { Link } from "./Link";
 import { TicketDetail } from "./TicketDetail";
-import { EmptyMessage, ErrorMessage, LoadingMessage, Paper } from "./ui";
+import { capsLinkClasses, EmptyMessage, ErrorMessage, LoadingMessage, Paper } from "./ui";
 
 interface TicketDetailPageProps {
   ticketId: string;
@@ -154,7 +154,7 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
       className={presentation === "page" ? "mx-auto w-full max-w-(--size-receipt)" : undefined}
     >
       {presentation === "page" && <p className="mb-4">
-        <Link to={`/${collectionQuery()}`} data-testid="back-to-backlog-link" className="text-label font-bold tracking-label text-amber uppercase">
+        <Link to={`/${collectionQuery()}`} data-testid="back-to-backlog-link" className={capsLinkClasses({ tone: "ground" })}>
           Back to Backlog
         </Link>
       </p>}
