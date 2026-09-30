@@ -121,7 +121,10 @@ describe("TicketBoard on phones", () => {
       expect(toggle).toHaveAttribute("aria-controls", within(a).getByTestId("board-slip-actions").id);
       expect(window.location.pathname).toBe("/");
 
-      fireEvent.click(within(screen.getByTestId("board-ticket-b")).getByTestId("board-slip-toggle"));
+      const toggleB = within(screen.getByTestId("board-ticket-b")).getByTestId("board-slip-toggle");
+      fireEvent.pointerDown(toggleB);
+      expect(within(a).getByTestId("board-slip-actions")).toBeInTheDocument();
+      fireEvent.click(toggleB);
       expect(screen.getAllByTestId("board-slip-actions")).toHaveLength(1);
       expect(within(a).queryByTestId("board-slip-actions")).not.toBeInTheDocument();
     });

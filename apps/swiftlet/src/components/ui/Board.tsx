@@ -34,7 +34,7 @@ export function ColumnHeader({ id, label, count }: { id: string; label: string; 
   );
 }
 
-const dropHints = { target: "▾ Drop here", origin: "● Current", reorder: "↕ Drop on a slip to reorder", blocked: "✕ Not allowed" };
+const dropHints = { target: "▾ Drop here", origin: "● Current", reorder: "↕ Reorder", blocked: "✕ Not allowed" };
 
 export function DropHint({ hint }: { hint?: keyof typeof dropHints }) {
   return (

@@ -89,8 +89,13 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
       setSelectedId(null);
       toggle()?.focus({ preventScroll: true });
     };
+    // Another slip's toggle switches the selection on click; collapsing the
+    // open panel on pointerdown would shift that toggle out from under the
+    // pointer before the click lands.
     const onPointerDown = (event: PointerEvent) => {
-      if (!(event.target as Element).closest(`[data-testid="${ticketRowTestId("board", selectedId)}"]`)) setSelectedId(null);
+      const target = event.target as Element;
+      if (target.closest(`[data-testid="${ticketRowTestId("board", selectedId)}"]`) || target.closest('[data-testid="board-slip-toggle"]')) return;
+      setSelectedId(null);
     };
     document.addEventListener("keydown", onKeyDown);
     document.addEventListener("pointerdown", onPointerDown);

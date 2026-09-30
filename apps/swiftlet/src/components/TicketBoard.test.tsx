@@ -266,7 +266,7 @@ describe("TicketBoard", () => {
       render(<TicketBoard onUnauthenticated={() => {}} />);
       const r3 = await screen.findByTestId("board-ticket-r3");
       fireEvent.dragStart(r3, { dataTransfer: { setData: vi.fn(), effectAllowed: "move" } });
-      expect(screen.getByTestId("board-status-Ready")).toHaveTextContent("↕ Drop on a slip to reorder");
+      expect(screen.getByTestId("board-status-Ready")).toHaveTextContent("↕ Reorder");
       const r1 = slipAt("r1", 0);
       dragAt("dragOver", r1, clientY);
       expect(r1).toHaveAttribute("data-drop-position", position);
