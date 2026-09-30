@@ -1,13 +1,11 @@
-import type { CSSProperties } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { UnauthenticatedError } from "../api/session";
 import { changeTicketStatus, fetchTickets, type Ticket } from "../api/tickets";
-import { BadgeTag, cx, EmptyMessage, ErrorMessage, LoadingMessage, Rule, shortDate, slipTilt, statuses, statusTone, ticketSerial } from "./ui";
-import { openTicketModal } from "../router";
+import { cx, EmptyMessage, ErrorMessage, LoadingMessage, statuses, statusTone } from "./ui";
 import { BoardStageSwitcher } from "./BoardStageSwitcher";
-import { SlipActions } from "./SlipActions";
 import { scrollBehavior, useIsPhone } from "./usePhone";
-import { focusTicketRow, refocusTicketRowIfFocusLost, TicketModalLink, ticketRowTestId } from "./TicketModalLink";
+import { focusTicketRow, refocusTicketRowIfFocusLost, ticketRowTestId } from "./TicketModalLink";
+import { TicketSlip } from "./TicketSlip";
 
 type BoardState =
   | { kind: "loading" }
@@ -239,87 +237,31 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
                 <div aria-hidden="true" className={cx("mt-4 h-2 rounded-pill bg-linear-to-b from-rail to-rail-shade shadow-inner", blocked && "opacity-40")} />
                 {tickets.length === 0 ? <p className="pt-4 text-center text-label text-dim">— no orders —</p> : (
                   <ul className={cx("-mt-3 flex flex-col gap-4 px-1", blocked && "opacity-40")}>
-                    {tickets.map((ticket) => {
-                      const eligibleTargets = moveTargets(ticket);
-                      const pending = pendingId === ticket.id;
-                      const selected = phone && selectedId === ticket.id;
-                      const panelId = `board-slip-actions-${ticket.id}`;
-                      const beingDragged = draggingId === ticket.id;
-                      return (
-                        <li
-                          key={ticket.id}
-                          data-testid={ticketRowTestId("board", ticket.id)}
-                          data-dragging={beingDragged ? "true" : undefined}
-                          aria-busy={pending}
-                          draggable={!pending && !phone}
-                          style={{ "--tilt": `${slipTilt(ticket.id)}deg` } as CSSProperties}
-                          className={cx("slip", phone && "grid", !pending && !phone && "cursor-grab", beingDragged && "opacity-60")}
-                          onDragStart={(event) => {
-                            if (commandPending.current) {
-                              event.preventDefault();
-                              return;
-                            }
-                            event.dataTransfer.effectAllowed = "move";
-                            event.dataTransfer.setData("application/x-ticketit-ticket", ticket.id);
-                            setDraggingId(ticket.id);
-                          }}
-                          onDragEnd={() => setDraggingId(null)}
-                        >
-                          <div
-                            data-surface="paper"
-                            {...statusTone(ticket.status)}
-                            className={cx(
-                              "slip-paper col-start-1 row-start-1 flex flex-col gap-2 border-t-4 border-(--status) bg-paper px-3 pt-3 pb-5 text-ink",
-                              beingDragged && "outline-2 -outline-offset-4 outline-ink outline-dashed",
-                              pending && "opacity-70",
-                              selected && "opacity-40 grayscale",
-                            )}
-                          >
-                            <div className="flex justify-between text-label text-muted">
-                              <span>{ticketSerial(ticket.id)}</span>
-                              <time dateTime={ticket.createdAt}>{shortDate(ticket.createdAt)}</time>
-                            </div>
-                            <TicketModalLink ticketId={ticket.id} view="board" disabled={pending} className="font-bold break-words text-ink">{ticket.title}</TicketModalLink>
-                            <Rule className="my-0!" />
-                            <div className="text-label">
-                              <p>Template: {ticket.template}</p>
-                              <p>Assignee: {ticket.assigneeType === "owner" ? "Owner" : "Unassigned"}</p>
-                            </div>
-                            <p data-testid="board-badges" aria-label={`Badges: ${ticket.badges.map((badge) => badge.name).join(", ") || "none"}`} className="flex flex-wrap gap-1 empty:hidden">
-                              {ticket.badges.map((badge, index) => (
-                                <span key={badge.id}>
-                                  {index > 0 && <span className="sr-only">, </span>}
-                                  <BadgeTag>{badge.name}</BadgeTag>
-                                </span>
-                              ))}
-                            </p>
-                            {pending && <span role="status" className="self-start rounded-tag bg-ink px-2 py-0.5 text-label font-bold tracking-label text-amber uppercase">Moving…</span>}
-                          </div>
-                          {phone && !pending && (
-                            <button
-                              type="button"
-                              data-testid="board-slip-toggle"
-                              aria-label={`Actions for ${ticket.title}`}
-                              aria-expanded={selected}
-                              aria-controls={panelId}
-                              className="z-10 col-start-1 row-start-1 h-full w-full cursor-pointer border-0 bg-transparent p-0"
-                              onClick={() => setSelectedId(selected ? null : ticket.id)}
-                            />
-                          )}
-                          {selected && (
-                            <SlipActions
-                              id={panelId}
-                              ticket={ticket}
-                              targets={eligibleTargets}
-                              disabled={pendingId !== null}
-                              onView={() => { setSelectedId(null); openTicketModal(ticket.id, "board"); }}
-                              onEdit={() => { setSelectedId(null); openTicketModal(ticket.id, "board", true); }}
-                              onMove={(target) => { setSelectedId(null); void moveTicket(ticket, target); }}
-                            />
-                          )}
-                        </li>
-                      );
-                    })}
+                    {tickets.map((ticket) => (
+                      <TicketSlip
+                        key={ticket.id}
+                        ticket={ticket}
+                        phone={phone}
+                        pending={pendingId === ticket.id}
+                        anyPending={pendingId !== null}
+                        selected={phone && selectedId === ticket.id}
+                        beingDragged={draggingId === ticket.id}
+                        moveTargets={moveTargets(ticket)}
+                        onToggle={() => setSelectedId(selectedId === ticket.id ? null : ticket.id)}
+                        onDismiss={() => setSelectedId(null)}
+                        onMove={(target) => void moveTicket(ticket, target)}
+                        onDragStart={(event) => {
+                          if (commandPending.current) {
+                            event.preventDefault();
+                            return;
+                          }
+                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.setData("application/x-ticketit-ticket", ticket.id);
+                          setDraggingId(ticket.id);
+                        }}
+                        onDragEnd={() => setDraggingId(null)}
+                      />
+                    ))}
                   </ul>
                 )}
               </section>
