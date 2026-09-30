@@ -35,13 +35,24 @@ var allowedSourceStatusesForTarget = map[TicketStatus][]TicketStatus{
 type transitionRejection struct {
 	code    string
 	message string
+	missing []AgentReadinessInput
+}
+
+func (r *transitionRejection) detail() ErrorDetail {
+	detail := ErrorDetail{Code: r.code, Message: r.message}
+	if len(r.missing) > 0 {
+		missing := r.missing
+		detail.Missing = &missing
+	}
+	return detail
 }
 
 // decidePlainStatusChange implements POST /api/tickets/{id}/status's
-// rule against a Ticket's persisted current Status. Done is rejected
+// rule against a Ticket's persisted state. Done is rejected
 // unconditionally, whatever the current Status, so completion can
 // never happen by accident through a plain status write.
-func decidePlainStatusChange(current, target TicketStatus) *transitionRejection {
+func decidePlainStatusChange(state ticketWorkflowState, target TicketStatus) *transitionRejection {
+	current := state.status
 	if target == Done {
 		return &transitionRejection{
 			code: invalidTransitionCode,
@@ -52,13 +63,26 @@ func decidePlainStatusChange(current, target TicketStatus) *transitionRejection 
 		}
 	}
 	sources, known := allowedSourceStatusesForTarget[target]
-	if known && containsStatus(sources, current) {
-		return nil
+	if !known || !containsStatus(sources, current) {
+		return &transitionRejection{
+			code:    invalidTransitionCode,
+			message: fmt.Sprintf("the transition %s -> %s is not permitted", current, target),
+		}
 	}
-	return &transitionRejection{
-		code:    invalidTransitionCode,
-		message: fmt.Sprintf("the transition %s -> %s is not permitted", current, target),
+	if state.agentAssigned() && containsStatus(agentOwnedTargets, target) {
+		return &transitionRejection{
+			code: agentOwnedTransitionCode,
+			message: fmt.Sprintf(
+				"on an Agent-assigned Ticket, In Progress, In Review and Blocked are set by execution, never a manual status change (attempted %s -> %s)",
+				current, target,
+			),
+		}
 	}
+	if target == Ready {
+		state.status = Ready
+		return decideAgentReadiness(state)
+	}
+	return nil
 }
 
 // decideAccept implements POST /api/tickets/{id}/accept's rule: D3 S2
@@ -95,19 +119,24 @@ func containsStatus(statuses []TicketStatus, target TicketStatus) bool {
 
 var statusTargets = []TicketStatus{Backlog, Ready, InProgress, Blocked, InReview, Done}
 
-func allowedActionsForTicket(status TicketStatus, condition TicketCompletionCondition, archived bool) TicketAllowedActions {
-	actions := TicketAllowedActions{StatusChanges: []TicketStatus{}}
-	if archived {
+func allowedActionsForTicket(state ticketWorkflowState, condition TicketCompletionCondition) TicketAllowedActions {
+	actions := TicketAllowedActions{StatusChanges: []TicketStatus{}, StatusChangeRejections: []TicketStatusChangeRejection{}}
+	if state.archived {
 		actions.Accept.Reason = &ErrorDetail{Code: archivedTicketCode, Message: archivedTicketMessage}
 		return actions
 	}
 	for _, target := range statusTargets {
-		if decidePlainStatusChange(status, target) == nil {
+		rejection := decidePlainStatusChange(state, target)
+		switch {
+		case rejection == nil:
 			actions.StatusChanges = append(actions.StatusChanges, target)
+		case rejection.code != invalidTransitionCode:
+			actions.StatusChangeRejections = append(actions.StatusChangeRejections, TicketStatusChangeRejection{Status: target, Reason: rejection.detail()})
 		}
 	}
-	if rejection := decideAccept(status, condition); rejection != nil {
-		actions.Accept.Reason = &ErrorDetail{Code: rejection.code, Message: rejection.message}
+	if rejection := decideAccept(state.status, condition); rejection != nil {
+		detail := rejection.detail()
+		actions.Accept.Reason = &detail
 	} else {
 		actions.Accept.Available = true
 	}
@@ -130,7 +159,7 @@ func applyTicketTransition(
 	pool *pgxpool.Pool,
 	ownerID int64,
 	publicID string,
-	decide func(current TicketStatus, condition TicketCompletionCondition) (nextStatus TicketStatus, rejection *transitionRejection),
+	decide func(state ticketWorkflowState, condition TicketCompletionCondition) (nextStatus TicketStatus, rejection *transitionRejection),
 ) (ticket Ticket, found bool, rejection *transitionRejection, err error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -145,21 +174,12 @@ func applyTicketTransition(
 	if err != nil || !found {
 		return Ticket{}, found, nil, err
 	}
-	var statusStr, conditionStr string
-	err = tx.QueryRow(ctx,
-		`SELECT status, completion_condition FROM tickets WHERE owner_id = $1 AND public_id = $2::uuid`,
-		ownerID, publicID,
-	).Scan(&statusStr, &conditionStr)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Ticket{}, false, nil, nil
-	}
+	locked, err := readLockedTicket(ctx, tx, ownerID, publicID)
 	if err != nil {
 		return Ticket{}, false, nil, fmt.Errorf("failed to read the ticket's current status: %w", err)
 	}
 
-	current := TicketStatus(statusStr)
-	condition := TicketCompletionCondition(conditionStr)
-	nextStatus, rej := decide(current, condition)
+	nextStatus, rej := decide(workflowStateOf(locked), locked.CompletionCondition)
 	if rej != nil {
 		return Ticket{}, true, rej, nil
 	}
@@ -186,7 +206,7 @@ func applyTicketTransition(
 // 400: the request is well-formed, the move is not permitted from the
 // ticket's current state.
 func writeTransitionRejection(w http.ResponseWriter, rejection *transitionRejection) {
-	writeError(w, http.StatusBadRequest, rejection.code, rejection.message)
+	writeJSON(w, http.StatusBadRequest, ErrorBody{Error: rejection.detail()})
 }
 
 func (s *server) ChangeTicketStatus(w http.ResponseWriter, r *http.Request, id string) {
@@ -214,8 +234,8 @@ func (s *server) ChangeTicketStatus(w http.ResponseWriter, r *http.Request, id s
 	defer cancel()
 
 	ticket, found, rejection, err := applyTicketTransition(ctx, s.pool, owner.ID, id,
-		func(current TicketStatus, _ TicketCompletionCondition) (TicketStatus, *transitionRejection) {
-			if rej := decidePlainStatusChange(current, req.Status); rej != nil {
+		func(state ticketWorkflowState, _ TicketCompletionCondition) (TicketStatus, *transitionRejection) {
+			if rej := decidePlainStatusChange(state, req.Status); rej != nil {
 				return "", rej
 			}
 			return req.Status, nil
@@ -254,8 +274,8 @@ func (s *server) AcceptTicket(w http.ResponseWriter, r *http.Request, id string)
 	defer cancel()
 
 	ticket, found, rejection, err := applyTicketTransition(ctx, s.pool, owner.ID, id,
-		func(current TicketStatus, condition TicketCompletionCondition) (TicketStatus, *transitionRejection) {
-			if rej := decideAccept(current, condition); rej != nil {
+		func(state ticketWorkflowState, condition TicketCompletionCondition) (TicketStatus, *transitionRejection) {
+			if rej := decideAccept(state.status, condition); rej != nil {
 				return "", rej
 			}
 			return Done, nil
@@ -281,25 +301,33 @@ type ticketAssignee struct {
 	agentID string
 }
 
-// D3 places no current-Status or Template precondition on assignment,
-// and no Round exists yet to lock the field.
-func setTicketAssigneeForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, publicID string, assignee ticketAssignee) (Ticket, bool, error) {
+// D3 places no Template precondition on assignment, and no Round
+// exists yet to lock the field.
+func setTicketAssigneeForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, publicID string, assignee ticketAssignee) (Ticket, bool, *transitionRejection, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
-		return Ticket{}, false, err
+		return Ticket{}, false, nil, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
 	found, err := lockTicketForMutation(ctx, tx, ownerID, publicID, false)
 	if err != nil || !found {
-		return Ticket{}, found, err
+		return Ticket{}, found, nil, err
 	}
 	var agentRowID *int64
+	var agentKind AgentKind
 	if assignee.kind == TicketAssigneeTypeAgent {
-		id, found, err := agentRowIDForOwner(ctx, tx, ownerID, assignee.agentID)
+		id, kind, found, err := agentForOwner(ctx, tx, ownerID, assignee.agentID)
 		if err != nil || !found {
-			return Ticket{}, found, err
+			return Ticket{}, found, nil, err
 		}
-		agentRowID = &id
+		agentRowID, agentKind = &id, kind
+	}
+	locked, err := readLockedTicket(ctx, tx, ownerID, publicID)
+	if err != nil {
+		return Ticket{}, false, nil, err
+	}
+	if rejection := decideAssignment(workflowStateOf(locked), agentKind); rejection != nil {
+		return Ticket{}, true, rejection, nil
 	}
 	var assigneeType *string
 	if assignee.kind != TicketAssigneeTypeEmpty {
@@ -314,18 +342,18 @@ func setTicketAssigneeForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID 
 	)
 	ticket, err := scanTicketRow(row)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return Ticket{}, false, nil
+		return Ticket{}, false, nil, nil
 	}
 	if err != nil {
-		return Ticket{}, false, err
+		return Ticket{}, false, nil, err
 	}
 	if err := loadTicketBadges(ctx, tx, ownerID, &ticket); err != nil {
-		return Ticket{}, false, err
+		return Ticket{}, false, nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return Ticket{}, false, err
+		return Ticket{}, false, nil, err
 	}
-	return ticket, true, nil
+	return ticket, true, nil, nil
 }
 
 func writeTicketOrAgentNotFound(w http.ResponseWriter) {
@@ -374,13 +402,17 @@ func (s *server) AssignTicket(w http.ResponseWriter, r *http.Request, id string)
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
 
-	ticket, found, err := setTicketAssigneeForOwner(ctx, s.pool, owner.ID, id, assignee)
+	ticket, found, rejection, err := setTicketAssigneeForOwner(ctx, s.pool, owner.ID, id, assignee)
 	if err != nil {
 		writeMutationError(w, err, "failed to assign the ticket")
 		return
 	}
 	if !found {
 		writeNotFound(w)
+		return
+	}
+	if rejection != nil {
+		writeTransitionRejection(w, rejection)
 		return
 	}
 	writeJSON(w, http.StatusOK, ticket)
@@ -400,7 +432,7 @@ func (s *server) UnassignTicket(w http.ResponseWriter, r *http.Request, id strin
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
 
-	ticket, found, err := setTicketAssigneeForOwner(ctx, s.pool, owner.ID, id, ticketAssignee{})
+	ticket, found, _, err := setTicketAssigneeForOwner(ctx, s.pool, owner.ID, id, ticketAssignee{})
 	if err != nil {
 		writeMutationError(w, err, "failed to unassign the ticket")
 		return
