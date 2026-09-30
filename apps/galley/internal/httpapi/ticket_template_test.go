@@ -212,8 +212,8 @@ func insertTicketWithMismatchedCompletionCondition(t *testing.T, pool *pgxpool.P
 	t.Helper()
 	publicID = uuid.NewString()
 	_, err := pool.Exec(context.Background(),
-		`INSERT INTO tickets (owner_id, title, status, public_id, template, completion_condition, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4::uuid, $5, $6, now(), now())`,
+		`INSERT INTO tickets (owner_id, title, status, public_id, template, completion_condition, created_at, updated_at, priority_rank)
+		 VALUES ($1, $2, $3, $4::uuid, $5, $6, now(), now(), `+topPriorityRankSQL+`)`,
 		ownerID, title, string(Backlog), publicID, string(template), string(mismatchedCondition),
 	)
 	if err != nil {

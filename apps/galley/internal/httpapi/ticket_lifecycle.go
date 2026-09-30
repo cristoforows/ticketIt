@@ -151,11 +151,15 @@ func allowedActionsForTicket(state ticketWorkflowState, condition TicketCompleti
 // writes what the closure returned. It creates no Round, work
 // request, or queue entry -- see
 // TestManualLifecycleActionsCreateNoExecutionRecords.
+//
+// mayEnterReady takes the Owner's priority lock up front, because
+// entering Ready moves the Ticket to the bottom of the order.
 func applyTicketTransition(
 	ctx context.Context,
 	pool *pgxpool.Pool,
 	ownerID int64,
 	publicID string,
+	mayEnterReady bool,
 	decide func(state ticketWorkflowState, condition TicketCompletionCondition) (nextStatus TicketStatus, rejection *transitionRejection),
 ) (ticket Ticket, found bool, rejection *transitionRejection, err error) {
 	tx, err := pool.Begin(ctx)
@@ -164,6 +168,11 @@ func applyTicketTransition(
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
 
+	if mayEnterReady {
+		if err := lockOwnerPriority(ctx, tx, ownerID); err != nil {
+			return Ticket{}, false, nil, fmt.Errorf("failed to take the priority lock: %w", err)
+		}
+	}
 	found, err = lockTicketForMutation(ctx, tx, ownerID, publicID, false)
 	if errors.Is(err, errArchivedTicket) {
 		return Ticket{}, true, &transitionRejection{code: archivedTicketCode, message: archivedTicketMessage}, nil
@@ -179,6 +188,14 @@ func applyTicketTransition(
 	nextStatus, rej := decide(workflowStateOf(locked), locked.CompletionCondition)
 	if rej != nil {
 		return Ticket{}, true, rej, nil
+	}
+	if nextStatus == Ready && locked.Status != Ready {
+		if !mayEnterReady {
+			return Ticket{}, true, nil, errors.New("entering Ready without the priority lock")
+		}
+		if err := moveTicketToBottom(ctx, tx, ownerID, publicID); err != nil {
+			return Ticket{}, true, nil, fmt.Errorf("failed to move the ticket to the bottom of the priority order: %w", err)
+		}
 	}
 
 	row := tx.QueryRow(ctx,
@@ -230,7 +247,7 @@ func (s *server) ChangeTicketStatus(w http.ResponseWriter, r *http.Request, id s
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
 
-	ticket, found, rejection, err := applyTicketTransition(ctx, s.pool, owner.ID, id,
+	ticket, found, rejection, err := applyTicketTransition(ctx, s.pool, owner.ID, id, req.Status == Ready,
 		func(state ticketWorkflowState, _ TicketCompletionCondition) (TicketStatus, *transitionRejection) {
 			if rej := decidePlainStatusChange(state, req.Status); rej != nil {
 				return "", rej
@@ -270,7 +287,7 @@ func (s *server) AcceptTicket(w http.ResponseWriter, r *http.Request, id string)
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
 
-	ticket, found, rejection, err := applyTicketTransition(ctx, s.pool, owner.ID, id,
+	ticket, found, rejection, err := applyTicketTransition(ctx, s.pool, owner.ID, id, false,
 		func(state ticketWorkflowState, condition TicketCompletionCondition) (TicketStatus, *transitionRejection) {
 			if rej := decideAccept(state.status, condition); rej != nil {
 				return "", rej
