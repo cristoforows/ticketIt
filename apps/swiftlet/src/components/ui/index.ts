@@ -1,6 +1,7 @@
 export { cx } from "./cx";
 export { buttonClasses, PrimaryButton, SecondaryButton, type ButtonSize, type ButtonTone, type ButtonVariant } from "./Button";
-export { Select, TextInput, Textarea } from "./Fields";
+export { fieldLabelClasses, Select, TextInput, Textarea } from "./Fields";
+export { FilterToggle } from "./FilterToggle";
 export { EmptyMessage, ErrorMessage, LoadingMessage } from "./Messages";
 export { Paper } from "./Paper";
 export { Rule } from "./Rule";

@@ -101,3 +101,8 @@ export async function acceptTicketDirect(page: Page, id: string): Promise<Ticket
 export function statusLabel(status: TicketStatus): string {
   return status.replace(/(?<=[a-z])(?=[A-Z])/g, " ");
 }
+
+export async function openCapture(page: Page, typedTitle?: string): Promise<void> {
+  if (typedTitle !== undefined) await page.getByTestId("new-order-input").fill(typedTitle);
+  await page.getByTestId("new-order-button").click();
+}

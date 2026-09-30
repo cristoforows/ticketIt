@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { signIn } from "../support/sign-in";
-import { createTicket } from "../support/tickets";
+import { createTicket, openCapture } from "../support/tickets";
 
 // issue #59, D3 (docs/decisions/d3-agent-template-compatibility.md): the
 // two built-in Ticket Templates, each Ticket's own retained completion
@@ -23,6 +23,7 @@ test.describe("ticket templates", () => {
     const title = `ticket-templates: coding via form ${Date.now()}`;
 
     await page.goto("/");
+    await openCapture(page);
     await page.getByTestId("ticket-title-input").fill(title);
     await page.getByTestId("ticket-template-select").selectOption("Coding");
     await page.getByTestId("ticket-capture-submit").click();
@@ -46,6 +47,7 @@ test.describe("ticket templates", () => {
     const title = `ticket-templates: basic via form ${Date.now()}`;
 
     await page.goto("/");
+    await openCapture(page);
     await expect(page.getByTestId("ticket-template-select")).toHaveValue("Basic");
     await page.getByTestId("ticket-title-input").fill(title);
     await page.getByTestId("ticket-capture-submit").click();

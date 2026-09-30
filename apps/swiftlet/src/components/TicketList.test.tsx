@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { NewOrderBar } from "./NewOrderBar";
 import { TicketList } from "./TicketList";
 
 type MockResponse = Pick<Response, "ok" | "status" | "statusText" | "json">;
@@ -57,8 +59,23 @@ const CODING_TICKET = {
   completionCondition: "reviewedPrMerge",
 };
 
+function OrderLog({ refreshKey = 0, focusTicketId }: { refreshKey?: number; focusTicketId?: string }) {
+  const [created, setCreated] = useState(0);
+  return (
+    <>
+      <NewOrderBar onUnauthenticated={() => {}} onCreated={() => setCreated((count) => count + 1)} />
+      <TicketList onUnauthenticated={() => {}} refreshKey={refreshKey + created} focusTicketId={focusTicketId} />
+    </>
+  );
+}
+
 function renderTicketList() {
-  return render(<TicketList onUnauthenticated={() => {}} />);
+  return render(<OrderLog />);
+}
+
+function openCaptureModal(typedTitle?: string) {
+  if (typedTitle !== undefined) fireEvent.change(screen.getByTestId("new-order-input"), { target: { value: typedTitle } });
+  fireEvent.click(screen.getByTestId("new-order-button"));
 }
 
 /** Routes by method + path, and can be reprogrammed mid-test (via `set`)
@@ -138,7 +155,6 @@ describe("TicketList", () => {
     expect(within(item).getByTestId("ticket-status")).toHaveTextContent("Backlog");
     expect(within(item).getByTestId("ticket-badges")).toHaveTextContent("Urgent");
     expect(within(item).getByLabelText("Badges: Urgent")).toBeInTheDocument();
-    expect(item.textContent).toContain("Backlog Urgent");
   });
 
   it("links each Ticket's title to its full-page detail route", async () => {
@@ -154,7 +170,7 @@ describe("TicketList", () => {
     const { rerender } = renderTicketList();
     await screen.findAllByTestId("ticket-title");
 
-    rerender(<TicketList onUnauthenticated={() => {}} refreshKey={1} focusTicketId={TICKET_B.id} />);
+    rerender(<OrderLog refreshKey={1} focusTicketId={TICKET_B.id} />);
 
     await vi.waitFor(() => expect(screen.getAllByTestId("ticket-title")[1]).toHaveFocus());
   });
@@ -163,12 +179,12 @@ describe("TicketList", () => {
     stubFetch({ "GET /api/tickets": jsonResponse({ tickets: [TICKET_A, TICKET_B] }) });
     const { rerender } = renderTicketList();
     await screen.findAllByTestId("ticket-title");
-    screen.getByTestId("ticket-title-input").focus();
+    screen.getByTestId("new-order-input").focus();
 
-    rerender(<TicketList onUnauthenticated={() => {}} refreshKey={1} focusTicketId={TICKET_B.id} />);
+    rerender(<OrderLog refreshKey={1} focusTicketId={TICKET_B.id} />);
     await act(async () => {});
 
-    expect(screen.getByTestId("ticket-title-input")).toHaveFocus();
+    expect(screen.getByTestId("new-order-input")).toHaveFocus();
   });
 
   it("keeps the last loaded Tickets and reports a failed refresh separately", async () => {
@@ -177,7 +193,7 @@ describe("TicketList", () => {
     await screen.findByTestId("ticket-title");
     api.set("GET /api/tickets", jsonResponse({ error: "boom" }, 503, "Service Unavailable"));
 
-    rerender(<TicketList onUnauthenticated={() => {}} refreshKey={1} />);
+    rerender(<OrderLog refreshKey={1} />);
 
     expect(await screen.findByTestId("ticket-list-refresh-error-message")).toHaveTextContent("503");
     expect(screen.getByTestId("ticket-title")).toHaveTextContent(TICKET_A.title);
@@ -199,6 +215,7 @@ describe("TicketList", () => {
     renderTicketList();
     await screen.findByTestId("ticket-list-empty");
 
+    openCaptureModal();
     const submit = screen.getByTestId("ticket-capture-submit");
     expect(submit).toBeDisabled();
 
@@ -218,13 +235,15 @@ describe("TicketList", () => {
     routes.set("POST /api/tickets", jsonResponse(TICKET_B, 201));
     routes.set("GET /api/tickets", jsonResponse({ tickets: [TICKET_B] }));
 
+    openCaptureModal();
     fireEvent.change(screen.getByTestId("ticket-title-input"), { target: { value: TICKET_B.title } });
     fireEvent.click(screen.getByTestId("ticket-capture-submit"));
 
     expect(await screen.findByTestId(`ticket-item-${TICKET_B.id}`)).toHaveTextContent(TICKET_B.title);
     expect(screen.queryByTestId("ticket-list-empty")).not.toBeInTheDocument();
-    expect(screen.getByTestId("ticket-title-input")).toHaveValue("");
-    expect(screen.queryByTestId("ticket-capture-error")).not.toBeInTheDocument();
+    expect(screen.getByTestId("new-order-input")).toHaveValue("");
+    expect(screen.queryByTestId("ticket-capture-form")).not.toBeInTheDocument();
+    expect(screen.getByTestId("new-order-button")).toHaveFocus();
   });
 
   it("ignores an older list response after a capture re-fetch completes", async () => {
@@ -239,6 +258,7 @@ describe("TicketList", () => {
 
     renderTicketList();
     expect(screen.getByTestId("ticket-list-loading")).toBeInTheDocument();
+    openCaptureModal();
     fireEvent.change(screen.getByTestId("ticket-title-input"), { target: { value: TICKET_B.title } });
     fireEvent.click(screen.getByTestId("ticket-capture-submit"));
 
@@ -255,6 +275,7 @@ describe("TicketList", () => {
     renderTicketList();
     await screen.findByTestId("ticket-list-empty");
 
+    openCaptureModal();
     expect(screen.getByTestId("ticket-template-select")).toHaveValue("Basic");
 
     routes.set("POST /api/tickets", jsonResponse(TICKET_B, 201));
@@ -279,6 +300,7 @@ describe("TicketList", () => {
     routes.set("POST /api/tickets", jsonResponse(CODING_TICKET, 201));
     routes.set("GET /api/tickets", jsonResponse({ tickets: [CODING_TICKET] }));
 
+    openCaptureModal();
     fireEvent.change(screen.getByTestId("ticket-title-input"), { target: { value: CODING_TICKET.title } });
     fireEvent.change(screen.getByTestId("ticket-template-select"), { target: { value: "Coding" } });
     fireEvent.click(screen.getByTestId("ticket-capture-submit"));
@@ -301,6 +323,7 @@ describe("TicketList", () => {
       jsonResponse({ error: { code: "invalid_request", message: '"title" must be a non-empty string' } }, 400),
     );
 
+    openCaptureModal();
     fireEvent.change(screen.getByTestId("ticket-title-input"), { target: { value: "   x   " } });
     fireEvent.click(screen.getByTestId("ticket-capture-submit"));
 
@@ -311,5 +334,6 @@ describe("TicketList", () => {
     // exactly as it was (still empty), not merely "still passes because
     // it happens to match."
     expect(screen.getByTestId("ticket-list-empty")).toBeInTheDocument();
+    expect(screen.getByTestId("ticket-title-input")).toHaveValue("   x   ");
   });
 });

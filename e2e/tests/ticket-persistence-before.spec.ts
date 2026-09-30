@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { createTicket } from "../support/tickets";
+import { createTicket, openCapture } from "../support/tickets";
 
 // Shares session-restart-before.spec.ts's saved storage state (this
 // runs immediately after it, in the same run.sh phase) so this spec
@@ -41,9 +41,11 @@ test("the Owner captures two Tickets, newest first, before Galley restarts", asy
   // alone captures a Ticket in Backlog through the browser") -- driven
   // through the real quick-capture form, not the API-direct helper.
   for (const title of [FIRST_TITLE, SECOND_TITLE]) {
+    await openCapture(page);
     await page.getByTestId("ticket-title-input").fill(title);
     await page.getByTestId("ticket-capture-submit").click();
-    await expect(page.getByTestId("ticket-title-input")).toHaveValue("");
+    await expect(page.getByTestId("ticket-capture-form")).toHaveCount(0);
+    await expect(page.getByTestId("new-order-input")).toHaveValue("");
   }
 
   // Newest first (apps/galley/README.md, "Ticket ordering"): the

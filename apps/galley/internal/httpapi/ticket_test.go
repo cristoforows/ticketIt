@@ -149,6 +149,137 @@ func TestCreateTicket_TitleOnlyCapturesBacklog(t *testing.T) {
 	}
 }
 
+func postCreateTicket(t *testing.T, client *http.Client, baseURL string, request CreateTicketRequest) (*http.Response, []byte) {
+	t.Helper()
+	body, err := json.Marshal(request)
+	if err != nil {
+		t.Fatalf("failed to marshal request: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/tickets", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("failed to build request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("POST /api/tickets failed: %v", err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	return resp, data
+}
+
+func TestCreateTicket_StoresDetailFields(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+	title := uniqueTitle(t)
+
+	resp, body := postCreateTicket(t, client, baseURL, CreateTicketRequest{
+		Title:           title,
+		Goal:            strPtr("  Restore sign-in \n"),
+		Context:         strPtr("Safari 17"),
+		SuccessCriteria: strPtr("Users can sign in"),
+		Constraints:     strPtr("Keep the login flow"),
+		Repository:      strPtr(" owner/repo "),
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+	var created Ticket
+	if err := json.Unmarshal(body, &created); err != nil {
+		t.Fatalf("failed to decode %q: %v", body, err)
+	}
+	want := map[string][2]string{
+		"Goal":            {created.Goal, "Restore sign-in"},
+		"Context":         {created.Context, "Safari 17"},
+		"SuccessCriteria": {created.SuccessCriteria, "Users can sign in"},
+		"Constraints":     {created.Constraints, "Keep the login flow"},
+		"Repository":      {created.Repository, "owner/repo"},
+	}
+	for name, pair := range want {
+		if pair[0] != pair[1] {
+			t.Errorf("created %s = %q, want %q", name, pair[0], pair[1])
+		}
+	}
+	got := getTicketAssertOK(t, client, baseURL, created.Id)
+	if got.Goal != created.Goal || got.Context != created.Context || got.SuccessCriteria != created.SuccessCriteria ||
+		got.Constraints != created.Constraints || got.Repository != created.Repository {
+		t.Errorf("GET returned %+v, want the created details %+v", got, created)
+	}
+}
+
+func TestCreateTicket_TitleOnlyLeavesDetailsUnset(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+	created := createTicket(t, client, baseURL, uniqueTitle(t))
+
+	got := getTicketAssertOK(t, client, baseURL, created.Id)
+	if got.Goal != "" || got.Context != "" || got.SuccessCriteria != "" || got.Constraints != "" || got.Repository != "" {
+		t.Errorf("details = %+v, want all unset", got)
+	}
+}
+
+func TestCreateTicket_EmptyAndWhitespaceDetailsAreUnset(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+
+	resp, body := postCreateTicket(t, client, baseURL, CreateTicketRequest{
+		Title:           uniqueTitle(t),
+		Goal:            strPtr(""),
+		Context:         strPtr("   \t\n "),
+		SuccessCriteria: strPtr(""),
+		Constraints:     strPtr("  "),
+		Repository:      strPtr("\n"),
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+	var created Ticket
+	if err := json.Unmarshal(body, &created); err != nil {
+		t.Fatalf("failed to decode %q: %v", body, err)
+	}
+	got := getTicketAssertOK(t, client, baseURL, created.Id)
+	for _, ticket := range []Ticket{created, got} {
+		if ticket.Goal != "" || ticket.Context != "" || ticket.SuccessCriteria != "" || ticket.Constraints != "" || ticket.Repository != "" {
+			t.Errorf("details = %+v, want all unset", ticket)
+		}
+	}
+}
+
+func TestCreateTicket_RejectsOverLengthDetailsAndCreatesNothing(t *testing.T) {
+	baseURL, client := devServerWithSessionForTickets(t)
+	over := func(n int) *string { return strPtr(strings.Repeat("x", n+1)) }
+
+	cases := []struct {
+		name    string
+		request CreateTicketRequest
+	}{
+		{"goal", CreateTicketRequest{Goal: over(ticketGoalMaxLength)}},
+		{"context", CreateTicketRequest{Context: over(ticketContextMaxLength)}},
+		{"successCriteria", CreateTicketRequest{SuccessCriteria: over(ticketSuccessCriteriaMaxLength)}},
+		{"constraints", CreateTicketRequest{Constraints: over(ticketConstraintsMaxLength)}},
+		{"repository", CreateTicketRequest{Repository: over(ticketRepositoryMaxLength)}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.request.Title = uniqueTitle(t)
+			resp, body := postCreateTicket(t, client, baseURL, tc.request)
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d; body=%s", resp.StatusCode, http.StatusBadRequest, body)
+			}
+			var errBody ErrorBody
+			if err := json.Unmarshal(body, &errBody); err != nil {
+				t.Fatalf("failed to decode error body %q: %v", body, err)
+			}
+			if errBody.Error.Code != "invalid_request" {
+				t.Errorf("Error.Code = %q, want %q", errBody.Error.Code, "invalid_request")
+			}
+			for _, ticket := range listTickets(t, client, baseURL) {
+				if ticket.Title == tc.request.Title {
+					t.Errorf("a Ticket titled %q exists after a rejected create", ticket.Title)
+				}
+			}
+		})
+	}
+}
+
 func TestCreateTicket_TrimsTitle(t *testing.T) {
 	baseURL, client := devServerWithSessionForTickets(t)
 	title := uniqueTitle(t)

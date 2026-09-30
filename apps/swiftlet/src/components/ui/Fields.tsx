@@ -15,3 +15,5 @@ export function Textarea({ className, ...rest }: ComponentPropsWithRef<"textarea
 export function Select({ className, ...rest }: ComponentPropsWithRef<"select">) {
   return <select className={cx(field, className)} {...rest} />;
 }
+
+export const fieldLabelClasses = "m-0 block text-label font-bold tracking-label text-muted uppercase";

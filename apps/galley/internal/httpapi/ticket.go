@@ -203,23 +203,7 @@ func (s *server) UpdateTicket(w http.ResponseWriter, r *http.Request, id string)
 	if !ok {
 		return
 	}
-	goal, ok := validateRefinementField(w, "goal", req.Goal, ticketGoalMaxLength)
-	if !ok {
-		return
-	}
-	ticketContext, ok := validateRefinementField(w, "context", req.Context, ticketContextMaxLength)
-	if !ok {
-		return
-	}
-	successCriteria, ok := validateRefinementField(w, "successCriteria", req.SuccessCriteria, ticketSuccessCriteriaMaxLength)
-	if !ok {
-		return
-	}
-	constraints, ok := validateRefinementField(w, "constraints", req.Constraints, ticketConstraintsMaxLength)
-	if !ok {
-		return
-	}
-	repository, ok := validateRefinementField(w, "repository", req.Repository, ticketRepositoryMaxLength)
+	refinement, ok := validateRefinementFields(w, req.Goal, req.Context, req.SuccessCriteria, req.Constraints, req.Repository)
 	if !ok {
 		return
 	}
@@ -234,11 +218,11 @@ func (s *server) UpdateTicket(w http.ResponseWriter, r *http.Request, id string)
 	// construction rather than by a check that could be bypassed here.
 	ticket, found, err := updateTicketForOwner(ctx, s.pool, owner.ID, id, ticketUpdate{
 		title:           title,
-		goal:            goal,
-		context:         ticketContext,
-		successCriteria: successCriteria,
-		constraints:     constraints,
-		repository:      repository,
+		goal:            refinement.goal,
+		context:         refinement.context,
+		successCriteria: refinement.successCriteria,
+		constraints:     refinement.constraints,
+		repository:      refinement.repository,
 	})
 	if err != nil {
 		writeMutationError(w, err, "failed to update the ticket")
@@ -301,6 +285,41 @@ func validateRefinementField(w http.ResponseWriter, name string, value *string, 
 	return &trimmed, true
 }
 
+type ticketRefinement struct {
+	goal, context, successCriteria, constraints, repository *string
+}
+
+func validateRefinementFields(w http.ResponseWriter, goal, ticketContext, successCriteria, constraints, repository *string) (ticketRefinement, bool) {
+	var (
+		out ticketRefinement
+		ok  bool
+	)
+	if out.goal, ok = validateRefinementField(w, "goal", goal, ticketGoalMaxLength); !ok {
+		return out, false
+	}
+	if out.context, ok = validateRefinementField(w, "context", ticketContext, ticketContextMaxLength); !ok {
+		return out, false
+	}
+	if out.successCriteria, ok = validateRefinementField(w, "successCriteria", successCriteria, ticketSuccessCriteriaMaxLength); !ok {
+		return out, false
+	}
+	if out.constraints, ok = validateRefinementField(w, "constraints", constraints, ticketConstraintsMaxLength); !ok {
+		return out, false
+	}
+	if out.repository, ok = validateRefinementField(w, "repository", repository, ticketRepositoryMaxLength); !ok {
+		return out, false
+	}
+	return out, true
+}
+
+// A Ticket created without a value stores NULL, like a title-only capture.
+func unsetIfEmpty(value *string) *string {
+	if value == nil || *value == "" {
+		return nil
+	}
+	return value
+}
+
 func (s *server) CreateTicket(w http.ResponseWriter, r *http.Request) {
 	owner, ok := s.requireSession(w, r)
 	if !ok {
@@ -308,7 +327,7 @@ func (s *server) CreateTicket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req CreateTicketRequest
-	if !decodeStrictJSON(w, r, &req, `request body must be JSON matching {"title": "..."}`) {
+	if !decodeStrictJSON(w, r, &req, `request body must be JSON matching {"title": "...", "template"?, "goal"?, "context"?, "successCriteria"?, "constraints"?, "repository"?}`) {
 		return
 	}
 
@@ -345,6 +364,11 @@ func (s *server) CreateTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	refinement, ok := validateRefinementFields(w, req.Goal, req.Context, req.SuccessCriteria, req.Constraints, req.Repository)
+	if !ok {
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
 
@@ -352,7 +376,7 @@ func (s *server) CreateTicket(w http.ResponseWriter, r *http.Request) {
 	// TicketStatus enum) is the only Status this slice ever produces --
 	// docs/ticket-creation.md, "Quick capture": a title alone captures a
 	// Ticket in Backlog. No transition exists yet (#60).
-	ticket, err := insertTicket(ctx, s.pool, owner.ID, title, template)
+	ticket, err := insertTicket(ctx, s.pool, owner.ID, title, template, refinement)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to create the ticket")
 		return
@@ -439,24 +463,21 @@ func scanTicketRow(row ticketRowScanner) (Ticket, error) {
 // is what makes completion_condition "derived from the Template's
 // default exactly once, at creation" (D3, issue #59) true by
 // construction: no other function ever computes or assigns this value.
-func insertTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64, title string, template TicketTemplate) (Ticket, error) {
+func insertTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64, title string, template TicketTemplate, refinement ticketRefinement) (Ticket, error) {
 	// public_id is generated here, in Go, rather than left to the
 	// column's DEFAULT -- matching how every other identifier in this
 	// codebase (session tokens, OAuth state) is generated in
 	// application code. See internal/migrations/000004_....sql.
 	publicID := uuid.NewString()
 	completionCondition := defaultCompletionCondition(template)
-	// goal/context/success_criteria/constraints/repository are left out
-	// of the INSERT entirely -- they have no DEFAULT (see
-	// internal/migrations/000005_.../000006_...sql), so they start
-	// NULL, i.e. "never set," exactly like a title-only quick capture
-	// that has not yet been through manual refinement (issue #58,
-	// docs/ticket-creation.md, "Quick capture").
 	row := pool.QueryRow(ctx,
-		`INSERT INTO tickets (owner_id, title, status, public_id, template, completion_condition)
-		 VALUES ($1, $2, $3, $4::uuid, $5, $6)
+		`INSERT INTO tickets (owner_id, title, status, public_id, template, completion_condition,
+		                      goal, context, success_criteria, constraints, repository)
+		 VALUES ($1, $2, $3, $4::uuid, $5, $6, $7, $8, $9, $10, $11)
 		 RETURNING `+ticketSelectColumns,
 		ownerID, title, string(Backlog), publicID, string(template), string(completionCondition),
+		unsetIfEmpty(refinement.goal), unsetIfEmpty(refinement.context), unsetIfEmpty(refinement.successCriteria),
+		unsetIfEmpty(refinement.constraints), unsetIfEmpty(refinement.repository),
 	)
 	ticket, err := scanTicketRow(row)
 	if err != nil {
