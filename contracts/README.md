@@ -155,9 +155,10 @@ separate toolchain — never `apps/swiftlet`'s):
 cd contracts
 npm ci
 npm run generate:swiftlet
+npm run generate:michelin   # apps/michelin/src/api/generated/schema.d.ts
 ```
 
-Commit the resulting diff in both cases.
+Commit the resulting diff in every case.
 
 ## The drift check
 
@@ -183,14 +184,15 @@ pass:
    ```
 
 2. **Regeneration produces no diff** — `apps/galley/scripts/check-contract-drift.sh`
-   and `contracts/check-swiftlet-drift.sh` each regenerate their
+   and `contracts/check-swiftlet-drift.sh`, and
+   `contracts/check-michelin-drift.sh` each regenerate their
    side's generated file and fail (`git diff --exit-code`) if that
    produces any change. This catches the contract changing without
    regeneration, or a generated file being hand-edited.
 
    ```sh
    cd apps/galley && ./scripts/check-contract-drift.sh
-   cd contracts && npm ci && ./check-swiftlet-drift.sh
+   cd contracts && npm ci && ./check-swiftlet-drift.sh && ./check-michelin-drift.sh
    ```
 
 `docs/evidence/m2/51-api-contract.md` records both checks caught
@@ -205,6 +207,7 @@ contracts/
 ├── openapi.yaml                 # the contract: GET /api/status + the shared error shape
 ├── package.json                 # codegen-only toolchain for Swiftlet's types (see above)
 ├── check-swiftlet-drift.sh      # drift check, part 2 (Swiftlet side)
+├── check-michelin-drift.sh      # drift check, part 3 (Michelin side)
 └── galley/
     └── oapi-codegen.config.yaml # pinned oapi-codegen configuration
 ```

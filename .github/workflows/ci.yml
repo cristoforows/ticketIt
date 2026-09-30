@@ -70,6 +70,21 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  michelin:
+    name: Michelin
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/michelin
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "26.9.0"
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
   contracts:
     name: Contracts
     runs-on: ubuntu-latest
@@ -90,3 +105,6 @@ jobs:
         run: |
           npm ci
           ./check-swiftlet-drift.sh
+      - name: Michelin contract drift
+        working-directory: contracts
+        run: ./check-michelin-drift.sh
