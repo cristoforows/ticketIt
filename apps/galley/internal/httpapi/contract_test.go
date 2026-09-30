@@ -419,6 +419,45 @@ func TestAgents_ResponsesMatchContractAndMethod405(t *testing.T) {
 	}
 }
 
+func TestAgentReadiness_ResponsesMatchContract(t *testing.T) {
+	handler, _, cookie := badgeTestHandler(t)
+	router, err := legacy.NewRouter(loadContract(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	validated := func(method, path, body string, want int) map[string]any {
+		t.Helper()
+		result, rec, req := badgeRequest(t, handler, cookie, method, path, body, want)
+		validateAgainstContract(t, router, req, rec)
+		return result.(map[string]any)
+	}
+	agent := validated(http.MethodPost, "/api/agents", fmt.Sprintf(`{"name":%q,"kind":"coding"}`, uuid.NewString()), http.StatusCreated)
+	assignAgent := fmt.Sprintf(`{"type":"agent","agentId":%q}`, agent["id"])
+
+	ticket := validated(http.MethodPost, "/api/tickets", `{"title":"readiness contract"}`, http.StatusCreated)
+	path := "/api/tickets/" + ticket["id"].(string)
+	assigned := validated(http.MethodPut, path+"/assignee", assignAgent, http.StatusOK)
+	if rejections := assigned["allowedActions"].(map[string]any)["statusChangeRejections"].([]any); len(rejections) != 2 {
+		t.Fatalf("statusChangeRejections = %v, want Ready and Blocked", rejections)
+	}
+	validated(http.MethodPost, path+"/status", `{"status":"Ready"}`, http.StatusBadRequest)
+	validated(http.MethodPost, path+"/status", `{"status":"Blocked"}`, http.StatusBadRequest)
+	validated(http.MethodPatch, path, `{"goal":"g","successCriteria":"s","repository":"r"}`, http.StatusOK)
+	if ready := validated(http.MethodPost, path+"/status", `{"status":"Ready"}`, http.StatusOK); ready["requestingAgentWork"] != true {
+		t.Fatalf("requestingAgentWork = %v", ready["requestingAgentWork"])
+	}
+	validated(http.MethodPatch, path, `{"goal":""}`, http.StatusBadRequest)
+	validated(http.MethodPost, path+"/status", `{"status":"InProgress"}`, http.StatusBadRequest)
+
+	owned := validated(http.MethodPost, "/api/tickets", `{"title":"readiness contract owner"}`, http.StatusCreated)
+	ownedPath := "/api/tickets/" + owned["id"].(string)
+	validated(http.MethodPost, ownedPath+"/status", `{"status":"Ready"}`, http.StatusOK)
+	rejected := validated(http.MethodPut, ownedPath+"/assignee", assignAgent, http.StatusBadRequest)
+	if missing := rejected["error"].(map[string]any)["missing"]; fmt.Sprint(missing) != "[goal successCriteria repository]" {
+		t.Fatalf("missing = %v", missing)
+	}
+}
+
 func TestArchive_ResponsesMatchContractAndMethod405(t *testing.T) {
 	handler, _, cookie := badgeTestHandler(t)
 	router, err := legacy.NewRouter(loadContract(t))
