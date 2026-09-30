@@ -403,7 +403,10 @@ func defaultCompletionCondition(template TicketTemplate) TicketCompletionConditi
 // getTicketForOwner's and listTicketsForOwner's SELECT, and
 // updateTicketForOwner's RETURNING -- so the column list and
 // scanTicketRow's scan targets can never drift against each other.
-const ticketSelectColumns = `public_id::text, title, status, template, completion_condition, assignee_type, goal, context, success_criteria, constraints, repository, created_at, updated_at, archived_at`
+const ticketSelectColumns = `public_id::text, title, status, template, completion_condition, assignee_type,
+	(SELECT json_build_object('id', a.public_id, 'name', a.name, 'kind', a.kind) FROM agents a
+	  WHERE a.owner_id = tickets.owner_id AND a.id = tickets.assignee_agent_id),
+	goal, context, success_criteria, constraints, repository, created_at, updated_at, archived_at`
 
 // ticketRowScanner is satisfied by both pgx.Row (QueryRow) and pgx.Rows
 // (Query) -- both expose Scan(dest ...any) error with this signature,
@@ -430,7 +433,7 @@ func scanTicketRow(row ticketRowScanner) (Ticket, error) {
 		archivedAt                                               sql.NullTime
 	)
 	if err := row.Scan(
-		&ticket.Id, &ticket.Title, &status, &template, &completionCondition, &assigneeType,
+		&ticket.Id, &ticket.Title, &status, &template, &completionCondition, &assigneeType, &ticket.AssigneeAgent,
 		&goal, &ctxField, &successCriteria, &constraints, &repository,
 		&createdAt, &updatedAt, &archivedAt,
 	); err != nil {

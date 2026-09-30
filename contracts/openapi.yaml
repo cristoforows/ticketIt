@@ -474,23 +474,26 @@ paths:
         required: true
         schema: {type: string, format: uuid, x-go-type: string}
     put:
-      operationId: assignTicketOwner
-      summary: Assign the signed-in Owner as a Ticket's Assignee
+      operationId: assignTicket
+      summary: Assign the signed-in Owner or one of the Owner's Agents
       tags: [tickets]
       description: >-
-        The Owner is the only assignable Assignee in M2; this contract
-        has no Agent-assignment command. Idempotent. Allowed whatever
-        the Ticket's current Status -- D3 places no precondition on
-        human assignment, since M2 has no open Round to lock the
-        Assignee field.
+        Idempotent, and allowed whatever the Ticket's current Status or
+        Template (D3 S1). Reassignment keeps the Ticket's history and
+        completion condition. An unknown, malformed or foreign Ticket or
+        Agent id returns the shared 404 not_found.
 
         Creates no Round, work request, or queue entry. Requires a
         valid session; returns `401 unauthenticated` otherwise.
-        Identifier handling matches the other `/api/tickets/{id}`
-        operations.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignTicketRequest"
       responses:
         "200":
-          description: The Ticket, now assigned to the Owner.
+          description: The Ticket with its new Assignee.
           content:
             application/json:
               schema:
@@ -509,7 +512,7 @@ paths:
         Idempotent: unassigning an already-unassigned Ticket returns
         200, matching this contract's last-write-wins conventions
         elsewhere. Allowed whatever the current Status, as
-        `assignTicketOwner`.
+        `assignTicket`.
 
         Requires a valid session; returns `401 unauthenticated`
         otherwise. Identifier handling matches the other
@@ -567,6 +570,86 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Badge"
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+  /api/agents:
+    get:
+      operationId: listAgents
+      summary: List the Owner's Agents
+      tags: [agents]
+      description: Ordered by case-insensitive name ascending, then id ascending.
+      responses:
+        "200":
+          description: The Owner's Agents.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentList"
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+    post:
+      operationId: createAgent
+      summary: Create an Agent
+      tags: [agents]
+      description: >-
+        Names are trimmed, non-empty, at most 80 characters after trimming,
+        and unique per Owner case-insensitively. Duplicate names return
+        409 duplicate_agent_name, including under concurrent creation.
+        `kind` is fixed at creation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAgentRequest"
+      responses:
+        "201":
+          description: The created Agent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+  /api/agents/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid, x-go-type: string}
+    patch:
+      operationId: renameAgent
+      summary: Rename an Agent
+      tags: [agents]
+      description: >-
+        Same name rules as `createAgent`; renaming to the Agent's own name
+        in a different case is allowed. An unknown, malformed or foreign id
+        returns the shared 404 not_found.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameAgentRequest"
+      responses:
+        "200":
+          description: The renamed Agent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
         default:
           description: Error. See `ErrorBody`.
           content:
@@ -782,9 +865,67 @@ components:
       description: >-
         The kind of Assignee responsible for a Ticket (CONTEXT.md,
         "Assignee"). "" means unassigned, always present on the wire,
-        matching `goal`'s convention. `owner` is the only non-empty
-        value in M2: there is no Agent Assignee yet.
-      enum: [owner, ""]
+        matching `goal`'s convention.
+      enum: [owner, agent, ""]
+    TicketAssigneeAgent:
+      type: object
+      additionalProperties: false
+      required: [id, name, kind]
+      properties:
+        id: {type: string, format: uuid, x-go-type: string}
+        name: {type: string}
+        kind:
+          $ref: "#/components/schemas/AgentKind"
+    AssignTicketRequest:
+      type: object
+      description: '`agentId` is required when `type` is `agent` and rejected otherwise.'
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [owner, agent]
+        agentId: {type: string, format: uuid, x-go-type: string}
+    AgentKind:
+      type: string
+      description: Set at creation and never changed in M4.
+      enum: [research, coding]
+      # Without these, "coding" collides with TicketTemplate's Coding and
+      # oapi-codegen renames both enums' constants.
+      x-enum-varnames: [AgentKindResearch, AgentKindCoding]
+    Agent:
+      type: object
+      additionalProperties: false
+      required: [id, name, kind, createdAt]
+      properties:
+        id: {type: string, format: uuid, x-go-type: string}
+        name: {type: string}
+        kind:
+          $ref: "#/components/schemas/AgentKind"
+        createdAt: {type: string, format: date-time, x-go-type: string}
+    AgentList:
+      type: object
+      additionalProperties: false
+      required: [agents]
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: "#/components/schemas/Agent"
+    CreateAgentRequest:
+      type: object
+      additionalProperties: false
+      required: [name, kind]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
+        kind:
+          $ref: "#/components/schemas/AgentKind"
+    RenameAgentRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 80}
     Ticket:
       type: object
       description: >-
@@ -806,6 +947,7 @@ components:
           template,
           completionCondition,
           assigneeType,
+          assigneeAgent,
           goal,
           context,
           successCriteria,
@@ -849,6 +991,11 @@ components:
           $ref: "#/components/schemas/TicketTemplate"
         assigneeType:
           $ref: "#/components/schemas/TicketAssigneeType"
+        assigneeAgent:
+          description: Null unless `assigneeType` is `agent`.
+          oneOf:
+            - $ref: "#/components/schemas/TicketAssigneeAgent"
+            - type: "null"
         completionCondition:
           $ref: "#/components/schemas/TicketCompletionCondition"
         goal:

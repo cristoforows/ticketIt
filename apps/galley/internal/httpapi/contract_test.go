@@ -312,7 +312,9 @@ func TestTicketCommands_ResponseMatchesContract(t *testing.T) {
 	request(http.MethodPost, path+"/status", `{"status":"Done"}`, http.StatusBadRequest)
 	request(http.MethodPost, path+"/accept", "", http.StatusBadRequest)
 	request(http.MethodPost, path+"/status", `{"status":"Ready"}`, http.StatusOK)
-	request(http.MethodPut, path+"/assignee", "", http.StatusOK)
+	request(http.MethodPut, path+"/assignee", `{"type":"owner"}`, http.StatusOK)
+	request(http.MethodPut, path+"/assignee", `{"type":"agent","agentId":"`+uuid.NewString()+`"}`, http.StatusNotFound)
+	request(http.MethodPut, path+"/assignee", `{"type":"agent"}`, http.StatusBadRequest)
 	request(http.MethodDelete, path+"/assignee", "", http.StatusOK)
 	request(http.MethodPost, path+"/status", `{"status":"InProgress"}`, http.StatusOK)
 	request(http.MethodPost, path+"/status", `{"status":"InReview"}`, http.StatusOK)
@@ -320,7 +322,7 @@ func TestTicketCommands_ResponseMatchesContract(t *testing.T) {
 	for _, operation := range []struct{ method, suffix, body string }{
 		{http.MethodPost, "/status", `{"status":"Ready"}`},
 		{http.MethodPost, "/accept", ""},
-		{http.MethodPut, "/assignee", ""},
+		{http.MethodPut, "/assignee", `{"type":"owner"}`},
 		{http.MethodDelete, "/assignee", ""},
 	} {
 		request(operation.method, "/api/tickets/"+uuid.NewString()+operation.suffix, operation.body, http.StatusNotFound)
@@ -359,6 +361,56 @@ func TestBadges_ResponsesMatchContractAndMethod405(t *testing.T) {
 	} {
 		result, rec, _ := badgeRequest(t, handler, cookie, tc.method, tc.path, "", http.StatusMethodNotAllowed)
 		if rec.Header().Get("Allow") != tc.allow || result.(map[string]any)["error"].(map[string]any)["code"] != "method_not_allowed" {
+			t.Fatalf("405 %s %s: %s, %v", tc.method, tc.path, rec.Header().Get("Allow"), result)
+		}
+		if err := doc.Components.Schemas["ErrorBody"].Value.VisitJSON(result); err != nil {
+			t.Fatalf("405 body not ErrorBody: %v", err)
+		}
+	}
+}
+
+func TestAgents_ResponsesMatchContractAndMethod405(t *testing.T) {
+	handler, _, cookie := badgeTestHandler(t)
+	doc := loadContract(t)
+	router, err := legacy.NewRouter(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	validated := func(method, path, body string, want int) any {
+		t.Helper()
+		result, rec, req := badgeRequest(t, handler, cookie, method, path, body, want)
+		validateAgainstContract(t, router, req, rec)
+		return result
+	}
+	agent := validated(http.MethodPost, "/api/agents", fmt.Sprintf(`{"name":%q,"kind":"research"}`, uuid.NewString()), http.StatusCreated).(map[string]any)
+	agentPath := "/api/agents/" + agent["id"].(string)
+	validated(http.MethodGet, "/api/agents", "", http.StatusOK)
+	validated(http.MethodPost, "/api/agents", fmt.Sprintf(`{"name":%q,"kind":"coding"}`, agent["name"]), http.StatusConflict)
+	validated(http.MethodPost, "/api/agents", `{"name":"x","kind":"design"}`, http.StatusBadRequest)
+	renamed := validated(http.MethodPatch, agentPath, fmt.Sprintf(`{"name":%q}`, uuid.NewString()), http.StatusOK).(map[string]any)
+	validated(http.MethodPatch, agentPath, `{"name":"x","kind":"coding"}`, http.StatusBadRequest)
+	validated(http.MethodPatch, "/api/agents/"+uuid.NewString(), `{"name":"x"}`, http.StatusNotFound)
+	validated(http.MethodPatch, "/api/agents/bad", `{"name":"x"}`, http.StatusNotFound)
+
+	ticket := validated(http.MethodPost, "/api/tickets", `{"title":"agent contract","template":"Coding"}`, http.StatusCreated).(map[string]any)
+	ticketPath := "/api/tickets/" + ticket["id"].(string)
+	assigned := validated(http.MethodPut, ticketPath+"/assignee", fmt.Sprintf(`{"type":"agent","agentId":%q}`, agent["id"]), http.StatusOK).(map[string]any)
+	if assigned["assigneeType"] != "agent" || assigned["assigneeAgent"].(map[string]any)["name"] != renamed["name"] {
+		t.Fatalf("assigned = %v", assigned)
+	}
+	validated(http.MethodGet, ticketPath, "", http.StatusOK)
+	validated(http.MethodGet, "/api/tickets", "", http.StatusOK)
+	validated(http.MethodPut, ticketPath+"/assignee", `{"type":"agent","agentId":"bad"}`, http.StatusNotFound)
+	validated(http.MethodPut, ticketPath+"/assignee", `{"type":"owner"}`, http.StatusOK)
+
+	for _, tc := range []struct{ method, path, allow string }{
+		{http.MethodDelete, "/api/agents", "GET, POST"},
+		{http.MethodGet, agentPath, "PATCH"},
+		{http.MethodPut, agentPath, "PATCH"},
+		{http.MethodPost, ticketPath + "/assignee", "PUT, DELETE"},
+	} {
+		result, rec, _ := badgeRequest(t, handler, cookie, tc.method, tc.path, "", http.StatusMethodNotAllowed)
+		if rec.Header().Get("Allow") != tc.allow || errorCode(result) != "method_not_allowed" {
 			t.Fatalf("405 %s %s: %s, %v", tc.method, tc.path, rec.Header().Get("Allow"), result)
 		}
 		if err := doc.Components.Schemas["ErrorBody"].Value.VisitJSON(result); err != nil {

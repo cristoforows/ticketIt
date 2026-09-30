@@ -74,6 +74,8 @@ func TestArchive_AllMutationsRejectWithoutChangingTicket(t *testing.T) {
 	id := created.(map[string]any)["id"].(string)
 	badge, _, _ := badgeRequest(t, handler, cookie, http.MethodPost, "/api/badges", fmt.Sprintf(`{"name":%q}`, uuid.NewString()), http.StatusCreated)
 	badgeID := badge.(map[string]any)["id"].(string)
+	agent, _, _ := badgeRequest(t, handler, cookie, http.MethodPost, "/api/agents", fmt.Sprintf(`{"name":%q,"kind":"coding"}`, uuid.NewString()), http.StatusCreated)
+	agentID := agent.(map[string]any)["id"].(string)
 	path := "/api/tickets/" + id
 	badgePath := path + "/badges/" + badgeID
 	badgeRequest(t, handler, cookie, http.MethodPut, badgePath, "", http.StatusOK)
@@ -83,7 +85,8 @@ func TestArchive_AllMutationsRejectWithoutChangingTicket(t *testing.T) {
 		{"edit", http.MethodPatch, path, `{"title":"changed"}`},
 		{"status", http.MethodPost, path + "/status", `{"status":"Ready"}`},
 		{"accept", http.MethodPost, path + "/accept", ""},
-		{"assign", http.MethodPut, path + "/assignee", ""},
+		{"assign", http.MethodPut, path + "/assignee", `{"type":"owner"}`},
+		{"assign agent", http.MethodPut, path + "/assignee", fmt.Sprintf(`{"type":"agent","agentId":%q}`, agentID)},
 		{"unassign", http.MethodDelete, path + "/assignee", ""},
 		{"attach", http.MethodPut, badgePath, ""},
 		{"detach", http.MethodDelete, badgePath, ""},

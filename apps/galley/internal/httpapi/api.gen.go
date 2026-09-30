@@ -14,6 +14,42 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for AgentKind.
+const (
+	AgentKindCoding   AgentKind = "coding"
+	AgentKindResearch AgentKind = "research"
+)
+
+// Valid indicates whether the value is a known member of the AgentKind enum.
+func (e AgentKind) Valid() bool {
+	switch e {
+	case AgentKindCoding:
+		return true
+	case AgentKindResearch:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AssignTicketRequestType.
+const (
+	AssignTicketRequestTypeAgent AssignTicketRequestType = "agent"
+	AssignTicketRequestTypeOwner AssignTicketRequestType = "owner"
+)
+
+// Valid indicates whether the value is a known member of the AssignTicketRequestType enum.
+func (e AssignTicketRequestType) Valid() bool {
+	switch e {
+	case AssignTicketRequestTypeAgent:
+		return true
+	case AssignTicketRequestTypeOwner:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DatabaseStatusStatus.
 const (
 	DatabaseStatusStatusError DatabaseStatusStatus = "error"
@@ -82,6 +118,7 @@ func (e StatusResponseStatus) Valid() bool {
 
 // Defines values for TicketAssigneeType.
 const (
+	TicketAssigneeTypeAgent TicketAssigneeType = "agent"
 	TicketAssigneeTypeEmpty TicketAssigneeType = ""
 	TicketAssigneeTypeOwner TicketAssigneeType = "owner"
 )
@@ -89,6 +126,8 @@ const (
 // Valid indicates whether the value is a known member of the TicketAssigneeType enum.
 func (e TicketAssigneeType) Valid() bool {
 	switch e {
+	case TicketAssigneeTypeAgent:
+		return true
 	case TicketAssigneeTypeEmpty:
 		return true
 	case TicketAssigneeTypeOwner:
@@ -164,6 +203,33 @@ func (e TicketTemplate) Valid() bool {
 	}
 }
 
+// Agent defines model for Agent.
+type Agent struct {
+	CreatedAt string `json:"createdAt"`
+	Id        string `json:"id"`
+
+	// Kind Set at creation and never changed in M4.
+	Kind AgentKind `json:"kind"`
+	Name string    `json:"name"`
+}
+
+// AgentKind Set at creation and never changed in M4.
+type AgentKind string
+
+// AgentList defines model for AgentList.
+type AgentList struct {
+	Agents []Agent `json:"agents"`
+}
+
+// AssignTicketRequest `agentId` is required when `type` is `agent` and rejected otherwise.
+type AssignTicketRequest struct {
+	AgentId *string                 `json:"agentId,omitempty"`
+	Type    AssignTicketRequestType `json:"type"`
+}
+
+// AssignTicketRequestType defines model for AssignTicketRequest.Type.
+type AssignTicketRequestType string
+
 // Badge defines model for Badge.
 type Badge struct {
 	CreatedAt string `json:"createdAt"`
@@ -180,6 +246,13 @@ type BadgeList struct {
 type ChangeTicketStatusRequest struct {
 	// Status A Ticket's lifecycle stage (CONTEXT.md, "Status"). Moves between these values are validated against the persisted current Status per D3 S2 (docs/decisions/d3-agent-template-compatibility.md). `Done` is reachable only through explicit Accept.
 	Status TicketStatus `json:"status"`
+}
+
+// CreateAgentRequest defines model for CreateAgentRequest.
+type CreateAgentRequest struct {
+	// Kind Set at creation and never changed in M4.
+	Kind AgentKind `json:"kind"`
+	Name string    `json:"name"`
 }
 
 // CreateBadgeRequest defines model for CreateBadgeRequest.
@@ -265,6 +338,11 @@ type Owner struct {
 	Login string `json:"login"`
 }
 
+// RenameAgentRequest defines model for RenameAgentRequest.
+type RenameAgentRequest struct {
+	Name string `json:"name"`
+}
+
 // SessionResponse defines model for SessionResponse.
 type SessionResponse struct {
 	// Owner ticketIt's stable internal Owner identity -- independent of any GitHub identifier (docs/deployment.md, "Ownership and sign-in"). `login` is the linked GitHub identity's most recently observed login, shown for display only: matching a sign-in to this Owner always uses the immutable provider account id, never this field.
@@ -303,7 +381,10 @@ type Ticket struct {
 	// ArchivedAt Null for an active Ticket; RFC3339 UTC archive timestamp otherwise. Status is retained separately.
 	ArchivedAt *time.Time `json:"archivedAt"`
 
-	// AssigneeType The kind of Assignee responsible for a Ticket (CONTEXT.md, "Assignee"). "" means unassigned, always present on the wire, matching `goal`'s convention. `owner` is the only non-empty value in M2: there is no Agent Assignee yet.
+	// AssigneeAgent Null unless `assigneeType` is `agent`.
+	AssigneeAgent *TicketAssigneeAgent `json:"assigneeAgent"`
+
+	// AssigneeType The kind of Assignee responsible for a Ticket (CONTEXT.md, "Assignee"). "" means unassigned, always present on the wire, matching `goal`'s convention.
 	AssigneeType TicketAssigneeType `json:"assigneeType"`
 
 	// Badges Ordered by case-insensitive name ascending, then id ascending. Empty when none attached.
@@ -360,7 +441,16 @@ type TicketAllowedActions struct {
 	StatusChanges []TicketStatus `json:"statusChanges"`
 }
 
-// TicketAssigneeType The kind of Assignee responsible for a Ticket (CONTEXT.md, "Assignee"). "" means unassigned, always present on the wire, matching `goal`'s convention. `owner` is the only non-empty value in M2: there is no Agent Assignee yet.
+// TicketAssigneeAgent defines model for TicketAssigneeAgent.
+type TicketAssigneeAgent struct {
+	Id string `json:"id"`
+
+	// Kind Set at creation and never changed in M4.
+	Kind AgentKind `json:"kind"`
+	Name string    `json:"name"`
+}
+
+// TicketAssigneeType The kind of Assignee responsible for a Ticket (CONTEXT.md, "Assignee"). "" means unassigned, always present on the wire, matching `goal`'s convention.
 type TicketAssigneeType string
 
 // TicketBadge defines model for TicketBadge.
@@ -425,6 +515,12 @@ type ListTicketsParams struct {
 	BadgeId *[]string `form:"badgeId,omitempty" json:"badgeId,omitempty"`
 }
 
+// CreateAgentJSONRequestBody defines body for CreateAgent for application/json ContentType.
+type CreateAgentJSONRequestBody = CreateAgentRequest
+
+// RenameAgentJSONRequestBody defines body for RenameAgent for application/json ContentType.
+type RenameAgentJSONRequestBody = RenameAgentRequest
+
 // CreateBadgeJSONRequestBody defines body for CreateBadge for application/json ContentType.
 type CreateBadgeJSONRequestBody = CreateBadgeRequest
 
@@ -437,11 +533,23 @@ type CreateTicketJSONRequestBody = CreateTicketRequest
 // UpdateTicketJSONRequestBody defines body for UpdateTicket for application/json ContentType.
 type UpdateTicketJSONRequestBody = UpdateTicketRequest
 
+// AssignTicketJSONRequestBody defines body for AssignTicket for application/json ContentType.
+type AssignTicketJSONRequestBody = AssignTicketRequest
+
 // ChangeTicketStatusJSONRequestBody defines body for ChangeTicketStatus for application/json ContentType.
 type ChangeTicketStatusJSONRequestBody = ChangeTicketStatusRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// ListAgents List the Owner's Agents
+	// (GET /api/agents)
+	ListAgents(w http.ResponseWriter, r *http.Request)
+	// CreateAgent Create an Agent
+	// (POST /api/agents)
+	CreateAgent(w http.ResponseWriter, r *http.Request)
+	// RenameAgent Rename an Agent
+	// (PATCH /api/agents/{id})
+	RenameAgent(w http.ResponseWriter, r *http.Request, id string)
 	// CompleteGithubOAuth Complete GitHub OAuth sign-in
 	// (GET /api/auth/github/callback)
 	CompleteGithubOAuth(w http.ResponseWriter, r *http.Request, params CompleteGithubOAuthParams)
@@ -490,9 +598,9 @@ type ServerInterface interface {
 	// UnassignTicket Clear a Ticket's Assignee
 	// (DELETE /api/tickets/{id}/assignee)
 	UnassignTicket(w http.ResponseWriter, r *http.Request, id string)
-	// AssignTicketOwner Assign the signed-in Owner as a Ticket's Assignee
+	// AssignTicket Assign the signed-in Owner or one of the Owner's Agents
 	// (PUT /api/tickets/{id}/assignee)
-	AssignTicketOwner(w http.ResponseWriter, r *http.Request, id string)
+	AssignTicket(w http.ResponseWriter, r *http.Request, id string)
 	// DetachTicketBadge Remove a Badge from a Ticket
 	// (DELETE /api/tickets/{id}/badges/{badgeId})
 	DetachTicketBadge(w http.ResponseWriter, r *http.Request, id string, badgeId string)
@@ -515,6 +623,60 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// ListAgents operation middleware
+func (siw *ServerInterfaceWrapper) ListAgents(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAgents(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateAgent operation middleware
+func (siw *ServerInterfaceWrapper) CreateAgent(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateAgent(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RenameAgent operation middleware
+func (siw *ServerInterfaceWrapper) RenameAgent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RenameAgent(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // CompleteGithubOAuth operation middleware
 func (siw *ServerInterfaceWrapper) CompleteGithubOAuth(w http.ResponseWriter, r *http.Request) {
@@ -877,8 +1039,8 @@ func (siw *ServerInterfaceWrapper) UnassignTicket(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
-// AssignTicketOwner operation middleware
-func (siw *ServerInterfaceWrapper) AssignTicketOwner(w http.ResponseWriter, r *http.Request) {
+// AssignTicket operation middleware
+func (siw *ServerInterfaceWrapper) AssignTicket(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -893,7 +1055,7 @@ func (siw *ServerInterfaceWrapper) AssignTicketOwner(w http.ResponseWriter, r *h
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.AssignTicketOwner(w, r, id)
+		siw.Handler.AssignTicket(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1157,9 +1319,12 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/status", wrapper.ChangeTicketStatus)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/accept", wrapper.AcceptTicket)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/tickets/{id}/assignee", wrapper.UnassignTicket)
-	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/tickets/{id}/assignee", wrapper.AssignTicketOwner)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/tickets/{id}/assignee", wrapper.AssignTicket)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/badges", wrapper.ListBadges)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/badges", wrapper.CreateBadge)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/agents", wrapper.ListAgents)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/agents", wrapper.CreateAgent)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/api/agents/{id}", wrapper.RenameAgent)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/tickets/{id}/badges/{badgeId}", wrapper.DetachTicketBadge)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/tickets/{id}/badges/{badgeId}", wrapper.AttachTicketBadge)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/archive", wrapper.ArchiveTicket)
