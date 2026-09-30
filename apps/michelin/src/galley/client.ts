@@ -84,7 +84,10 @@ export async function fetchStatus(request: StatusRequest): Promise<StatusResult>
 function unreachable(error: unknown): StatusFailure {
   const cause = error instanceof Error ? error.cause : undefined;
   const code = isRecord(cause) && typeof cause["code"] === "string" ? cause["code"] : undefined;
-  const message = cause instanceof Error ? cause.message : error instanceof Error ? error.message : String(error);
+  const nested = cause instanceof AggregateError ? cause.errors[0] : undefined;
+  const message = [cause, nested, error]
+    .map((candidate) => (candidate instanceof Error ? candidate.message : ""))
+    .find((text) => text !== "") ?? code ?? "request failed";
   return code === undefined ? { reason: "unreachable", error: message } : { reason: "unreachable", error: message, code };
 }
 

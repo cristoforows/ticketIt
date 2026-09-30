@@ -85,6 +85,17 @@ describe("status loop", () => {
     await loop.stop();
   });
 
+  it("keeps a useful message when the OS error is an empty AggregateError (localhost, IPv4 and IPv6)", async () => {
+    const inner = Object.assign(new Error("connect ECONNREFUSED ::1:8080"), { code: "ECONNREFUSED" });
+    const cause = Object.assign(new AggregateError([inner], ""), { code: "ECONNREFUSED" });
+    const { loop, records } = setup(async () => {
+      throw new TypeError("fetch failed", { cause });
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(records[0]).toMatchObject({ reason: "unreachable", code: "ECONNREFUSED", error: "connect ECONNREFUSED ::1:8080" });
+    await loop.stop();
+  });
+
   it("logs a non-2xx response with its status", async () => {
     const { loop, records } = setup(async () => json({ error: "x" }, 503));
     await vi.advanceTimersByTimeAsync(0);
