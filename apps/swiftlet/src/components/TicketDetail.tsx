@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import type { Badge, Ticket, TicketUpdate } from "../api/tickets";
+import type { Agent } from "../api/agents";
+import type { Badge, Ticket, TicketAssignee, TicketUpdate } from "../api/tickets";
+import { assigneeLabel } from "./assignee";
 import { refinementGuidance } from "./refinementGuidance";
-import { BadgeTag, ErrorMessage, FieldHint, FieldLabel, FieldNote, FieldValue, PrimaryButton, ReceiptLine, Rule, SecondaryButton, Select, StatusTag, statusLabel, TextInput, Textarea, ticketSerial } from "./ui";
+import { BadgeTag, ErrorMessage, FieldHint, FieldLabel, FieldNote, FieldValue, InlineError, PrimaryButton, ReceiptLine, Rule, SecondaryButton, Select, StatusTag, statusLabel, TextInput, Textarea, ticketSerial } from "./ui";
 
 interface TicketDetailProps {
   ticket: Ticket;
   onSave: (update: TicketUpdate) => Promise<Ticket>;
   onChangeStatus: (status: Ticket["status"]) => Promise<Ticket>;
   onAccept: () => Promise<Ticket>;
-  onAssign: () => Promise<Ticket>;
+  onAssign: (assignee: TicketAssignee) => Promise<Ticket>;
   onUnassign: () => Promise<Ticket>;
+  onLoadAgents: () => Promise<Agent[]>;
   onLoadBadges: () => Promise<Badge[]>;
   onCreateBadge: (name: string) => Promise<Badge>;
   onAttachBadge: (badgeId: string) => Promise<Ticket>;
@@ -51,10 +54,7 @@ function completionConditionLabel(condition: Ticket["completionCondition"]): str
   return condition === "reviewedPrMerge" ? "Reviewed pull request merged" : "Human acceptance";
 }
 
-/** The only non-empty assignee_type M2 writes; there is no Agent Assignee kind yet. */
-const OWNER_ASSIGNEE_TYPE = "owner";
-
-export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssign, onUnassign, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge, onArchive, onRestore, onArchived, editRequested = false }: TicketDetailProps) {
+export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssign, onUnassign, onLoadAgents, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge, onArchive, onRestore, onArchived, editRequested = false }: TicketDetailProps) {
   const previousTicket = useRef(ticket);
   const [current, setCurrent] = useState(ticket);
   const [mode, setMode] = useState<"view" | "editing">(editRequested && !ticket.archivedAt ? "editing" : "view");
@@ -179,7 +179,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
               {completionConditionLabel(current.completionCondition)}
             </ReceiptLine>
             <ReceiptLine label="Assignee" data-testid="ticket-detail-assignee">
-              {current.assigneeType === OWNER_ASSIGNEE_TYPE ? "Owner" : "Unassigned"}
+              {assigneeLabel(current)}
             </ReceiptLine>
             <ReceiptLine label="Created" data-testid="ticket-detail-created-at">{current.createdAt}</ReceiptLine>
             <ReceiptLine label="Updated" data-testid="ticket-detail-updated-at">{current.updatedAt}</ReceiptLine>
@@ -240,8 +240,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
                   Accept
                 </PrimaryButton>
               )}
-              {/* Owner is the only Assignee kind M2 has. */}
-              {current.assigneeType === OWNER_ASSIGNEE_TYPE ? (
+              {current.assigneeType !== "" && (
                 <SecondaryButton
                   data-testid="ticket-detail-unassign-button"
                   onClick={() => runAction(onUnassign)}
@@ -250,17 +249,9 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
                 >
                   Unassign
                 </SecondaryButton>
-              ) : (
-                <SecondaryButton
-                  data-testid="ticket-detail-assign-button"
-                  onClick={() => runAction(onAssign)}
-                  disabled={actionPending || archived}
-                  title={archivedReason}
-                >
-                  Assign to me
-                </SecondaryButton>
               )}
             </div>
+            <AssigneePicker ticket={current} disabled={actionPending || archived} reason={archivedReason} onLoad={onLoadAgents} onAssign={(assignee) => runAction(() => onAssign(assignee))} />
             {!current.allowedActions.accept.available && (
               <p data-testid="ticket-detail-accept-unavailable" className="m-0 text-muted">{current.allowedActions.accept.reason?.message}</p>
             )}
@@ -358,6 +349,58 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
   );
 }
 
+function assigneeValue(ticket: Ticket): string {
+  return ticket.assigneeAgent ? `agent:${ticket.assigneeAgent.id}` : ticket.assigneeType;
+}
+
+function AssigneePicker({ ticket, disabled, reason, onLoad, onAssign }: {
+  ticket: Ticket;
+  disabled: boolean;
+  reason?: string;
+  onLoad: () => Promise<Agent[]>;
+  onAssign: (assignee: TicketAssignee) => Promise<void>;
+}) {
+  const current = assigneeValue(ticket);
+  const [selected, setSelected] = useState(current);
+  const [agents, setAgents] = useState<Pick<Agent, "id" | "name">[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => setSelected(current), [current]);
+
+  useEffect(() => {
+    let cancelled = false;
+    onLoad().then((loaded) => {
+      if (!cancelled) setAgents(loaded);
+    }).catch((cause: unknown) => {
+      if (!cancelled) setLoadError(cause instanceof Error ? cause.message : "Failed to load Agents.");
+    });
+    return () => { cancelled = true; };
+  }, [onLoad]);
+
+  const options = ticket.assigneeAgent && !agents.some((agent) => agent.id === ticket.assigneeAgent!.id)
+    ? [...agents, ticket.assigneeAgent]
+    : agents;
+
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void onAssign(selected === "owner" ? { type: "owner" } : { type: "agent", agentId: selected.slice("agent:".length) });
+  }
+
+  return (
+    <form onSubmit={submit} data-testid="ticket-detail-assignee-form" className="flex flex-wrap items-end gap-2">
+      <div className="min-w-48 flex-1">
+        <FieldLabel htmlFor="ticket-detail-assignee-select">Assign to</FieldLabel>
+        <Select id="ticket-detail-assignee-select" data-testid="ticket-detail-assignee-select" value={selected} onChange={(event) => setSelected(event.target.value)} disabled={disabled} title={reason}>
+          {current === "" && <option value="" disabled>Unassigned</option>}
+          <option value="owner">Me</option>
+          {options.map((agent) => <option key={agent.id} value={`agent:${agent.id}`}>{agent.name}</option>)}
+        </Select>
+      </div>
+      <SecondaryButton type="submit" data-testid="ticket-detail-assign-button" disabled={disabled || selected === current || selected === ""} title={reason}>Assign</SecondaryButton>
+      {loadError && <InlineError data-testid="ticket-detail-agents-error" className="m-0 basis-full">Agents could not be loaded: {loadError}</InlineError>}
+    </form>
+  );
+}
 
 function BadgePicker({ ticket, disabled, reason, onAttached, onLoad, onCreate, onAttach }: {
   ticket: Ticket;

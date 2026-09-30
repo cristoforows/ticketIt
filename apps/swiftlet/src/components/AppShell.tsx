@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { signOut, type Owner } from "../api/session";
 import { collectionQuery, setArchivedFilter, useArchivedFilter, useBadgeFilter, useRoute, type CollectionRoute } from "../router";
+import { AgentsPage } from "./AgentsPage";
 import { BadgeFilter } from "./BadgeFilter";
 import { NewOrderBar } from "./NewOrderBar";
 import { AppHeader } from "./AppHeader";
@@ -34,7 +35,7 @@ export function AppShell({ owner, onSignedOut, onUnauthenticated }: AppShellProp
   const filterKey = `${badgeIds.join(",")}:${archived}`;
   const currentRoute = useRef(route);
   useLayoutEffect(() => { currentRoute.current = route; }, [route]);
-  const background: CollectionRoute | undefined = route.name === "ticket-detail" ? route.background : route.name;
+  const background: CollectionRoute | undefined = route.name === "ticket-detail" ? route.background : route.name === "agents" ? undefined : route.name;
   const modalTicketId = route.name === "ticket-detail" && route.background ? route.ticketId : undefined;
   const previousModal = useRef<{ ticketId: string; background: CollectionRoute } | null>(null);
   const [refresh, setRefresh] = useState<{ key: number; view?: CollectionRoute; ticketId?: string }>({ key: 0 });
@@ -81,6 +82,9 @@ export function AppShell({ owner, onSignedOut, onUnauthenticated }: AppShellProp
           <NavTab to={`/${collectionQuery()}`} current={background === "backlog"}>List</NavTab>
           <NavTab to={`/board${collectionQuery()}`} current={background === "board"}>Board</NavTab>
         </nav>
+        <nav aria-label="Settings" className="flex gap-1">
+          <NavTab to="/agents" current={route.name === "agents"}>Agents</NavTab>
+        </nav>
         <div className="ml-auto flex min-w-0 items-center gap-4">
           <Caption tone="ground" data-testid="signed-in-owner" title={owner.login} className="min-w-0 break-words">Signed in as {owner.login}</Caption>
           <SecondaryButton tone="ground" className="shrink-0" onClick={handleSignOut} disabled={signingOut} data-testid="sign-out-button">
@@ -94,6 +98,7 @@ export function AppShell({ owner, onSignedOut, onUnauthenticated }: AppShellProp
         )}
       </AppHeader>
       <main className="mx-auto max-w-(--size-page) px-6 py-8">
+        {route.name === "agents" && <AgentsPage onUnauthenticated={onUnauthenticated} />}
         {route.name === "ticket-detail" && !route.background && (
           <TicketDetailPage key={route.ticketId} ticketId={route.ticketId} onUnauthenticated={onUnauthenticated} />
         )}

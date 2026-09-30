@@ -111,7 +111,7 @@ func acceptTicketHTTP(t *testing.T, client *http.Client, baseURL, id string) lif
 
 func assignOwnerHTTP(t *testing.T, client *http.Client, baseURL, id string) lifecycleResult {
 	t.Helper()
-	return doLifecycleRequest(t, client, http.MethodPut, baseURL+"/api/tickets/"+id+"/assignee", nil)
+	return doLifecycleRequest(t, client, http.MethodPut, baseURL+"/api/tickets/"+id+"/assignee", AssignTicketRequest{Type: AssignTicketRequestTypeOwner})
 }
 
 func unassignHTTP(t *testing.T, client *http.Client, baseURL, id string) lifecycleResult {
@@ -325,7 +325,7 @@ func TestTicketRoutes_AcceptUUIDURN(t *testing.T) {
 	if got := changeStatus(t, client, baseURL, id, Ready); got.status != http.StatusOK || got.ticket.Status != Ready {
 		t.Fatalf("status transition = %+v", got)
 	}
-	if got := assignOwnerHTTP(t, client, baseURL, id); got.status != http.StatusOK || got.ticket.AssigneeType != assigneeTypeOwnerValue {
+	if got := assignOwnerHTTP(t, client, baseURL, id); got.status != http.StatusOK || got.ticket.AssigneeType != TicketAssigneeTypeOwner {
 		t.Fatalf("assign = %+v", got)
 	}
 	if got := unassignHTTP(t, client, baseURL, id); got.status != http.StatusOK || got.ticket.AssigneeType != "" {
@@ -569,8 +569,7 @@ func TestSetTicketAssigneeForOwner_ScopedToOwner(t *testing.T) {
 	_, publicID := insertTicketAt(t, pool, ownerID, uniqueTitle(t), time.Now().UTC())
 	bogusOwnerID := ownerID + 1_000_000_000
 
-	assigneeType := assigneeTypeOwnerValue
-	_, found, err := setTicketAssigneeForOwner(ctx, pool, bogusOwnerID, publicID, &assigneeType)
+	_, found, err := setTicketAssigneeForOwner(ctx, pool, bogusOwnerID, publicID, ticketAssignee{kind: TicketAssigneeTypeOwner})
 	if err != nil {
 		t.Fatalf("setTicketAssigneeForOwner() returned unexpected error: %v", err)
 	}

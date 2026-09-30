@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useLayoutEffect } from "react";
 import { TicketDetail } from "./TicketDetail";
-import type { Badge, Ticket, TicketUpdate } from "../api/tickets";
+import type { Agent } from "../api/agents";
+import type { Badge, Ticket, TicketAssignee, TicketUpdate } from "../api/tickets";
 import { statusLabel } from "./ui";
 
 const TICKET: Ticket = {
@@ -13,6 +14,7 @@ const TICKET: Ticket = {
   template: "Basic",
   completionCondition: "humanAcceptance",
   assigneeType: "",
+  assigneeAgent: null,
   goal: "",
   context: "",
   successCriteria: "",
@@ -45,8 +47,9 @@ function noopActions() {
   return {
     onChangeStatus: vi.fn<(status: Ticket["status"]) => Promise<Ticket>>(),
     onAccept: vi.fn<() => Promise<Ticket>>(),
-    onAssign: vi.fn<() => Promise<Ticket>>(),
+    onAssign: vi.fn<(assignee: TicketAssignee) => Promise<Ticket>>(),
     onUnassign: vi.fn<() => Promise<Ticket>>(),
+    onLoadAgents: vi.fn<() => Promise<Agent[]>>().mockResolvedValue([]),
     onLoadBadges: vi.fn<() => Promise<import("../api/tickets").Badge[]>>().mockResolvedValue([]),
     onCreateBadge: vi.fn<(name: string) => Promise<import("../api/tickets").Badge>>(),
     onAttachBadge: vi.fn<(id: string) => Promise<Ticket>>(),
@@ -172,10 +175,11 @@ describe("archive presentation", () => {
     render(<TicketDetail ticket={{ ...TICKET, archivedAt: "2026-09-29T10:00:00Z", badges: [{ id: BADGE.id, name: BADGE.name }], allowedActions: { statusChanges: [], accept: { available: false, reason } } }} onSave={vi.fn()} {...noopActions()} />);
     expect(screen.getByTestId("ticket-detail-archived")).toHaveTextContent(reason.message);
     expect(screen.getByTestId("ticket-detail-badges")).toHaveTextContent(BADGE.name);
-    for (const name of ["Edit", "Archive", "Add badge", "Remove Urgent", "Assign to me"]) {
+    for (const name of ["Edit", "Archive", "Add badge", "Remove Urgent", "Assign"]) {
       expect(screen.getByRole("button", { name })).toBeDisabled();
       expect(screen.getByRole("button", { name })).toHaveAttribute("title", reason.message);
     }
+    expect(screen.getByLabelText("Assign to")).toBeDisabled();
   });
 
   it("asks before archiving and only navigates after Galley confirms", async () => {
@@ -387,36 +391,99 @@ describe("TicketDetail", () => {
   // The workflow controls live in this reusable component rather than
   // TicketDetailPage, so M3's modal inherits them unchanged.
   describe("workflow controls", () => {
-    it("shows Unassigned and an Assign button when the Ticket has no Assignee", () => {
-      render(<TicketDetail ticket={TICKET} onSave={vi.fn()} {...noopActions()} />);
+    const AGENTS: Agent[] = [
+      { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kind: "research", createdAt: "2026-09-30T10:00:00Z" },
+      { id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", name: "Builder", kind: "coding", createdAt: "2026-09-30T10:00:00Z" },
+    ];
+
+    function agentAssigned(agent: Agent): Ticket {
+      return { ...TICKET, assigneeType: "agent", assigneeAgent: { id: agent.id, name: agent.name, kind: agent.kind } };
+    }
+
+    it("shows Unassigned and offers Me first, then Galley's Agents in order", async () => {
+      render(<TicketDetail ticket={TICKET} onSave={vi.fn()} {...noopActions()} onLoadAgents={vi.fn().mockResolvedValue(AGENTS)} />);
 
       expect(screen.getByTestId("ticket-detail-assignee")).toHaveTextContent("Unassigned");
-      expect(screen.getByTestId("ticket-detail-assign-button")).toBeInTheDocument();
+      await screen.findByRole("option", { name: "Builder" });
+      const options = screen.getAllByRole("option").map((option) => option.textContent);
+      expect(options).toEqual(["Unassigned", "Me", "atlas", "Builder"]);
+      expect(screen.getByRole("option", { name: "Unassigned" })).toBeDisabled();
+      expect(screen.getByTestId("ticket-detail-assign-button")).toBeDisabled();
       expect(screen.queryByTestId("ticket-detail-unassign-button")).not.toBeInTheDocument();
     });
 
-    it("shows Owner and an Unassign button when the Ticket is Owner-assigned", () => {
+    it("shows Owner, selects Me and offers Unassign when the Ticket is Owner-assigned", () => {
       const assigned: Ticket = { ...TICKET, assigneeType: "owner" };
       render(<TicketDetail ticket={assigned} onSave={vi.fn()} {...noopActions()} />);
 
       expect(screen.getByTestId("ticket-detail-assignee")).toHaveTextContent("Owner");
+      expect(screen.getByLabelText("Assign to")).toHaveValue("owner");
+      expect(screen.queryByRole("option", { name: "Unassigned" })).not.toBeInTheDocument();
       expect(screen.getByTestId("ticket-detail-unassign-button")).toBeInTheDocument();
-      expect(screen.queryByTestId("ticket-detail-assign-button")).not.toBeInTheDocument();
+    });
+
+    it("shows the assigned Agent's name and selects it", async () => {
+      render(<TicketDetail ticket={agentAssigned(AGENTS[1])} onSave={vi.fn()} {...noopActions()} onLoadAgents={vi.fn().mockResolvedValue(AGENTS)} />);
+
+      expect(screen.getByTestId("ticket-detail-assignee")).toHaveTextContent("Builder");
+      await screen.findByRole("option", { name: "atlas" });
+      expect(screen.getByLabelText("Assign to")).toHaveValue(`agent:${AGENTS[1].id}`);
+      expect(screen.getByTestId("ticket-detail-unassign-button")).toBeInTheDocument();
     });
 
     it("assigns the Owner and shows the updated Ticket Galley returned", async () => {
       const assigned: Ticket = { ...TICKET, assigneeType: "owner" };
-      const onAssign = vi.fn<() => Promise<Ticket>>().mockResolvedValue(assigned);
+      const onAssign = vi.fn<(assignee: TicketAssignee) => Promise<Ticket>>().mockResolvedValue(assigned);
       render(<TicketDetail ticket={TICKET} onSave={vi.fn()} {...noopActions()} onAssign={onAssign} />);
 
+      fireEvent.change(screen.getByLabelText("Assign to"), { target: { value: "owner" } });
       fireEvent.click(screen.getByTestId("ticket-detail-assign-button"));
 
       expect(await screen.findByTestId("ticket-detail-assignee")).toHaveTextContent("Owner");
-      expect(onAssign).toHaveBeenCalledTimes(1);
+      expect(onAssign).toHaveBeenCalledExactlyOnceWith({ type: "owner" });
+    });
+
+    it("assigns an Agent, then replaces it with the Owner", async () => {
+      const onAssign = vi.fn<(assignee: TicketAssignee) => Promise<Ticket>>()
+        .mockResolvedValueOnce(agentAssigned(AGENTS[0]))
+        .mockResolvedValueOnce({ ...TICKET, assigneeType: "owner" });
+      render(<TicketDetail ticket={TICKET} onSave={vi.fn()} {...noopActions()} onAssign={onAssign} onLoadAgents={vi.fn().mockResolvedValue(AGENTS)} />);
+      await screen.findByRole("option", { name: "atlas" });
+
+      fireEvent.change(screen.getByLabelText("Assign to"), { target: { value: `agent:${AGENTS[0].id}` } });
+      fireEvent.click(screen.getByTestId("ticket-detail-assign-button"));
+      expect(await screen.findByTestId("ticket-detail-assignee")).toHaveTextContent("atlas");
+      expect(onAssign).toHaveBeenLastCalledWith({ type: "agent", agentId: AGENTS[0].id });
+      expect(screen.getByTestId("ticket-detail-assign-button")).toBeDisabled();
+
+      await waitFor(() => expect(screen.getByLabelText("Assign to")).toBeEnabled());
+      fireEvent.change(screen.getByLabelText("Assign to"), { target: { value: "owner" } });
+      fireEvent.click(screen.getByTestId("ticket-detail-assign-button"));
+      await waitFor(() => expect(screen.getByTestId("ticket-detail-assignee")).toHaveTextContent("Owner"));
+      expect(onAssign).toHaveBeenLastCalledWith({ type: "owner" });
+    });
+
+    it("keeps the last-known Assignee and shows Galley's rejection when assignment fails", async () => {
+      const onAssign = vi.fn<(assignee: TicketAssignee) => Promise<Ticket>>().mockRejectedValue(new Error("no ticket or agent with that identifier"));
+      render(<TicketDetail ticket={TICKET} onSave={vi.fn()} {...noopActions()} onAssign={onAssign} onLoadAgents={vi.fn().mockResolvedValue(AGENTS)} />);
+      await screen.findByRole("option", { name: "atlas" });
+
+      fireEvent.change(screen.getByLabelText("Assign to"), { target: { value: `agent:${AGENTS[0].id}` } });
+      fireEvent.click(screen.getByTestId("ticket-detail-assign-button"));
+
+      expect(await screen.findByTestId("ticket-detail-action-error")).toHaveTextContent("no ticket or agent with that identifier");
+      expect(screen.getByTestId("ticket-detail-assignee")).toHaveTextContent("Unassigned");
+    });
+
+    it("still offers Me when Agents cannot be loaded", async () => {
+      render(<TicketDetail ticket={TICKET} onSave={vi.fn()} {...noopActions()} onLoadAgents={vi.fn().mockRejectedValue(new Error("Galley is unreachable."))} />);
+
+      expect(await screen.findByTestId("ticket-detail-agents-error")).toHaveTextContent("Galley is unreachable.");
+      expect(screen.getByRole("option", { name: "Me" })).toBeInTheDocument();
     });
 
     it("unassigns and shows the updated Ticket Galley returned", async () => {
-      const assigned: Ticket = { ...TICKET, assigneeType: "owner" };
+      const assigned = agentAssigned(AGENTS[0]);
       const unassigned: Ticket = { ...TICKET, assigneeType: "" };
       const onUnassign = vi.fn<() => Promise<Ticket>>().mockResolvedValue(unassigned);
       render(<TicketDetail ticket={assigned} onSave={vi.fn()} {...noopActions()} onUnassign={onUnassign} />);
@@ -500,9 +567,5 @@ describe("TicketDetail", () => {
       expect(screen.getAllByTestId("ticket-detail-accept-unavailable")).toHaveLength(2);
     });
 
-    it("offers no Agent Assignee option anywhere -- M2 has no Agents (AGENTS.md)", () => {
-      render(<TicketDetail ticket={TICKET} onSave={vi.fn()} {...noopActions()} />);
-      expect(screen.queryByText(/agent/i)).not.toBeInTheDocument();
-    });
   });
 });

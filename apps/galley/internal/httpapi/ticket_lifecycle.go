@@ -194,7 +194,7 @@ func (s *server) ChangeTicketStatus(w http.ResponseWriter, r *http.Request, id s
 	if !ok {
 		return
 	}
-	id, ok = canonicalTicketID(id)
+	id, ok = canonicalPublicID(id)
 	if !ok {
 		writeTicketNotFound(w)
 		return
@@ -244,7 +244,7 @@ func (s *server) AcceptTicket(w http.ResponseWriter, r *http.Request, id string)
 	if !ok {
 		return
 	}
-	id, ok = canonicalTicketID(id)
+	id, ok = canonicalPublicID(id)
 	if !ok {
 		writeTicketNotFound(w)
 		return
@@ -276,12 +276,14 @@ func (s *server) AcceptTicket(w http.ResponseWriter, r *http.Request, id string)
 	writeJSON(w, http.StatusOK, ticket)
 }
 
-// setTicketAssigneeForOwner unconditionally sets assignee_type; nil
-// binds SQL NULL (unassigned). D3 places no current-Status
-// precondition on human assignment, and M2 never has an open Round to
-// lock the field. The transaction keeps the mutation and Badge hydration
-// atomic for the response.
-func setTicketAssigneeForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, publicID string, assigneeType *string) (Ticket, bool, error) {
+type ticketAssignee struct {
+	kind    TicketAssigneeType
+	agentID string
+}
+
+// D3 places no current-Status or Template precondition on assignment,
+// and no Round exists yet to lock the field.
+func setTicketAssigneeForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, publicID string, assignee ticketAssignee) (Ticket, bool, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return Ticket{}, false, err
@@ -291,11 +293,24 @@ func setTicketAssigneeForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID 
 	if err != nil || !found {
 		return Ticket{}, found, err
 	}
+	var agentRowID *int64
+	if assignee.kind == TicketAssigneeTypeAgent {
+		id, found, err := agentRowIDForOwner(ctx, tx, ownerID, assignee.agentID)
+		if err != nil || !found {
+			return Ticket{}, found, err
+		}
+		agentRowID = &id
+	}
+	var assigneeType *string
+	if assignee.kind != TicketAssigneeTypeEmpty {
+		value := string(assignee.kind)
+		assigneeType = &value
+	}
 	row := tx.QueryRow(ctx,
-		`UPDATE tickets SET assignee_type = $3, updated_at = now()
+		`UPDATE tickets SET assignee_type = $3, assignee_agent_id = $4, updated_at = now()
 		  WHERE owner_id = $1 AND public_id = $2::uuid
 		  RETURNING `+ticketSelectColumns,
-		ownerID, publicID, assigneeType,
+		ownerID, publicID, assigneeType, agentRowID,
 	)
 	ticket, err := scanTicketRow(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -313,34 +328,59 @@ func setTicketAssigneeForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID 
 	return ticket, true, nil
 }
 
-// The only non-empty assignee_type M2 writes; migration 000007 says
-// why the column is not a closed CHECK.
-const assigneeTypeOwnerValue = "owner"
+func writeTicketOrAgentNotFound(w http.ResponseWriter) {
+	writeError(w, http.StatusNotFound, "not_found", "no ticket or agent with that identifier")
+}
 
-// The Owner is the only assignable Assignee in M2, so this takes no
-// assignee in its body.
-func (s *server) AssignTicketOwner(w http.ResponseWriter, r *http.Request, id string) {
+func (s *server) AssignTicket(w http.ResponseWriter, r *http.Request, id string) {
 	owner, ok := s.requireSession(w, r)
 	if !ok {
 		return
 	}
-	id, ok = canonicalTicketID(id)
+	id, ok = canonicalPublicID(id)
 	if !ok {
 		writeTicketNotFound(w)
+		return
+	}
+	var req AssignTicketRequest
+	if !decodeStrictJSON(w, r, &req, `request body must be JSON matching {"type": "owner"} or {"type": "agent", "agentId": "<uuid>"}`) {
+		return
+	}
+	assignee := ticketAssignee{kind: TicketAssigneeTypeOwner}
+	writeNotFound := writeTicketNotFound
+	switch req.Type {
+	case AssignTicketRequestTypeOwner:
+		if req.AgentId != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", `"agentId" is accepted only when "type" is "agent"`)
+			return
+		}
+	case AssignTicketRequestTypeAgent:
+		if req.AgentId == nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", `"agentId" is required when "type" is "agent"`)
+			return
+		}
+		agentID, valid := canonicalPublicID(*req.AgentId)
+		if !valid {
+			writeTicketOrAgentNotFound(w)
+			return
+		}
+		assignee = ticketAssignee{kind: TicketAssigneeTypeAgent, agentID: agentID}
+		writeNotFound = writeTicketOrAgentNotFound
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf(`"type" must be %q or %q`, AssignTicketRequestTypeOwner, AssignTicketRequestTypeAgent))
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
 
-	assigneeType := assigneeTypeOwnerValue
-	ticket, found, err := setTicketAssigneeForOwner(ctx, s.pool, owner.ID, id, &assigneeType)
+	ticket, found, err := setTicketAssigneeForOwner(ctx, s.pool, owner.ID, id, assignee)
 	if err != nil {
 		writeMutationError(w, err, "failed to assign the ticket")
 		return
 	}
 	if !found {
-		writeTicketNotFound(w)
+		writeNotFound(w)
 		return
 	}
 	writeJSON(w, http.StatusOK, ticket)
@@ -351,7 +391,7 @@ func (s *server) UnassignTicket(w http.ResponseWriter, r *http.Request, id strin
 	if !ok {
 		return
 	}
-	id, ok = canonicalTicketID(id)
+	id, ok = canonicalPublicID(id)
 	if !ok {
 		writeTicketNotFound(w)
 		return
@@ -360,7 +400,7 @@ func (s *server) UnassignTicket(w http.ResponseWriter, r *http.Request, id strin
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
 
-	ticket, found, err := setTicketAssigneeForOwner(ctx, s.pool, owner.ID, id, nil)
+	ticket, found, err := setTicketAssigneeForOwner(ctx, s.pool, owner.ID, id, ticketAssignee{})
 	if err != nil {
 		writeMutationError(w, err, "failed to unassign the ticket")
 		return

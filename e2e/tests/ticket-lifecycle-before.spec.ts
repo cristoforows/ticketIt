@@ -31,6 +31,7 @@ test("a Status and Assignee reached through the real controls survive a Galley r
   await page.getByTestId("ticket-detail-status-button-InProgress").click();
   await expect(page.getByTestId("ticket-detail-status")).toHaveText("In Progress");
 
+  await page.getByLabel("Assign to").selectOption({ label: "Me" });
   await page.getByTestId("ticket-detail-assign-button").click();
   await expect(page.getByTestId("ticket-detail-assignee")).toHaveText("Owner");
 });

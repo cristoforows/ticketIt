@@ -855,8 +855,8 @@ test would not catch.
 Implements the accepted [D3 decision](../../docs/decisions/d3-agent-template-compatibility.md)
 S2's human-assigned workflow table and S4's rejections: an Assignee
 (`internal/migrations/000007_add_ticket_assignee.up.sql`'s nullable
-`assignee_type TEXT` -- `"owner"` or unassigned; M2 has no Agent
-Assignee), a Status state machine
+`assignee_type TEXT` -- `"owner"` or unassigned in M2; #127 adds
+`"agent"`, see "Agents and Agent assignment"), a Status state machine
 (`internal/httpapi/ticket_lifecycle.go`), and the four commands that
 change either: `POST /api/tickets/{id}/status`,
 `POST /api/tickets/{id}/accept`, and
@@ -907,12 +907,10 @@ read-then-write version of the same function
 precondition on assignment is vacuously true throughout M2 (no Round
 concept exists anywhere), so `AssignTicketOwner`/`UnassignTicket` apply
 via a plain, idempotent `UPDATE` from every Status, with no transaction
-of their own -- there is nothing for them to race against.
-`Ticket.assigneeType` is a plain, unenumerated string in the contract
-(not a closed enum, unlike `status`/`template`/`completionCondition`):
-nothing in this contract ever accepts an assignee-type value from a
-client, so a future Agent Assignee kind can be added as a purely
-additive change to this same column and contract field.
+of their own -- there is nothing for them to race against. (#93 later
+put both behind the archive row lock; #127 renamed `AssignTicketOwner`
+to `AssignTicket`, gave it a request body and enumerated
+`assigneeType`.)
 
 **The no-execution-artifact guardrail
 (`internal/httpapi/no_execution_side_effects_test.go`) is a database-level
@@ -937,8 +935,8 @@ was caught by the guardrail on the first real test run, not merely
 described afterward; see the evidence record for the captured failure
 and the deliberate allowlist extension that resolved it.
 
-**Out of scope, explicitly:** Agent Assignee, an agent-assignment
-endpoint, and Agent-readiness validation (M4); open-Round field locks
+**Out of scope, explicitly:** Agent Assignee and an agent-assignment
+endpoint (added by #127), Agent-readiness validation (M4); open-Round field locks
 (M4, vacuously satisfied in M2); D4's `Done -> Ready` "already-merged
 PR" caveat (unresolved, still M8); reviewed-merge evidence transport
 (D2, M8); archive and Badges (M3). See
@@ -1044,6 +1042,35 @@ malformed or foreign ids return the shared `404`. Restore does not create
 execution artefacts or request work. The tests cover the Status grid,
 owner scope, a concurrent Archive/Restore race against PostgreSQL and
 persistence after a process restart. Run `go test ./...`, `go vet ./...`,
+`go build ./...` and `./scripts/check-contract-drift.sh` here.
+
+## Agents and Agent assignment (issue #127)
+
+Migration `000010_create_agents.up.sql` adds the Owner-scoped `agents`
+table: a public UUID, a name of 1-80 characters after trimming, unique
+per Owner ignoring case (`agents_owner_name_ci_unique` on
+`lower(name)`), and an immutable kind, `research` or `coding`.
+`GET /api/agents` lists them ordered by name ignoring case;
+`POST /api/agents` creates one (`201`); `PATCH /api/agents/{id}` renames
+one and rejects any other property. A duplicate name, including one
+created concurrently, is `409 duplicate_agent_name`.
+
+The same migration adds nullable `tickets.assignee_agent_id`. A composite
+foreign key to `agents (owner_id, id)` keeps the Agent in the Ticket's
+Owner, and `tickets_assignee_agent_iff_agent_type` requires the Agent id
+exactly when `assignee_type` is `agent`. `PUT /api/tickets/{id}/assignee`
+now takes `{"type":"owner"}` or `{"type":"agent","agentId":"<uuid>"}`
+and replaces any previous Assignee; `DELETE` clears both columns. Every
+Ticket response carries `assigneeAgent` (`{id,name,kind}` or `null`),
+read live from `agents`, so a rename shows on every Ticket. An unknown,
+malformed or foreign Agent id returns the shared `404` with
+`no ticket or agent with that identifier`, leaving the Ticket unchanged.
+
+Assignment is allowed on both Templates and in every Status, and never
+reads the Template, the Agent's kind or any readiness rule. It creates no
+execution record and requests no work: `agents` joins the
+no-execution-artefact allowlist, and the trip wire expects exactly one
+new Agent and one new Ticket. Run `go test ./...`, `go vet ./...`,
 `go build ./...` and `./scripts/check-contract-drift.sh` here.
 
 ## Error shape

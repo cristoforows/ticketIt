@@ -16,6 +16,7 @@ const CREATED = {
   template: "Basic",
   completionCondition: "humanAcceptance",
   assigneeType: "",
+  assigneeAgent: null,
   goal: "",
   context: "",
   successCriteria: "",
