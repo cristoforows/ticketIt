@@ -139,6 +139,7 @@ export interface paths {
          * Partially update a Ticket's manual refinement fields
          * @description Manual refinement (issue #58, docs/ticket-creation.md, "Manual guidance"): edits title, goal, context, successCriteria, constraints, and/or repository (issue #59) by hand. No AI of any kind, and this triggers nothing else. This is a genuine partial update, not a replace-whole-resource PUT: a property absent from the request body leaves the stored value unchanged; a property present and set to "" clears the stored value (title excepted -- see below); a property present with text is trimmed and stored. Every property here is therefore optional at the schema level (never listed under `required`) so "absent" and "present as an empty string" stay distinguishable on the wire, and so generated Go clients bind each one through a pointer -- see UpdateTicketRequest.
          *     `title` cannot be cleared: a value that trims to empty is rejected with `invalid_request`, since every Ticket must keep a title. Every field here is trimmed of leading/trailing whitespace before validation or storage, exactly like CreateTicketRequest.title -- a value that trims to only whitespace is treated as an explicit empty string (i.e. it clears goal/context/successCriteria/constraints/repository, and is rejected for title).
+         *     On a Ready, Agent-assigned Ticket, clearing an AgentReadinessInput that Agent needs is rejected with `agent_readiness_incomplete` and no field is updated.
          *     `template` is present in this request schema only so a client request naming it can be told apart from one that does not -- it is never accepted. Changing a Ticket's Template after creation is out of scope for M2 (post-delivery Template/repository change is D4, owned by M8): a request naming `template` at all, any value included, is rejected with `invalid_request` and no field is updated. `completionCondition` has no corresponding request field anywhere in this contract -- it cannot be set or changed through this or any other operation once a Ticket is created (issue #59, D3).
          *     Concurrent-edit rule: last-write-wins, with no optimistic concurrency check (no version token, no ETag/If-Match). Two PATCH requests touching disjoint fields both apply, since each only ever touches the fields it names; two PATCH requests naming the same field apply in whichever order Galley processes them, and the later one's value silently wins -- there is no conflict detection. See apps/galley/README.md, "Manual refinement fields," for the full reasoning.
          *     Requires a valid session; returns 401 unauthenticated otherwise. An unknown identifier, a malformed identifier, and an identifier belonging to another Owner all return the same 404 not_found, exactly like GET on this same path.
@@ -162,6 +163,7 @@ export interface paths {
          * @description A human-assigned lifecycle transition, implementing D3 S2's table (docs/decisions/d3-agent-template-compatibility.md). Validated against the Ticket's persisted current Status inside one transaction, so of two concurrent conflicting requests at most one applies.
          *     `Done` is always rejected here, whatever the current Status: it is reachable only through `POST /api/tickets/{id}/accept`, so completion cannot happen by accident.
          *     Any move off D3 S2's table is rejected with `invalid_transition`; notably `Blocked` resumes only to `InProgress`, never straight to `Ready`.
+         *     On an Agent-assigned Ticket, `InProgress`, `InReview` and `Blocked` are rejected with `agent_owned_transition` (D3 S4), and `Ready` with `agent_readiness_incomplete` while an AgentReadinessInput is missing.
          *     Creates no Round, work request, or queue entry. Requires a valid session; returns `401 unauthenticated` otherwise. Identifier handling matches the other `/api/tickets/{id}` operations.
          */
         post: operations["changeTicketStatus"];
@@ -208,14 +210,14 @@ export interface paths {
         get?: never;
         /**
          * Assign the signed-in Owner or one of the Owner's Agents
-         * @description Idempotent, and allowed whatever the Ticket's current Status or Template (D3 S1). Reassignment keeps the Ticket's history and completion condition. An unknown, malformed or foreign Ticket or Agent id returns the shared 404 not_found.
+         * @description Idempotent, and allowed whatever the Ticket's current Status or Template (D3 S1), except that assigning an Agent to a Ready Ticket missing an AgentReadinessInput that Agent needs is rejected with `agent_readiness_incomplete`. Reassignment keeps the Ticket's history and completion condition. An unknown, malformed or foreign Ticket or Agent id returns the shared 404 not_found.
          *     Creates no Round, work request, or queue entry. Requires a valid session; returns `401 unauthenticated` otherwise.
          */
         put: operations["assignTicket"];
         post?: never;
         /**
          * Clear a Ticket's Assignee
-         * @description Idempotent: unassigning an already-unassigned Ticket returns 200, matching this contract's last-write-wins conventions elsewhere. Allowed whatever the current Status, as `assignTicket`.
+         * @description Idempotent: unassigning an already-unassigned Ticket returns 200, matching this contract's last-write-wins conventions elsewhere. Allowed whatever the current Status.
          *     Requires a valid session; returns `401 unauthenticated` otherwise. Identifier handling matches the other `/api/tickets/{id}` operations.
          */
         delete: operations["unassignTicket"];
@@ -441,6 +443,11 @@ export interface components {
          * @enum {string}
          */
         AgentKind: "research" | "coding";
+        /**
+         * @description A Ticket field an Agent-assigned Ticket needs before Ready (D3 S1): `goal` and `successCriteria` always, `repository` for a `coding` Agent.
+         * @enum {string}
+         */
+        AgentReadinessInput: "goal" | "successCriteria" | "repository";
         Agent: {
             /** Format: uuid */
             id: string;
@@ -480,16 +487,18 @@ export interface components {
             assigneeType: components["schemas"]["TicketAssigneeType"];
             /** @description Null unless `assigneeType` is `agent`. */
             assigneeAgent: components["schemas"]["TicketAssigneeAgent"] | null;
+            /** @description Unarchived, Ready, Agent-assigned, and every AgentReadinessInput that Agent needs is present. Creates no Round by itself. */
+            requestingAgentWork: boolean;
             completionCondition: components["schemas"]["TicketCompletionCondition"];
             /** @description Manual refinement (issue #58, docs/ticket-creation.md, "Manual guidance" -- prompt "What outcome do you want?"). Plain text, never Markdown (M7 owns report rendering). Always present on the wire; "" means never set or cleared -- read access never distinguishes those two, only PATCH's request body does (see UpdateTicketRequest). */
             goal: string;
             /** @description Manual refinement (issue #58 -- prompt "Supply relevant background, links, repositories, or examples."). Plain text; see `goal`'s description for the "" convention. */
             context: string;
-            /** @description Manual refinement (issue #58 -- prompt "Describe observable conditions that demonstrate the outcome was achieved."). CONTEXT.md's "Success Criteria" term -- not "acceptance criteria". Plain text; see `goal`'s description for the "" convention. Agent-readiness validation of this field is M4's, not this slice's. */
+            /** @description Manual refinement (issue #58 -- prompt "Describe observable conditions that demonstrate the outcome was achieved."). CONTEXT.md's "Success Criteria" term -- not "acceptance criteria". Plain text; see `goal`'s description for the "" convention. */
             successCriteria: string;
             /** @description Manual refinement (issue #58 -- prompt "State what must stay unchanged or remain out of scope."). Plain text; see `goal`'s description for the "" convention. */
             constraints: string;
-            /** @description One Ticket repository reference (issue #59, D3 S1 check 3), available on either Template -- required by nothing in M2. There is exactly one such field on a Ticket; the Coding Template surfaces it by default, but it is not a competing Basic-only concept. Plain text (e.g. an "owner/repo" name or a URL) with no format enforced yet. Always present on the wire; "" means never set or cleared -- see `goal`'s description for the same convention. */
+            /** @description One Ticket repository reference (issue #59, D3 S1 check 3), available on either Template, and required before Ready only by a `coding` Agent's readiness. There is exactly one such field on a Ticket; the Coding Template surfaces it by default, but it is not a competing Basic-only concept. Plain text (e.g. an "owner/repo" name or a URL) with no format enforced yet. Always present on the wire; "" means never set or cleared -- see `goal`'s description for the same convention. */
             repository: string;
             /**
              * Format: date-time
@@ -527,7 +536,13 @@ export interface components {
         TicketAllowedActions: {
             /** @description Targets accepted by a plain status command from this Ticket's current Status. */
             statusChanges: components["schemas"]["TicketStatus"][];
+            /** @description Targets D3 S2's table permits from the current Status that this Ticket's Agent assignment or missing inputs rule out, each with the status command's error. */
+            statusChangeRejections: components["schemas"]["TicketStatusChangeRejection"][];
             accept: components["schemas"]["TicketAcceptAvailability"];
+        };
+        TicketStatusChangeRejection: {
+            status: components["schemas"]["TicketStatus"];
+            reason: components["schemas"]["ErrorDetail"];
         };
         TicketAcceptAvailability: {
             available: boolean;
@@ -620,6 +635,8 @@ export interface components {
             code: string;
             /** @description Human-readable, non-secret explanation. */
             message: string;
+            /** @description Present only with `agent_readiness_incomplete`. */
+            missing?: components["schemas"]["AgentReadinessInput"][];
         };
     };
     responses: never;
@@ -939,7 +956,7 @@ export interface operations {
                     "application/json": components["schemas"]["Ticket"];
                 };
             };
-            /** @description Error. See `ErrorBody`. Includes `invalid_transition` for a Status move not on D3 S2's table. */
+            /** @description Error. See `ErrorBody`. Includes `invalid_transition`, `agent_owned_transition` and `agent_readiness_incomplete`. */
             default: {
                 headers: {
                     [name: string]: unknown;
