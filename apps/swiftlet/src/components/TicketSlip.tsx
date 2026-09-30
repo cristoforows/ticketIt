@@ -1,27 +1,33 @@
 import type { CSSProperties, DragEvent } from "react";
-import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import type { Ticket } from "../api/tickets";
-import { BadgeTag, buttonClasses, cx, Rule, shortDate, slipTilt, statusLabel, statusTone, ticketSerial } from "./ui";
+import { BadgeTag, cx, Rule, shortDate, slipTilt, statusTone, ticketSerial } from "./ui";
+import { openTicketModal } from "../router";
+import { SlipActions } from "./SlipActions";
 import { TicketModalLink, ticketRowTestId } from "./TicketModalLink";
 
-export function TicketSlip({ ticket, pending, anyPending, beingDragged, moveTargets, onMove, onDragStart, onDragEnd }: {
+export function TicketSlip({ ticket, phone, pending, anyPending, selected, beingDragged, moveTargets, onToggle, onDismiss, onMove, onDragStart, onDragEnd }: {
   ticket: Ticket;
+  phone: boolean;
   pending: boolean;
   anyPending: boolean;
+  selected: boolean;
   beingDragged: boolean;
   moveTargets: Ticket["status"][];
+  onToggle: () => void;
+  onDismiss: () => void;
   onMove: (target: Ticket["status"]) => void;
   onDragStart: (event: DragEvent<HTMLLIElement>) => void;
   onDragEnd: () => void;
 }) {
+  const panelId = `board-slip-actions-${ticket.id}`;
   return (
     <li
       data-testid={ticketRowTestId("board", ticket.id)}
       data-dragging={beingDragged ? "true" : undefined}
       aria-busy={pending}
-      draggable={!pending}
+      draggable={!pending && !phone}
       style={{ "--tilt": `${slipTilt(ticket.id)}deg` } as CSSProperties}
-      className={cx("slip", !pending && "cursor-grab", beingDragged && "opacity-60")}
+      className={cx("slip", phone && "grid", !pending && !phone && "cursor-grab", beingDragged && "opacity-60")}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
     >
@@ -29,9 +35,10 @@ export function TicketSlip({ ticket, pending, anyPending, beingDragged, moveTarg
         data-surface="paper"
         {...statusTone(ticket.status)}
         className={cx(
-          "slip-paper flex flex-col gap-2 border-t-4 border-(--status) bg-paper px-3 pt-3 pb-5 text-ink",
+          "slip-paper col-start-1 row-start-1 flex flex-col gap-2 border-t-4 border-(--status) bg-paper px-3 pt-3 pb-5 text-ink",
           beingDragged && "outline-2 -outline-offset-4 outline-ink outline-dashed",
           pending && "opacity-70",
+          selected && "opacity-40 grayscale",
         )}
       >
         <div className="flex justify-between text-label text-muted">
@@ -53,26 +60,29 @@ export function TicketSlip({ ticket, pending, anyPending, beingDragged, moveTarg
           ))}
         </p>
         {pending && <span role="status" className="self-start rounded-tag bg-ink px-2 py-0.5 text-label font-bold tracking-label text-amber uppercase">Moving…</span>}
-        {moveTargets.length > 0 && (
-          <DropdownMenu.Root modal={false}>
-            <DropdownMenu.Trigger data-testid="move-to-trigger" disabled={anyPending} className={cx(buttonClasses("secondary"), "self-start px-2 py-1 text-label tracking-label uppercase")}>Move to…</DropdownMenu.Trigger>
-            <DropdownMenu.Portal>
-              <DropdownMenu.Content align="start" sideOffset={4} className="z-50 min-w-40 border-2 border-ink bg-paper p-1 text-ink shadow-paper">
-                {moveTargets.map((target) => (
-                  <DropdownMenu.Item
-                    key={target}
-                    data-move-target={target}
-                    className="cursor-pointer px-2 py-1.5 text-body font-bold outline-none data-[highlighted]:bg-ink data-[highlighted]:text-amber data-[highlighted]:before:mr-1 data-[highlighted]:before:content-['▸']"
-                    onSelect={() => onMove(target)}
-                  >
-                    {statusLabel(target)}
-                  </DropdownMenu.Item>
-                ))}
-              </DropdownMenu.Content>
-            </DropdownMenu.Portal>
-          </DropdownMenu.Root>
-        )}
       </div>
+      {phone && !pending && (
+        <button
+          type="button"
+          data-testid="board-slip-toggle"
+          aria-label={`Actions for ${ticket.title}`}
+          aria-expanded={selected}
+          aria-controls={panelId}
+          className="z-10 col-start-1 row-start-1 h-full w-full cursor-pointer border-0 bg-transparent p-0"
+          onClick={onToggle}
+        />
+      )}
+      {selected && (
+        <SlipActions
+          id={panelId}
+          ticket={ticket}
+          targets={moveTargets}
+          disabled={anyPending}
+          onView={() => { onDismiss(); openTicketModal(ticket.id, "board"); }}
+          onEdit={() => { onDismiss(); openTicketModal(ticket.id, "board", true); }}
+          onMove={(target) => { onDismiss(); onMove(target); }}
+        />
+      )}
     </li>
   );
 }

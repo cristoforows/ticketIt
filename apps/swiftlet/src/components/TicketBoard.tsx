@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { UnauthenticatedError } from "../api/session";
 import { changeTicketStatus, fetchTickets, type Ticket } from "../api/tickets";
 import { cx, EmptyMessage, ErrorMessage, LoadingMessage, statuses, statusTone } from "./ui";
-import { refocusTicketRowIfFocusLost } from "./TicketModalLink";
+import { BoardStageSwitcher } from "./BoardStageSwitcher";
+import { scrollBehavior, useIsPhone } from "./usePhone";
+import { focusTicketRow, refocusTicketRowIfFocusLost, ticketRowTestId } from "./TicketModalLink";
 import { TicketSlip } from "./TicketSlip";
 
 type BoardState =
@@ -20,6 +22,80 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
   const requestId = useRef(0);
   const focusMovedTicketId = useRef<string | null>(null);
   const focusedRefreshKey = useRef(0);
+  const phone = useIsPhone();
+  const [stage, setStage] = useState(() => {
+    const index = statuses.findIndex(({ value }) => value === new URLSearchParams(window.location.search).get("stage"));
+    return Math.max(index, 0);
+  });
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const columnsRef = useRef<HTMLDivElement>(null);
+  const scrollTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  const columnLeft = (index: number) => {
+    const container = columnsRef.current;
+    const column = container?.children[index];
+    if (!container || !column) return 0;
+    return column.getBoundingClientRect().left - container.getBoundingClientRect().left + container.scrollLeft;
+  };
+
+  const rememberStage = (index: number) => {
+    if (window.location.pathname !== "/board") return;
+    const query = new URLSearchParams(window.location.search);
+    if (index === 0) query.delete("stage");
+    else query.set("stage", statuses[index].value);
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${query.size ? `?${query}` : ""}`);
+  };
+
+  const goToStage = useCallback((index: number) => {
+    setStage(index);
+    rememberStage(index);
+    setSelectedId(null);
+    columnsRef.current?.scrollTo?.({ left: columnLeft(index), behavior: scrollBehavior() });
+  }, []);
+
+  function syncStageFromScroll() {
+    clearTimeout(scrollTimer.current);
+    scrollTimer.current = setTimeout(() => {
+      const container = columnsRef.current;
+      if (!container) return;
+      let nearest = 0;
+      for (let index = 1; index < container.children.length; index++) {
+        if (Math.abs(columnLeft(index) - container.scrollLeft) < Math.abs(columnLeft(nearest) - container.scrollLeft)) nearest = index;
+      }
+      setStage((current) => {
+        if (current !== nearest) setSelectedId(null);
+        return nearest;
+      });
+      rememberStage(nearest);
+    }, 100);
+  }
+
+  useEffect(() => () => clearTimeout(scrollTimer.current), []);
+
+  const loaded = state.kind === "loaded";
+  useLayoutEffect(() => {
+    if (!loaded || !phone || stage === 0) return;
+    columnsRef.current?.scrollTo?.({ left: columnLeft(stage), behavior: "instant" });
+  }, [loaded, phone]);
+
+  useEffect(() => {
+    if (!phone || !selectedId) return;
+    const toggle = () => document.querySelector<HTMLElement>(`[data-testid="${ticketRowTestId("board", selectedId)}"] [data-testid="board-slip-toggle"]`);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setSelectedId(null);
+      toggle()?.focus({ preventScroll: true });
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (!(event.target as Element).closest(`[data-testid="${ticketRowTestId("board", selectedId)}"]`)) setSelectedId(null);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [phone, selectedId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,8 +132,11 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
     if (state.kind !== "loaded" || !focusMovedTicketId.current) return;
     const id = focusMovedTicketId.current;
     focusMovedTicketId.current = null;
-    const card = document.querySelector<HTMLElement>(`[data-testid="board-ticket-${id}"]`);
-    (card?.querySelector<HTMLElement>('[data-testid="move-to-trigger"]') ?? card?.querySelector<HTMLElement>("a"))?.focus({ preventScroll: true });
+    if (phone) {
+      document.querySelector<HTMLElement>(`[data-testid="board-stage-step-${statuses[stage].value}"]`)?.focus({ preventScroll: true });
+      return;
+    }
+    focusTicketRow("board", id);
   }, [state, pendingId]);
 
   const draggingTicket = state.kind === "loaded" ? state.tickets.find((ticket) => ticket.id === draggingId) : undefined;
@@ -104,9 +183,21 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
       {state.kind === "loaded" && (
         state.tickets.length === 0 && badgeIds.length > 0 && <EmptyMessage data-testid="ticket-board-filter-empty" className="mb-4">No tickets match the selected Badges.</EmptyMessage>
       )}
+      {state.kind === "loaded" && phone && (
+        <BoardStageSwitcher
+          stages={statuses.map(({ value, label }) => ({ value, label, count: state.tickets.filter((ticket) => ticket.status === value).length }))}
+          current={stage}
+          onSelect={goToStage}
+        />
+      )}
       {state.kind === "loaded" && (
-        <div data-testid="board-columns" className="scroll-hint grid grid-flow-col auto-cols-[minmax(10rem,1fr)] max-md:auto-cols-[minmax(13rem,1fr)] gap-3 overflow-x-auto px-1 pt-3 pb-6">
-          {statuses.map(({ value, label }) => {
+        <div
+          ref={columnsRef}
+          data-testid="board-columns"
+          onScroll={phone ? syncStageFromScroll : undefined}
+          className="scroll-hint grid grid-flow-col auto-cols-[minmax(10rem,1fr)] max-md:snap-x max-md:snap-mandatory max-md:auto-cols-[100%] gap-3 overflow-x-auto px-1 pt-3 pb-6"
+        >
+          {statuses.map(({ value, label }, columnIndex) => {
             const tickets = state.tickets.filter((ticket) => ticket.status === value);
             const dragging = draggingTicket !== undefined;
             const blocked = dragging && !(draggingTicket.status === value) && !canMove(draggingTicket, value);
@@ -116,11 +207,12 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
               <section
                 key={value}
                 {...statusTone(value)}
+                inert={phone && columnIndex !== stage}
                 data-testid={`board-status-${value}`}
                 data-drop-target={isDropTarget ? "true" : undefined}
                 data-drop-blocked={dragging && !isDropTarget && !isOrigin ? "true" : undefined}
                 className={cx(
-                  "flex min-w-0 flex-col p-2",
+                  "flex min-w-0 flex-col p-2 max-md:snap-start",
                   isDropTarget && "bg-paper/10 outline-2 -outline-offset-2 outline-(--status-text) outline-dashed",
                 )}
                 aria-labelledby={`board-heading-${value}`}
@@ -135,11 +227,11 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
                   setDraggingId(null);
                 }}
               >
-                <div className="flex items-center justify-between border-b-2 border-(--status) pb-2">
+                <div className="flex items-center justify-between border-b-2 border-(--status) pb-2 max-md:sr-only">
                   <h3 id={`board-heading-${value}`} className="text-label font-bold tracking-label text-(--status-text) uppercase">{label}</h3>
                   <span aria-hidden="true" className="grid size-6 place-items-center rounded-pill bg-(--status-text) text-label font-bold text-ground">{tickets.length}</span>
                 </div>
-                <p aria-hidden="true" className={cx("mt-2 min-h-4 text-center", slipEdge, isDropTarget ? "font-bold text-(--status-text)" : "text-dim")}>
+                <p aria-hidden="true" className={cx("mt-2 min-h-4 text-center max-md:hidden", slipEdge, isDropTarget ? "font-bold text-(--status-text)" : "text-dim")}>
                   {dragging && (isDropTarget ? "▾ Drop here" : isOrigin ? "● Current" : "✕ Not allowed")}
                 </p>
                 <div aria-hidden="true" className={cx("mt-4 h-2 rounded-pill bg-linear-to-b from-rail to-rail-shade shadow-inner", blocked && "opacity-40")} />
@@ -149,10 +241,14 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
                       <TicketSlip
                         key={ticket.id}
                         ticket={ticket}
+                        phone={phone}
                         pending={pendingId === ticket.id}
                         anyPending={pendingId !== null}
+                        selected={phone && selectedId === ticket.id}
                         beingDragged={draggingId === ticket.id}
                         moveTargets={moveTargets(ticket)}
+                        onToggle={() => setSelectedId(selectedId === ticket.id ? null : ticket.id)}
+                        onDismiss={() => setSelectedId(null)}
                         onMove={(target) => void moveTicket(ticket, target)}
                         onDragStart={(event) => {
                           if (commandPending.current) {

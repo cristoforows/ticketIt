@@ -62,6 +62,21 @@ describe("TicketDetailPage", () => {
     expect(fetch).toHaveBeenCalledWith(`/api/tickets/${TICKET_ID}`, undefined);
   });
 
+  it("opens in edit mode when the edit flag is set, unless the Ticket is archived", async () => {
+    window.history.replaceState({}, "", `/tickets/${TICKET_ID}?edit=true`);
+    stubFetch(jsonResponse(TICKET));
+    const { unmount } = render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+    expect(await screen.findByTestId("ticket-detail-edit-form")).toBeInTheDocument();
+    await waitFor(() => expect(window.location.search).toBe(""));
+    unmount();
+
+    stubFetch(jsonResponse({ ...TICKET, archivedAt: "2026-09-23T00:00:00Z" }));
+    render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+    expect(await screen.findByTestId("ticket-detail-edit-button")).toBeDisabled();
+    expect(screen.queryByTestId("ticket-detail-edit-form")).not.toBeInTheDocument();
+    window.history.replaceState({}, "", "/");
+  });
+
   it("rejects a Ticket missing Galley's allowed actions or an unavailable Accept reason", async () => {
     for (const payload of [
       { ...TICKET, allowedActions: undefined },
