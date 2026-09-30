@@ -266,6 +266,15 @@ full-page detail, then replaces the second with the Owner. Each step is
 checked against Galley's live response, the Ticket list and the slip.
 `run.sh` checks its exit code.
 
+`tests/runner.spec.ts` pairs a runner on the Agents page, reads the
+credential from the page, and spawns a real Michelin
+(`apps/michelin/src/main.ts`, no install needed) against `GALLEY_BASE_URL`.
+It waits for **Runner connected** in the header, stops Michelin, then
+calls the development-only `POST /api/dev/clock/advance` for 30 s so
+Galley's health window passes without a real wait, and waits for
+**Runner disconnected**. The Ticket list must be unchanged, and it
+stays unchanged after **Revoke**. `run.sh` checks its exit code.
+
 ## The failure-mode spec
 
 `tests/backend-failure.spec.ts` runs *after* `run.sh` stops Galley, and
