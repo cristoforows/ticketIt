@@ -32,9 +32,9 @@ func migrateTo(t *testing.T, databaseURL string, version uint) {
 	}
 }
 
-func TestMigration11_BackfillsPriorityRankNewestFirstPerOwner(t *testing.T) {
+func TestMigration12_BackfillsPriorityRankNewestFirstPerOwner(t *testing.T) {
 	databaseURL := NewEmptyTestDatabase(t)
-	migrateTo(t, databaseURL, 10)
+	migrateTo(t, databaseURL, 11)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	conn, err := pgx.Connect(ctx, databaseURL)
@@ -71,7 +71,7 @@ func TestMigration11_BackfillsPriorityRankNewestFirstPerOwner(t *testing.T) {
 		}
 	}
 
-	migrateTo(t, databaseURL, 11)
+	migrateTo(t, databaseURL, 12)
 
 	want := map[string]int64{
 		"tied, inserted second": 1024,

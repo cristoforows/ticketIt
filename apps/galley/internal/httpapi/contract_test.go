@@ -764,3 +764,72 @@ func loadContract(t *testing.T) *openapi3.T {
 	}
 	return doc
 }
+
+func TestRunner_ResponsesMatchContractAndMethod405(t *testing.T) {
+	f := newRunnerFixture(t)
+	router, err := legacy.NewRouter(loadContract(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate := func(call runnerCall, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(call.method, call.path, strings.NewReader(call.body))
+		if call.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if call.token != "" {
+			req.Header.Set("Authorization", "Bearer "+call.token)
+		}
+		if call.cookie != nil {
+			req.AddCookie(call.cookie)
+		}
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("%s %s: status=%d, want %d; body=%s", call.method, call.path, rec.Code, want, rec.Body.String())
+		}
+		validateAgainstContract(t, router, req, rec)
+		return rec
+	}
+	validate(runnerCall{method: http.MethodGet, path: "/api/runner-health", cookie: f.cookie}, http.StatusOK)
+	validate(runnerCall{method: http.MethodGet, path: "/api/runner-health"}, http.StatusUnauthorized)
+	var pairing RunnerPairing
+	if err := json.Unmarshal(validate(runnerCall{method: http.MethodPost, path: "/api/runner-credential", cookie: f.cookie}, http.StatusCreated).Body.Bytes(), &pairing); err != nil {
+		t.Fatal(err)
+	}
+	validate(runnerCall{method: http.MethodGet, path: "/api/runner-health", cookie: f.cookie}, http.StatusOK)
+	validate(runnerCall{method: http.MethodPost, path: "/api/runner/heartbeat", token: pairing.Token}, http.StatusConflict)
+	validate(runnerCall{method: http.MethodPost, path: "/api/runner/register", body: `{}`, token: pairing.Token}, http.StatusBadRequest)
+	validate(runnerCall{method: http.MethodPost, path: "/api/runner/register", body: registerBody, token: pairing.Token}, http.StatusOK)
+	validate(runnerCall{method: http.MethodPost, path: "/api/runner/heartbeat", token: pairing.Token}, http.StatusOK)
+	validate(runnerCall{method: http.MethodGet, path: "/api/runner-health", cookie: f.cookie}, http.StatusOK)
+	validate(runnerCall{method: http.MethodPost, path: "/api/runner/heartbeat", cookie: f.cookie}, http.StatusUnauthorized)
+	validate(runnerCall{method: http.MethodDelete, path: "/api/runner-credential", cookie: f.cookie}, http.StatusNoContent)
+	validate(runnerCall{method: http.MethodPost, path: "/api/runner/register", body: registerBody, token: pairing.Token}, http.StatusUnauthorized)
+
+	pool := postgres.NewEmptyMigratedTestPool(t)
+	dev := runnerFixture{handler: NewHandler(config.Config{Environment: config.EnvDevelopment, Version: "dev"}, time.Now(), pool, testLogger(&bytes.Buffer{})), cookie: mintTestSessionCookie(t, pool)}
+	req := httptest.NewRequest(http.MethodPost, "/api/dev/clock/advance", strings.NewReader(`{"seconds":1}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(dev.cookie)
+	rec := httptest.NewRecorder()
+	dev.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("advance dev clock: status=%d; body=%s", rec.Code, rec.Body.String())
+	}
+	validateAgainstContract(t, router, req, rec)
+
+	for path, allow := range map[string]string{
+		"/api/runner-credential": "POST, DELETE",
+		"/api/runner-health":     "GET",
+		"/api/runner/register":   "POST",
+		"/api/runner/heartbeat":  "POST",
+		"/api/dev/clock/advance": "POST",
+	} {
+		rec := f.expect(t, runnerCall{method: http.MethodPut, path: path, cookie: f.cookie}, http.StatusMethodNotAllowed)
+		if rec.Header().Get("Allow") != allow {
+			t.Fatalf("%s Allow = %q, want %q", path, rec.Header().Get("Allow"), allow)
+		}
+	}
+	f.expect(t, runnerCall{method: http.MethodGet, path: "/api/runner/" + uuid.NewString(), token: pairing.Token}, http.StatusNotFound)
+}

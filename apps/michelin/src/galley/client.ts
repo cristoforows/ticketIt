@@ -2,12 +2,19 @@ import type { components } from "../api/generated/schema.d.ts";
 
 export type StatusResponse = components["schemas"]["StatusResponse"];
 
-export type StatusFailure =
+export type TransportFailure =
   | { reason: "unreachable"; error: string; code?: string }
   | { reason: "timeout"; timeoutMs: number }
-  | { reason: "http_status"; httpStatus: number }
-  | { reason: "invalid_body"; error: string }
   | { reason: "aborted" };
+
+export type StatusFailure =
+  | TransportFailure
+  | { reason: "http_status"; httpStatus: number }
+  | { reason: "invalid_body"; error: string };
+
+export type Outcome<T, F> = { ok: true; value: T } | { ok: false; failure: F };
+
+export type Timed<O> = O & { durationMs: number };
 
 export type StatusResult =
   | { ok: true; status: StatusResponse; durationMs: number }
@@ -17,18 +24,25 @@ export type FetchFn = typeof fetch;
 
 export const DEFAULT_REQUEST_TIMEOUT_MS = 5_000;
 
-export interface StatusRequest {
+export interface GalleyRequest {
   fetch: FetchFn;
   galleyUrl: URL;
   signal: AbortSignal;
   timeoutMs?: number;
 }
 
-export async function fetchStatus(request: StatusRequest): Promise<StatusResult> {
+export type StatusRequest = GalleyRequest;
+
+export async function callGalley<T, F>(
+  request: GalleyRequest,
+  path: string,
+  init: RequestInit,
+  handle: (response: Response, readJson: () => Promise<unknown>) => Promise<Outcome<T, F>>,
+): Promise<Timed<Outcome<T, F | TransportFailure>>> {
   const { fetch: fetchFn, galleyUrl, signal, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS } = request;
   const started = performance.now();
-  const done = (result: { ok: true; status: StatusResponse } | { ok: false; failure: StatusFailure }): StatusResult => ({
-    ...result,
+  const done = (outcome: Outcome<T, F | TransportFailure>): Timed<Outcome<T, F | TransportFailure>> => ({
+    ...outcome,
     durationMs: Math.round(performance.now() - started),
   });
 
@@ -45,28 +59,18 @@ export async function fetchStatus(request: StatusRequest): Promise<StatusResult>
   }
 
   try {
-    const response = await fetchFn(new URL("api/status", galleyUrl), {
-      headers: { accept: "application/json" },
-      signal: attempt.signal,
-    });
-    if (!response.ok) {
-      await response.body?.cancel();
-      return done({ ok: false, failure: { reason: "http_status", httpStatus: response.status } });
-    }
-    let body: unknown;
-    try {
-      body = await response.json();
-    } catch (error) {
-      if (attempt.signal.aborted) {
-        throw error;
+    const response = await fetchFn(new URL(path, galleyUrl), { ...init, signal: attempt.signal });
+    const readJson = async (): Promise<unknown> => {
+      try {
+        return await response.json();
+      } catch (error) {
+        if (attempt.signal.aborted) {
+          throw error;
+        }
+        return INVALID_JSON;
       }
-      return done({ ok: false, failure: { reason: "invalid_body", error: "response is not valid JSON" } });
-    }
-    const parsed = parseStatusResponse(body);
-    if (typeof parsed === "string") {
-      return done({ ok: false, failure: { reason: "invalid_body", error: parsed } });
-    }
-    return done({ ok: true, status: parsed });
+    };
+    return done(await handle(response, readJson));
   } catch (error) {
     if (timedOut) {
       return done({ ok: false, failure: { reason: "timeout", timeoutMs } });
@@ -81,7 +85,35 @@ export async function fetchStatus(request: StatusRequest): Promise<StatusResult>
   }
 }
 
-function unreachable(error: unknown): StatusFailure {
+export const INVALID_JSON: unique symbol = Symbol("invalid JSON");
+
+export async function fetchStatus(request: StatusRequest): Promise<StatusResult> {
+  const result = await callGalley<StatusResponse, StatusFailure>(
+    request,
+    "api/status",
+    { headers: { accept: "application/json" } },
+    async (response, readJson) => {
+      if (!response.ok) {
+        await response.body?.cancel();
+        return { ok: false, failure: { reason: "http_status", httpStatus: response.status } };
+      }
+      const body = await readJson();
+      if (body === INVALID_JSON) {
+        return { ok: false, failure: { reason: "invalid_body", error: "response is not valid JSON" } };
+      }
+      const parsed = parseStatusResponse(body);
+      if (typeof parsed === "string") {
+        return { ok: false, failure: { reason: "invalid_body", error: parsed } };
+      }
+      return { ok: true, value: parsed };
+    },
+  );
+  return result.ok
+    ? { ok: true, status: result.value, durationMs: result.durationMs }
+    : { ok: false, failure: result.failure, durationMs: result.durationMs };
+}
+
+function unreachable(error: unknown): TransportFailure {
   const cause = error instanceof Error ? error.cause : undefined;
   const code = isRecord(cause) && typeof cause["code"] === "string" ? cause["code"] : undefined;
   const nested = cause instanceof AggregateError ? cause.errors[0] : undefined;
@@ -91,7 +123,7 @@ function unreachable(error: unknown): StatusFailure {
   return { reason: "unreachable", error: message, code };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
