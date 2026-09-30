@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Drift check 2 of 2 (see contracts/README.md): regenerate api.gen.go
+# Drift check 1 of 3 (see contracts/README.md): regenerate api.gen.go
 # and fail on any diff, which means the contract changed without
 # regenerating or the generated file was hand-edited. Needs a clean
 # working tree for that file, else unrelated edits look like drift.

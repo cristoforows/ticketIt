@@ -6,7 +6,9 @@
   "type": "module",
   "scripts": {
     "generate:swiftlet": "openapi-typescript openapi.yaml -o ../apps/swiftlet/src/api/generated/schema.d.ts",
-    "check:swiftlet-drift": "bash ./check-swiftlet-drift.sh"
+    "check:swiftlet-drift": "bash ./check-swiftlet-drift.sh",
+    "generate:michelin": "openapi-typescript openapi.yaml -o ../apps/michelin/src/api/generated/schema.d.ts",
+    "check:michelin-drift": "bash ./check-michelin-drift.sh"
   },
   "devDependencies": {
     "openapi-typescript": "7.13.0",
