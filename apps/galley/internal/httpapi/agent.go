@@ -124,7 +124,7 @@ func (s *server) RenameAgent(w http.ResponseWriter, r *http.Request, id string) 
 	if !ok {
 		return
 	}
-	id, ok = canonicalTicketID(id)
+	id, ok = canonicalPublicID(id)
 	if !ok {
 		writeAgentNotFound(w)
 		return

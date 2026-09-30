@@ -105,12 +105,12 @@ func (s *server) AttachTicketBadge(w http.ResponseWriter, r *http.Request, id, b
 	if !ok {
 		return
 	}
-	id, ok = canonicalTicketID(id)
+	id, ok = canonicalPublicID(id)
 	if !ok {
 		writeBadgeNotFound(w)
 		return
 	}
-	badgeId, ok = canonicalTicketID(badgeId)
+	badgeId, ok = canonicalPublicID(badgeId)
 	if !ok {
 		writeBadgeNotFound(w)
 		return
@@ -178,12 +178,12 @@ func (s *server) DetachTicketBadge(w http.ResponseWriter, r *http.Request, id, b
 	if !ok {
 		return
 	}
-	id, ok = canonicalTicketID(id)
+	id, ok = canonicalPublicID(id)
 	if !ok {
 		writeBadgeNotFound(w)
 		return
 	}
-	badgeId, ok = canonicalTicketID(badgeId)
+	badgeId, ok = canonicalPublicID(badgeId)
 	if !ok {
 		writeBadgeNotFound(w)
 		return

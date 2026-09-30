@@ -75,7 +75,7 @@ func (s *server) ListTickets(w http.ResponseWriter, r *http.Request, params List
 	badgeIDs := make([]string, 0, len(selected))
 	seen := make(map[string]bool, len(selected))
 	for _, value := range selected {
-		id, valid := canonicalTicketID(value)
+		id, valid := canonicalPublicID(value)
 		if !valid {
 			writeError(w, http.StatusBadRequest, "invalid_request", "badgeId must identify an owned Badge")
 			return
@@ -119,7 +119,7 @@ func (s *server) GetTicket(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 
-	id, ok = canonicalTicketID(id)
+	id, ok = canonicalPublicID(id)
 	if !ok {
 		writeTicketNotFound(w)
 		return
@@ -144,7 +144,7 @@ func writeTicketNotFound(w http.ResponseWriter) {
 	writeError(w, http.StatusNotFound, "not_found", "no ticket with that identifier")
 }
 
-func canonicalTicketID(id string) (string, bool) {
+func canonicalPublicID(id string) (string, bool) {
 	parsed, err := uuid.Parse(id)
 	if err != nil {
 		return "", false
@@ -175,7 +175,7 @@ func (s *server) UpdateTicket(w http.ResponseWriter, r *http.Request, id string)
 		return
 	}
 
-	id, ok = canonicalTicketID(id)
+	id, ok = canonicalPublicID(id)
 	if !ok {
 		writeTicketNotFound(w)
 		return

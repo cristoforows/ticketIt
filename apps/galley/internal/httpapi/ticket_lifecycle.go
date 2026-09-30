@@ -194,7 +194,7 @@ func (s *server) ChangeTicketStatus(w http.ResponseWriter, r *http.Request, id s
 	if !ok {
 		return
 	}
-	id, ok = canonicalTicketID(id)
+	id, ok = canonicalPublicID(id)
 	if !ok {
 		writeTicketNotFound(w)
 		return
@@ -244,7 +244,7 @@ func (s *server) AcceptTicket(w http.ResponseWriter, r *http.Request, id string)
 	if !ok {
 		return
 	}
-	id, ok = canonicalTicketID(id)
+	id, ok = canonicalPublicID(id)
 	if !ok {
 		writeTicketNotFound(w)
 		return
@@ -337,7 +337,7 @@ func (s *server) AssignTicket(w http.ResponseWriter, r *http.Request, id string)
 	if !ok {
 		return
 	}
-	id, ok = canonicalTicketID(id)
+	id, ok = canonicalPublicID(id)
 	if !ok {
 		writeTicketNotFound(w)
 		return
@@ -359,7 +359,7 @@ func (s *server) AssignTicket(w http.ResponseWriter, r *http.Request, id string)
 			writeError(w, http.StatusBadRequest, "invalid_request", `"agentId" is required when "type" is "agent"`)
 			return
 		}
-		agentID, valid := canonicalTicketID(*req.AgentId)
+		agentID, valid := canonicalPublicID(*req.AgentId)
 		if !valid {
 			writeTicketOrAgentNotFound(w)
 			return
@@ -391,7 +391,7 @@ func (s *server) UnassignTicket(w http.ResponseWriter, r *http.Request, id strin
 	if !ok {
 		return
 	}
-	id, ok = canonicalTicketID(id)
+	id, ok = canonicalPublicID(id)
 	if !ok {
 		writeTicketNotFound(w)
 		return
