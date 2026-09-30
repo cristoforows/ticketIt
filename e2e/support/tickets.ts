@@ -3,6 +3,13 @@ import type { Page } from "@playwright/test";
 export type TicketTemplate = "Basic" | "Coding";
 export type AgentKind = "research" | "coding";
 export type TicketStatus = "Backlog" | "Ready" | "InProgress" | "Blocked" | "InReview" | "Done";
+export type AgentReadinessInput = "goal" | "successCriteria" | "repository";
+
+export interface ErrorDetail {
+  code: string;
+  message: string;
+  missing?: AgentReadinessInput[];
+}
 
 export interface Ticket {
   /** Opaque public identifier (issue #57) -- never the internal sequential database id. */
@@ -13,8 +20,10 @@ export interface Ticket {
   archivedAt: string | null;
   allowedActions: {
     statusChanges: TicketStatus[];
-    accept: { available: boolean; reason?: { code: string; message: string } };
+    accept: { available: boolean; reason?: ErrorDetail };
+    statusChangeRejections: { status: TicketStatus; reason: ErrorDetail }[];
   };
+  requestingAgentWork: boolean;
   /** Chosen at capture (issue #59), default Basic -- see docs/ticket-creation.md. */
   template: TicketTemplate;
   /** Derived from template's default once, at creation, and retained thereafter (issue #59, D3). */
@@ -73,11 +82,12 @@ export interface TicketCommandResult {
   ticket?: Ticket;
   errorCode?: string;
   errorMessage?: string;
+  missing?: AgentReadinessInput[];
 }
 
 async function ticketCommand(
   page: Page,
-  method: "POST" | "PUT" | "DELETE",
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
   data?: unknown,
 ): Promise<TicketCommandResult> {
@@ -86,7 +96,7 @@ async function ticketCommand(
   if (response.ok()) {
     return { ok: true, status: response.status(), ticket: body as Ticket };
   }
-  return { ok: false, status: response.status(), errorCode: body?.error?.code, errorMessage: body?.error?.message };
+  return { ok: false, status: response.status(), errorCode: body?.error?.code, errorMessage: body?.error?.message, missing: body?.error?.missing };
 }
 
 /**
@@ -100,6 +110,18 @@ export async function changeTicketStatusDirect(page: Page, id: string, status: T
 /** Same purpose as changeTicketStatusDirect, for Accept. */
 export async function acceptTicketDirect(page: Page, id: string): Promise<TicketCommandResult> {
   return ticketCommand(page, "POST", `/api/tickets/${id}/accept`);
+}
+
+export type TicketAssignee = { type: "owner" } | { type: "agent"; agentId: string };
+
+/** Same purpose as changeTicketStatusDirect, for assignment. */
+export async function assignTicketDirect(page: Page, id: string, assignee: TicketAssignee): Promise<TicketCommandResult> {
+  return ticketCommand(page, "PUT", `/api/tickets/${id}/assignee`, assignee);
+}
+
+/** Same purpose as changeTicketStatusDirect, for editing Ticket fields. */
+export async function updateTicketDirect(page: Page, id: string, fields: Partial<Pick<Ticket, "title" | "goal" | "context" | "successCriteria" | "constraints" | "repository">>): Promise<TicketCommandResult> {
+  return ticketCommand(page, "PATCH", `/api/tickets/${id}`, fields);
 }
 
 export function statusLabel(status: TicketStatus): string {
