@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type DragEvent } from "react";
 import { UnauthenticatedError } from "../api/session";
-import { changeTicketStatus, fetchTickets, type Ticket } from "../api/tickets";
+import { changeTicketStatus, fetchTickets, reorderTicket, type Ticket, type TicketPlacement } from "../api/tickets";
 import { BoardColumn, BoardColumns, Caption, ColumnHeader, DropHint, EmptyMessage, ErrorMessage, LoadingMessage, Rail, SlipList, statuses, statusTone } from "./ui";
 import { BoardStageSwitcher } from "./BoardStageSwitcher";
 import { scrollBehavior, useIsPhone } from "./usePhone";
+import { focusReorderButton, type ReorderDirection } from "./ReorderButtons";
 import { focusTicketRow, refocusTicketRowIfFocusLost, ticketRowTestId } from "./TicketModalLink";
 import { TicketSlip } from "./TicketSlip";
 
@@ -15,12 +16,14 @@ type BoardState =
 export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, badgeIds = [] }: { onUnauthenticated: () => void; refreshKey?: number; focusTicketId?: string; badgeIds?: string[] }) {
   const [state, setState] = useState<BoardState>({ kind: "loading" });
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dropSlot, setDropSlot] = useState<{ id: string; placement: "before" | "after" } | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [moveRefreshKey, setMoveRefreshKey] = useState(0);
   const commandPending = useRef(false);
   const requestId = useRef(0);
   const focusMovedTicketId = useRef<string | null>(null);
+  const focusReorder = useRef<{ id: string; direction?: ReorderDirection } | null>(null);
   const focusedRefreshKey = useRef(0);
   const phone = useIsPhone();
   const [stage, setStage] = useState(() => {
@@ -129,6 +132,14 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
   }, [state, refreshKey, focusTicketId]);
 
   useEffect(() => {
+    if (state.kind !== "loaded" || !focusReorder.current) return;
+    const { id, direction } = focusReorder.current;
+    focusReorder.current = null;
+    if (direction) focusReorderButton(document.querySelector(`[data-testid="${ticketRowTestId("board", id)}"]`), "board-slip", direction);
+    else focusTicketRow("board", id);
+  }, [state]);
+
+  useEffect(() => {
     if (state.kind !== "loaded" || !focusMovedTicketId.current) return;
     const id = focusMovedTicketId.current;
     focusMovedTicketId.current = null;
@@ -169,6 +180,32 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
       setPendingId(null);
     }
   }
+
+  async function reorderOnBoard(ticket: Ticket, placement: TicketPlacement, direction?: ReorderDirection) {
+    if (commandPending.current) return;
+    commandPending.current = true;
+    setPendingId(ticket.id);
+    setMoveError(null);
+    try {
+      await reorderTicket(ticket.id, placement);
+    } catch (error) {
+      if (error instanceof UnauthenticatedError) {
+        onUnauthenticated();
+        return;
+      }
+      setMoveError(error instanceof Error ? error.message : "Failed to reorder the ticket.");
+    } finally {
+      commandPending.current = false;
+      setPendingId(null);
+    }
+    focusReorder.current = { id: ticket.id, direction };
+    setMoveRefreshKey((key) => key + 1);
+  }
+
+  const dropPlacement = (event: DragEvent<HTMLLIElement>) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    return event.clientY < box.top + box.height / 2 ? "before" : "after";
+  };
 
   return (
     <section data-testid="ticket-board" className="min-w-0">
@@ -218,14 +255,17 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
                 }}
               >
                 <ColumnHeader id={`board-heading-${value}`} label={label} count={tickets.length} />
-                <DropHint hint={dragging ? (isDropTarget ? "target" : isOrigin ? "origin" : "blocked") : undefined} />
+                <DropHint hint={dragging ? (isDropTarget ? "target" : isOrigin ? (tickets.length > 1 ? "reorder" : "origin") : "blocked") : undefined} />
                 <Rail />
                 {tickets.length === 0 ? <p className="pt-4 text-center text-label text-dim">— no orders —</p> : (
                   <SlipList>
-                    {tickets.map((ticket) => (
+                    {tickets.map((ticket) => {
+                      const reorderable = draggingTicket !== undefined && draggingTicket.status === ticket.status && draggingTicket.id !== ticket.id;
+                      return (
                       <TicketSlip
                         key={ticket.id}
                         ticket={ticket}
+                        stageTickets={tickets}
                         phone={phone}
                         pending={pendingId === ticket.id}
                         anyPending={pendingId !== null}
@@ -235,6 +275,28 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
                         onToggle={() => setSelectedId(selectedId === ticket.id ? null : ticket.id)}
                         onDismiss={() => setSelectedId(null)}
                         onMove={(target) => void moveTicket(ticket, target)}
+                        onReorder={(placement, direction) => void reorderOnBoard(ticket, placement, direction)}
+                        dropPosition={dropSlot?.id === ticket.id ? dropSlot.placement : undefined}
+                        onDragOver={(event) => {
+                          if (!reorderable) return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          event.dataTransfer.dropEffect = "move";
+                          const placement = dropPlacement(event);
+                          if (dropSlot?.id !== ticket.id || dropSlot.placement !== placement) setDropSlot({ id: ticket.id, placement });
+                        }}
+                        onDragLeave={(event) => {
+                          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropSlot(null);
+                        }}
+                        onDrop={(event) => {
+                          if (!reorderable) return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          const placement = dropPlacement(event);
+                          setDraggingId(null);
+                          setDropSlot(null);
+                          void reorderOnBoard(draggingTicket, placement === "before" ? { before: ticket.id } : { after: ticket.id });
+                        }}
                         onDragStart={(event) => {
                           if (commandPending.current) {
                             event.preventDefault();
@@ -244,9 +306,13 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
                           event.dataTransfer.setData("application/x-ticketit-ticket", ticket.id);
                           setDraggingId(ticket.id);
                         }}
-                        onDragEnd={() => setDraggingId(null)}
+                        onDragEnd={() => {
+                          setDraggingId(null);
+                          setDropSlot(null);
+                        }}
                       />
-                    ))}
+                      );
+                    })}
                   </SlipList>
                 )}
               </BoardColumn>

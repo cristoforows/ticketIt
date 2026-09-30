@@ -1,24 +1,31 @@
 import type { DragEvent } from "react";
-import type { Ticket } from "../api/tickets";
+import type { Ticket, TicketPlacement } from "../api/tickets";
 import { BadgeList, PendingTag, QueuedTag, Rule, shortDate, Slip, SlipPaper, SlipToggle, slipTilt, ticketSerial } from "./ui";
 import { openTicketModal } from "../router";
 import { assigneeLabel } from "./assignee";
+import type { ReorderDirection } from "./ReorderButtons";
 import { SlipActions } from "./SlipActions";
 import { TicketModalLink, ticketRowTestId } from "./TicketModalLink";
 
-export function TicketSlip({ ticket, phone, pending, anyPending, selected, beingDragged, moveTargets, onToggle, onDismiss, onMove, onDragStart, onDragEnd }: {
+export function TicketSlip({ ticket, stageTickets, phone, pending, anyPending, selected, beingDragged, dropPosition, moveTargets, onToggle, onDismiss, onMove, onReorder, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }: {
   ticket: Ticket;
+  stageTickets: Ticket[];
   phone: boolean;
   pending: boolean;
   anyPending: boolean;
   selected: boolean;
   beingDragged: boolean;
+  dropPosition?: "before" | "after";
   moveTargets: Ticket["status"][];
   onToggle: () => void;
   onDismiss: () => void;
   onMove: (target: Ticket["status"]) => void;
+  onReorder: (placement: TicketPlacement, direction: ReorderDirection) => void;
   onDragStart: (event: DragEvent<HTMLLIElement>) => void;
   onDragEnd: () => void;
+  onDragOver: (event: DragEvent<HTMLLIElement>) => void;
+  onDragLeave: (event: DragEvent<HTMLLIElement>) => void;
+  onDrop: (event: DragEvent<HTMLLIElement>) => void;
 }) {
   const panelId = `board-slip-actions-${ticket.id}`;
   return (
@@ -27,11 +34,15 @@ export function TicketSlip({ ticket, phone, pending, anyPending, selected, being
       stacked={phone}
       dragging={beingDragged}
       selected={selected}
+      dropPosition={dropPosition}
       data-testid={ticketRowTestId("board", ticket.id)}
       aria-busy={pending}
       draggable={!pending && !phone}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
     >
       <SlipPaper status={ticket.status}>
         <div className="flex justify-between text-label text-muted">
@@ -63,11 +74,13 @@ export function TicketSlip({ ticket, phone, pending, anyPending, selected, being
         <SlipActions
           id={panelId}
           ticket={ticket}
+          stageTickets={stageTickets}
           targets={moveTargets}
           disabled={anyPending}
           onView={() => { onDismiss(); openTicketModal(ticket.id, "board"); }}
           onEdit={() => { onDismiss(); openTicketModal(ticket.id, "board", true); }}
           onMove={(target) => { onDismiss(); onMove(target); }}
+          onReorder={onReorder}
         />
       )}
     </Slip>

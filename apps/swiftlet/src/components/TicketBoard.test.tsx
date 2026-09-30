@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, createEvent, fireEvent, render, screen, within } from "@testing-library/react";
 import { TicketBoard } from "./TicketBoard";
 
 const ticket = (id: string, status: string, template = "Basic") => ({
@@ -230,5 +230,77 @@ describe("TicketBoard", () => {
     await vi.waitFor(() => expect(screen.getByTestId("board-status-Ready")).toContainElement(screen.getByTestId("board-ticket-moving")));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(within(screen.getByTestId("board-ticket-moving")).getByRole("link")).toHaveFocus();
+  });
+  describe("reordering within a stage", () => {
+    const readyActions = { statusChangeRejections: [], statusChanges: ["Backlog", "InProgress"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } } };
+    const ready = (id: string) => ({ ...ticket(id, "Ready"), allowedActions: readyActions });
+
+    function slipAt(id: string, top: number) {
+      const slip = screen.getByTestId(`board-ticket-${id}`);
+      vi.spyOn(slip, "getBoundingClientRect").mockReturnValue({ top, height: 100, bottom: top + 100, left: 0, right: 100, width: 100, x: 0, y: top, toJSON: () => ({}) });
+      return slip;
+    }
+
+    function stubReorder(initial: unknown[], afterwards: unknown[], moved: unknown) {
+      const fetchStub = vi.fn()
+        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ tickets: initial }) })
+        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => moved })
+        .mockResolvedValue({ ok: true, status: 200, json: async () => ({ tickets: afterwards }) });
+      vi.stubGlobal("fetch", fetchStub);
+      return fetchStub;
+    }
+
+    function dragAt(type: "dragOver" | "drop", target: HTMLElement, clientY: number) {
+      const event = createEvent[type](target, { dataTransfer: {} });
+      Object.defineProperty(event, "clientY", { value: clientY });
+      fireEvent(target, event);
+    }
+
+    const readyOrder = () => within(screen.getByTestId("board-status-Ready")).getAllByTestId(/^board-ticket-/).map((slip) => slip.getAttribute("data-testid"));
+
+    it.each([
+      ["upper half", "before", 10, { before: "r1" }],
+      ["lower half", "after", 90, { after: "r1" }],
+    ])("dropping on a slip's %s places the Ticket %s it and renders Galley's refetched order", async (_, position, clientY, body) => {
+      const fetchStub = stubReorder([ready("r1"), ready("r2"), ready("r3")], [ready("r3"), ready("r1"), ready("r2")], ready("r3"));
+      render(<TicketBoard onUnauthenticated={() => {}} />);
+      const r3 = await screen.findByTestId("board-ticket-r3");
+      fireEvent.dragStart(r3, { dataTransfer: { setData: vi.fn(), effectAllowed: "move" } });
+      expect(screen.getByTestId("board-status-Ready")).toHaveTextContent("↕ Drop on a slip to reorder");
+      const r1 = slipAt("r1", 0);
+      dragAt("dragOver", r1, clientY);
+      expect(r1).toHaveAttribute("data-drop-position", position);
+      dragAt("drop", r1, clientY);
+
+      expect(fetchStub).toHaveBeenNthCalledWith(2, "/api/tickets/r3/position", expect.objectContaining({ method: "POST", body: JSON.stringify(body) }));
+      await vi.waitFor(() => expect(fetchStub).toHaveBeenCalledTimes(3));
+      await vi.waitFor(() => expect(readyOrder()).toEqual(["board-ticket-r3", "board-ticket-r1", "board-ticket-r2"]));
+      expect(r1).not.toHaveAttribute("data-drop-position");
+      await vi.waitFor(() => expect(within(screen.getByTestId("board-ticket-r3")).getByRole("link")).toHaveFocus());
+    });
+
+    it("keeps a drop on another stage a Status move, and offers no reorder slot across stages", async () => {
+      const fetchStub = stubReorder([ready("r1"), { ...ticket("b1", "Backlog"), allowedActions: readyActions }], [], ready("r1"));
+      render(<TicketBoard onUnauthenticated={() => {}} />);
+      const r1 = await screen.findByTestId("board-ticket-r1");
+      fireEvent.dragStart(r1, { dataTransfer: { setData: vi.fn(), effectAllowed: "move" } });
+      const b1 = slipAt("b1", 0);
+      dragAt("dragOver", b1, 10);
+      expect(b1).not.toHaveAttribute("data-drop-position");
+      fireEvent.drop(screen.getByTestId("board-status-Backlog"));
+      expect(fetchStub).toHaveBeenNthCalledWith(2, "/api/tickets/r1/status", expect.objectContaining({ body: JSON.stringify({ status: "Backlog" }) }));
+    });
+
+    it("shows Galley's reorder rejection verbatim", async () => {
+      vi.stubGlobal("fetch", vi.fn()
+        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ tickets: [ready("r1"), ready("r2")] }) })
+        .mockResolvedValueOnce({ ok: false, status: 400, json: async () => ({ error: { code: "reorder_anchor_invalid", message: "Galley anchor reason" } }) })
+        .mockResolvedValue({ ok: true, status: 200, json: async () => ({ tickets: [ready("r1"), ready("r2")] }) }));
+      render(<TicketBoard onUnauthenticated={() => {}} />);
+      const r2 = await screen.findByTestId("board-ticket-r2");
+      fireEvent.dragStart(r2, { dataTransfer: { setData: vi.fn(), effectAllowed: "move" } });
+      dragAt("drop", slipAt("r1", 0), 10);
+      expect(await screen.findByTestId("ticket-board-move-error")).toHaveTextContent("Galley anchor reason");
+    });
   });
 });

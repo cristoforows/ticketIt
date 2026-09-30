@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { UnauthenticatedError } from "../api/session";
-import { fetchTickets, type Ticket } from "../api/tickets";
+import { fetchTickets, reorderTicket, type Ticket, type TicketPlacement } from "../api/tickets";
+import { focusReorderButton, ReorderButtons, type ReorderDirection } from "./ReorderButtons";
 import { refocusTicketRowIfFocusLost, TicketModalLink, ticketRowTestId } from "./TicketModalLink";
-import { BadgeList, EmptyMessage, ErrorMessage, LoadingMessage, LogRow, LogRowMain, LogStatus, Paper, ReceiptTitle, Rule, ticketSerial } from "./ui";
+import { BadgeList, EmptyMessage, ErrorMessage, LoadingMessage, LogRow, LogRowMain, LogStatus, Paper, PendingTag, ReceiptTitle, Rule, ticketSerial } from "./ui";
 
 type ListState =
   | { kind: "loading" }
@@ -17,13 +18,16 @@ type ListState =
  */
 export function TicketList({ onUnauthenticated, refreshKey = 0, focusTicketId, badgeIds = [], archived = false }: { onUnauthenticated: () => void; refreshKey?: number; focusTicketId?: string; badgeIds?: string[]; archived?: boolean }) {
   const [state, setState] = useState<ListState>({ kind: "loading" });
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [reorderError, setReorderError] = useState<string | null>(null);
   const requestId = useRef(0);
   const mounted = useRef(false);
+  const refocus = useRef<{ id: string; direction: ReorderDirection } | null>(null);
 
   const load = useCallback((keepExisting = false, refreshKey = 0) => {
     const id = ++requestId.current;
     if (!keepExisting) setState({ kind: "loading" });
-    fetchTickets(badgeIds, archived)
+    return fetchTickets(badgeIds, archived)
       .then((tickets) => {
         if (id === requestId.current) setState({ kind: "loaded", tickets, refreshKey });
       })
@@ -55,6 +59,32 @@ export function TicketList({ onUnauthenticated, refreshKey = 0, focusTicketId, b
     }
   }, [state, refreshKey, focusTicketId]);
 
+  useEffect(() => {
+    if (state.kind !== "loaded" || !refocus.current) return;
+    const { id, direction } = refocus.current;
+    refocus.current = null;
+    focusReorderButton(document.querySelector(`[data-testid="${ticketRowTestId("backlog", id)}"]`), "ticket", direction);
+  }, [state]);
+
+  async function reorder(ticket: Ticket, placement: TicketPlacement, direction: ReorderDirection) {
+    if (pendingId) return;
+    setPendingId(ticket.id);
+    setReorderError(null);
+    try {
+      await reorderTicket(ticket.id, placement);
+    } catch (error) {
+      if (error instanceof UnauthenticatedError) {
+        onUnauthenticated();
+        return;
+      }
+      setReorderError(error instanceof Error ? error.message : "Failed to reorder the ticket.");
+    } finally {
+      setPendingId(null);
+    }
+    refocus.current = { id: ticket.id, direction };
+    await load(true);
+  }
+
   const count = state.kind === "loaded" ? state.tickets.length : 0;
 
   return (
@@ -77,7 +107,7 @@ export function TicketList({ onUnauthenticated, refreshKey = 0, focusTicketId, b
         <>
           <ul data-testid="ticket-list-items" className="m-0 list-none p-0">
             {state.tickets.map((ticket) => (
-              <LogRow key={ticket.id} data-testid={ticketRowTestId("backlog", ticket.id)}>
+              <LogRow key={ticket.id} data-testid={ticketRowTestId("backlog", ticket.id)} aria-busy={pendingId === ticket.id}>
                 <LogRowMain>
                   <span className="shrink-0 text-muted">{ticketSerial(ticket.id)}</span>
                   <TicketModalLink ticketId={ticket.id} view="backlog" variant="log" data-testid="ticket-title" title={ticket.title}>
@@ -86,12 +116,24 @@ export function TicketList({ onUnauthenticated, refreshKey = 0, focusTicketId, b
                 </LogRowMain>
                 <BadgeList as="span" data-testid="ticket-badges" badges={ticket.badges} />
                 <LogStatus data-testid="ticket-status" status={ticket.status} />
+                {!archived && (
+                  <ReorderButtons
+                    ticket={ticket}
+                    tickets={state.tickets}
+                    disabled={pendingId !== null}
+                    testIdPrefix="ticket"
+                    className="flex-[1_1_100%] justify-end"
+                    onReorder={(placement, direction) => void reorder(ticket, placement, direction)}
+                  />
+                )}
+                {pendingId === ticket.id && <PendingTag>Moving…</PendingTag>}
               </LogRow>
             ))}
           </ul>
           <p data-testid="ticket-list-total" className="m-0 mt-4 font-bold">TOTAL — {count} {count === 1 ? "order" : "orders"}</p>
         </>
       )}
+      {reorderError && <ErrorMessage title={reorderError} data-testid="ticket-list-reorder-error" flat className="mt-4" />}
       {state.kind === "loaded" && state.refreshError && (
         <ErrorMessage title="Unable to refresh tickets." data-testid="ticket-list-refresh-error" flat className="mt-4">
           <p data-testid="ticket-list-refresh-error-message" className="m-0">{state.refreshError}</p>
