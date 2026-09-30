@@ -22,8 +22,11 @@ Ticket locked to the runner; reconciliation of work in flight is M5
 - Michelin (M4.3, #129): a status loop polling `GET /api/status`, JSON
   logs, config validation that exits 1. No credential, no writes.
 - Swiftlet: the order-rail shell and `/agents` page (#114, #127).
-- M4.2 (#128) was in flight in parallel and had not merged; this slice
-  touches none of its readiness rules.
+- M4.2 (#128) landed on main while this slice was open, and the branch
+  merged it. This slice changes none of its readiness rules.
+  `TestRunnerDisconnect_ChangesNoTicket` now fills in the readiness
+  fields and moves Status before assigning the Agent, because M4.2 makes
+  those moves Galley-owned once an Agent is assigned.
 
 ## What this slice added
 
@@ -147,12 +150,12 @@ runs used real ones.
 
 ## Observed results
 
-**Checks.** `gofmt -l` printed nothing; `go vet` clean. Galley
-`go test ./...`: all packages `ok`, 494 tests and subtests passed, 0
+**Checks** (after merging M4.2). `gofmt -l` printed nothing; `go vet` clean. Galley
+`go test ./...`: all packages `ok`, 695 tests and subtests passed, 0
 failed. All three drift checks printed `OK … (no drift)`. Swiftlet: 18
-files, 237 tests passed; `npm run build` succeeded. Michelin: typecheck
+files, 249 tests passed; `npm run build` succeeded. Michelin: typecheck
 clean; 6 files, 49 tests passed. Browser suite: `SUITE PASSED`, every
-spec exit code 0, 76 tests; `runner.spec.ts` passed in 20.7 s.
+spec exit code 0, 78 tests; `runner.spec.ts` passed in 20.7 s.
 
 Runner tests in `internal/httpapi` and `internal/auth`:
 

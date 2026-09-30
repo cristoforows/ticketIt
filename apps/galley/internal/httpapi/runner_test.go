@@ -533,10 +533,11 @@ func TestRunnerDisconnect_ChangesNoTicket(t *testing.T) {
 		if err := json.Unmarshal(rec.Body.Bytes(), &ticket); err != nil {
 			t.Fatal(err)
 		}
-		f.expect(t, runnerCall{method: http.MethodPut, path: "/api/tickets/" + ticket.Id + "/assignee", body: assignAgentBody(agent.Id), cookie: f.cookie}, http.StatusOK)
+		f.expect(t, runnerCall{method: http.MethodPatch, path: "/api/tickets/" + ticket.Id, body: `{"goal":"g","successCriteria":"s","repository":"octo/repo"}`, cookie: f.cookie}, http.StatusOK)
 		for _, status := range path {
 			f.expect(t, runnerCall{method: http.MethodPost, path: "/api/tickets/" + ticket.Id + "/status", body: fmt.Sprintf(`{"status":%q}`, status), cookie: f.cookie}, http.StatusOK)
 		}
+		f.expect(t, runnerCall{method: http.MethodPut, path: "/api/tickets/" + ticket.Id + "/assignee", body: assignAgentBody(agent.Id), cookie: f.cookie}, http.StatusOK)
 	}
 	snapshot := func() (string, string, map[string]int64) {
 		api := f.expect(t, runnerCall{method: http.MethodGet, path: "/api/tickets", cookie: f.cookie}, http.StatusOK).Body.String()
