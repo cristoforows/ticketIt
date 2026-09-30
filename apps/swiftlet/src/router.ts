@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 
 export type CollectionRoute = "backlog" | "board";
-export type Route = { name: CollectionRoute } | { name: "ticket-detail"; ticketId: string; background?: CollectionRoute };
+export type Route = { name: CollectionRoute } | { name: "agents" } | { name: "ticket-detail"; ticketId: string; background?: CollectionRoute };
 
 // crypto.randomUUID is undefined outside secure contexts, e.g. a LAN IP over HTTP.
 const pageLoadId = `${performance.timeOrigin}:${Math.random()}`;
@@ -19,6 +19,7 @@ function modalBackground(): CollectionRoute | undefined {
 
 function parseRoute(pathname: string, background?: CollectionRoute): Route {
   if (pathname === "/board") return { name: "board" };
+  if (pathname === "/agents" || pathname === "/agents/") return { name: "agents" };
   const detailMatch = pathname.match(/^\/tickets\/([^/]+)\/?$/);
   if (detailMatch) {
     try {

@@ -47,6 +47,14 @@ describe("router", () => {
     expect(screen.getByTestId("route")).toHaveTextContent("board");
   });
 
+  it("reads the Agents route from /agents", () => {
+    window.history.pushState({}, "", "/agents");
+
+    render(<RouteProbe />);
+
+    expect(screen.getByTestId("route")).toHaveTextContent("agents");
+  });
+
   it("falls back to the Backlog route for any other path", () => {
     window.history.pushState({}, "", "/something-unknown");
 

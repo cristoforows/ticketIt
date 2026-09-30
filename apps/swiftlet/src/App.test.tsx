@@ -47,6 +47,7 @@ const TICKET = {
   template: "Basic",
   completionCondition: "humanAcceptance",
   assigneeType: "owner",
+  assigneeAgent: null,
   goal: "Original goal",
   context: "",
   successCriteria: "",
@@ -219,6 +220,7 @@ describe("App", () => {
     stubFetchByPath({
       "/api/session": SIGNED_IN,
       [`GET /api/tickets/${TICKET.id}`]: jsonResponse(name === "assign" ? { ...TICKET, assigneeType: "" } : TICKET),
+      "/api/agents": jsonResponse({ agents: [] }),
       [`${method} /api/tickets/${TICKET.id}${path}`]: UNAUTHENTICATED,
     });
     render(<App />);
@@ -228,12 +230,35 @@ describe("App", () => {
       fireEvent.click(screen.getByTestId("ticket-detail-edit-button"));
       fireEvent.change(screen.getByTestId("ticket-detail-textarea-goal"), { target: { value: "Updated goal" } });
     }
+    if (name === "assign") {
+      fireEvent.change(screen.getByLabelText("Assign to"), { target: { value: "owner" } });
+    }
     fireEvent.click(screen.getByTestId(button));
 
     expect(await screen.findByTestId("sign-in-page")).toBeInTheDocument();
     expect(screen.queryByTestId("app-shell")).not.toBeInTheDocument();
     expect(screen.queryByTestId("ticket-detail-save-error")).not.toBeInTheDocument();
     expect(screen.queryByTestId("ticket-detail-action-error")).not.toBeInTheDocument();
+  });
+
+  it("returns to sign-in when loading Agents for the receipt returns 401", async () => {
+    window.history.pushState({}, "", `/tickets/${TICKET.id}`);
+    stubFetchByPath({
+      "/api/session": SIGNED_IN,
+      [`/api/tickets/${TICKET.id}`]: jsonResponse(TICKET),
+      "/api/agents": UNAUTHENTICATED,
+    });
+    render(<App />);
+
+    expect(await screen.findByTestId("sign-in-page")).toBeInTheDocument();
+  });
+
+  it("returns to sign-in when the Agents page load returns 401", async () => {
+    window.history.pushState({}, "", "/agents");
+    stubFetchByPath({ "/api/session": SIGNED_IN, "/api/status": jsonResponse(SAMPLE_STATUS), "/api/agents": UNAUTHENTICATED });
+    render(<App />);
+
+    expect(await screen.findByTestId("sign-in-page")).toBeInTheDocument();
   });
 
   it("hides the previous Ticket immediately on navigation to a new detail URL", async () => {

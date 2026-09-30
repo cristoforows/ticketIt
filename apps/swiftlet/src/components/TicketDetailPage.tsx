@@ -5,7 +5,7 @@ import {
   updateTicket,
   changeTicketStatus,
   acceptTicket,
-  assignTicketOwner,
+  assignTicket,
   unassignTicket,
   createBadge,
   attachTicketBadge,
@@ -16,8 +16,10 @@ import {
   TicketNotFoundError,
   type Ticket,
   type Badge,
+  type TicketAssignee,
   type TicketUpdate,
 } from "../api/tickets";
+import { fetchAgents, type Agent } from "../api/agents";
 import { collectionQuery, fullPageReturnPath, navigate, useEditRequested } from "../router";
 import { Link } from "./Link";
 import { TicketDetail } from "./TicketDetail";
@@ -103,8 +105,8 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
     return runCommand(() => acceptTicket(ticketId));
   }
 
-  function assign(): Promise<Ticket> {
-    return runCommand(() => assignTicketOwner(ticketId));
+  function assign(assignee: TicketAssignee): Promise<Ticket> {
+    return runCommand(() => assignTicket(ticketId, assignee));
   }
 
   function unassign(): Promise<Ticket> {
@@ -129,6 +131,15 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
     }
   }, [onUnauthenticated]);
 
+  const loadAgents = useCallback(async (): Promise<Agent[]> => {
+    try {
+      return await fetchAgents();
+    } catch (error) {
+      if (error instanceof UnauthenticatedError) onUnauthenticated();
+      throw error;
+    }
+  }, [onUnauthenticated]);
+
   const receipt = state.kind === "loaded" && (
     <TicketDetail
       ticket={state.ticket}
@@ -137,6 +148,7 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
       onAccept={accept}
       onAssign={assign}
       onUnassign={unassign}
+      onLoadAgents={loadAgents}
       onCreateBadge={createNewBadge}
       onLoadBadges={loadBadges}
       onAttachBadge={(badgeId) => runCommand(() => attachTicketBadge(ticketId, badgeId))}

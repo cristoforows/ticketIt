@@ -22,6 +22,7 @@ const TICKET = {
   template: "Basic",
   completionCondition: "humanAcceptance",
   assigneeType: "",
+  assigneeAgent: null,
   goal: "",
   context: "",
   successCriteria: "",
@@ -33,10 +34,18 @@ const TICKET = {
   archivedAt: null,
 };
 
+const AGENTS = [{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kind: "research", createdAt: "2026-09-30T10:00:00Z" }];
+
 const onUnauthenticated = () => {};
 
+/** The receipt loads Agents alongside the Ticket; answering that here keeps each test's mock sequence about the Ticket. */
+function stubGalley(fetchMock: (input: RequestInfo | URL, init?: RequestInit) => Promise<MockResponse>) {
+  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+    String(input) === "/api/agents" ? Promise.resolve(jsonResponse({ agents: AGENTS })) : fetchMock(input, init)));
+}
+
 function stubFetch(response: MockResponse) {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+  stubGalley(vi.fn().mockResolvedValue(response));
 }
 
 describe("TicketDetailPage", () => {
@@ -46,7 +55,7 @@ describe("TicketDetailPage", () => {
   });
 
   it("shows a loading state before the fetch settles", () => {
-    vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => {})));
+    stubGalley(vi.fn().mockReturnValue(new Promise(() => {})));
 
     render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
 
@@ -117,7 +126,7 @@ describe("TicketDetailPage", () => {
       .mockResolvedValueOnce(jsonResponse(TICKET))
       .mockResolvedValueOnce(jsonResponse({ badges: [badge] }))
       .mockResolvedValueOnce(jsonResponse({ error: { code: "not_found", message: rejection } }, 404));
-    vi.stubGlobal("fetch", fetchMock);
+    stubGalley(fetchMock);
 
     render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
     await screen.findByTestId("ticket-detail-title");
@@ -135,11 +144,25 @@ describe("TicketDetailPage", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(TICKET))
       .mockResolvedValueOnce(jsonResponse({ error: { code: "not_found", message: "a different Galley reason" } }, 404));
-    vi.stubGlobal("fetch", fetchMock);
+    stubGalley(fetchMock);
     render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
     await screen.findByTestId("ticket-detail-title");
     fireEvent.click(screen.getByTestId("ticket-detail-status-button-Ready"));
     expect(await screen.findByTestId("ticket-detail-action-error")).toHaveTextContent("Galley reported no ticket with that identifier.");
+  });
+
+  it("shows Galley's 404 reason for a rejected Agent assignment", async () => {
+    const rejection = "no ticket or agent with that identifier";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(TICKET))
+      .mockResolvedValueOnce(jsonResponse({ error: { code: "not_found", message: rejection } }, 404));
+    stubGalley(fetchMock);
+    render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+    await screen.findByRole("option", { name: "atlas" });
+    fireEvent.change(screen.getByLabelText("Assign to"), { target: { value: `agent:${AGENTS[0].id}` } });
+    fireEvent.click(screen.getByTestId("ticket-detail-assign-button"));
+    expect(await screen.findByTestId("ticket-detail-action-error")).toHaveTextContent(rejection);
+    expect(screen.getByTestId("ticket-detail-assignee")).toHaveTextContent("Unassigned");
   });
 
   it("offers a link back to the Backlog", async () => {
@@ -165,7 +188,7 @@ describe("TicketDetailPage", () => {
   it("returns an archive from a Board detail URL opened in a new tab to the filtered Board", async () => {
     window.history.pushState(null, "", `/tickets/${TICKET_ID}?badgeId=first&from=board`);
     vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
-    vi.stubGlobal("fetch", vi.fn()
+    stubGalley(vi.fn()
       .mockResolvedValueOnce(jsonResponse(TICKET))
       .mockResolvedValueOnce(jsonResponse({ ...TICKET, archivedAt: "2026-09-29T10:00:00Z" })));
 
@@ -198,7 +221,7 @@ describe("TicketDetailPage", () => {
       .fn()
       .mockResolvedValueOnce(jsonResponse(TICKET))
       .mockResolvedValueOnce(jsonResponse(updated));
-    vi.stubGlobal("fetch", fetchMock);
+    stubGalley(fetchMock);
 
     render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
     await screen.findByTestId("ticket-detail-title");
@@ -232,7 +255,7 @@ describe("TicketDetailPage", () => {
       Object.assign(stored, update);
       return Promise.resolve(jsonResponse(stored));
     });
-    vi.stubGlobal("fetch", fetchMock);
+    stubGalley(fetchMock);
 
     render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
     await screen.findByTestId("ticket-detail-title");
@@ -256,7 +279,7 @@ describe("TicketDetailPage", () => {
   it("changes Status through POST /api/tickets/:id/status and shows the updated Ticket", async () => {
     const moved = { ...TICKET, status: "Ready" };
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(TICKET)).mockResolvedValueOnce(jsonResponse(moved));
-    vi.stubGlobal("fetch", fetchMock);
+    stubGalley(fetchMock);
 
     render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
     await screen.findByTestId("ticket-detail-title");
@@ -277,7 +300,7 @@ describe("TicketDetailPage", () => {
       .fn()
       .mockResolvedValueOnce(jsonResponse(inReview))
       .mockResolvedValueOnce(jsonResponse(done));
-    vi.stubGlobal("fetch", fetchMock);
+    stubGalley(fetchMock);
 
     render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
     await screen.findByTestId("ticket-detail-title");
@@ -288,25 +311,37 @@ describe("TicketDetailPage", () => {
     expect(fetchMock).toHaveBeenLastCalledWith(`/api/tickets/${TICKET_ID}/accept`, expect.objectContaining({ method: "POST" }));
   });
 
-  it("assigns and unassigns the Owner through PUT/DELETE /api/tickets/:id/assignee", async () => {
+  it("assigns an Agent, replaces it with the Owner, and unassigns through PUT/DELETE /api/tickets/:id/assignee", async () => {
+    const agentAssigned = { ...TICKET, assigneeType: "agent", assigneeAgent: { id: AGENTS[0].id, name: AGENTS[0].name, kind: AGENTS[0].kind } };
     const assigned = { ...TICKET, assigneeType: "owner" };
     const unassigned = { ...TICKET, assigneeType: "" };
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse(TICKET))
+      .mockResolvedValueOnce(jsonResponse(agentAssigned))
       .mockResolvedValueOnce(jsonResponse(assigned))
       .mockResolvedValueOnce(jsonResponse(unassigned));
-    vi.stubGlobal("fetch", fetchMock);
+    stubGalley(fetchMock);
 
     render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
-    await screen.findByTestId("ticket-detail-title");
+    await screen.findByRole("option", { name: "atlas" });
 
+    fireEvent.change(screen.getByLabelText("Assign to"), { target: { value: `agent:${AGENTS[0].id}` } });
     fireEvent.click(screen.getByTestId("ticket-detail-assign-button"));
-    expect(await screen.findByTestId("ticket-detail-assignee")).toHaveTextContent("Owner");
-    expect(fetchMock).toHaveBeenLastCalledWith(
-      `/api/tickets/${TICKET_ID}/assignee`,
-      expect.objectContaining({ method: "PUT" }),
-    );
+    expect(await screen.findByTestId("ticket-detail-assignee")).toHaveTextContent("atlas");
+    expect(fetchMock).toHaveBeenLastCalledWith(`/api/tickets/${TICKET_ID}/assignee`, expect.objectContaining({
+      method: "PUT",
+      body: JSON.stringify({ type: "agent", agentId: AGENTS[0].id }),
+    }));
+
+    await waitFor(() => expect(screen.getByLabelText("Assign to")).toBeEnabled());
+    fireEvent.change(screen.getByLabelText("Assign to"), { target: { value: "owner" } });
+    fireEvent.click(screen.getByTestId("ticket-detail-assign-button"));
+    await waitFor(() => expect(screen.getByTestId("ticket-detail-assignee")).toHaveTextContent("Owner"));
+    expect(fetchMock).toHaveBeenLastCalledWith(`/api/tickets/${TICKET_ID}/assignee`, expect.objectContaining({
+      method: "PUT",
+      body: JSON.stringify({ type: "owner" }),
+    }));
 
     fireEvent.click(screen.getByTestId("ticket-detail-unassign-button"));
     expect(await screen.findByTestId("ticket-detail-assignee")).toHaveTextContent("Unassigned");

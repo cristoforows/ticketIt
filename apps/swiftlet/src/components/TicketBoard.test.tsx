@@ -10,6 +10,7 @@ const ticket = (id: string, status: string, template = "Basic") => ({
   allowedActions: { statusChanges: [], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } } },
   completionCondition: "humanAcceptance",
   assigneeType: "",
+  assigneeAgent: null,
   goal: "",
   context: "",
   successCriteria: "",
@@ -77,6 +78,20 @@ describe("TicketBoard", () => {
     const card = await screen.findByTestId("board-ticket-badged");
     expect(within(card).getByTestId("board-badges")).toHaveTextContent("Urgent");
     expect(within(card).getByLabelText("Badges: Urgent")).toBeInTheDocument();
+  });
+
+  it("shows the assigned Agent's name, the Owner, or Unassigned on each slip", async () => {
+    stubTickets([
+      { ...ticket("agent", "Backlog", "Coding"), assigneeType: "agent", assigneeAgent: { id: "a1", name: "Builder", kind: "coding" } },
+      { ...ticket("owner", "Backlog"), assigneeType: "owner" },
+      ticket("nobody", "Backlog"),
+    ]);
+
+    render(<TicketBoard onUnauthenticated={() => {}} />);
+
+    expect(within(await screen.findByTestId("board-ticket-agent")).getByTestId("board-assignee")).toHaveTextContent("Assignee: Builder");
+    expect(within(screen.getByTestId("board-ticket-owner")).getByTestId("board-assignee")).toHaveTextContent("Assignee: Owner");
+    expect(within(screen.getByTestId("board-ticket-nobody")).getByTestId("board-assignee")).toHaveTextContent("Assignee: Unassigned");
   });
 
   it("shows empty sections even when there are no Tickets", async () => {

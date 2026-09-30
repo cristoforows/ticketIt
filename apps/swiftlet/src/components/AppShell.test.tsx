@@ -91,6 +91,7 @@ describe("AppShell", () => {
         template: "Basic",
         completionCondition: "humanAcceptance",
         assigneeType: "",
+        assigneeAgent: null,
         goal: "",
         context: "",
         successCriteria: "",
@@ -125,6 +126,19 @@ describe("AppShell", () => {
     expect(await screen.findAllByText("— no orders —")).toHaveLength(6);
     expect(screen.getByTestId("signed-in-owner")).toHaveTextContent(OWNER.login);
     expect(window.location.pathname).toBe("/board");
+  });
+
+  it("links to the Agents page from the shell and loads /agents directly", async () => {
+    stubFetchByPath({ "/api/status": jsonResponse({ ok: true }), "/api/tickets": EMPTY_TICKET_LIST, "/api/agents": jsonResponse({ agents: [] }) });
+
+    render(<AppShell owner={OWNER} onSignedOut={() => {}} onUnauthenticated={() => {}} />);
+    fireEvent.click(screen.getByRole("link", { name: "Agents" }));
+
+    expect(await screen.findByTestId("agent-list-empty")).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/agents");
+    expect(screen.getByRole("navigation", { name: "Settings" })).toContainElement(screen.getByRole("link", { name: "Agents" }));
+    expect(screen.getByRole("link", { name: "Agents" })).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByTestId("ticket-capture-form")).not.toBeInTheDocument();
   });
 
   it("treats a 401 on sign-out as already signed out", async () => {

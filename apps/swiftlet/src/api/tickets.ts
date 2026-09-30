@@ -7,7 +7,9 @@ import type { components } from "./generated/schema";
 import { UnauthenticatedError } from "./session";
 
 export type Ticket = components["schemas"]["Ticket"];
+type AgentKind = components["schemas"]["AgentKind"];
 export type Badge = components["schemas"]["Badge"];
+export type TicketAssignee = components["schemas"]["AssignTicketRequest"];
 
 /**
  * Manual refinement (issue #58): a genuine partial update. A field
@@ -61,7 +63,7 @@ type FetchLike = Pick<Response, "ok" | "status" | "statusText" | "json">;
  * 401 always throws UnauthenticatedError, the one signal this app
  * treats as "return to the sign-in page."
  */
-async function authenticatedFetch(path: string, init?: RequestInit): Promise<FetchLike> {
+export async function authenticatedFetch(path: string, init?: RequestInit): Promise<FetchLike> {
   let response: FetchLike;
   try {
     response = await fetch(path, init);
@@ -82,6 +84,7 @@ function parseTicket(payload: unknown): Ticket {
   const actions = record.allowedActions as Record<string, unknown> | undefined;
   const accept = actions?.accept as Record<string, unknown> | undefined;
   const reason = accept?.reason as Record<string, unknown> | undefined;
+  const agent = record.assigneeAgent as Record<string, unknown> | null | undefined;
   if (
     typeof record.id !== "string" ||
     typeof record.title !== "string" ||
@@ -89,6 +92,8 @@ function parseTicket(payload: unknown): Ticket {
     typeof record.template !== "string" ||
     typeof record.completionCondition !== "string" ||
     typeof record.assigneeType !== "string" ||
+    !(agent === null || (typeof agent === "object" && agent !== undefined &&
+      typeof agent.id === "string" && typeof agent.name === "string" && typeof agent.kind === "string")) ||
     typeof record.goal !== "string" ||
     typeof record.context !== "string" ||
     typeof record.successCriteria !== "string" ||
@@ -127,6 +132,7 @@ function parseTicket(payload: unknown): Ticket {
     template: record.template as Ticket["template"],
     completionCondition: record.completionCondition as Ticket["completionCondition"],
     assigneeType: record.assigneeType as Ticket["assigneeType"],
+    assigneeAgent: agent === null ? null : { id: agent.id as string, name: agent.name as string, kind: agent.kind as AgentKind },
     badges: record.badges as Ticket["badges"],
     archivedAt: record.archivedAt,
     goal: record.goal,
@@ -151,7 +157,7 @@ function parseTicketList(payload: unknown): Ticket[] {
 }
 
 /** Galley's error.message, when the body matches the shared error shape -- undefined otherwise. */
-function errorMessage(payload: unknown): string | undefined {
+export function errorMessage(payload: unknown): string | undefined {
   if (typeof payload !== "object" || payload === null) {
     return undefined;
   }
@@ -316,13 +322,13 @@ export async function acceptTicket(id: string): Promise<Ticket> {
   return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(id)}/accept`, { method: "POST" });
 }
 
-/**
- * Assigns the signed-in Owner as a Ticket's Assignee (issue #61) --
- * the only Assignee kind M2 has (AGENTS.md, "No AI, Agents, Rounds, or
- * Michelin in M2"). Idempotent, matching Galley's own PUT semantics.
- */
-export async function assignTicketOwner(id: string): Promise<Ticket> {
-  return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(id)}/assignee`, { method: "PUT" });
+/** An Agent id Galley cannot find for this Owner shares the Ticket's 404, so its message is shown rather than "not found". */
+export async function assignTicket(id: string, assignee: TicketAssignee): Promise<Ticket> {
+  return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(id)}/assignee`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(assignee),
+  }, assignee.type === "agent" ? "response" : "ticket");
 }
 
 /** Clears a Ticket's Assignee (issue #61). Idempotent, matching Galley's own DELETE semantics. */
