@@ -109,6 +109,17 @@ describe("TicketDetailPage", () => {
     expect(screen.queryByTestId("ticket-detail-error")).not.toBeInTheDocument();
   });
 
+  it.each([
+    { name: "a kind outside the contract", assigneeAgent: { id: AGENTS[0].id, name: "atlas", kind: "general" } },
+    { name: "a missing name", assigneeAgent: { id: AGENTS[0].id, kind: "research" } },
+  ])("rejects a Ticket whose assigned Agent has $name", async ({ assigneeAgent }) => {
+    stubFetch(jsonResponse({ ...TICKET, assigneeType: "agent", assigneeAgent }));
+
+    render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+
+    expect(await screen.findByTestId("ticket-detail-error-message")).toHaveTextContent("Galley's Ticket response was missing a required field.");
+  });
+
   it("renders an explicit error state for a failure other than 404", async () => {
     stubFetch(jsonResponse({ error: "boom" }, 503, "Service Unavailable"));
 

@@ -1,8 +1,9 @@
 import type { components } from "./generated/schema";
-import { authenticatedFetch, errorMessage } from "./tickets";
+import { authenticatedFetch, errorMessage } from "./http";
 
 export type Agent = components["schemas"]["Agent"];
 export type AgentKind = components["schemas"]["AgentKind"];
+export type AgentSummary = components["schemas"]["TicketAssigneeAgent"];
 
 export const AGENT_KINDS: AgentKind[] = ["research", "coding"];
 
@@ -10,11 +11,15 @@ export const AGENT_NAME_MAX_LENGTH = 80;
 
 const AGENTS_ENDPOINT = "/api/agents";
 
-function isAgent(value: unknown): value is Agent {
+export function isAgentSummary(value: unknown): value is AgentSummary {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Record<string, unknown>;
   return typeof record.id === "string" && typeof record.name === "string" &&
-    AGENT_KINDS.includes(record.kind as AgentKind) && typeof record.createdAt === "string";
+    AGENT_KINDS.includes(record.kind as AgentKind);
+}
+
+function isAgent(value: unknown): value is Agent {
+  return isAgentSummary(value) && typeof (value as Record<string, unknown>).createdAt === "string";
 }
 
 async function agentResponse(path: string, init?: RequestInit): Promise<unknown> {

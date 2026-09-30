@@ -4,10 +4,10 @@
  * drift-check convention this file follows too.
  */
 import type { components } from "./generated/schema";
-import { UnauthenticatedError } from "./session";
+import { isAgentSummary } from "./agents";
+import { authenticatedFetch, errorMessage } from "./http";
 
 export type Ticket = components["schemas"]["Ticket"];
-type AgentKind = components["schemas"]["AgentKind"];
 export type Badge = components["schemas"]["Badge"];
 export type TicketAssignee = components["schemas"]["AssignTicketRequest"];
 
@@ -54,28 +54,6 @@ export class TicketNotFoundError extends Error {
   }
 }
 
-type FetchLike = Pick<Response, "ok" | "status" | "statusText" | "json">;
-
-/**
- * Every Ticket call is authenticated (Galley requires a valid session
- * for both operations -- docs/adr/0001-single-authority-galley.md),
- * so this mirrors src/api/session.ts's authenticatedFetch exactly: a
- * 401 always throws UnauthenticatedError, the one signal this app
- * treats as "return to the sign-in page."
- */
-export async function authenticatedFetch(path: string, init?: RequestInit): Promise<FetchLike> {
-  let response: FetchLike;
-  try {
-    response = await fetch(path, init);
-  } catch (cause) {
-    throw new Error("Galley is unreachable.", { cause });
-  }
-  if (response.status === 401) {
-    throw new UnauthenticatedError();
-  }
-  return response;
-}
-
 function parseTicket(payload: unknown): Ticket {
   if (typeof payload !== "object" || payload === null) {
     throw new Error("Galley's response body was not a JSON object.");
@@ -84,7 +62,7 @@ function parseTicket(payload: unknown): Ticket {
   const actions = record.allowedActions as Record<string, unknown> | undefined;
   const accept = actions?.accept as Record<string, unknown> | undefined;
   const reason = accept?.reason as Record<string, unknown> | undefined;
-  const agent = record.assigneeAgent as Record<string, unknown> | null | undefined;
+  const agent = record.assigneeAgent;
   if (
     typeof record.id !== "string" ||
     typeof record.title !== "string" ||
@@ -92,8 +70,7 @@ function parseTicket(payload: unknown): Ticket {
     typeof record.template !== "string" ||
     typeof record.completionCondition !== "string" ||
     typeof record.assigneeType !== "string" ||
-    !(agent === null || (typeof agent === "object" && agent !== undefined &&
-      typeof agent.id === "string" && typeof agent.name === "string" && typeof agent.kind === "string")) ||
+    !(agent === null || isAgentSummary(agent)) ||
     typeof record.goal !== "string" ||
     typeof record.context !== "string" ||
     typeof record.successCriteria !== "string" ||
@@ -132,7 +109,7 @@ function parseTicket(payload: unknown): Ticket {
     template: record.template as Ticket["template"],
     completionCondition: record.completionCondition as Ticket["completionCondition"],
     assigneeType: record.assigneeType as Ticket["assigneeType"],
-    assigneeAgent: agent === null ? null : { id: agent.id as string, name: agent.name as string, kind: agent.kind as AgentKind },
+    assigneeAgent: agent === null ? null : { id: agent.id, name: agent.name, kind: agent.kind },
     badges: record.badges as Ticket["badges"],
     archivedAt: record.archivedAt,
     goal: record.goal,
@@ -154,19 +131,6 @@ function parseTicketList(payload: unknown): Ticket[] {
     throw new Error('Galley\'s response was missing array field "tickets".');
   }
   return record.tickets.map(parseTicket);
-}
-
-/** Galley's error.message, when the body matches the shared error shape -- undefined otherwise. */
-export function errorMessage(payload: unknown): string | undefined {
-  if (typeof payload !== "object" || payload === null) {
-    return undefined;
-  }
-  const error = (payload as Record<string, unknown>).error;
-  if (typeof error !== "object" || error === null) {
-    return undefined;
-  }
-  const message = (error as Record<string, unknown>).message;
-  return typeof message === "string" ? message : undefined;
 }
 
 /**
