@@ -26,6 +26,7 @@ var knownPublicTables = []string{
 	"oauth_states",
 	"owner_identities",
 	"owners",
+	"runners",
 	"schema_migrations",
 	"sessions",
 	"tickets",

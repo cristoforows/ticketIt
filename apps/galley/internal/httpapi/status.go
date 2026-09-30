@@ -60,14 +60,17 @@ type server struct {
 	pool         *pgxpool.Pool
 	cfg          config.Config
 	githubClient *auth.GitHubClient
+	now          func() time.Time
+	devClock     *devClock
 }
 
 // newServer computes the fixed status fields once. startedAt is
 // captured at process start (cmd/galley/main.go). pool is used live,
 // per request, by GetStatus, the diagnostic operations (diagnostic.go),
 // and the auth operations (auth.go) -- never cached here.
-func newServer(cfg config.Config, startedAt time.Time, pool *pgxpool.Pool) *server {
+func newServer(cfg config.Config, startedAt time.Time, pool *pgxpool.Pool, now func() time.Time) *server {
 	return &server{
+		now: now,
 		fixed: StatusResponse{
 			Application: Galley,
 			Status:      StatusResponseStatusOk,

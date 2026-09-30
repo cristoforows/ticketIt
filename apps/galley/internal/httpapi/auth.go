@@ -159,9 +159,14 @@ func (s *server) SignOut(w http.ResponseWriter, r *http.Request) {
 // GetStatus must stay public, so a blanket middleware over every
 // generated operation is the wrong shape here.
 func (s *server) requireSession(w http.ResponseWriter, r *http.Request) (auth.OwnerView, bool) {
+	// Bearer credentials are runner credentials, refused on Owner routes (#130).
+	if len(r.Header.Values("Authorization")) > 0 {
+		writeUnauthenticated(w)
+		return auth.OwnerView{}, false
+	}
 	c, err := r.Cookie(SessionCookieName)
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, "unauthenticated", "sign-in required")
+		writeUnauthenticated(w)
 		return auth.OwnerView{}, false
 	}
 
@@ -175,8 +180,12 @@ func (s *server) requireSession(w http.ResponseWriter, r *http.Request) (auth.Ow
 	}
 	if !ok {
 		http.SetCookie(w, expiredSessionCookie(s.cfg))
-		writeError(w, http.StatusUnauthorized, "unauthenticated", "sign-in required")
+		writeUnauthenticated(w)
 		return auth.OwnerView{}, false
 	}
 	return owner, true
+}
+
+func writeUnauthenticated(w http.ResponseWriter) {
+	writeError(w, http.StatusUnauthorized, "unauthenticated", "sign-in required")
 }

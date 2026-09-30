@@ -51,13 +51,29 @@ const devOnlyPathPrefix = "/api/dev/"
 // 405; anything else -> 404. The same technique gives the diagnostic
 // routes their own 405 in development only.
 func NewHandler(cfg config.Config, startedAt time.Time, pool *pgxpool.Pool, logger *slog.Logger) http.Handler {
+	if cfg.Environment != config.EnvDevelopment {
+		return newHandler(cfg, logger, newServer(cfg, startedAt, pool, time.Now))
+	}
+	clock := &devClock{base: time.Now}
+	srv := newServer(cfg, startedAt, pool, clock.Now)
+	srv.devClock = clock
+	return newHandler(cfg, logger, srv)
+}
+
+// NewHandlerWithClock is NewHandler with the clock runner health is
+// derived from supplied by the caller, and no dev clock control.
+func NewHandlerWithClock(cfg config.Config, startedAt time.Time, pool *pgxpool.Pool, logger *slog.Logger, now func() time.Time) http.Handler {
+	return newHandler(cfg, logger, newServer(cfg, startedAt, pool, now))
+}
+
+func newHandler(cfg config.Config, logger *slog.Logger, srv *server) http.Handler {
 	mux := http.NewServeMux()
 
 	var registrar ServeMux = mux
 	if cfg.Environment != config.EnvDevelopment {
 		registrar = &gatedMux{mux: mux}
 	}
-	HandlerFromMux(newServer(cfg, startedAt, pool), registrar)
+	HandlerFromMux(srv, registrar)
 
 	mux.HandleFunc("/api/status", methodNotAllowedHandler("GET"))
 	mux.HandleFunc("/api/auth/github/start", methodNotAllowedHandler("GET"))
@@ -74,8 +90,13 @@ func NewHandler(cfg config.Config, startedAt time.Time, pool *pgxpool.Pool, logg
 	mux.HandleFunc("/api/tickets/{id}/badges/{badgeId}", methodNotAllowedHandler("PUT", "DELETE"))
 	mux.HandleFunc("/api/tickets/{id}/archive", methodNotAllowedHandler("POST"))
 	mux.HandleFunc("/api/tickets/{id}/restore", methodNotAllowedHandler("POST"))
+	mux.HandleFunc("/api/runner-credential", methodNotAllowedHandler("POST", "DELETE"))
+	mux.HandleFunc("/api/runner-health", methodNotAllowedHandler("GET"))
+	mux.HandleFunc("/api/runner/register", methodNotAllowedHandler("POST"))
+	mux.HandleFunc("/api/runner/heartbeat", methodNotAllowedHandler("POST"))
 	if cfg.Environment == config.EnvDevelopment {
 		mux.HandleFunc(devOnlyPathPrefix+"diagnostic-notes", methodNotAllowedHandler("GET", "POST"))
+		mux.HandleFunc(devOnlyPathPrefix+"clock/advance", methodNotAllowedHandler("POST"))
 	}
 	mux.HandleFunc("/", notFoundHandler)
 
