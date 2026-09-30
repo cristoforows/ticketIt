@@ -21,6 +21,7 @@ import {
 import { collectionQuery, fullPageReturnPath, navigate } from "../router";
 import { Link } from "./Link";
 import { TicketDetail } from "./TicketDetail";
+import { EmptyMessage, ErrorMessage, LoadingMessage, Paper } from "./ui";
 
 interface TicketDetailPageProps {
   ticketId: string;
@@ -119,46 +120,50 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
     }
   }, [onUnauthenticated]);
 
+  const receipt = state.kind === "loaded" && (
+    <TicketDetail
+      ticket={state.ticket}
+      onSave={saveTicket}
+      onChangeStatus={changeStatus}
+      onAccept={accept}
+      onAssign={assign}
+      onUnassign={unassign}
+      onCreateBadge={createNewBadge}
+      onLoadBadges={loadBadges}
+      onAttachBadge={(badgeId) => runCommand(() => attachTicketBadge(ticketId, badgeId))}
+      onDetachBadge={(badgeId) => runCommand(() => detachTicketBadge(ticketId, badgeId))}
+      onArchive={() => runCommand(() => archiveTicket(ticketId))}
+      onRestore={() => runCommand(() => restoreTicket(ticketId))}
+      onArchived={() => (onArchiveSucceeded ? onArchiveSucceeded() : navigate(fullPageReturnPath()))}
+    />
+  );
+
   return (
-    <section data-testid={presentation === "page" ? "ticket-detail-page" : "ticket-detail-modal-content"}>
-      {presentation === "page" && <p>
-        <Link to={`/${collectionQuery()}`} data-testid="back-to-backlog-link">
+    <section
+      data-testid={presentation === "page" ? "ticket-detail-page" : "ticket-detail-modal-content"}
+      className={presentation === "page" ? "mx-auto w-full max-w-(--size-receipt)" : undefined}
+    >
+      {presentation === "page" && <p className="mb-4">
+        <Link to={`/${collectionQuery()}`} data-testid="back-to-backlog-link" className="text-label font-bold tracking-label text-amber uppercase">
           Back to Backlog
         </Link>
       </p>}
       {state.kind === "loading" && (
-        <p role="status" data-testid="ticket-detail-loading">
+        <LoadingMessage data-testid="ticket-detail-loading">
           Loading ticket…
-        </p>
+        </LoadingMessage>
       )}
       {state.kind === "not-found" && (
         <div data-testid="ticket-detail-not-found">
-          <p>This ticket could not be found.</p>
+          <EmptyMessage>This ticket could not be found.</EmptyMessage>
         </div>
       )}
       {state.kind === "error" && (
-        <div role="alert" data-testid="ticket-detail-error">
-          <p>Unable to load this ticket.</p>
+        <ErrorMessage title="Unable to load this ticket." data-testid="ticket-detail-error">
           <p data-testid="ticket-detail-error-message">{state.message}</p>
-        </div>
+        </ErrorMessage>
       )}
-      {state.kind === "loaded" && (
-        <TicketDetail
-          ticket={state.ticket}
-          onSave={saveTicket}
-          onChangeStatus={changeStatus}
-          onAccept={accept}
-          onAssign={assign}
-          onUnassign={unassign}
-          onCreateBadge={createNewBadge}
-          onLoadBadges={loadBadges}
-          onAttachBadge={(badgeId) => runCommand(() => attachTicketBadge(ticketId, badgeId))}
-          onDetachBadge={(badgeId) => runCommand(() => detachTicketBadge(ticketId, badgeId))}
-          onArchive={() => runCommand(() => archiveTicket(ticketId))}
-          onRestore={() => runCommand(() => restoreTicket(ticketId))}
-          onArchived={() => (onArchiveSucceeded ? onArchiveSucceeded() : navigate(fullPageReturnPath()))}
-        />
-      )}
+      {receipt && (presentation === "page" ? <Paper className="p-6">{receipt}</Paper> : receipt)}
     </section>
   );
 }

@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { signIn } from "../support/sign-in";
-import { createTicket } from "../support/tickets";
+import { createTicket, statusLabel } from "../support/tickets";
 
 // issue #57: the canonical full-page Ticket view -- list-to-detail
 // navigation, a direct URL load, a reload of that direct URL (the
@@ -22,7 +22,7 @@ test.describe("ticket detail page", () => {
 
     expect(new URL(page.url()).pathname).toBe(`/tickets/${ticket.id}`);
     await expect(page.getByRole("dialog", { name: "Ticket details" }).getByTestId("ticket-detail-title")).toHaveText(title);
-    await expect(page.getByTestId("ticket-detail-status")).toHaveText(ticket.status);
+    await expect(page.getByTestId("ticket-detail-status")).toHaveText(statusLabel(ticket.status));
     await expect(page.getByTestId("ticket-detail-created-at")).toHaveText(ticket.createdAt);
 
     // The classic failure point named in issue #57: the static server
@@ -33,7 +33,7 @@ test.describe("ticket detail page", () => {
     await expect(page.getByTestId("ticket-detail-page")).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page.getByTestId("ticket-detail-title")).toHaveText(title);
-    await expect(page.getByTestId("ticket-detail-status")).toHaveText(ticket.status);
+    await expect(page.getByTestId("ticket-detail-status")).toHaveText(statusLabel(ticket.status));
   });
 
   test("loading a Ticket's URL directly renders its full page", async ({ page }) => {
@@ -43,7 +43,7 @@ test.describe("ticket detail page", () => {
     await page.goto(`/tickets/${ticket.id}`);
 
     await expect(page.getByTestId("ticket-detail-title")).toHaveText(title);
-    await expect(page.getByTestId("ticket-detail-status")).toHaveText(ticket.status);
+    await expect(page.getByTestId("ticket-detail-status")).toHaveText(statusLabel(ticket.status));
   });
 
   test("an unknown Ticket identifier renders a clear not-found page, not a blank screen or a raw error", async ({

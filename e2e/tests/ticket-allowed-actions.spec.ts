@@ -1,15 +1,15 @@
 import { test, expect, type Page } from "@playwright/test";
 import { signIn } from "../support/sign-in";
-import { createTicket, changeTicketStatusDirect, acceptTicketDirect, type Ticket, type TicketStatus } from "../support/tickets";
+import { createTicket, changeTicketStatusDirect, acceptTicketDirect, type Ticket, type TicketStatus, statusLabel } from "../support/tickets";
 
 async function assertPublishedControls(page: Page, id: string) {
   const response = await page.request.get(`/api/tickets/${id}`);
   expect(response.ok()).toBe(true);
   const ticket = await response.json() as Ticket;
   await page.goto(`/tickets/${id}`);
-  await expect(page.getByTestId("ticket-detail-status")).toHaveText(ticket.status);
+  await expect(page.getByTestId("ticket-detail-status")).toHaveText(statusLabel(ticket.status));
   const targets = await page.getByTestId("ticket-detail-status-actions").getByRole("button").allTextContents();
-  expect(targets).toEqual(ticket.allowedActions.statusChanges);
+  expect(targets).toEqual(ticket.allowedActions.statusChanges.map(statusLabel));
   if (ticket.allowedActions.accept.available) {
     await expect(page.getByTestId("ticket-detail-accept-button")).toBeVisible();
     await expect(page.getByTestId("ticket-detail-accept-unavailable")).toHaveCount(0);

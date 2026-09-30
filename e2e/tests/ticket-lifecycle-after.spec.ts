@@ -26,6 +26,6 @@ test("the Status and Assignee reached before a Galley restart are still there af
   await expect(ticketLink).toHaveText(TITLE);
   await ticketLink.click();
 
-  await expect(page.getByTestId("ticket-detail-status")).toHaveText("InProgress");
+  await expect(page.getByTestId("ticket-detail-status")).toHaveText("In Progress");
   await expect(page.getByTestId("ticket-detail-assignee")).toHaveText("Owner");
 });

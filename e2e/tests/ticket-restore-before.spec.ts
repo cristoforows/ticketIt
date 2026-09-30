@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { changeTicketStatusDirect, acceptTicketDirect, createTicket, type Ticket } from "../support/tickets";
+import { changeTicketStatusDirect, acceptTicketDirect, createTicket, type Ticket, statusLabel } from "../support/tickets";
 
 const STORAGE_STATE_PATH = process.env.E2E_STORAGE_STATE_PATH;
 test.use({ storageState: STORAGE_STATE_PATH });
@@ -39,7 +39,7 @@ test("Archived list combines Badge filter, restores Ready to Backlog and Done un
     await page.getByTestId(`ticket-item-${ticket.id}`).getByRole("link").click();
     const modal = page.getByRole("dialog", { name: "Ticket details" });
     await modal.getByTestId("ticket-detail-restore-button").click();
-    await expect(modal.getByTestId("ticket-detail-status")).toHaveText(status);
+    await expect(modal.getByTestId("ticket-detail-status")).toHaveText(statusLabel(status));
     await modal.getByRole("button", { name: "Close", exact: true }).click();
     await expect(page.getByTestId(`ticket-item-${ticket.id}`)).toHaveCount(0);
     const response = await page.request.get(`/api/tickets/${ticket.id}`);

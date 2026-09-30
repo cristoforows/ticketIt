@@ -40,10 +40,10 @@ test.describe("ticket lifecycle controls", () => {
     await expect(page.getByTestId("ticket-detail-status")).toHaveText("Ready");
 
     await page.getByTestId("ticket-detail-status-button-InProgress").click();
-    await expect(page.getByTestId("ticket-detail-status")).toHaveText("InProgress");
+    await expect(page.getByTestId("ticket-detail-status")).toHaveText("In Progress");
 
     await page.getByTestId("ticket-detail-status-button-InReview").click();
-    await expect(page.getByTestId("ticket-detail-status")).toHaveText("InReview");
+    await expect(page.getByTestId("ticket-detail-status")).toHaveText("In Review");
 
     // A humanAcceptance Ticket: Accept is offered, and reaches Done
     // where no Status button can.
@@ -73,7 +73,7 @@ test.describe("ticket lifecycle controls", () => {
     await changeTicketStatusDirect(page, ticket.id, "InProgress");
 
     await page.goto(`/tickets/${ticket.id}`);
-    await expect(page.getByTestId("ticket-detail-status")).toHaveText("InProgress");
+    await expect(page.getByTestId("ticket-detail-status")).toHaveText("In Progress");
 
     await page.getByTestId("ticket-detail-status-button-Blocked").click();
     await expect(page.getByTestId("ticket-detail-status")).toHaveText("Blocked");
@@ -83,7 +83,7 @@ test.describe("ticket lifecycle controls", () => {
     await expect(page.getByTestId("ticket-detail-status-button-InProgress")).toBeVisible();
 
     await page.getByTestId("ticket-detail-status-button-InProgress").click();
-    await expect(page.getByTestId("ticket-detail-status")).toHaveText("InProgress");
+    await expect(page.getByTestId("ticket-detail-status")).toHaveText("In Progress");
   });
 
   test("a rejected skip is surfaced with Galley's actual reason -- never hidden, retried, or applied as if it had succeeded", async ({
@@ -133,7 +133,7 @@ test.describe("ticket lifecycle controls", () => {
     expect(directAccept.errorMessage).toBeTruthy();
 
     await page.goto(`/tickets/${ticket.id}`);
-    await expect(page.getByTestId("ticket-detail-status")).toHaveText("InReview");
+    await expect(page.getByTestId("ticket-detail-status")).toHaveText("In Review");
     await expect(page.getByTestId("ticket-detail-accept-button")).toHaveCount(0);
     await expect(page.getByTestId("ticket-detail-accept-unavailable")).toHaveText(directAccept.errorMessage!);
   });

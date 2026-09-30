@@ -29,7 +29,7 @@ test("a Status and Assignee reached through the real controls survive a Galley r
   await expect(page.getByTestId("ticket-detail-status")).toHaveText("Ready");
 
   await page.getByTestId("ticket-detail-status-button-InProgress").click();
-  await expect(page.getByTestId("ticket-detail-status")).toHaveText("InProgress");
+  await expect(page.getByTestId("ticket-detail-status")).toHaveText("In Progress");
 
   await page.getByTestId("ticket-detail-assign-button").click();
   await expect(page.getByTestId("ticket-detail-assignee")).toHaveText("Owner");

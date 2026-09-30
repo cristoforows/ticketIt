@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Badge, Ticket, TicketUpdate } from "../api/tickets";
+import { BadgeTag, cx, ErrorMessage, PrimaryButton, Rule, SecondaryButton, Select, StatusTag, statusLabel, TextInput, Textarea, ticketSerial } from "./ui";
 
 interface TicketDetailProps {
   ticket: Ticket;
@@ -142,125 +143,146 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
     }
   }
 
+  const archived = !!current.archivedAt;
+  const archivedReason = archived ? current.allowedActions.accept.reason?.message : undefined;
+
   return (
-    <article data-testid="ticket-detail">
+    <article data-testid="ticket-detail" className="text-body">
       {mode === "view" && (
         <>
-          <h2 data-testid="ticket-detail-title">{current.title}</h2>
-          {current.archivedAt && <p data-testid="ticket-detail-archived">Archived {current.archivedAt}. {current.allowedActions.accept.reason?.message}</p>}
-          <dl>
-            <dt>Status</dt>
-            <dd data-testid="ticket-detail-status">{current.status}</dd>
-            <dt>Template</dt>
-            <dd data-testid="ticket-detail-template">{current.template}</dd>
-            <dt>Completion condition</dt>
-            <dd data-testid="ticket-detail-completion-condition">
-              {completionConditionLabel(current.completionCondition)}
-            </dd>
-            <dt>Created</dt>
-            <dd data-testid="ticket-detail-created-at">{current.createdAt}</dd>
-            <dt>Updated</dt>
-            <dd data-testid="ticket-detail-updated-at">{current.updatedAt}</dd>
-          </dl>
-          <section aria-label="Badges" data-testid="ticket-detail-badges">
-            <h3>Badges</h3>
-            <ul>{current.badges.map((badge) => <li key={badge.id}><span>{badge.name}</span> <button type="button" disabled={actionPending || !!current.archivedAt} title={current.archivedAt ? current.allowedActions.accept.reason?.message : undefined} onClick={() => runAction(() => onDetachBadge(badge.id))} aria-label={`Remove ${badge.name}`}>Remove</button></li>)}</ul>
-            <BadgePicker ticket={current} disabled={!!current.archivedAt} reason={current.allowedActions.accept.reason?.message} onAttached={setCurrent} onLoad={onLoadBadges} onCreate={onCreateBadge} onAttach={onAttachBadge} />
-          </section>
-          <section aria-label="Refinement">
+          <p className="text-label tracking-label text-muted">{ticketSerial(current.id)}</p>
+          <h2 data-testid="ticket-detail-title" className="mt-1 mb-2 text-title font-bold break-words">{current.title}</h2>
+          <StatusTag status={current.status} data-testid="ticket-detail-status" />
+          {archived && (
+            <p data-testid="ticket-detail-archived" className="mt-3 border-2 border-status-blocked-deep p-2 text-status-blocked-deep">
+              <span className="font-bold tracking-label uppercase">Archived</span> {current.archivedAt}. {archivedReason}
+            </p>
+          )}
+          <Rule />
+          <section aria-label="Refinement" className="flex flex-col gap-3">
             <RefinementValue label="Goal" testId="goal" value={current.goal} />
+            <Rule className="my-0!" />
             <RefinementValue label="Context" testId="context" value={current.context} />
+            <Rule className="my-0!" />
             <RefinementValue label="Success Criteria" testId="success-criteria" value={current.successCriteria} />
+            <Rule className="my-0!" />
             <RefinementValue label="Constraints" testId="constraints" value={current.constraints} />
+            <Rule className="my-0!" />
             <RefinementValue label="Repository" testId="repository" value={current.repository} />
           </section>
-          {current.template === "Coding" && (
-            <section aria-label="Pull Request" data-testid="ticket-detail-pr-section">
-              <h3>Pull Request</h3>
-              {/* No PR exists until M8 -- there is nothing to fabricate a
-                  field for; this is the section's own honest state. */}
-              <p data-testid="ticket-detail-pr-empty-state">
-                PR delivery arrives with coding execution -- no pull request exists yet.
-              </p>
-            </section>
-          )}
-          <section aria-label="Workflow" data-testid="ticket-detail-workflow">
-            <dl>
-              <dt>Assignee</dt>
-              <dd data-testid="ticket-detail-assignee">
-                {current.assigneeType === OWNER_ASSIGNEE_TYPE ? "Owner" : "Unassigned"}
-              </dd>
-            </dl>
-            {/* Owner is the only Assignee kind M2 has. */}
-            {current.assigneeType === OWNER_ASSIGNEE_TYPE ? (
-              <button
-                type="button"
-                data-testid="ticket-detail-unassign-button"
-                onClick={() => runAction(onUnassign)}
-                disabled={actionPending || !!current.archivedAt}
-                title={current.archivedAt ? current.allowedActions.accept.reason?.message : undefined}
-              >
-                Unassign
-              </button>
+          <Rule />
+          <dl className="m-0 flex flex-col gap-1">
+            <ReceiptLine label="Template" testId="template">{current.template}</ReceiptLine>
+            <ReceiptLine label="Completion condition" testId="completion-condition">
+              {completionConditionLabel(current.completionCondition)}
+            </ReceiptLine>
+            <ReceiptLine label="Assignee" testId="assignee">
+              {current.assigneeType === OWNER_ASSIGNEE_TYPE ? "Owner" : "Unassigned"}
+            </ReceiptLine>
+            <ReceiptLine label="Created" testId="created-at">{current.createdAt}</ReceiptLine>
+            <ReceiptLine label="Updated" testId="updated-at">{current.updatedAt}</ReceiptLine>
+          </dl>
+          <Rule />
+          <section aria-label="Badges" data-testid="ticket-detail-badges">
+            <h3 className={labelClasses}>Badges</h3>
+            {current.badges.length === 0 ? (
+              <p className="my-1 text-muted italic">No badges.</p>
             ) : (
-              <button
-                type="button"
-                data-testid="ticket-detail-assign-button"
-                onClick={() => runAction(onAssign)}
-                disabled={actionPending || !!current.archivedAt}
-                title={current.archivedAt ? current.allowedActions.accept.reason?.message : undefined}
-              >
-                Assign to me
-              </button>
-            )}
-
-            {current.allowedActions.statusChanges.length > 0 && (
-              <div data-testid="ticket-detail-status-actions">
-                {current.allowedActions.statusChanges.map((target) => (
-                  <button
-                    key={target}
-                    type="button"
-                    data-testid={`ticket-detail-status-button-${target}`}
-                    onClick={() => runAction(() => onChangeStatus(target))}
-                    disabled={actionPending || !!current.archivedAt}
-                  >
-                    {target}
-                  </button>
+              <ul className="my-2 flex list-none flex-wrap gap-2 p-0">
+                {current.badges.map((badge) => (
+                  <li key={badge.id} className="mt-0 flex items-center gap-1 border-t-0 pt-0">
+                    <BadgeTag>{badge.name}</BadgeTag>
+                    <SecondaryButton size="sm" disabled={actionPending || archived} title={archivedReason} onClick={() => runAction(() => onDetachBadge(badge.id))} aria-label={`Remove ${badge.name}`}>Remove</SecondaryButton>
+                  </li>
                 ))}
-              </div>
+              </ul>
             )}
-
-            {current.allowedActions.accept.available ? (
-              <button
-                type="button"
-                data-testid="ticket-detail-accept-button"
-                onClick={() => runAction(onAccept)}
-                disabled={actionPending || !!current.archivedAt}
-              >
-                Accept
-              </button>
-            ) : (
-              <p data-testid="ticket-detail-accept-unavailable">{current.allowedActions.accept.reason?.message}</p>
-            )}
-
-            {actionError && (
-              <p role="alert" data-testid="ticket-detail-action-error">
-                {actionError}
-              </p>
-            )}
+            <BadgePicker ticket={current} disabled={archived} reason={archivedReason} onAttached={setCurrent} onLoad={onLoadBadges} onCreate={onCreateBadge} onAttach={onAttachBadge} />
           </section>
-          <button type="button" data-testid="ticket-detail-edit-button" onClick={startEditing} disabled={!!current.archivedAt} title={current.archivedAt ? current.allowedActions.accept.reason?.message : undefined}>
-            Edit
-          </button>
-          <button type="button" data-testid="ticket-detail-archive-button" onClick={() => void handleArchive()} disabled={actionPending || !!current.archivedAt} title={current.archivedAt ? current.allowedActions.accept.reason?.message : undefined}>Archive</button>
-          {current.archivedAt && <button type="button" data-testid="ticket-detail-restore-button" onClick={() => runAction(onRestore)} disabled={actionPending}>Restore</button>}
+          {current.template === "Coding" && (
+            <>
+              <Rule />
+              <section aria-label="Pull Request" data-testid="ticket-detail-pr-section">
+                <h3 className={labelClasses}>Pull Request</h3>
+                {/* No PR exists until M8 -- there is nothing to fabricate a
+                    field for; this is the section's own honest state. */}
+                <p data-testid="ticket-detail-pr-empty-state" className="my-1 text-muted italic">
+                  PR delivery arrives with coding execution -- no pull request exists yet.
+                </p>
+              </section>
+            </>
+          )}
+          <Rule weight="thick" />
+          <section aria-label="Workflow" data-testid="ticket-detail-workflow" className="flex flex-col gap-3">
+            <div className="flex flex-wrap gap-2">
+              {current.allowedActions.statusChanges.length > 0 && (
+                <div data-testid="ticket-detail-status-actions" className="flex flex-wrap gap-2">
+                  {current.allowedActions.statusChanges.map((target) => (
+                    <PrimaryButton
+                      key={target}
+                      data-testid={`ticket-detail-status-button-${target}`}
+                      onClick={() => runAction(() => onChangeStatus(target))}
+                      disabled={actionPending || archived}
+                    >
+                      {statusLabel(target)}
+                    </PrimaryButton>
+                  ))}
+                </div>
+              )}
+              {current.allowedActions.accept.available && (
+                <PrimaryButton
+                  data-testid="ticket-detail-accept-button"
+                  onClick={() => runAction(onAccept)}
+                  disabled={actionPending || archived}
+                >
+                  Accept
+                </PrimaryButton>
+              )}
+              {/* Owner is the only Assignee kind M2 has. */}
+              {current.assigneeType === OWNER_ASSIGNEE_TYPE ? (
+                <SecondaryButton
+                  data-testid="ticket-detail-unassign-button"
+                  onClick={() => runAction(onUnassign)}
+                  disabled={actionPending || archived}
+                  title={archivedReason}
+                >
+                  Unassign
+                </SecondaryButton>
+              ) : (
+                <SecondaryButton
+                  data-testid="ticket-detail-assign-button"
+                  onClick={() => runAction(onAssign)}
+                  disabled={actionPending || archived}
+                  title={archivedReason}
+                >
+                  Assign to me
+                </SecondaryButton>
+              )}
+            </div>
+            {!current.allowedActions.accept.available && (
+              <p data-testid="ticket-detail-accept-unavailable" className="m-0 text-muted">{current.allowedActions.accept.reason?.message}</p>
+            )}
+            {actionError && (
+              <ErrorMessage title="Could not update the ticket.">
+                <p data-testid="ticket-detail-action-error" className="m-0">{actionError}</p>
+              </ErrorMessage>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <SecondaryButton data-testid="ticket-detail-edit-button" onClick={startEditing} disabled={archived} title={archivedReason}>
+                Edit
+              </SecondaryButton>
+              <SecondaryButton data-testid="ticket-detail-archive-button" onClick={() => void handleArchive()} disabled={actionPending || archived} title={archivedReason}>Archive</SecondaryButton>
+              {archived && <PrimaryButton data-testid="ticket-detail-restore-button" onClick={() => runAction(onRestore)} disabled={actionPending}>Restore</PrimaryButton>}
+            </div>
+          </section>
         </>
       )}
       {mode === "editing" && (
-        <form data-testid="ticket-detail-edit-form" onSubmit={handleSave}>
+        <form data-testid="ticket-detail-edit-form" onSubmit={handleSave} className="flex flex-col gap-4">
+          <p className="text-label tracking-label text-muted">{ticketSerial(current.id)}</p>
           <div>
-            <label htmlFor="ticket-detail-input-title">Title</label>
-            <input
+            <label htmlFor="ticket-detail-input-title" className={labelClasses}>Title</label>
+            <TextInput
               id="ticket-detail-input-title"
               data-testid="ticket-detail-input-title"
               value={fields.title}
@@ -301,8 +323,8 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
             disabled={saving}
           />
           <div>
-            <label htmlFor="ticket-detail-input-repository">Repository</label>
-            <input
+            <label htmlFor="ticket-detail-input-repository" className={labelClasses}>Repository</label>
+            <TextInput
               id="ticket-detail-input-repository"
               data-testid="ticket-detail-input-repository"
               value={fields.repository}
@@ -311,24 +333,37 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
             />
           </div>
           {saveError && (
-            <p role="alert" data-testid="ticket-detail-save-error">
-              {saveError}
-            </p>
+            <ErrorMessage title="Could not save the ticket.">
+              <p data-testid="ticket-detail-save-error" className="m-0">{saveError}</p>
+            </ErrorMessage>
           )}
-          <button type="submit" data-testid="ticket-detail-save-button" disabled={saving}>
-            Save
-          </button>
-          <button
-            type="button"
-            data-testid="ticket-detail-cancel-button"
-            onClick={cancelEditing}
-            disabled={saving}
-          >
-            Cancel
-          </button>
+          <Rule className="my-0!" />
+          <div className="flex gap-2">
+            <PrimaryButton type="submit" data-testid="ticket-detail-save-button" disabled={saving}>
+              Save
+            </PrimaryButton>
+            <SecondaryButton
+              data-testid="ticket-detail-cancel-button"
+              onClick={cancelEditing}
+              disabled={saving}
+            >
+              Cancel
+            </SecondaryButton>
+          </div>
         </form>
       )}
     </article>
+  );
+}
+
+const labelClasses = "m-0 block text-label font-bold tracking-label text-muted uppercase";
+
+function ReceiptLine({ label, testId, children }: { label: string; testId: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4">
+      <dt className={labelClasses}>{label}</dt>
+      <dd data-testid={`ticket-detail-${testId}`} className="m-0 text-right break-words">{children}</dd>
+    </div>
   );
 }
 
@@ -404,22 +439,26 @@ function BadgePicker({ ticket, disabled, reason, onAttached, onLoad, onCreate, o
   }
 
   return <>
-    <button type="button" onClick={() => setOpen((value) => !value)} disabled={disabled} title={disabled ? reason : undefined} data-testid="badge-picker-toggle">{open ? "Close badge picker" : "Add badge"}</button>
-    {open && <div data-testid="badge-picker">
-      <form onSubmit={attach}>
-        <label htmlFor="existing-badge">Existing badge</label>
-        <select id="existing-badge" data-testid="badge-picker-select" value={selected} onChange={(event) => setSelected(event.target.value)} disabled={pending}>
-          <option value="">Choose a badge</option>
-          {available.map((badge) => <option key={badge.id} value={badge.id}>{badge.name}</option>)}
-        </select>
-        <button type="submit" disabled={pending || !selected}>Attach badge</button>
+    <SecondaryButton size="sm" onClick={() => setOpen((value) => !value)} disabled={disabled} title={disabled ? reason : undefined} data-testid="badge-picker-toggle">{open ? "Close badge picker" : "Add badge"}</SecondaryButton>
+    {open && <div data-testid="badge-picker" className="mt-3 flex flex-col gap-3 border border-dashed border-rule p-3">
+      <form onSubmit={attach} className="flex flex-wrap items-end gap-2">
+        <div className="min-w-40 flex-1">
+          <label htmlFor="existing-badge" className={labelClasses}>Existing badge</label>
+          <Select id="existing-badge" data-testid="badge-picker-select" value={selected} onChange={(event) => setSelected(event.target.value)} disabled={pending}>
+            <option value="">Choose a badge</option>
+            {available.map((badge) => <option key={badge.id} value={badge.id}>{badge.name}</option>)}
+          </Select>
+        </div>
+        <PrimaryButton type="submit" disabled={pending || !selected}>Attach badge</PrimaryButton>
       </form>
-      <form onSubmit={createAndAttach}>
-        <label htmlFor="new-badge-name">New badge name</label>
-        <input id="new-badge-name" data-testid="new-badge-name" value={name} onChange={(event) => setName(event.target.value)} disabled={pending} />
-        <button type="submit" disabled={pending}>Create and attach</button>
+      <form onSubmit={createAndAttach} className="flex flex-wrap items-end gap-2">
+        <div className="min-w-40 flex-1">
+          <label htmlFor="new-badge-name" className={labelClasses}>New badge name</label>
+          <TextInput id="new-badge-name" data-testid="new-badge-name" value={name} onChange={(event) => setName(event.target.value)} disabled={pending} />
+        </div>
+        <PrimaryButton type="submit" disabled={pending}>Create and attach</PrimaryButton>
       </form>
-      {error && <p role="alert" data-testid="badge-picker-error">{error}</p>}
+      {error && <ErrorMessage title="Badge action failed."><p data-testid="badge-picker-error" className="m-0">{error}</p></ErrorMessage>}
     </div>}
   </>;
 }
@@ -427,8 +466,8 @@ function BadgePicker({ ticket, disabled, reason, onAttached, onLoad, onCreate, o
 function RefinementValue({ label, testId, value }: { label: string; testId: string; value: string }) {
   return (
     <div>
-      <h3>{label}</h3>
-      <p data-testid={`ticket-detail-field-${testId}`}>{value === "" ? "Not set." : value}</p>
+      <h3 className={labelClasses}>{label}</h3>
+      <p data-testid={`ticket-detail-field-${testId}`} className={cx("mt-1 mb-0 break-words whitespace-pre-wrap", value === "" && "text-muted italic")}>{value === "" ? "Not set." : value}</p>
     </div>
   );
 }
@@ -446,9 +485,9 @@ function RefinementInput({ label, guidance, testId, value, onChange, disabled }:
   const inputId = `ticket-detail-textarea-${testId}`;
   return (
     <div>
-      <label htmlFor={inputId}>{label}</label>
-      <p data-testid={`ticket-detail-guidance-${testId}`}>{guidance}</p>
-      <textarea
+      <label htmlFor={inputId} className={labelClasses}>{label}</label>
+      <p data-testid={`ticket-detail-guidance-${testId}`} className="mt-0.5 mb-1 text-muted">{guidance}</p>
+      <Textarea
         id={inputId}
         data-testid={inputId}
         value={value}
