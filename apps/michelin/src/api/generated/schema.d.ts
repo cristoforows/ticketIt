@@ -391,6 +391,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runner-credential": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pair a runner
+         * @description Issues a new runner credential and revokes the Owner's previous one. `token` appears in this response only; Galley stores its SHA-256 hash.
+         */
+        post: operations["pairRunner"];
+        /**
+         * Revoke the runner credential
+         * @description Idempotent; succeeds when nothing is paired.
+         */
+        delete: operations["revokeRunner"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runner-health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Runner health
+         * @description Derived on read from `lastSeenAt` and Galley's clock: `connected` while the last heartbeat is under 30 s old, `disconnected` after that or before the first one, `not_paired` without a credential. Never changes a Ticket or its Status.
+         */
+        get: operations["getRunnerHealth"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runner/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register a runner
+         * @description Called by Michelin on start. Also counts as a heartbeat. Every `/api/runner/` route requires the runner credential as a bearer token and rejects an Owner session cookie with the shared `401`.
+         */
+        post: operations["registerRunner"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runner/heartbeat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Runner heartbeat
+         * @description Records last-seen. A credential that has not registered since it was issued returns `409 runner_not_registered`.
+         */
+        post: operations["runnerHeartbeat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/dev/clock/advance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Advance Galley's clock
+         * @description Development-only, gated like the diagnostic notes. Moves the clock runner health reads forward, for the browser suite.
+         */
+        post: operations["advanceDevClock"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -625,6 +729,47 @@ export interface components {
         };
         CreateDiagnosticNoteRequest: {
             note: string;
+        };
+        /** @enum {string} */
+        RunnerHealthState: "connected" | "disconnected" | "not_paired";
+        RunnerHealth: {
+            state: components["schemas"]["RunnerHealthState"];
+            /**
+             * Format: date-time
+             * @description Galley's clock when `state` was derived.
+             */
+            checkedAt: string;
+            /** Format: date-time */
+            pairedAt: string | null;
+            /** Format: date-time */
+            registeredAt: string | null;
+            /** Format: date-time */
+            lastSeenAt: string | null;
+            michelinVersion: string | null;
+            hostname: string | null;
+        };
+        RunnerPairing: {
+            token: string;
+            health: components["schemas"]["RunnerHealth"];
+        };
+        RegisterRunnerRequest: {
+            michelinVersion: string;
+            hostname: string;
+        };
+        RunnerRegistration: {
+            /** Format: date-time */
+            registeredAt: string;
+        };
+        RunnerHeartbeat: {
+            /** Format: date-time */
+            lastSeenAt: string;
+        };
+        AdvanceDevClockRequest: {
+            seconds: number;
+        };
+        DevClock: {
+            /** Format: date-time */
+            now: string;
         };
         /** @description The shared JSON error shape used by every Galley error response. */
         ErrorBody: {
@@ -1393,6 +1538,186 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    pairRunner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The new credential and the resulting runner health. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerPairing"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    revokeRunner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No runner credential remains. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    getRunnerHealth: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Owner's runner health. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerHealth"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    registerRunner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterRunnerRequest"];
+            };
+        };
+        responses: {
+            /** @description The runner is registered. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerRegistration"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    runnerHeartbeat: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Last-seen recorded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerHeartbeat"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    advanceDevClock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdvanceDevClockRequest"];
+            };
+        };
+        responses: {
+            /** @description Galley's clock after the advance. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DevClock"];
+                };
             };
             /** @description Error. See `ErrorBody`. */
             default: {

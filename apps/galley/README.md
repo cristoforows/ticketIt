@@ -1119,6 +1119,59 @@ Tests:
 Checking out the repository reference is M8 #9. See
 [`docs/evidence/m4/128-agent-readiness.md`](../../docs/evidence/m4/128-agent-readiness.md).
 
+## Runner pairing, bearer authentication, and health (issue #130)
+
+Migration `000011_create_runners.up.sql` adds `runners`: one row per
+Owner (`runners_one_per_owner`), holding only the SHA-256 of the runner
+credential (`runners_token_hash_sha256` requires 32 bytes), when it was
+paired, and what Michelin last registered (version, hostname, first
+registration and last heartbeat, set together or not at all).
+
+| Route | Caller | Auth |
+| --- | --- | --- |
+| `POST /api/runner-credential` | Owner | session cookie |
+| `DELETE /api/runner-credential` | Owner | session cookie |
+| `GET /api/runner-health` | Owner | session cookie |
+| `POST /api/runner/register` | Michelin | `Authorization: Bearer tir_…` |
+| `POST /api/runner/heartbeat` | Michelin | `Authorization: Bearer tir_…` |
+| `POST /api/dev/clock/advance` | tests | session cookie, development only |
+
+**Pairing** returns `201` with `tir_` plus 32 random bytes in unpadded
+base64url, sent once with `Cache-Control: no-store`. Pairing again
+revokes the previous credential in the same transaction; the Owner row
+lock makes concurrent pairings leave exactly one. **Revoke** deletes the
+row and is `204` whether or not one existed.
+
+**The auth boundary runs both ways.** Everything under `/api/runner/`
+requires one well-formed, current bearer credential and refuses a
+session cookie, even beside a valid token. `requireSession` refuses an
+`Authorization` header with the `Bearer` scheme in any casing, so a
+runner credential opens no Owner route. Other schemes pass, so a proxy
+that forwards `Authorization: Basic …` does not lock the Owner out. Every refusal, including a malformed or revoked token,
+is the shared `401 unauthenticated`. Neither Galley nor its logs ever
+see the raw token after issuance.
+
+**Register** records `michelinVersion` (1–64 characters) and `hostname`
+(1–253), counts as a heartbeat, and may repeat. **Heartbeat** updates the
+last-seen time; before any register it is `409 runner_not_registered`,
+which Michelin answers by registering again.
+
+**Health** is derived at read time, never stored: `connected` while the
+last heartbeat is less than 30 s old by Galley's clock, `disconnected`
+with `lastSeenAt` otherwise, and `not_paired` without a credential.
+`checkedAt` is that clock's reading, so clients measure "last seen"
+against it rather than their own clock. Disconnecting changes no Ticket;
+M4.7+ overlays it on the locked Ticket, and reconciliation is M5 (#6).
+
+**Clock.** Handlers read `s.now`. `NewHandlerWithClock` injects it for
+tests. In development only, `NewHandler` wraps `time.Now` so
+`POST /api/dev/clock/advance {"seconds":1..86400}` can move it forward,
+which the browser suite uses to cross the health window; the route is
+gated like the other `/api/dev/` routes and is `404` in production.
+
+`runners` joins the no-execution-artefact allowlist. Run
+`go test ./...`, `go vet ./...` and `./scripts/check-contract-drift.sh`.
+
 ## Error shape
 
 `ErrorBody`/`ErrorDetail` are generated from
@@ -1375,7 +1428,8 @@ apps/galley/
     ├── postgres/           # issue #52: pgxpool wrapper, live health check, migration runner,
     │                       #   and the real-PostgreSQL test-setup helper (NewTestPool)
     ├── auth/                # issue #54: tokens/hashing, sessions, oauth state, Owner
-    │                       #   resolution, and the GitHub OAuth client -- no HTTP here
+    │                       #   resolution, and the GitHub OAuth client -- no HTTP here;
+    │                       #   issue #130 added runner credentials (runner.go)
     ├── githubfake/          # issue #54: local fake GitHub OAuth/identity server (fixtures);
     │                       #   issue #55 refactored Start (real-port, no testing.TB) out of
     │                       #   New (Go-test cleanup wrapper) for cmd/githubfake above
@@ -1395,6 +1449,8 @@ apps/galley/
         ├── template_capability_guardrail_test.go  # issue #59 (extended #60): the no-mapping guardrail test
         ├── ticket_lifecycle.go                 # issue #60: Status transitions, Accept, Assignee
         ├── ticket_lifecycle_test.go            # issue #60: transition-table, Accept, and concurrency tests
+        ├── runner.go       # issue #130: pairing, revoke, register, heartbeat, derived health, requireRunner
+        ├── devclock.go     # issue #130: development-only clock advance for the browser suite
         └── no_execution_side_effects_test.go   # issue #60: the no-Round/queue/work-request guardrail
 ```
 

@@ -40,8 +40,25 @@ const textPairs: Array<[string, string, string]> = [
   ["queued tag: status-ready-deep on paper", "status-ready-deep", "paper"],
 ];
 
+// Every foreground each HealthPill variant paints (text, dot and border share it) over the surface it sits on.
+const healthPillPairs: Array<[string, string, string]> = [
+  ["header pill connected", "status-done-text", "header"],
+  ["header pill disconnected", "status-blocked-text", "header"],
+  ["header pill not paired / unknown", "dim", "header"],
+  ["ground pill connected", "status-done-text", "ground"],
+  ["ground pill disconnected", "status-blocked-text", "ground"],
+  ["ground pill not paired / unknown", "dim", "ground"],
+  ["paper pill connected", "status-done-deep", "paper"],
+  ["paper pill disconnected", "status-blocked-deep", "paper"],
+  ["paper pill not paired / unknown", "muted", "paper"],
+];
+
 describe("token contrast (WCAG AA)", () => {
   it.each(textPairs)("%s is at least 4.5:1", (_label, fg, bg) => {
+    expect(contrast(token(fg), token(bg))).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it.each(healthPillPairs)("%s is at least 4.5:1", (_label, fg, bg) => {
     expect(contrast(token(fg), token(bg))).toBeGreaterThanOrEqual(4.5);
   });
 

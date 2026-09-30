@@ -60,7 +60,7 @@ async function run(options: StatusLoopOptions, signal: AbortSignal): Promise<voi
   }
 }
 
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
+export function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     if (signal.aborted) {
       resolve();

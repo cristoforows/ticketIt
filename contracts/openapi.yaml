@@ -810,7 +810,151 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorBody"
+  /api/runner-credential:
+    post:
+      operationId: pairRunner
+      summary: Pair a runner
+      tags: [runner]
+      description: >-
+        Issues a new runner credential and revokes the Owner's previous
+        one. `token` appears in this response only; Galley stores its
+        SHA-256 hash.
+      responses:
+        "201":
+          description: The new credential and the resulting runner health.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunnerPairing"
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+    delete:
+      operationId: revokeRunner
+      summary: Revoke the runner credential
+      tags: [runner]
+      description: Idempotent; succeeds when nothing is paired.
+      responses:
+        "204":
+          description: No runner credential remains.
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+  /api/runner-health:
+    get:
+      operationId: getRunnerHealth
+      summary: Runner health
+      tags: [runner]
+      description: >-
+        Derived on read from `lastSeenAt` and Galley's clock: `connected`
+        while the last heartbeat is under 30 s old, `disconnected` after
+        that or before the first one, `not_paired` without a credential.
+        Never changes a Ticket or its Status.
+      responses:
+        "200":
+          description: The Owner's runner health.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunnerHealth"
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+  /api/runner/register:
+    post:
+      operationId: registerRunner
+      summary: Register a runner
+      tags: [runner-api]
+      description: >-
+        Called by Michelin on start. Also counts as a heartbeat. Every
+        `/api/runner/` route requires the runner credential as a bearer
+        token and rejects an Owner session cookie with the shared `401`.
+      security:
+        - runnerBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRunnerRequest"
+      responses:
+        "200":
+          description: The runner is registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunnerRegistration"
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+  /api/runner/heartbeat:
+    post:
+      operationId: runnerHeartbeat
+      summary: Runner heartbeat
+      tags: [runner-api]
+      description: >-
+        Records last-seen. A credential that has not registered since it
+        was issued returns `409 runner_not_registered`.
+      security:
+        - runnerBearer: []
+      responses:
+        "200":
+          description: Last-seen recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunnerHeartbeat"
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+  /api/dev/clock/advance:
+    post:
+      operationId: advanceDevClock
+      summary: Advance Galley's clock
+      tags: [dev-diagnostic]
+      description: >-
+        Development-only, gated like the diagnostic notes. Moves the
+        clock runner health reads forward, for the browser suite.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdvanceDevClockRequest"
+      responses:
+        "200":
+          description: Galley's clock after the advance.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DevClock"
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
 components:
+  securitySchemes:
+    runnerBearer:
+      type: http
+      scheme: bearer
+      description: A runner credential, `tir_` followed by 43 base64url characters.
   schemas:
     Owner:
       type: object
@@ -1373,6 +1517,67 @@ components:
         note:
           type: string
           minLength: 1
+    RunnerHealthState:
+      type: string
+      enum: [connected, disconnected, not_paired]
+      x-enum-varnames: [RunnerConnected, RunnerDisconnected, RunnerNotPaired]
+    RunnerHealth:
+      type: object
+      additionalProperties: false
+      required: [state, checkedAt, pairedAt, registeredAt, lastSeenAt, michelinVersion, hostname]
+      properties:
+        state:
+          $ref: "#/components/schemas/RunnerHealthState"
+        checkedAt:
+          type: string
+          format: date-time
+          description: Galley's clock when `state` was derived.
+        pairedAt: {type: [string, "null"], format: date-time}
+        registeredAt: {type: [string, "null"], format: date-time}
+        lastSeenAt: {type: [string, "null"], format: date-time}
+        michelinVersion: {type: [string, "null"]}
+        hostname: {type: [string, "null"]}
+    RunnerPairing:
+      type: object
+      additionalProperties: false
+      required: [token, health]
+      properties:
+        token:
+          type: string
+          pattern: "^tir_[A-Za-z0-9_-]{43}$"
+        health:
+          $ref: "#/components/schemas/RunnerHealth"
+    RegisterRunnerRequest:
+      type: object
+      additionalProperties: false
+      required: [michelinVersion, hostname]
+      properties:
+        michelinVersion: {type: string, minLength: 1, maxLength: 64}
+        hostname: {type: string, minLength: 1, maxLength: 253}
+    RunnerRegistration:
+      type: object
+      additionalProperties: false
+      required: [registeredAt]
+      properties:
+        registeredAt: {type: string, format: date-time}
+    RunnerHeartbeat:
+      type: object
+      additionalProperties: false
+      required: [lastSeenAt]
+      properties:
+        lastSeenAt: {type: string, format: date-time}
+    AdvanceDevClockRequest:
+      type: object
+      additionalProperties: false
+      required: [seconds]
+      properties:
+        seconds: {type: integer, minimum: 1, maximum: 86400}
+    DevClock:
+      type: object
+      additionalProperties: false
+      required: [now]
+      properties:
+        now: {type: string, format: date-time}
     ErrorBody:
       type: object
       description: The shared JSON error shape used by every Galley error response.

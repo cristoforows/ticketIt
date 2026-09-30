@@ -5,6 +5,7 @@ import { AgentsPage } from "./AgentsPage";
 import { BadgeFilter } from "./BadgeFilter";
 import { NewOrderBar } from "./NewOrderBar";
 import { AppHeader } from "./AppHeader";
+import { RunnerHealthPill } from "./RunnerHealthPill";
 import { StatusView } from "./StatusView";
 import { TicketBoard } from "./TicketBoard";
 import { TicketDetailPage } from "./TicketDetailPage";
@@ -85,7 +86,8 @@ export function AppShell({ owner, onSignedOut, onUnauthenticated }: AppShellProp
         <nav aria-label="Settings" className="flex gap-1">
           <NavTab to="/agents" current={route.name === "agents"}>Agents</NavTab>
         </nav>
-        <div className="ml-auto flex min-w-0 items-center gap-4">
+        <div className="ml-auto flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
+          <RunnerHealthPill onUnauthenticated={onUnauthenticated} />
           <Caption tone="ground" data-testid="signed-in-owner" title={owner.login} className="min-w-0 break-words">Signed in as {owner.login}</Caption>
           <SecondaryButton tone="ground" className="shrink-0" onClick={handleSignOut} disabled={signingOut} data-testid="sign-out-button">
             Sign out

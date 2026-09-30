@@ -89,6 +89,27 @@ func (e DatabaseStatusStatus) Valid() bool {
 	}
 }
 
+// Defines values for RunnerHealthState.
+const (
+	RunnerConnected    RunnerHealthState = "connected"
+	RunnerDisconnected RunnerHealthState = "disconnected"
+	RunnerNotPaired    RunnerHealthState = "not_paired"
+)
+
+// Valid indicates whether the value is a known member of the RunnerHealthState enum.
+func (e RunnerHealthState) Valid() bool {
+	switch e {
+	case RunnerConnected:
+		return true
+	case RunnerDisconnected:
+		return true
+	case RunnerNotPaired:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for StatusResponseApplication.
 const (
 	Galley StatusResponseApplication = "galley"
@@ -224,6 +245,11 @@ func (e TicketTemplate) Valid() bool {
 	}
 }
 
+// AdvanceDevClockRequest defines model for AdvanceDevClockRequest.
+type AdvanceDevClockRequest struct {
+	Seconds int `json:"seconds"`
+}
+
 // Agent defines model for Agent.
 type Agent struct {
 	CreatedAt string `json:"createdAt"`
@@ -326,6 +352,11 @@ type DatabaseStatus struct {
 // DatabaseStatusStatus defines model for DatabaseStatus.Status.
 type DatabaseStatusStatus string
 
+// DevClock defines model for DevClock.
+type DevClock struct {
+	Now time.Time `json:"now"`
+}
+
 // DiagnosticNote Development-only diagnostic record (issue #52), persisted in the diagnostic_notes table. Not a domain/ticket concept.
 type DiagnosticNote struct {
 	// CreatedAt RFC3339 UTC timestamp of when the note was persisted.
@@ -365,9 +396,46 @@ type Owner struct {
 	Login string `json:"login"`
 }
 
+// RegisterRunnerRequest defines model for RegisterRunnerRequest.
+type RegisterRunnerRequest struct {
+	Hostname        string `json:"hostname"`
+	MichelinVersion string `json:"michelinVersion"`
+}
+
 // RenameAgentRequest defines model for RenameAgentRequest.
 type RenameAgentRequest struct {
 	Name string `json:"name"`
+}
+
+// RunnerHealth defines model for RunnerHealth.
+type RunnerHealth struct {
+	// CheckedAt Galley's clock when `state` was derived.
+	CheckedAt       time.Time         `json:"checkedAt"`
+	Hostname        *string           `json:"hostname"`
+	LastSeenAt      *time.Time        `json:"lastSeenAt"`
+	MichelinVersion *string           `json:"michelinVersion"`
+	PairedAt        *time.Time        `json:"pairedAt"`
+	RegisteredAt    *time.Time        `json:"registeredAt"`
+	State           RunnerHealthState `json:"state"`
+}
+
+// RunnerHealthState defines model for RunnerHealthState.
+type RunnerHealthState string
+
+// RunnerHeartbeat defines model for RunnerHeartbeat.
+type RunnerHeartbeat struct {
+	LastSeenAt time.Time `json:"lastSeenAt"`
+}
+
+// RunnerPairing defines model for RunnerPairing.
+type RunnerPairing struct {
+	Health RunnerHealth `json:"health"`
+	Token  string       `json:"token"`
+}
+
+// RunnerRegistration defines model for RunnerRegistration.
+type RunnerRegistration struct {
+	RegisteredAt time.Time `json:"registeredAt"`
 }
 
 // SessionResponse defines model for SessionResponse.
@@ -565,8 +633,14 @@ type RenameAgentJSONRequestBody = RenameAgentRequest
 // CreateBadgeJSONRequestBody defines body for CreateBadge for application/json ContentType.
 type CreateBadgeJSONRequestBody = CreateBadgeRequest
 
+// AdvanceDevClockJSONRequestBody defines body for AdvanceDevClock for application/json ContentType.
+type AdvanceDevClockJSONRequestBody = AdvanceDevClockRequest
+
 // CreateDiagnosticNoteJSONRequestBody defines body for CreateDiagnosticNote for application/json ContentType.
 type CreateDiagnosticNoteJSONRequestBody = CreateDiagnosticNoteRequest
+
+// RegisterRunnerJSONRequestBody defines body for RegisterRunner for application/json ContentType.
+type RegisterRunnerJSONRequestBody = RegisterRunnerRequest
 
 // CreateTicketJSONRequestBody defines body for CreateTicket for application/json ContentType.
 type CreateTicketJSONRequestBody = CreateTicketRequest
@@ -603,12 +677,30 @@ type ServerInterface interface {
 	// CreateBadge Create a reusable Badge
 	// (POST /api/badges)
 	CreateBadge(w http.ResponseWriter, r *http.Request)
+	// AdvanceDevClock Advance Galley's clock
+	// (POST /api/dev/clock/advance)
+	AdvanceDevClock(w http.ResponseWriter, r *http.Request)
 	// ListDiagnosticNotes List development diagnostic notes
 	// (GET /api/dev/diagnostic-notes)
 	ListDiagnosticNotes(w http.ResponseWriter, r *http.Request)
 	// CreateDiagnosticNote Persist a development diagnostic note
 	// (POST /api/dev/diagnostic-notes)
 	CreateDiagnosticNote(w http.ResponseWriter, r *http.Request)
+	// RevokeRunner Revoke the runner credential
+	// (DELETE /api/runner-credential)
+	RevokeRunner(w http.ResponseWriter, r *http.Request)
+	// PairRunner Pair a runner
+	// (POST /api/runner-credential)
+	PairRunner(w http.ResponseWriter, r *http.Request)
+	// GetRunnerHealth Runner health
+	// (GET /api/runner-health)
+	GetRunnerHealth(w http.ResponseWriter, r *http.Request)
+	// RunnerHeartbeat Runner heartbeat
+	// (POST /api/runner/heartbeat)
+	RunnerHeartbeat(w http.ResponseWriter, r *http.Request)
+	// RegisterRunner Register a runner
+	// (POST /api/runner/register)
+	RegisterRunner(w http.ResponseWriter, r *http.Request)
 	// SignOut Sign out
 	// (DELETE /api/session)
 	SignOut(w http.ResponseWriter, r *http.Request)
@@ -820,6 +912,20 @@ func (siw *ServerInterfaceWrapper) CreateBadge(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// AdvanceDevClock operation middleware
+func (siw *ServerInterfaceWrapper) AdvanceDevClock(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AdvanceDevClock(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListDiagnosticNotes operation middleware
 func (siw *ServerInterfaceWrapper) ListDiagnosticNotes(w http.ResponseWriter, r *http.Request) {
 
@@ -839,6 +945,76 @@ func (siw *ServerInterfaceWrapper) CreateDiagnosticNote(w http.ResponseWriter, r
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateDiagnosticNote(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeRunner operation middleware
+func (siw *ServerInterfaceWrapper) RevokeRunner(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeRunner(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PairRunner operation middleware
+func (siw *ServerInterfaceWrapper) PairRunner(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PairRunner(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetRunnerHealth operation middleware
+func (siw *ServerInterfaceWrapper) GetRunnerHealth(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRunnerHealth(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RunnerHeartbeat operation middleware
+func (siw *ServerInterfaceWrapper) RunnerHeartbeat(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RunnerHeartbeat(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RegisterRunner operation middleware
+func (siw *ServerInterfaceWrapper) RegisterRunner(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RegisterRunner(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1372,6 +1548,12 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/restore", wrapper.RestoreTicket)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/session", wrapper.SignOut)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/session", wrapper.GetSession)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/runner-credential", wrapper.RevokeRunner)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner-credential", wrapper.PairRunner)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/runner-health", wrapper.GetRunnerHealth)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner/register", wrapper.RegisterRunner)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner/heartbeat", wrapper.RunnerHeartbeat)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/dev/clock/advance", wrapper.AdvanceDevClock)
 
 	return m
 }
