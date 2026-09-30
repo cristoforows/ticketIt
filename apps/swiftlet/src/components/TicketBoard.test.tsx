@@ -78,7 +78,7 @@ describe("TicketBoard", () => {
     stubTickets([]);
     render(<TicketBoard onUnauthenticated={() => {}} />);
 
-    expect(await screen.findAllByText("No tickets.")).toHaveLength(6);
+    expect(await screen.findAllByText("— no orders —")).toHaveLength(6);
     expect(screen.queryByTestId(/^board-ticket-/)).not.toBeInTheDocument();
   });
 
@@ -93,11 +93,11 @@ describe("TicketBoard", () => {
     for (const [status, id] of [["Backlog", "captured"], ["InReview", "reviewing"]]) {
       const section = within(screen.getByTestId(`board-status-${status}`));
       expect(section.getByTestId(`board-ticket-${id}`)).toBeInTheDocument();
-      expect(section.queryByText("No tickets.")).not.toBeInTheDocument();
+      expect(section.queryByText("— no orders —")).not.toBeInTheDocument();
     }
     for (const status of ["Ready", "InProgress", "Blocked", "Done"]) {
       const section = within(screen.getByTestId(`board-status-${status}`));
-      expect(section.getByText("No tickets.")).toBeInTheDocument();
+      expect(section.getByText("— no orders —")).toBeInTheDocument();
       expect(section.queryByTestId(/^board-ticket-/)).not.toBeInTheDocument();
     }
   });

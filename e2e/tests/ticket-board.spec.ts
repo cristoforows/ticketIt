@@ -70,3 +70,18 @@ test("board and list render the same live Tickets in Galley order, with reloadab
   await expect(page.getByRole("dialog", { name: "Ticket details" })).toBeVisible();
   expect(new URL(page.url()).pathname).toBe(`/tickets/${blocked.id}`);
 });
+
+test("slips tilt at rest and stay flat under reduced motion", async ({ page, request }) => {
+  await signIn(page, request, "owner");
+  const created = await createTicket(page, `tilt ${Date.now()}`);
+  await page.goto("/board");
+  const slip = page.getByTestId(`board-ticket-${created.id}`);
+  await expect(slip).toBeVisible();
+  const rotate = () => slip.evaluate((element) => getComputedStyle(element).rotate);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await expect.poll(rotate).not.toBe("none");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect.poll(rotate).toBe("none");
+  await slip.hover();
+  expect(await slip.evaluate((element) => getComputedStyle(element).translate)).toBe("none");
+});
