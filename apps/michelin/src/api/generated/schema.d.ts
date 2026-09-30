@@ -207,15 +207,15 @@ export interface paths {
         };
         get?: never;
         /**
-         * Assign the signed-in Owner as a Ticket's Assignee
-         * @description The Owner is the only assignable Assignee in M2; this contract has no Agent-assignment command. Idempotent. Allowed whatever the Ticket's current Status -- D3 places no precondition on human assignment, since M2 has no open Round to lock the Assignee field.
-         *     Creates no Round, work request, or queue entry. Requires a valid session; returns `401 unauthenticated` otherwise. Identifier handling matches the other `/api/tickets/{id}` operations.
+         * Assign the signed-in Owner or one of the Owner's Agents
+         * @description Idempotent, and allowed whatever the Ticket's current Status or Template (D3 S1). Reassignment keeps the Ticket's history and completion condition. An unknown, malformed or foreign Ticket or Agent id returns the shared 404 not_found.
+         *     Creates no Round, work request, or queue entry. Requires a valid session; returns `401 unauthenticated` otherwise.
          */
-        put: operations["assignTicketOwner"];
+        put: operations["assignTicket"];
         post?: never;
         /**
          * Clear a Ticket's Assignee
-         * @description Idempotent: unassigning an already-unassigned Ticket returns 200, matching this contract's last-write-wins conventions elsewhere. Allowed whatever the current Status, as `assignTicketOwner`.
+         * @description Idempotent: unassigning an already-unassigned Ticket returns 200, matching this contract's last-write-wins conventions elsewhere. Allowed whatever the current Status, as `assignTicket`.
          *     Requires a valid session; returns `401 unauthenticated` otherwise. Identifier handling matches the other `/api/tickets/{id}` operations.
          */
         delete: operations["unassignTicket"];
@@ -246,6 +246,52 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the Owner's Agents
+         * @description Ordered by case-insensitive name ascending, then id ascending.
+         */
+        get: operations["listAgents"];
+        put?: never;
+        /**
+         * Create an Agent
+         * @description Names are trimmed, non-empty, at most 80 characters after trimming, and unique per Owner case-insensitively. Duplicate names return 409 duplicate_agent_name, including under concurrent creation. `kind` is fixed at creation.
+         */
+        post: operations["createAgent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Rename an Agent
+         * @description Same name rules as `createAgent`; renaming to the Agent's own name in a different case is allowed. An unknown, malformed or foreign id returns the shared 404 not_found.
+         */
+        patch: operations["renameAgent"];
         trace?: never;
     };
     "/api/tickets/{id}/badges/{badgeId}": {
@@ -373,10 +419,46 @@ export interface components {
          */
         TicketCompletionCondition: "humanAcceptance" | "reviewedPrMerge";
         /**
-         * @description The kind of Assignee responsible for a Ticket (CONTEXT.md, "Assignee"). "" means unassigned, always present on the wire, matching `goal`'s convention. `owner` is the only non-empty value in M2: there is no Agent Assignee yet.
+         * @description The kind of Assignee responsible for a Ticket (CONTEXT.md, "Assignee"). "" means unassigned, always present on the wire, matching `goal`'s convention.
          * @enum {string}
          */
-        TicketAssigneeType: "owner" | "";
+        TicketAssigneeType: "owner" | "agent" | "";
+        TicketAssigneeAgent: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            kind: components["schemas"]["AgentKind"];
+        };
+        /** @description `agentId` is required when `type` is `agent` and rejected otherwise. */
+        AssignTicketRequest: {
+            /** @enum {string} */
+            type: "owner" | "agent";
+            /** Format: uuid */
+            agentId?: string;
+        };
+        /**
+         * @description Set at creation and never changed in M4.
+         * @enum {string}
+         */
+        AgentKind: "research" | "coding";
+        Agent: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            kind: components["schemas"]["AgentKind"];
+            /** Format: date-time */
+            createdAt: string;
+        };
+        AgentList: {
+            agents: components["schemas"]["Agent"][];
+        };
+        CreateAgentRequest: {
+            name: string;
+            kind: components["schemas"]["AgentKind"];
+        };
+        RenameAgentRequest: {
+            name: string;
+        };
         /** @description ticketIt's first domain record (issue #56): a title captured in Backlog. No work-type/category column -- see docs/ticket-creation.md, "Flexible ticket structure". Owned by exactly one Owner, enforced by Galley (docs/adr/0001-single-authority-galley.md). Addressed by an opaque, non-sequential public identifier (issue #57) -- see `id` below. */
         Ticket: {
             /**
@@ -396,6 +478,8 @@ export interface components {
             archivedAt: string | null;
             template: components["schemas"]["TicketTemplate"];
             assigneeType: components["schemas"]["TicketAssigneeType"];
+            /** @description Null unless `assigneeType` is `agent`. */
+            assigneeAgent: components["schemas"]["TicketAssigneeAgent"] | null;
             completionCondition: components["schemas"]["TicketCompletionCondition"];
             /** @description Manual refinement (issue #58, docs/ticket-creation.md, "Manual guidance" -- prompt "What outcome do you want?"). Plain text, never Markdown (M7 owns report rendering). Always present on the wire; "" means never set or cleared -- read access never distinguishes those two, only PATCH's request body does (see UpdateTicketRequest). */
             goal: string;
@@ -897,7 +981,7 @@ export interface operations {
             };
         };
     };
-    assignTicketOwner: {
+    assignTicket: {
         parameters: {
             query?: never;
             header?: never;
@@ -906,9 +990,13 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignTicketRequest"];
+            };
+        };
         responses: {
-            /** @description The Ticket, now assigned to the Owner. */
+            /** @description The Ticket with its new Assignee. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1008,6 +1096,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Badge"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    listAgents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Owner's Agents. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentList"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    createAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAgentRequest"];
+            };
+        };
+        responses: {
+            /** @description The created Agent. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Agent"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    renameAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameAgentRequest"];
+            };
+        };
+        responses: {
+            /** @description The renamed Agent. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Agent"];
                 };
             };
             /** @description Error. See `ErrorBody`. */

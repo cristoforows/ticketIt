@@ -1,9 +1,5 @@
 # Michelin application boot
 
-`docs/evidence/m4/TEMPLATE.md` does not exist when this record is written
-(issue #127 creates it in parallel). This record follows
-[docs/evidence/m3/TEMPLATE.md](../m3/TEMPLATE.md)'s section order.
-
 ## Purpose
 
 Add `apps/michelin`, the runner application skeleton: a Node process that
