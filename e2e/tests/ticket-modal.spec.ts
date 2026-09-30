@@ -81,6 +81,7 @@ test("board: modal edits, assignment and Status change refresh from Galley on cl
   await modal.getByTestId("ticket-detail-textarea-goal").fill("Modal goal");
   await modal.getByTestId("ticket-detail-save-button").click();
   await expect(modal.getByTestId("ticket-detail-title")).toHaveText(`${ticket.title} edited`);
+  await modal.getByLabel("Assign to").selectOption({ label: "Me" });
   await modal.getByTestId("ticket-detail-assign-button").click();
   await expect(modal.getByTestId("ticket-detail-assignee")).toHaveText("Owner");
   await modal.getByTestId("ticket-detail-status-button-Ready").click();
@@ -110,6 +111,7 @@ test("list: modal edit and Accept refresh the list from Galley", async ({ page, 
   await modal.getByTestId("ticket-detail-input-title").fill(`${ticket.title} accepted`);
   await modal.getByTestId("ticket-detail-save-button").click();
   await expect(modal.getByTestId("ticket-detail-title")).toHaveText(`${ticket.title} accepted`);
+  await modal.getByLabel("Assign to").selectOption({ label: "Me" });
   await modal.getByTestId("ticket-detail-assign-button").click();
   await expect(modal.getByTestId("ticket-detail-assignee")).toHaveText("Owner");
   await modal.getByTestId("ticket-detail-unassign-button").click();
@@ -226,6 +228,7 @@ test("Open full page retains modal edits and workflow controls", async ({ page, 
   await modal.getByTestId("ticket-detail-textarea-goal").fill("Goal edited in modal");
   await modal.getByTestId("ticket-detail-save-button").click();
   await expect(modal.getByTestId("ticket-detail-field-goal")).toHaveText("Goal edited in modal");
+  await modal.getByLabel("Assign to").selectOption({ label: "Me" });
   await modal.getByTestId("ticket-detail-assign-button").click();
   await expect(modal.getByTestId("ticket-detail-assignee")).toHaveText("Owner");
   await modal.getByRole("link", { name: "Open full page" }).click();

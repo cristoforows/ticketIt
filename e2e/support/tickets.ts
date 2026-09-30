@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 
 export type TicketTemplate = "Basic" | "Coding";
+export type AgentKind = "research" | "coding";
 export type TicketStatus = "Backlog" | "Ready" | "InProgress" | "Blocked" | "InReview" | "Done";
 
 export interface Ticket {
@@ -25,6 +26,9 @@ export interface Ticket {
   constraints: string;
   /** One Ticket repository reference (issue #59, D3), available on either Template -- "" when never set or cleared. */
   repository: string;
+  assigneeType: "owner" | "agent" | "";
+  /** Null unless assigneeType is "agent" (issue #127). */
+  assigneeAgent: { id: string; name: string; kind: AgentKind } | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -105,4 +109,26 @@ export function statusLabel(status: TicketStatus): string {
 export async function openCapture(page: Page, typedTitle?: string): Promise<void> {
   if (typedTitle !== undefined) await page.getByTestId("new-order-input").fill(typedTitle);
   await page.getByTestId("new-order-button").click();
+}
+
+export interface Agent {
+  id: string;
+  name: string;
+  kind: AgentKind;
+  createdAt: string;
+}
+
+/** Same data-setup convention as createTicket, for Agents (issue #127). */
+export async function createAgent(page: Page, name: string, kind: AgentKind): Promise<Agent> {
+  const response = await page.request.post("/api/agents", { data: { name, kind } });
+  if (!response.ok()) {
+    throw new Error(`failed to create Agent ${JSON.stringify(name)} via POST /api/agents: ${response.status()} ${await response.text()}`);
+  }
+  return response.json();
+}
+
+export async function listAgents(page: Page): Promise<Agent[]> {
+  const response = await page.request.get("/api/agents");
+  if (!response.ok()) throw new Error(`failed to list Agents: ${response.status()} ${await response.text()}`);
+  return (await response.json() as { agents: Agent[] }).agents;
 }
