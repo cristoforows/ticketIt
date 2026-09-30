@@ -59,7 +59,7 @@ nullable `pairedAt`, `registeredAt`, `lastSeenAt`, `michelinVersion`,
   that shape, including non-canonical and padded encodings.
 - `internal/httpapi/runner.go`: the five runner handlers, derived
   health and `requireRunner`. `auth.go`: `requireSession` now refuses
-  any request with an `Authorization` header. `devclock.go`: the dev
+  an `Authorization` header with the `Bearer` scheme. `devclock.go`: the dev
   clock. `handler.go`: `NewHandlerWithClock`, 405 registrations.
 - `runners` joins `knownPublicTables` in
   `no_execution_side_effects_test.go`.
@@ -115,9 +115,17 @@ with its exit code checked.
   would not fix a wrong credential, and updating `.env` and restarting
   is the fix either way. A missing or malformed token is a config error
   and exits 1.
-- **Auth boundary checks come first.** `requireSession` refuses any
-  `Authorization` header before reading the cookie. `requireRunner`
-  refuses a session cookie even beside a valid bearer. Both answer with
+- **Only a 409 or 401 sends Michelin back to registering.** A timeout,
+  an unreachable Galley, a 5xx or a bad body is retried as a heartbeat.
+  Registering again rewrites `registered_at`, so resetting on every
+  failure would make the `registeredAt` Galley reports mean "last
+  network blip".
+- **Auth boundary checks come first.** `requireSession` refuses a
+  `Bearer` `Authorization` header, with the scheme matched
+  case-insensitively, before reading the cookie. Other schemes pass,
+  so a deployment behind a Basic-auth proxy still reaches Owner routes.
+  Both guards parse the scheme with one helper, `bearerToken`.
+  `requireRunner` refuses a session cookie even beside a valid bearer. Both answer with
   the shared `401 unauthenticated` and never clear the Owner's cookie.
 
 ## Exact versions and toolchain
@@ -150,11 +158,11 @@ runs used real ones.
 
 ## Observed results
 
-**Checks** (after merging M4.2). `gofmt -l` printed nothing; `go vet` clean. Galley
-`go test ./...`: all packages `ok`, 695 tests and subtests passed, 0
+**Checks** (after merging M4.2 and the review fixes). `gofmt -l` printed nothing; `go vet` clean. Galley
+`go test ./...`: all packages `ok`, 758 tests and subtests passed, 0
 failed. All three drift checks printed `OK … (no drift)`. Swiftlet: 18
-files, 249 tests passed; `npm run build` succeeded. Michelin: typecheck
-clean; 6 files, 49 tests passed. Browser suite: `SUITE PASSED`, every
+files, 258 tests passed; `npm run build` succeeded. Michelin: typecheck
+clean; 6 files, 53 tests passed. Browser suite: `SUITE PASSED`, every
 spec exit code 0, 78 tests; `runner.spec.ts` passed in 20.7 s.
 
 Runner tests in `internal/httpapi` and `internal/auth`:
@@ -169,6 +177,7 @@ Runner tests in `internal/httpapi` and `internal/auth`:
 --- PASS: TestRunnerCredentials_OneActiveRowPerOwnerIsEnforcedByTheDatabase
 --- PASS: TestRunnerEndpoints_RejectOwnerSessions
 --- PASS: TestOwnerEndpoints_RejectRunnerBearerTokens
+--- PASS: TestOwnerEndpoints_AcceptNonBearerAuthorizationBesideASession
 --- PASS: TestRegisterRunner_ValidatesTheBody
 --- PASS: TestRunnerDisconnect_ChangesNoTicket
 --- PASS: TestAdvanceDevClock_MovesRunnerHealthInDevelopmentOnly
@@ -178,13 +187,39 @@ Runner tests in `internal/httpapi` and `internal/auth`:
 
 `TestOwnerEndpoints_RejectRunnerBearerTokens` walks every contract
 operation except the public ones and those under `/api/runner/` (25
-operations), so a new Owner route is covered without editing the test.
+operations) with `Bearer`, `bearer` and `BEARER` tokens, with and
+without a session, so a new Owner route is covered without editing the
+test. `TestOwnerEndpoints_AcceptNonBearerAuthorizationBesideASession`
+sends `Authorization: Basic …` and `Digest …` beside a valid session to
+every parameterless Owner `GET` and expects 200.
+
+Michelin's `heartbeatLoop.test.ts` checks that an unreachable Galley, a
+503, a non-JSON body and a timeout on a heartbeat are each followed by
+another heartbeat, not a register.
+
+**Health pill contrast** (`tokens.test.ts`, `healthPillPairs`; text,
+dot and border share one colour, and the pill has no fill of its own):
+
+| Pill | Foreground | Surface | Ratio |
+| --- | --- | --- | --- |
+| Header, connected | `status-done-text` #43aa8b | `header` #1a1816 | 6.21:1 |
+| Header, disconnected | `status-blocked-text` #e26161 | `header` | 5.16:1 |
+| Header, not paired / unknown | `dim` #a8a29e | `header` | 7.02:1 |
+| Ground tone, connected | `status-done-text` | `ground` #23201d | 5.68:1 |
+| Ground tone, disconnected | `status-blocked-text` | `ground` | 4.72:1 |
+| Ground tone, not paired / unknown | `dim` | `ground` | 6.43:1 |
+| Runner section, connected | `status-done-deep` #327e67 | `paper` #fffdf7 | 4.78:1 |
+| Runner section, disconnected | `status-blocked-deep` #d62828 | `paper` | 4.92:1 |
+| Runner section, not paired / unknown | `muted` #736c66 | `paper` | 5.08:1 |
+
+The header pill sits on `bg-header` (the `AppHeader` element), and the
+`ground` rows cover the same tone on the page ground. No token changed.
 
 **Falsification.** Each guard was broken on purpose, the named test
 was run, and the file was restored with `git checkout`:
 
 ```text
-### requireSession accepts an Authorization header
+### requireSession skips its Authorization check
 --- FAIL: TestOwnerEndpoints_RejectRunnerBearerTokens (0.17s)
         runner_test.go:458: status=200, want 401; body={"tickets":[…]}   (truncated here)
         runner_test.go:458: status=200, want 401; body={"tickets":[…]}   (truncated here)
@@ -216,6 +251,25 @@ FAIL
     runner_test.go:334: trial 0 pair 6: status=503; body={"error":{"code":"database_unavailable","message":"failed to pair the runner"}}
     runner_test.go:334: trial 0 pair 8: status=503; body={"error":{"code":"database_unavailable","message":"failed to pair the runner"}}
 FAIL
+```
+
+Added after review, with the same procedure:
+
+```text
+### requireSession refuses every Authorization header (the first version's rule)
+--- FAIL: TestOwnerEndpoints_AcceptNonBearerAuthorizationBesideASession
+        runner_test.go:649: GET /api/tickets with Authorization "Basic b3duZXI6cHJveHk=": status=401, want 200; body={"error":{"code":"unauthenticated","message":"sign-in required"}}
+### requireSession matches only the exact-case "Bearer " prefix
+--- FAIL: TestOwnerEndpoints_RejectRunnerBearerTokens
+    --- FAIL: TestOwnerEndpoints_RejectRunnerBearerTokens/listTickets_lowercase_bearer
+    --- FAIL: TestOwnerEndpoints_RejectRunnerBearerTokens/listTickets_uppercase_bearer
+### heartbeatLoop registers again after every failure
+× logs an unreachable Galley distinctly and keeps retrying
+× keeps heartbeating, without registering again, after an unreachable Galley
+× keeps heartbeating, without registering again, after a server error
+× keeps heartbeating, without registering again, after a non-JSON body
+× keeps heartbeating, without registering again, after a timeout
+Tests  5 failed | 10 passed (15)
 ```
 
 **Manual run: Galley** (development, scratch database):
@@ -322,7 +376,7 @@ starts at M4.7; reconciling in-flight work after a disconnect is M5
 
 - The pill and Runner section were checked by unit tests and the
   Chromium browser suite, not a manual screen-reader pass. Contrast
-  uses the existing order-rail status tokens.
+  is asserted per pill colour and surface (table above).
 - CI does not run the browser suite; `runner.spec.ts` ran locally
   through `run.sh` only.
 - Stranded-runner recovery and reconciliation after disconnect: M5
