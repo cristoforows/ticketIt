@@ -24,6 +24,12 @@ smoke test. It exits non-zero and names the log to read on any failure.
 
 Stop with `.agents/skills/run-dev/down.sh`.
 
+Michelin is not started by `up.sh`. To watch it against this Galley:
+
+```sh
+cd apps/michelin && npm ci && npm start
+```
+
 ## Rules
 
 - Runs whatever is checked out. To test latest `main`, `git fetch` and
