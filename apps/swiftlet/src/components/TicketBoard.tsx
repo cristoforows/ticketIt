@@ -1,8 +1,7 @@
-import type { CSSProperties } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { UnauthenticatedError } from "../api/session";
 import { changeTicketStatus, fetchTickets, type Ticket } from "../api/tickets";
-import { BadgeTag, cx, EmptyMessage, ErrorMessage, LoadingMessage, Rule, shortDate, slipTilt, statuses, statusTone, ticketSerial } from "./ui";
+import { BadgeList, BoardColumn, BoardColumns, Caption, ColumnHeader, DropHint, EmptyMessage, ErrorMessage, LoadingMessage, PendingTag, Rail, Rule, shortDate, Slip, SlipList, SlipPaper, SlipToggle, slipTilt, statuses, statusTone, ticketSerial } from "./ui";
 import { openTicketModal } from "../router";
 import { BoardStageSwitcher } from "./BoardStageSwitcher";
 import { SlipActions } from "./SlipActions";
@@ -172,10 +171,9 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
     }
   }
 
-  const slipEdge = "text-label tracking-label uppercase";
   return (
     <section data-testid="ticket-board" className="min-w-0">
-      <h2 className="mb-3 text-label tracking-label text-dim uppercase">Board</h2>
+      <Caption as="h2" tone="ground" className="mb-3">Board</Caption>
       {state.kind === "loading" && <LoadingMessage data-testid="ticket-board-loading">Loading tickets…</LoadingMessage>}
       {state.kind === "error" && (
         <ErrorMessage title="Unable to load tickets." data-testid="ticket-board-error">
@@ -193,12 +191,7 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
         />
       )}
       {state.kind === "loaded" && (
-        <div
-          ref={columnsRef}
-          data-testid="board-columns"
-          onScroll={phone ? syncStageFromScroll : undefined}
-          className="scroll-hint grid grid-flow-col auto-cols-[minmax(10rem,1fr)] max-md:snap-x max-md:snap-mandatory max-md:auto-cols-[100%] gap-3 overflow-x-auto px-1 pt-3 pb-6"
-        >
+        <BoardColumns ref={columnsRef} data-testid="board-columns" onScroll={phone ? syncStageFromScroll : undefined}>
           {statuses.map(({ value, label }, columnIndex) => {
             const tickets = state.tickets.filter((ticket) => ticket.status === value);
             const dragging = draggingTicket !== undefined;
@@ -206,17 +199,13 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
             const isOrigin = dragging && draggingTicket.status === value;
             const isDropTarget = dragging && canMove(draggingTicket, value);
             return (
-              <section
+              <BoardColumn
                 key={value}
                 {...statusTone(value)}
                 inert={phone && columnIndex !== stage}
                 data-testid={`board-status-${value}`}
                 data-drop-target={isDropTarget ? "true" : undefined}
-                data-drop-blocked={dragging && !isDropTarget && !isOrigin ? "true" : undefined}
-                className={cx(
-                  "flex min-w-0 flex-col p-2 max-md:snap-start",
-                  isDropTarget && "bg-paper/10 outline-2 -outline-offset-2 outline-(--status-text) outline-dashed",
-                )}
+                data-drop-blocked={blocked ? "true" : undefined}
                 aria-labelledby={`board-heading-${value}`}
                 onDragOver={(event) => {
                   if (!isDropTarget) return;
@@ -229,16 +218,11 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
                   setDraggingId(null);
                 }}
               >
-                <div className="flex items-center justify-between border-b-2 border-(--status) pb-2 max-md:sr-only">
-                  <h3 id={`board-heading-${value}`} className="text-label font-bold tracking-label text-(--status-text) uppercase">{label}</h3>
-                  <span aria-hidden="true" className="grid size-6 place-items-center rounded-pill bg-(--status-text) text-label font-bold text-ground">{tickets.length}</span>
-                </div>
-                <p aria-hidden="true" className={cx("mt-2 min-h-4 text-center max-md:hidden", slipEdge, isDropTarget ? "font-bold text-(--status-text)" : "text-dim")}>
-                  {dragging && (isDropTarget ? "▾ Drop here" : isOrigin ? "● Current" : "✕ Not allowed")}
-                </p>
-                <div aria-hidden="true" className={cx("mt-4 h-2 rounded-pill bg-linear-to-b from-rail to-rail-shade shadow-inner", blocked && "opacity-40")} />
+                <ColumnHeader id={`board-heading-${value}`} label={label} count={tickets.length} />
+                <DropHint hint={dragging ? (isDropTarget ? "target" : isOrigin ? "origin" : "blocked") : undefined} />
+                <Rail />
                 {tickets.length === 0 ? <p className="pt-4 text-center text-label text-dim">— no orders —</p> : (
-                  <ul className={cx("-mt-3 flex flex-col gap-4 px-1", blocked && "opacity-40")}>
+                  <SlipList>
                     {tickets.map((ticket) => {
                       const eligibleTargets = moveTargets(ticket);
                       const pending = pendingId === ticket.id;
@@ -246,14 +230,15 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
                       const panelId = `board-slip-actions-${ticket.id}`;
                       const beingDragged = draggingId === ticket.id;
                       return (
-                        <li
+                        <Slip
                           key={ticket.id}
+                          tilt={slipTilt(ticket.id)}
+                          stacked={phone}
+                          dragging={beingDragged}
+                          selected={selected}
                           data-testid={ticketRowTestId("board", ticket.id)}
-                          data-dragging={beingDragged ? "true" : undefined}
                           aria-busy={pending}
                           draggable={!pending && !phone}
-                          style={{ "--tilt": `${slipTilt(ticket.id)}deg` } as CSSProperties}
-                          className={cx("slip", phone && "grid", !pending && !phone && "cursor-grab", beingDragged && "opacity-60")}
                           onDragStart={(event) => {
                             if (commandPending.current) {
                               event.preventDefault();
@@ -265,44 +250,26 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
                           }}
                           onDragEnd={() => setDraggingId(null)}
                         >
-                          <div
-                            data-surface="paper"
-                            {...statusTone(ticket.status)}
-                            className={cx(
-                              "slip-paper col-start-1 row-start-1 flex flex-col gap-2 border-t-4 border-(--status) bg-paper px-3 pt-3 pb-5 text-ink",
-                              beingDragged && "outline-2 -outline-offset-4 outline-ink outline-dashed",
-                              pending && "opacity-70",
-                              selected && "opacity-40 grayscale",
-                            )}
-                          >
+                          <SlipPaper status={ticket.status}>
                             <div className="flex justify-between text-label text-muted">
                               <span>{ticketSerial(ticket.id)}</span>
                               <time dateTime={ticket.createdAt}>{shortDate(ticket.createdAt)}</time>
                             </div>
-                            <TicketModalLink ticketId={ticket.id} view="board" disabled={pending} className="font-bold break-words text-ink">{ticket.title}</TicketModalLink>
-                            <Rule className="my-0!" />
+                            <TicketModalLink ticketId={ticket.id} view="board" variant="slip" disabled={pending}>{ticket.title}</TicketModalLink>
+                            <Rule className="my-0" />
                             <div className="text-label">
                               <p>Template: {ticket.template}</p>
                               <p>Assignee: {ticket.assigneeType === "owner" ? "Owner" : "Unassigned"}</p>
                             </div>
-                            <p data-testid="board-badges" aria-label={`Badges: ${ticket.badges.map((badge) => badge.name).join(", ") || "none"}`} className="flex flex-wrap gap-1 empty:hidden">
-                              {ticket.badges.map((badge, index) => (
-                                <span key={badge.id}>
-                                  {index > 0 && <span className="sr-only">, </span>}
-                                  <BadgeTag>{badge.name}</BadgeTag>
-                                </span>
-                              ))}
-                            </p>
-                            {pending && <span role="status" className="self-start rounded-tag bg-ink px-2 py-0.5 text-label font-bold tracking-label text-amber uppercase">Moving…</span>}
-                          </div>
+                            <BadgeList data-testid="board-badges" badges={ticket.badges} />
+                            {pending && <PendingTag className="self-start">Moving…</PendingTag>}
+                          </SlipPaper>
                           {phone && !pending && (
-                            <button
-                              type="button"
+                            <SlipToggle
                               data-testid="board-slip-toggle"
                               aria-label={`Actions for ${ticket.title}`}
                               aria-expanded={selected}
                               aria-controls={panelId}
-                              className="z-10 col-start-1 row-start-1 h-full w-full cursor-pointer border-0 bg-transparent p-0"
                               onClick={() => setSelectedId(selected ? null : ticket.id)}
                             />
                           )}
@@ -317,15 +284,15 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
                               onMove={(target) => { setSelectedId(null); void moveTicket(ticket, target); }}
                             />
                           )}
-                        </li>
+                        </Slip>
                       );
                     })}
-                  </ul>
+                  </SlipList>
                 )}
-              </section>
+              </BoardColumn>
             );
           })}
-        </div>
+        </BoardColumns>
       )}
       {state.kind === "loaded" && state.refreshError && (
         <ErrorMessage title="Unable to refresh tickets." data-testid="ticket-board-refresh-error" className="mt-4">

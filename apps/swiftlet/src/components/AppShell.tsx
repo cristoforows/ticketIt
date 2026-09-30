@@ -2,7 +2,6 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { signOut, type Owner } from "../api/session";
 import { collectionQuery, setArchivedFilter, useArchivedFilter, useBadgeFilter, useRoute, type CollectionRoute } from "../router";
 import { BadgeFilter } from "./BadgeFilter";
-import { Link } from "./Link";
 import { NewOrderBar } from "./NewOrderBar";
 import { AppHeader } from "./AppHeader";
 import { StatusView } from "./StatusView";
@@ -10,7 +9,7 @@ import { TicketBoard } from "./TicketBoard";
 import { TicketDetailPage } from "./TicketDetailPage";
 import { TicketDetailModal } from "./TicketDetailModal";
 import { TicketList } from "./TicketList";
-import { ErrorMessage, FilterToggle, Paper, SecondaryButton } from "./ui";
+import { Caption, ErrorMessage, FieldLabel, FilterToggle, NavTab, Paper, SecondaryButton } from "./ui";
 
 interface AppShellProps {
   owner: Owner;
@@ -75,17 +74,15 @@ export function AppShell({ owner, onSignedOut, onUnauthenticated }: AppShellProp
     }
   }
 
-  const navLink = "px-3 py-1.5 text-label font-bold tracking-label text-dim uppercase no-underline ring-1 ring-dim hover:text-paper aria-[current=page]:bg-amber aria-[current=page]:text-ink aria-[current=page]:ring-amber";
-
   return (
     <div data-testid="app-shell">
       <AppHeader>
         <nav aria-label="Ticket views" className="flex gap-1">
-          <Link to={`/${collectionQuery()}`} className={navLink} aria-current={background === "backlog" ? "page" : undefined}>List</Link>
-          <Link to={`/board${collectionQuery()}`} className={navLink} aria-current={background === "board" ? "page" : undefined}>Board</Link>
+          <NavTab to={`/${collectionQuery()}`} current={background === "backlog"}>List</NavTab>
+          <NavTab to={`/board${collectionQuery()}`} current={background === "board"}>Board</NavTab>
         </nav>
         <div className="ml-auto flex min-w-0 items-center gap-4">
-          <p data-testid="signed-in-owner" title={owner.login} className="min-w-0 break-words text-label tracking-label text-dim uppercase">Signed in as {owner.login}</p>
+          <Caption tone="ground" data-testid="signed-in-owner" title={owner.login} className="min-w-0 break-words">Signed in as {owner.login}</Caption>
           <SecondaryButton tone="ground" className="shrink-0" onClick={handleSignOut} disabled={signingOut} data-testid="sign-out-button">
             Sign out
           </SecondaryButton>
@@ -115,7 +112,7 @@ export function AppShell({ owner, onSignedOut, onUnauthenticated }: AppShellProp
               <>
                 <TicketList key={filterKey} badgeIds={badgeIds} archived={archived} onUnauthenticated={onUnauthenticated} refreshKey={refresh.key} focusTicketId={refresh.view === "backlog" ? refresh.ticketId : undefined} />
                 <Paper as="footer" className="mt-6 p-4">
-                  <h2 className="m-0 mb-2 text-label font-bold tracking-label text-muted uppercase">Galley status</h2>
+                  <FieldLabel as="h2" className="mb-2">Galley status</FieldLabel>
                   <StatusView />
                 </Paper>
               </>

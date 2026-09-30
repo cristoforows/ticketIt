@@ -13,7 +13,7 @@ export function SignInPage() {
       <h2 className="text-center text-body font-bold tracking-label uppercase">Sign in</h2>
       <p className="text-center text-muted">Sign in to continue.</p>
       <Rule />
-      <a data-testid="sign-in-with-github" href="/api/auth/github/start" className={`${buttonClasses("primary")} w-full`}>
+      <a data-testid="sign-in-with-github" href="/api/auth/github/start" className={buttonClasses({ className: "w-full" })}>
         Sign in with GitHub
       </a>
     </Paper>
