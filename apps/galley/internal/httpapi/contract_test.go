@@ -494,6 +494,38 @@ func TestArchive_ResponsesMatchContractAndMethod405(t *testing.T) {
 	}
 }
 
+func TestReorder_ResponsesMatchContractAndMethod405(t *testing.T) {
+	handler, _, cookie := badgeTestHandler(t)
+	router, err := legacy.NewRouter(loadContract(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 3)
+	for i := range ids {
+		created, _, _ := badgeRequest(t, handler, cookie, http.MethodPost, "/api/tickets", fmt.Sprintf(`{"title":"reorder contract %d"}`, i), http.StatusCreated)
+		ids[i] = created.(map[string]any)["id"].(string)
+	}
+	badgeRequest(t, handler, cookie, http.MethodPost, "/api/tickets/"+ids[2]+"/status", `{"status":"Ready"}`, http.StatusOK)
+	path := "/api/tickets/" + ids[0] + "/position"
+	for _, tc := range []struct {
+		path, body string
+		want       int
+	}{
+		{path, fmt.Sprintf(`{"before":%q}`, ids[1]), http.StatusOK},
+		{path, fmt.Sprintf(`{"after":%q}`, ids[1]), http.StatusOK},
+		{path, fmt.Sprintf(`{"before":%q}`, ids[2]), http.StatusBadRequest},
+		{path, `{}`, http.StatusBadRequest},
+		{"/api/tickets/" + uuid.NewString() + "/position", fmt.Sprintf(`{"before":%q}`, ids[1]), http.StatusNotFound},
+	} {
+		_, rec, req := badgeRequest(t, handler, cookie, http.MethodPost, tc.path, tc.body, tc.want)
+		validateAgainstContract(t, router, req, rec)
+	}
+	_, rec, _ := badgeRequest(t, handler, cookie, http.MethodGet, path, "", http.StatusMethodNotAllowed)
+	if rec.Header().Get("Allow") != "POST" {
+		t.Fatalf("position Allow = %q, want POST", rec.Header().Get("Allow"))
+	}
+}
+
 func TestTicketAcceptAvailability_ResponseContractRejectsInvalidCombinations(t *testing.T) {
 	pool := postgres.NewTestPool(t)
 	router, err := legacy.NewRouter(loadContract(t))

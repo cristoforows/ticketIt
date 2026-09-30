@@ -102,16 +102,15 @@ type priorityRow struct {
 	rowID    int64
 	status   TicketStatus
 	archived bool
-	rank     int64
 }
 
 func readPriorityRow(ctx context.Context, tx pgx.Tx, ownerID int64, publicID string, lock bool) (priorityRow, bool, error) {
-	query := `SELECT id, status, archived_at IS NOT NULL, priority_rank FROM tickets WHERE owner_id = $1 AND public_id = $2::uuid`
+	query := `SELECT id, status, archived_at IS NOT NULL FROM tickets WHERE owner_id = $1 AND public_id = $2::uuid`
 	if lock {
 		query += ` FOR UPDATE`
 	}
 	var row priorityRow
-	err := tx.QueryRow(ctx, query, ownerID, publicID).Scan(&row.rowID, &row.status, &row.archived, &row.rank)
+	err := tx.QueryRow(ctx, query, ownerID, publicID).Scan(&row.rowID, &row.status, &row.archived)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return priorityRow{}, false, nil
 	}
