@@ -58,13 +58,20 @@
   - `api/http.ts` gains `parseErrorDetail`, which validates `missing` against the enum, and `GalleyError`.
   - `ticketCommand` throws `GalleyError` for a body that holds an error.
   - `parseTicket` requires both new fields.
-- **Queued copy:** `QueuedTag` shows **Queued for <Agent name>** on the slip and the receipt. It appears only when Galley's flag is true.
+- **Queued copy:** `QueuedTag` shows **Queued for <Agent name>** on the slip and the receipt, only when Galley's flag is true.
+  - It uses its own `queued` variant of the `tag` cva: an outline tag with `border-status-ready-deep`, `bg-paper` and `text-status-ready-deep`. The transient "Moving…" `PendingTag` keeps the ink fill and amber text, so the two no longer look alike.
+  - The tokens are the existing Ready deep colour (`--color-status-ready-deep`, `#227f74`) on `--color-paper` (`#fffdf7`). No new colours were added.
+  - Contrast is 4.74:1, which passes WCAG AA for text. `tokens.test.ts` now asserts that pair ("queued tag: status-ready-deep on paper") at 4.5:1 or more.
 - **Rejection placement on the receipt:**
   - Status control: advertised refusals as "<Status>: <message>", plus refused status commands.
   - Assignee control: refused assignments, shown below it.
   - Save area: refused saves.
-- **Missing markers:** each field in `missing` gets a **Missing** marker, linked to Galley's message with `aria-describedby`. The edit inputs also get `aria-invalid`.
-- **New Vitest cases:** 11, bringing the total to 224.
+- **Missing markers:** each field in `missing` gets a **Missing** marker.
+  - The field's value element on the receipt, or its input in the edit form, has `aria-describedby` set to the marker's id followed by the id of Galley's reason. For example, the goal's accessible description is "Missing Ready: <Galley's message>".
+  - Edit inputs also get `aria-invalid`.
+  - The marker is an `InlineError` with the new `announce={false}` prop, so it has no `role="alert"`, and nothing needs to override its role.
+- **Readiness inputs:** `api/http.ts` checks `missing` against `{goal, successCriteria, repository} satisfies Record<ReadinessInput, true>`. If the contract adds an input, the compiler rejects this object until the input is added. Deleting `repository` from the object was confirmed to fail `tsc` with TS2741.
+- **New Vitest cases:** 12, bringing the total to 225.
 
 **Browser suite**
 - `e2e/tests/agent-readiness.spec.ts`, registered in `run.sh` with its exit-code check.
@@ -89,7 +96,8 @@
 - **`PATCH`:** it is refused only when a field it names ends up missing. An Agent-assigned Ticket made Ready before this slice with missing inputs can still be filled one field at a time.
 - **Message:** Galley builds the message from `missing` in contract order. Swiftlet shows it verbatim and places markers only from `missing`.
 - **Unassign:** it never refuses, because the result is never Agent-assigned.
-- **`agentOwnedTargets`:** kept as its own set, not derived from D3's table. D3 S2 names these three Statuses.
+- **`agentOwnedTargets`:** kept as its own set, not derived from D3's table, because D3 S2 names these three Statuses. It maps each Status to its label.
+- **`agent_owned_transition` message:** one short line per target, such as "Execution sets In Progress on an Agent-assigned Ticket". Galley returns the same text when a command is refused and when the move is only advertised as refused, so it does not say "attempted". The grid asserts the exact text for each target.
 
 ## Exact versions and toolchain
 
@@ -161,17 +169,17 @@ Both race orders happened, so each side was seen losing:
 
 ```text
 === RUN   TestAgentReadiness_ConcurrentClearAndReadinessNeverBothApply/clear_goal_vs_move_to_Ready
-    agent_readiness_test.go:552: 20 trials: map[clear won:9 readiness won:11]
+    agent_readiness_test.go:558: 20 trials: map[clear won:14 readiness won:6]
 === RUN   TestAgentReadiness_ConcurrentClearAndReadinessNeverBothApply/clear_goal_vs_assign_an_Agent_while_Ready
-    agent_readiness_test.go:552: 20 trials: map[clear won:7 readiness won:13]
+    agent_readiness_test.go:558: 20 trials: map[clear won:10 readiness won:10]
 ```
 
 **Galley: real responses** (a title-only Basic Ticket assigned to a coding Agent, captured through the test server with a temporary logging test that is not in the slice)
 
 ```text
 POST /status {"status":"Ready"} -> HTTP 400 {"error":{"code":"agent_readiness_incomplete","message":"this Ticket needs a goal, Success Criteria and a repository before a coding Agent can take it from Ready","missing":["goal","successCriteria","repository"]}}
-POST /status {"status":"Blocked"} -> HTTP 400 {"error":{"code":"agent_owned_transition","message":"on an Agent-assigned Ticket, In Progress, In Review and Blocked are set by execution, never a manual status change (attempted Backlog -> Blocked)"}}
-GET -> {"allowedActions":{"accept":{"available":false,"reason":{"code":"invalid_transition","message":"Accept requires the ticket to be In Review (current status Backlog)"}},"statusChangeRejections":[{"reason":{"code":"agent_readiness_incomplete","message":"this Ticket needs a goal, Success Criteria and a repository before a coding Agent can take it from Ready","missing":["goal","successCriteria","repository"]},"status":"Ready"},{"reason":{"code":"agent_owned_transition","message":"on an Agent-assigned Ticket, In Progress, In Review and Blocked are set by execution, never a manual status change (attempted Backlog -> Blocked)"},"status":"Blocked"}],"statusChanges":[]},...,"assigneeType":"agent",...,"requestingAgentWork":false,"status":"Backlog",...,"template":"Basic",...}
+POST /status {"status":"Blocked"} -> HTTP 400 {"error":{"code":"agent_owned_transition","message":"Execution sets Blocked on an Agent-assigned Ticket"}}
+GET -> {"allowedActions":{"accept":{"available":false,"reason":{"code":"invalid_transition","message":"Accept requires the ticket to be In Review (current status Backlog)"}},"statusChangeRejections":[{"reason":{"code":"agent_readiness_incomplete","message":"this Ticket needs a goal, Success Criteria and a repository before a coding Agent can take it from Ready","missing":["goal","successCriteria","repository"]},"status":"Ready"},{"reason":{"code":"agent_owned_transition","message":"Execution sets Blocked on an Agent-assigned Ticket"},"status":"Blocked"}],"statusChanges":[]},...,"assigneeType":"agent",...,"requestingAgentWork":false,"status":"Backlog",...,"template":"Basic",...}
 ```
 
 **Falsification**
@@ -189,9 +197,11 @@ GET -> {"allowedActions":{"accept":{"available":false,"reason":{"code":"invalid_
 - **Advertised actions:** I made `allowedActionsForTicket` decide as if no Agent were assigned. The advertised-against-actual grid failed:
 
   ```text
-  --- FAIL: TestTicketAllowedActions_MatchCommandsForEveryAssignee (0.60s)
-          agent_readiness_test.go:442: Backlog -> Blocked advertised, command status 400 ({Error:{Code:agent_owned_transition Message:on an Agent-assigned Ticket, In Progress, In Review and Blocked are set by execution, never a manual status change (attempted Backlog -> Blocked) Missing:<nil>}})
-          agent_readiness_test.go:442: Ready -> InProgress advertised, command status 400 ({Error:{Code:agent_owned_transition Message:... (attempted Ready -> InProgress) Missing:<nil>}})
+  --- FAIL: TestTicketAllowedActions_MatchCommandsForEveryAssignee (0.75s)
+          agent_readiness_test.go:448: Backlog -> Blocked advertised, command status 400 ({Error:{Code:agent_owned_transition Message:Execution sets Blocked on an Agent-assigned Ticket Missing:<nil>}})
+          agent_readiness_test.go:451: Backlog -> Blocked advertised for an Agent-assigned Ticket
+          agent_readiness_test.go:448: Ready -> InProgress advertised, command status 400 ({Error:{Code:agent_owned_transition Message:Execution sets In Progress on an Agent-assigned Ticket Missing:<nil>}})
+          agent_readiness_test.go:451: Ready -> InProgress advertised for an Agent-assigned Ticket
   ```
 
 - **Existing tests:** five existing Galley tests failed on the first run of the new rules, because they moved Agent-assigned Tickets by hand or into Ready without inputs. They were changed to supply inputs, or to assign the Owner before manual moves, and still assert what they asserted.
@@ -202,7 +212,7 @@ Both temporary changes were reverted, and the full suite above passed afterwards
 
 ```text
  Test Files  15 passed (15)
-      Tests  224 passed (224)
+      Tests  225 passed (225)
 ✓ built in 104ms
 ```
 

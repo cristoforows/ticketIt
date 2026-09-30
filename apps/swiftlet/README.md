@@ -637,7 +637,7 @@ Agents cannot load, **Me** is still offered. Use
 
 Swiftlet never decides readiness itself. When Galley's
 `requestingAgentWork` is true, the receipt and the Board slip show
-**Queued for <Agent name>** as a `QueuedTag`.
+**Queued for <Agent name>** as a `QueuedTag`. It uses the `tag` cva's `queued` variant: an outline in the Ready deep colour on paper (4.74:1), unlike the transient `PendingTag`.
 
 Galley's reasons appear beside the control that caused them:
 
@@ -649,7 +649,7 @@ Galley's reasons appear beside the control that caused them:
 
 `GalleyError` carries the error's `missing` list. A **Missing** marker then
 appears on each listed field, both on the receipt and in the edit form.
-The marker is linked to Galley's message with `aria-describedby`.
+The field's value element or input names the marker and Galley's message in `aria-describedby`. The marker is an `InlineError` with `announce={false}`, so it is not an alert.
 `parseTicket` requires `requestingAgentWork` and `statusChangeRejections`.
 `e2e/tests/agent-readiness.spec.ts` walks both orderings.
 
