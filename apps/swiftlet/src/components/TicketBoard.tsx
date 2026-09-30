@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { UnauthenticatedError } from "../api/session";
 import { changeTicketStatus, fetchTickets, type Ticket } from "../api/tickets";
-import { BadgeList, BoardColumn, BoardColumns, Caption, ColumnHeader, DropHint, EmptyMessage, ErrorMessage, LoadingMessage, PendingTag, Rail, Rule, shortDate, Slip, SlipList, SlipPaper, SlipToggle, slipTilt, statuses, statusTone, ticketSerial } from "./ui";
-import { openTicketModal } from "../router";
+import { BoardColumn, BoardColumns, Caption, ColumnHeader, DropHint, EmptyMessage, ErrorMessage, LoadingMessage, Rail, SlipList, statuses, statusTone } from "./ui";
 import { BoardStageSwitcher } from "./BoardStageSwitcher";
-import { SlipActions } from "./SlipActions";
 import { scrollBehavior, useIsPhone } from "./usePhone";
-import { focusTicketRow, refocusTicketRowIfFocusLost, TicketModalLink, ticketRowTestId } from "./TicketModalLink";
+import { focusTicketRow, refocusTicketRowIfFocusLost, ticketRowTestId } from "./TicketModalLink";
+import { TicketSlip } from "./TicketSlip";
 
 type BoardState =
   | { kind: "loading" }
@@ -223,70 +222,31 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
                 <Rail />
                 {tickets.length === 0 ? <p className="pt-4 text-center text-label text-dim">— no orders —</p> : (
                   <SlipList>
-                    {tickets.map((ticket) => {
-                      const eligibleTargets = moveTargets(ticket);
-                      const pending = pendingId === ticket.id;
-                      const selected = phone && selectedId === ticket.id;
-                      const panelId = `board-slip-actions-${ticket.id}`;
-                      const beingDragged = draggingId === ticket.id;
-                      return (
-                        <Slip
-                          key={ticket.id}
-                          tilt={slipTilt(ticket.id)}
-                          stacked={phone}
-                          dragging={beingDragged}
-                          selected={selected}
-                          data-testid={ticketRowTestId("board", ticket.id)}
-                          aria-busy={pending}
-                          draggable={!pending && !phone}
-                          onDragStart={(event) => {
-                            if (commandPending.current) {
-                              event.preventDefault();
-                              return;
-                            }
-                            event.dataTransfer.effectAllowed = "move";
-                            event.dataTransfer.setData("application/x-ticketit-ticket", ticket.id);
-                            setDraggingId(ticket.id);
-                          }}
-                          onDragEnd={() => setDraggingId(null)}
-                        >
-                          <SlipPaper status={ticket.status}>
-                            <div className="flex justify-between text-label text-muted">
-                              <span>{ticketSerial(ticket.id)}</span>
-                              <time dateTime={ticket.createdAt}>{shortDate(ticket.createdAt)}</time>
-                            </div>
-                            <TicketModalLink ticketId={ticket.id} view="board" variant="slip" disabled={pending}>{ticket.title}</TicketModalLink>
-                            <Rule className="my-0" />
-                            <div className="text-label">
-                              <p>Template: {ticket.template}</p>
-                              <p>Assignee: {ticket.assigneeType === "owner" ? "Owner" : "Unassigned"}</p>
-                            </div>
-                            <BadgeList data-testid="board-badges" badges={ticket.badges} />
-                            {pending && <PendingTag className="self-start">Moving…</PendingTag>}
-                          </SlipPaper>
-                          {phone && !pending && (
-                            <SlipToggle
-                              data-testid="board-slip-toggle"
-                              aria-label={`Actions for ${ticket.title}`}
-                              aria-expanded={selected}
-                              aria-controls={panelId}
-                              onClick={() => setSelectedId(selected ? null : ticket.id)}
-                            />
-                          )}
-                          {selected && (
-                            <SlipActions
-                              id={panelId}
-                              ticket={ticket}
-                              targets={eligibleTargets}
-                              disabled={pendingId !== null}
-                              onView={() => { setSelectedId(null); openTicketModal(ticket.id, "board"); }}
-                              onEdit={() => { setSelectedId(null); openTicketModal(ticket.id, "board", true); }}
-                              onMove={(target) => { setSelectedId(null); void moveTicket(ticket, target); }}
-                            />
-                          )}
-                        </Slip>
-                      );
-                    })}
+                    {tickets.map((ticket) => (
+                      <TicketSlip
+                        key={ticket.id}
+                        ticket={ticket}
+                        phone={phone}
+                        pending={pendingId === ticket.id}
+                        anyPending={pendingId !== null}
+                        selected={phone && selectedId === ticket.id}
+                        beingDragged={draggingId === ticket.id}
+                        moveTargets={moveTargets(ticket)}
+                        onToggle={() => setSelectedId(selectedId === ticket.id ? null : ticket.id)}
+                        onDismiss={() => setSelectedId(null)}
+                        onMove={(target) => void moveTicket(ticket, target)}
+                        onDragStart={(event) => {
+                          if (commandPending.current) {
+                            event.preventDefault();
+                            return;
+                          }
+                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.setData("application/x-ticketit-ticket", ticket.id);
+                          setDraggingId(ticket.id);
+                        }}
+                        onDragEnd={() => setDraggingId(null)}
+                      />
+                    ))}
                   </SlipList>
                 )}
               </BoardColumn>
