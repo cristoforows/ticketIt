@@ -9,7 +9,7 @@ export function agentKindLabel(kind: AgentKind): string {
 
 type ListState =
   | { kind: "loading" }
-  | { kind: "loaded"; agents: Agent[] }
+  | { kind: "loaded"; agents: Agent[]; reloadError?: string }
   | { kind: "error"; message: string };
 
 export function AgentsPage({ onUnauthenticated }: { onUnauthenticated: () => void }) {
@@ -27,7 +27,9 @@ export function AgentsPage({ onUnauthenticated }: { onUnauthenticated: () => voi
       if (mounted.current) setState({ kind: "loaded", agents });
     } catch (error) {
       const message = failed(error, "Unknown error loading Agents.");
-      if (mounted.current) setState((current) => current.kind === "loaded" ? current : { kind: "error", message });
+      if (mounted.current) {
+        setState((current) => current.kind === "loaded" ? { ...current, reloadError: message } : { kind: "error", message });
+      }
     }
   }, [failed]);
 
@@ -47,6 +49,11 @@ export function AgentsPage({ onUnauthenticated }: { onUnauthenticated: () => voi
         {state.kind === "error" && (
           <ErrorMessage flat title="Unable to load Agents." data-testid="agent-list-error">
             <p className="m-0">{state.message}</p>
+          </ErrorMessage>
+        )}
+        {state.kind === "loaded" && state.reloadError && (
+          <ErrorMessage flat title="Unable to refresh Agents; this list may be out of date." data-testid="agent-list-reload-error">
+            <p className="m-0">{state.reloadError}</p>
           </ErrorMessage>
         )}
         {state.kind === "loaded" && state.agents.length === 0 && (

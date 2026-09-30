@@ -90,6 +90,53 @@ describe("AgentsPage", () => {
     }));
   });
 
+  it("keeps the rows and says the list may be stale when the reload after a change fails", async () => {
+    let listCalls = 0;
+    stubGalley({
+      "GET /api/agents": () => ++listCalls === 1
+        ? jsonResponse({ agents: [ATLAS] })
+        : jsonResponse({ error: { code: "database_unavailable", message: "failed to read agents" } }, 503),
+      "POST /api/agents": () => jsonResponse(BUILDER, 201),
+    });
+    render(<AgentsPage onUnauthenticated={() => {}} />);
+    await screen.findByTestId(`agent-row-${ATLAS.id}`);
+
+    fireEvent.change(screen.getByLabelText("Name", { exact: true }), { target: { value: "Builder" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Agent" }));
+
+    expect(await screen.findByTestId("agent-list-reload-error")).toHaveTextContent("failed to read agents");
+    expect(rowNames()).toEqual(["atlas"]);
+    expect(screen.queryByTestId("agent-create-error")).not.toBeInTheDocument();
+  });
+
+  it("clears the stale-list notice once a later reload succeeds", async () => {
+    const responses = [
+      jsonResponse({ agents: [ATLAS] }),
+      jsonResponse({ error: { code: "database_unavailable", message: "failed to read agents" } }, 503),
+      jsonResponse({ agents: [{ ...ATLAS, name: "Atlas Prime" }] }),
+    ];
+    stubGalley({
+      "GET /api/agents": () => responses.shift()!,
+      [`PATCH /api/agents/${ATLAS.id}`]: () => jsonResponse({ ...ATLAS, name: "Atlas Prime" }),
+    });
+    render(<AgentsPage onUnauthenticated={() => {}} />);
+    await screen.findByTestId(`agent-row-${ATLAS.id}`);
+
+    async function renameTo(name: string) {
+      fireEvent.click(screen.getByRole("button", { name: /^Rename / }));
+      fireEvent.change(screen.getByRole("textbox", { name: /^New name for / }), { target: { value: name } });
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument());
+    }
+
+    await renameTo("Atlas Prime");
+    expect(await screen.findByTestId("agent-list-reload-error")).toBeInTheDocument();
+    await renameTo("Atlas Prime");
+
+    await waitFor(() => expect(screen.queryByTestId("agent-list-reload-error")).not.toBeInTheDocument());
+    expect(rowNames()).toEqual(["Atlas Prime"]);
+  });
+
   it("shows Galley's duplicate-name rejection and keeps the typed name", async () => {
     stubGalley({
       "GET /api/agents": () => jsonResponse({ agents: [ATLAS] }),
