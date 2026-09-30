@@ -30,6 +30,10 @@ export function BadgeTag({ className, ...rest }: ComponentPropsWithRef<"span">) 
   return <span className={cn(tag({ kind: "badge" }), className)} {...rest} />;
 }
 
+export function QueuedTag({ className, ...rest }: ComponentPropsWithRef<"span">) {
+  return <span className={cn(tag({ kind: "pending" }), className)} {...rest} />;
+}
+
 export function PendingTag({ className, ...rest }: ComponentPropsWithRef<"span">) {
   return <span role="status" className={cn(tag({ kind: "pending" }), className)} {...rest} />;
 }

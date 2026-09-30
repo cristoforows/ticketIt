@@ -8,10 +8,11 @@ const ticket = (id: string, status: string, statusChanges: string[] = [], archiv
   title: `Ticket ${id}`,
   status,
   template: "Basic",
-  allowedActions: { statusChanges, accept },
+  allowedActions: { statusChangeRejections: [], statusChanges, accept },
   completionCondition: "humanAcceptance",
   assigneeType: "",
   assigneeAgent: null,
+  requestingAgentWork: false,
   goal: "",
   context: "",
   successCriteria: "",
@@ -167,7 +168,7 @@ describe("TicketBoard on phones", () => {
       const original = ticket("a", "Backlog", ["Ready", "Blocked", "Done"]);
       const fetchStub = vi.fn()
         .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ tickets: [original] }) })
-        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ...original, status: "Ready", allowedActions: { statusChanges: ["Backlog"], accept } }) })
+        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ...original, status: "Ready", allowedActions: { statusChangeRejections: [], statusChanges: ["Backlog"], accept } }) })
         .mockResolvedValue({ ok: true, status: 200, json: async () => ({ tickets: [{ ...original, status: "Ready" }] }) });
       vi.stubGlobal("fetch", fetchStub);
       render(<TicketBoard onUnauthenticated={() => {}} />);

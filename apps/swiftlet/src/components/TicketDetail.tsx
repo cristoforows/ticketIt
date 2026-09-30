@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { Agent } from "../api/agents";
+import { missingInputsOf, type ReadinessInput } from "../api/http";
 import type { Badge, Ticket, TicketAssignee, TicketUpdate } from "../api/tickets";
 import { assigneeLabel } from "./assignee";
 import { refinementGuidance } from "./refinementGuidance";
-import { BadgeTag, ErrorMessage, FieldHint, FieldLabel, FieldNote, FieldValue, InlineError, PrimaryButton, ReceiptLine, Rule, SecondaryButton, Select, StatusTag, statusLabel, TextInput, Textarea, ticketSerial } from "./ui";
+import { BadgeTag, ErrorMessage, FieldHint, FieldLabel, FieldNote, FieldValue, InlineError, PrimaryButton, QueuedTag, ReceiptLine, Rule, SecondaryButton, Select, StatusTag, statusLabel, TextInput, Textarea, ticketSerial } from "./ui";
 
 interface TicketDetailProps {
   ticket: Ticket;
@@ -60,9 +61,9 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
   const [mode, setMode] = useState<"view" | "editing">(editRequested && !ticket.archivedAt ? "editing" : "view");
   const [fields, setFields] = useState<EditableFields>(() => fieldsFrom(ticket));
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<Rejection | null>(null);
   const [actionPending, setActionPending] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<(Rejection & { control: ActionControl }) | null>(null);
 
   useEffect(() => {
     if (previousTicket.current === ticket) return;
@@ -78,14 +79,14 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
    * Never an optimistic update: a rejection leaves `current` alone, so
    * the last-known-good Status and Assignee stay on screen (ADR 0001).
    */
-  async function runAction(action: () => Promise<Ticket>) {
+  async function runAction(action: () => Promise<Ticket>, control: ActionControl = "other") {
     setActionError(null);
     setActionPending(true);
     try {
       const updated = await action();
       setCurrent(updated);
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : "Failed to update the ticket.");
+      setActionError({ ...rejectionOf(error, "Failed to update the ticket."), control });
     } finally {
       setActionPending(false);
     }
@@ -99,7 +100,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
       setCurrent(await onArchive());
       onArchived?.();
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : "Failed to archive the ticket.");
+      setActionError({ ...rejectionOf(error, "Failed to archive the ticket."), control: "other" });
     } finally {
       setActionPending(false);
     }
@@ -139,7 +140,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
     } catch (error) {
       // Galley's own message, verbatim -- not a friendlier substitute
       // (issue #58's own requirement).
-      setSaveError(error instanceof Error ? error.message : "Failed to save the ticket.");
+      setSaveError(rejectionOf(error, "Failed to save the ticket."));
     } finally {
       setSaving(false);
     }
@@ -147,6 +148,15 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
 
   const archived = !!current.archivedAt;
   const archivedReason = archived ? current.allowedActions.accept.reason?.message : undefined;
+  const readyRejection = current.allowedActions.statusChangeRejections.find(({ status }) => status === "Ready");
+  const missing = new Set<ReadinessInput>([...(actionError?.missing ?? []), ...(readyRejection?.reason.missing ?? [])]);
+  const missingReasonId = actionError?.missing.length ? "ticket-detail-action-error" : "ticket-detail-status-unavailable-Ready";
+  const missingFor = (input: ReadinessInput) => (missing.has(input) ? missingReasonId : undefined);
+  const actionErrorMessage = (control: ActionControl) => actionError?.control === control && (
+    <ErrorMessage title="Could not update the ticket.">
+      <p id="ticket-detail-action-error" data-testid="ticket-detail-action-error" className="m-0">{actionError.message}</p>
+    </ErrorMessage>
+  );
 
   return (
     <article data-testid="ticket-detail" className="text-body">
@@ -154,7 +164,12 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
         <>
           <p className="text-label tracking-label text-muted">{ticketSerial(current.id)}</p>
           <h2 data-testid="ticket-detail-title" className="mt-1 mb-2 text-title font-bold break-words">{current.title}</h2>
-          <StatusTag status={current.status} data-testid="ticket-detail-status" />
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusTag status={current.status} data-testid="ticket-detail-status" />
+            {current.requestingAgentWork && current.assigneeAgent && (
+              <QueuedTag data-testid="ticket-detail-queued">Queued for {current.assigneeAgent.name}</QueuedTag>
+            )}
+          </div>
           {archived && (
             <p data-testid="ticket-detail-archived" className="mt-3 border-2 border-status-blocked-deep p-2 text-status-blocked-deep">
               <span className="font-bold tracking-label uppercase">Archived</span> {current.archivedAt}. {archivedReason}
@@ -162,15 +177,15 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
           )}
           <Rule />
           <section aria-label="Refinement" className="flex flex-col gap-3">
-            <RefinementValue label="Goal" testId="goal" value={current.goal} />
+            <RefinementValue label="Goal" testId="goal" value={current.goal} missingReasonId={missingFor("goal")} />
             <Rule className="my-0" />
             <RefinementValue label="Context" testId="context" value={current.context} />
             <Rule className="my-0" />
-            <RefinementValue label="Success Criteria" testId="success-criteria" value={current.successCriteria} />
+            <RefinementValue label="Success Criteria" testId="success-criteria" value={current.successCriteria} missingReasonId={missingFor("successCriteria")} />
             <Rule className="my-0" />
             <RefinementValue label="Constraints" testId="constraints" value={current.constraints} />
             <Rule className="my-0" />
-            <RefinementValue label="Repository" testId="repository" value={current.repository} />
+            <RefinementValue label="Repository" testId="repository" value={current.repository} missingReasonId={missingFor("repository")} />
           </section>
           <Rule />
           <dl className="m-0 flex flex-col gap-1">
@@ -216,14 +231,14 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
           )}
           <Rule weight="thick" />
           <section aria-label="Workflow" data-testid="ticket-detail-workflow" className="flex flex-col gap-3">
-            <div className="flex flex-wrap gap-2">
+            <div data-testid="ticket-detail-status-control" className="flex flex-col gap-2">
               {current.allowedActions.statusChanges.length > 0 && (
                 <div data-testid="ticket-detail-status-actions" className="flex flex-wrap gap-2">
                   {current.allowedActions.statusChanges.map((target) => (
                     <PrimaryButton
                       key={target}
                       data-testid={`ticket-detail-status-button-${target}`}
-                      onClick={() => runAction(() => onChangeStatus(target))}
+                      onClick={() => runAction(() => onChangeStatus(target), "status")}
                       disabled={actionPending || archived}
                     >
                       {statusLabel(target)}
@@ -231,6 +246,14 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
                   ))}
                 </div>
               )}
+              {current.allowedActions.statusChangeRejections.map(({ status, reason }) => (
+                <p key={status} id={`ticket-detail-status-unavailable-${status}`} data-testid={`ticket-detail-status-unavailable-${status}`} className="m-0 text-muted">
+                  <span className="font-bold">{statusLabel(status)}:</span> {reason.message}
+                </p>
+              ))}
+              {actionErrorMessage("status")}
+            </div>
+            <div className="flex flex-wrap gap-2">
               {current.allowedActions.accept.available && (
                 <PrimaryButton
                   data-testid="ticket-detail-accept-button"
@@ -251,15 +274,12 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
                 </SecondaryButton>
               )}
             </div>
-            <AssigneePicker ticket={current} disabled={actionPending || archived} reason={archivedReason} onLoad={onLoadAgents} onAssign={(assignee) => runAction(() => onAssign(assignee))} />
+            <AssigneePicker ticket={current} disabled={actionPending || archived} reason={archivedReason} onLoad={onLoadAgents} onAssign={(assignee) => runAction(() => onAssign(assignee), "assignee")} />
+            {actionErrorMessage("assignee")}
             {!current.allowedActions.accept.available && (
               <p data-testid="ticket-detail-accept-unavailable" className="m-0 text-muted">{current.allowedActions.accept.reason?.message}</p>
             )}
-            {actionError && (
-              <ErrorMessage title="Could not update the ticket.">
-                <p data-testid="ticket-detail-action-error" className="m-0">{actionError}</p>
-              </ErrorMessage>
-            )}
+            {actionErrorMessage("other")}
             <div className="flex flex-wrap gap-2">
               <SecondaryButton data-testid="ticket-detail-edit-button" onClick={startEditing} disabled={archived} title={archivedReason}>
                 Edit
@@ -286,6 +306,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
           <RefinementInput
             label="Goal"
             guidance={refinementGuidance.goal}
+            missing={saveError?.missing.includes("goal")}
             testId="goal"
             value={fields.goal}
             onChange={(value) => setFields((current) => ({ ...current, goal: value }))}
@@ -302,6 +323,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
           <RefinementInput
             label="Success Criteria"
             guidance={refinementGuidance.successCriteria}
+            missing={saveError?.missing.includes("successCriteria")}
             testId="success-criteria"
             value={fields.successCriteria}
             onChange={(value) => setFields((current) => ({ ...current, successCriteria: value }))}
@@ -323,11 +345,14 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
               value={fields.repository}
               onChange={(event) => setFields((current) => ({ ...current, repository: event.target.value }))}
               disabled={saving}
+              aria-invalid={saveError?.missing.includes("repository") || undefined}
+              aria-describedby={saveError?.missing.includes("repository") ? "ticket-detail-save-error" : undefined}
             />
+            {saveError?.missing.includes("repository") && <MissingNote testId="repository" reasonId="ticket-detail-save-error" />}
           </div>
           {saveError && (
             <ErrorMessage title="Could not save the ticket.">
-              <p data-testid="ticket-detail-save-error" className="m-0">{saveError}</p>
+              <p id="ticket-detail-save-error" data-testid="ticket-detail-save-error" className="m-0">{saveError.message}</p>
             </ErrorMessage>
           )}
           <Rule className="my-0" />
@@ -498,11 +523,32 @@ function BadgePicker({ ticket, disabled, reason, onAttached, onLoad, onCreate, o
   </>;
 }
 
-function RefinementValue({ label, testId, value }: { label: string; testId: string; value: string }) {
+type ActionControl = "status" | "assignee" | "other";
+
+interface Rejection {
+  message: string;
+  missing: ReadinessInput[];
+}
+
+function rejectionOf(error: unknown, fallback: string): Rejection {
+  return { message: error instanceof Error ? error.message : fallback, missing: missingInputsOf(error) };
+}
+
+/** Galley's reason for the missing field is the element `reasonId` names. */
+function MissingNote({ testId, reasonId }: { testId: string; reasonId: string }) {
+  return (
+    <InlineError role={undefined} data-testid={`ticket-detail-missing-${testId}`} aria-describedby={reasonId} className="m-0 mt-1 font-bold">
+      Missing
+    </InlineError>
+  );
+}
+
+function RefinementValue({ label, testId, value, missingReasonId }: { label: string; testId: string; value: string; missingReasonId?: string }) {
   return (
     <div>
       <FieldLabel as="h3">{label}</FieldLabel>
       <FieldValue data-testid={`ticket-detail-field-${testId}`} empty={value === ""}>{value === "" ? "Not set." : value}</FieldValue>
+      {missingReasonId && <MissingNote testId={testId} reasonId={missingReasonId} />}
     </div>
   );
 }
@@ -514,9 +560,10 @@ interface RefinementInputProps {
   value: string;
   onChange: (value: string) => void;
   disabled: boolean;
+  missing?: boolean;
 }
 
-function RefinementInput({ label, guidance, testId, value, onChange, disabled }: RefinementInputProps) {
+function RefinementInput({ label, guidance, testId, value, onChange, disabled, missing = false }: RefinementInputProps) {
   const inputId = `ticket-detail-textarea-${testId}`;
   return (
     <div>
@@ -528,7 +575,10 @@ function RefinementInput({ label, guidance, testId, value, onChange, disabled }:
         value={value}
         onChange={(event) => onChange(event.target.value)}
         disabled={disabled}
+        aria-invalid={missing || undefined}
+        aria-describedby={missing ? "ticket-detail-save-error" : undefined}
       />
+      {missing && <MissingNote testId={testId} reasonId="ticket-detail-save-error" />}
     </div>
   );
 }
