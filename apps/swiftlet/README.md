@@ -633,6 +633,23 @@ Board slip show the assigned Agent's name, or Owner / Unassigned. If
 Agents cannot load, **Me** is still offered. Use
 `npm test && npm run build` here and `cd e2e && ./run.sh` at the root.
 
+## Runner pairing and health (issue #130)
+
+The shell header shows a runner pill: **Runner connected**, **Runner
+disconnected** with how long ago Galley last heard from Michelin, or
+**Runner not paired**. It reads `GET /api/runner-health` every 10 s and
+at once after a pair or revoke. Galley derives the state from its own
+clock, so the pill never compares timestamps with the browser's clock.
+Only the state label is a live region; the pill does not animate.
+
+`/agents` has a **Runner** section. **Pair runner** issues a credential
+and shows it once, with **Copy** and the instruction to put it in
+`apps/michelin/.env` as `MICHELIN_RUNNER_TOKEN` (`chmod 600 .env`).
+**Done** drops it from the page. **Pair again** and **Revoke** each ask
+for an in-page confirmation (Escape or **Cancel** backs out); after
+pairing again the page says the previous credential is revoked.
+Disconnecting or revoking changes no Ticket.
+
 ## Browser-to-backend suite
 
 The tests above stub `fetch`, so they never exercise the real proxy or

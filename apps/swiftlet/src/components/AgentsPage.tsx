@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AGENT_KINDS, AGENT_NAME_MAX_LENGTH, createAgent, fetchAgents, renameAgent, type Agent, type AgentKind } from "../api/agents";
 import { UnauthenticatedError } from "../api/session";
+import { RunnerSection } from "./RunnerSection";
 import { Caption, EmptyMessage, ErrorMessage, FieldHint, FieldLabel, LoadingMessage, LogRow, LogRowMain, Paper, PrimaryButton, ReceiptTitle, Rule, SecondaryButton, Select, TextInput } from "./ui";
 
 export function agentKindLabel(kind: AgentKind): string {
@@ -65,6 +66,7 @@ export function AgentsPage({ onUnauthenticated }: { onUnauthenticated: () => voi
           </ul>
         )}
       </Paper>
+      <RunnerSection onUnauthenticated={onUnauthenticated} onFailed={failed} />
     </div>
   );
 }

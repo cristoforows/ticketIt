@@ -1,4 +1,4 @@
-import { cva } from "class-variance-authority";
+import { cva, type VariantProps } from "class-variance-authority";
 import { Fragment, type ComponentPropsWithRef } from "react";
 import { cn } from "./cn";
 import { statusLabel, statusTone, type TicketStatus } from "./status";
@@ -32,6 +32,35 @@ export function BadgeTag({ className, ...rest }: ComponentPropsWithRef<"span">) 
 
 export function PendingTag({ className, ...rest }: ComponentPropsWithRef<"span">) {
   return <span role="status" className={cn(tag({ kind: "pending" }), className)} {...rest} />;
+}
+
+const healthPill = cva("inline-flex items-center gap-1.5 rounded-pill border px-2.5 py-0.5 text-label font-bold tracking-label uppercase", {
+  variants: {
+    health: { connected: "", disconnected: "", not_paired: "", unknown: "" },
+    tone: { ground: "", paper: "" },
+  },
+  compoundVariants: [
+    { tone: "ground", health: "connected", className: "border-status-done-text text-status-done-text" },
+    { tone: "ground", health: "disconnected", className: "border-status-blocked-text text-status-blocked-text" },
+    { tone: "ground", health: ["not_paired", "unknown"], className: "border-dim text-dim" },
+    { tone: "paper", health: "connected", className: "border-status-done-deep text-status-done-deep" },
+    { tone: "paper", health: "disconnected", className: "border-status-blocked-deep text-status-blocked-deep" },
+    { tone: "paper", health: ["not_paired", "unknown"], className: "border-muted text-muted" },
+  ],
+  defaultVariants: { tone: "ground" },
+});
+
+export type HealthPillState = NonNullable<VariantProps<typeof healthPill>["health"]>;
+
+type HealthPillProps = ComponentPropsWithRef<"span"> & { health: HealthPillState; tone?: "ground" | "paper" };
+
+export function HealthPill({ health, tone, className, children, ...rest }: HealthPillProps) {
+  return (
+    <span data-health={health} className={cn(healthPill({ health, tone }), className)} {...rest}>
+      <span aria-hidden="true" className="size-1.5 shrink-0 rounded-pill bg-current" />
+      {children}
+    </span>
+  );
 }
 
 export function BadgeList({ badges, as: Component = "p", className, ...rest }: { badges: { id: string; name: string }[]; as?: "p" | "span" } & ComponentPropsWithRef<"p">) {
