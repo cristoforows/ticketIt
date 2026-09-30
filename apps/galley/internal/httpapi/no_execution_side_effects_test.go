@@ -1,11 +1,14 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"sort"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -17,6 +20,7 @@ import (
 // lifecycle actions write to it. See
 // docs/evidence/m2/60-lifecycle-transitions.md.
 var knownPublicTables = []string{
+	"agents",
 	"badges",
 	"diagnostic_notes",
 	"oauth_states",
@@ -70,8 +74,8 @@ func tableRowCount(t *testing.T, pool *pgxpool.Pool, table string) int64 {
 //
 // Instead, after driving every manual command this slice adds through
 // the real API on one Ticket: the schema's table set is still exactly
-// knownPublicTables, and every known table but tickets has an
-// unchanged row count, with tickets itself growing by exactly one.
+// knownPublicTables, and every known table but tickets and agents has
+// an unchanged row count, with those two growing by exactly one each.
 func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 	baseURL, client, pool, _ := devServerWithSessionAndPoolForTickets(t)
 
@@ -82,8 +86,15 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 	}
 
 	created := createTicketWithTemplate(t, client, baseURL, uniqueTitle(t), Basic)
-	if resp := assignOwnerHTTP(t, client, baseURL, created.Id); resp.status != http.StatusOK {
-		t.Fatalf("assign: status = %d, want 200; error=%+v", resp.status, resp.errBody)
+	agent := createAgentHTTP(t, client, baseURL, AgentKindCoding)
+	for _, body := range []AssignTicketRequest{
+		{Type: AssignTicketRequestTypeAgent, AgentId: &agent.Id},
+		{Type: AssignTicketRequestTypeOwner},
+		{Type: AssignTicketRequestTypeAgent, AgentId: &agent.Id},
+	} {
+		if resp := doLifecycleRequest(t, client, http.MethodPut, baseURL+"/api/tickets/"+created.Id+"/assignee", body); resp.status != http.StatusOK {
+			t.Fatalf("assign %s: status = %d, want 200; error=%+v", body.Type, resp.status, resp.errBody)
+		}
 	}
 	for _, to := range []TicketStatus{Ready, InProgress, Blocked, InProgress, InReview} {
 		if resp := changeStatus(t, client, baseURL, created.Id, to); resp.status != http.StatusOK {
@@ -138,9 +149,9 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 	for _, table := range knownPublicTables {
 		after := tableRowCount(t, pool, table)
 		switch table {
-		case "tickets":
+		case "tickets", "agents":
 			if after != before[table]+1 {
-				t.Errorf("tickets row count = %d, want %d (before %d + the one Ticket this test created)", after, before[table]+1, before[table])
+				t.Errorf("%s row count = %d, want %d (before %d + the one row this test created)", table, after, before[table]+1, before[table])
 			}
 		default:
 			if after != before[table] {
@@ -148,6 +159,24 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 			}
 		}
 	}
+}
+
+func createAgentHTTP(t *testing.T, client *http.Client, baseURL string, kind AgentKind) Agent {
+	t.Helper()
+	data, err := json.Marshal(CreateAgentRequest{Name: uuid.NewString(), Kind: kind})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := client.Post(baseURL+"/api/agents", "application/json", bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var agent Agent
+	if err := json.NewDecoder(res.Body).Decode(&agent); err != nil || res.StatusCode != http.StatusCreated {
+		t.Fatalf("create Agent: status = %d, error = %v", res.StatusCode, err)
+	}
+	return agent
 }
 
 func equalStrings(a, b []string) bool {

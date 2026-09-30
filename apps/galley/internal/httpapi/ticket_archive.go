@@ -42,7 +42,7 @@ func (s *server) ArchiveTicket(w http.ResponseWriter, r *http.Request, id string
 	if !ok {
 		return
 	}
-	id, ok = canonicalTicketID(id)
+	id, ok = canonicalPublicID(id)
 	if !ok {
 		writeTicketNotFound(w)
 		return
@@ -93,7 +93,7 @@ func (s *server) RestoreTicket(w http.ResponseWriter, r *http.Request, id string
 	if !ok {
 		return
 	}
-	id, ok = canonicalTicketID(id)
+	id, ok = canonicalPublicID(id)
 	if !ok {
 		writeTicketNotFound(w)
 		return

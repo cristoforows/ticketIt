@@ -617,6 +617,22 @@ including Ready becoming Backlog. On modal close, the archived collection
 refreshes and the restored Ticket leaves that view. Use
 `npm test && npm run build` here and `cd e2e && ./run.sh` at the root.
 
+## Agents and Agent assignment (issue #127)
+
+**Agents** in the shell's Settings navigation opens `/agents`: Galley's
+Agent list with each kind, a **New Agent** form (name and kind; kind is
+fixed once created) and a per-row **Rename**. Escape cancels a rename
+and returns focus to its button. Every change reloads the list from
+Galley, and Galley's rejection, such as a duplicate name, is shown
+verbatim.
+
+The receipt's **Assign to** select offers **Me** first, then Galley's
+Agents in its order; **Assign** sends the choice and **Unassign** clears
+it. Choosing another Assignee replaces the current one. The receipt and
+Board slip show the assigned Agent's name, or Owner / Unassigned. If
+Agents cannot load, **Me** is still offered. Use
+`npm test && npm run build` here and `cd e2e && ./run.sh` at the root.
+
 ## Browser-to-backend suite
 
 The tests above stub `fetch`, so they never exercise the real proxy or

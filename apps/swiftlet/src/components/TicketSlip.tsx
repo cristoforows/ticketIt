@@ -2,6 +2,7 @@ import type { DragEvent } from "react";
 import type { Ticket } from "../api/tickets";
 import { BadgeList, PendingTag, Rule, shortDate, Slip, SlipPaper, SlipToggle, slipTilt, ticketSerial } from "./ui";
 import { openTicketModal } from "../router";
+import { assigneeLabel } from "./assignee";
 import { SlipActions } from "./SlipActions";
 import { TicketModalLink, ticketRowTestId } from "./TicketModalLink";
 
@@ -41,7 +42,7 @@ export function TicketSlip({ ticket, phone, pending, anyPending, selected, being
         <Rule className="my-0" />
         <div className="text-label">
           <p>Template: {ticket.template}</p>
-          <p>Assignee: {ticket.assigneeType === "owner" ? "Owner" : "Unassigned"}</p>
+          <p data-testid="board-assignee">Assignee: {assigneeLabel(ticket)}</p>
         </div>
         <BadgeList data-testid="board-badges" badges={ticket.badges} />
         {pending && <PendingTag className="self-start">Moving…</PendingTag>}

@@ -34,6 +34,7 @@ test.describe("ticket lifecycle controls", () => {
     // Assignment is independent of Status, so it runs before any
     // transition.
     await expect(page.getByTestId("ticket-detail-assignee")).toHaveText("Unassigned");
+    await page.getByLabel("Assign to").selectOption({ label: "Me" });
     await page.getByTestId("ticket-detail-assign-button").click();
     await expect(page.getByTestId("ticket-detail-assignee")).toHaveText("Owner");
 

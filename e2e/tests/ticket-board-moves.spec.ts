@@ -49,7 +49,7 @@ test("the detail modal's Status buttons move a board Ticket by keyboard and pers
   await page.keyboard.press("Enter");
   const modal = page.getByRole("dialog", { name: "Ticket details" });
   const actions = modal.getByTestId("ticket-detail-status-actions");
-  expect(await actions.getByRole("button").allTextContents()).toEqual(before.allowedActions.statusChanges.map(statusLabel));
+  await expect(actions.getByRole("button")).toHaveText(before.allowedActions.statusChanges.map(statusLabel));
   await Promise.all([
     page.waitForResponse((response) => response.url().includes(`/api/tickets/${created.id}/status`) && response.request().method() === "POST"),
     actions.getByRole("button", { name: "In Review" }).click(),
