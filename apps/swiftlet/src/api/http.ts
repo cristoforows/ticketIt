@@ -39,7 +39,11 @@ export function errorMessage(payload: unknown): string | undefined {
   return typeof message === "string" ? message : undefined;
 }
 
-const READINESS_INPUTS: readonly string[] = ["goal", "successCriteria", "repository"] satisfies ReadinessInput[];
+const READINESS_INPUTS = { goal: true, successCriteria: true, repository: true } as const satisfies Record<ReadinessInput, true>;
+
+function isReadinessInput(value: unknown): value is ReadinessInput {
+  return typeof value === "string" && Object.hasOwn(READINESS_INPUTS, value);
+}
 
 /** Galley's ErrorDetail, or undefined when the value is off-contract. */
 export function parseErrorDetail(value: unknown): ErrorDetail | undefined {
@@ -47,10 +51,9 @@ export function parseErrorDetail(value: unknown): ErrorDetail | undefined {
   const record = value as Record<string, unknown>;
   if (typeof record.code !== "string" || typeof record.message !== "string") return undefined;
   if (record.missing === undefined) return { code: record.code, message: record.message };
-  if (!Array.isArray(record.missing) || !record.missing.every((input: unknown) => typeof input === "string" && READINESS_INPUTS.includes(input))) {
-    return undefined;
-  }
-  return { code: record.code, message: record.message, missing: record.missing as ReadinessInput[] };
+  const missing: unknown = record.missing;
+  if (!Array.isArray(missing) || !missing.every(isReadinessInput)) return undefined;
+  return { code: record.code, message: record.message, missing };
 }
 
 /** A rejected command, carrying Galley's own code and any missing readiness inputs. */

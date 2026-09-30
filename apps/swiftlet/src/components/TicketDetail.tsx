@@ -346,9 +346,9 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
               onChange={(event) => setFields((current) => ({ ...current, repository: event.target.value }))}
               disabled={saving}
               aria-invalid={saveError?.missing.includes("repository") || undefined}
-              aria-describedby={saveError?.missing.includes("repository") ? "ticket-detail-save-error" : undefined}
+              aria-describedby={describedByMissing("repository", saveError?.missing.includes("repository") ? "ticket-detail-save-error" : undefined)}
             />
-            {saveError?.missing.includes("repository") && <MissingNote testId="repository" reasonId="ticket-detail-save-error" />}
+            {saveError?.missing.includes("repository") && <MissingNote testId="repository" />}
           </div>
           {saveError && (
             <ErrorMessage title="Could not save the ticket.">
@@ -534,10 +534,16 @@ function rejectionOf(error: unknown, fallback: string): Rejection {
   return { message: error instanceof Error ? error.message : fallback, missing: missingInputsOf(error) };
 }
 
-/** Galley's reason for the missing field is the element `reasonId` names. */
-function MissingNote({ testId, reasonId }: { testId: string; reasonId: string }) {
+const missingNoteId = (testId: string) => `ticket-detail-missing-${testId}`;
+
+/** The field references this marker and Galley's reason (`reasonId`) through `aria-describedby`. */
+function describedByMissing(testId: string, reasonId: string | undefined): string | undefined {
+  return reasonId ? `${missingNoteId(testId)} ${reasonId}` : undefined;
+}
+
+function MissingNote({ testId }: { testId: string }) {
   return (
-    <InlineError role={undefined} data-testid={`ticket-detail-missing-${testId}`} aria-describedby={reasonId} className="m-0 mt-1 font-bold">
+    <InlineError announce={false} id={missingNoteId(testId)} data-testid={missingNoteId(testId)} className="m-0 mt-1 font-bold">
       Missing
     </InlineError>
   );
@@ -547,8 +553,10 @@ function RefinementValue({ label, testId, value, missingReasonId }: { label: str
   return (
     <div>
       <FieldLabel as="h3">{label}</FieldLabel>
-      <FieldValue data-testid={`ticket-detail-field-${testId}`} empty={value === ""}>{value === "" ? "Not set." : value}</FieldValue>
-      {missingReasonId && <MissingNote testId={testId} reasonId={missingReasonId} />}
+      <FieldValue data-testid={`ticket-detail-field-${testId}`} empty={value === ""} aria-describedby={describedByMissing(testId, missingReasonId)}>
+        {value === "" ? "Not set." : value}
+      </FieldValue>
+      {missingReasonId && <MissingNote testId={testId} />}
     </div>
   );
 }
@@ -576,9 +584,9 @@ function RefinementInput({ label, guidance, testId, value, onChange, disabled, m
         onChange={(event) => onChange(event.target.value)}
         disabled={disabled}
         aria-invalid={missing || undefined}
-        aria-describedby={missing ? "ticket-detail-save-error" : undefined}
+        aria-describedby={describedByMissing(testId, missing ? "ticket-detail-save-error" : undefined)}
       />
-      {missing && <MissingNote testId={testId} reasonId="ticket-detail-save-error" />}
+      {missing && <MissingNote testId={testId} />}
     </div>
   );
 }

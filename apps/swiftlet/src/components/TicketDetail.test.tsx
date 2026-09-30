@@ -547,7 +547,7 @@ describe("TicketDetail", () => {
           statusChanges: [],
           statusChangeRejections: [
             { status: "Ready", reason: readiness },
-            { status: "Blocked", reason: { code: "agent_owned_transition", message: "Blocked is set by execution" } },
+            { status: "Blocked", reason: { code: "agent_owned_transition", message: "Execution sets Blocked on an Agent-assigned Ticket" } },
           ],
         },
       };
@@ -565,9 +565,13 @@ describe("TicketDetail", () => {
 
         const control = screen.getByTestId("ticket-detail-status-control");
         expect(within(control).getByTestId("ticket-detail-status-unavailable-Ready")).toHaveTextContent(`Ready: ${readiness.message}`);
-        expect(within(control).getByTestId("ticket-detail-status-unavailable-Blocked")).toHaveTextContent("Blocked is set by execution");
+        expect(within(control).getByTestId("ticket-detail-status-unavailable-Blocked")).toHaveTextContent("Execution sets Blocked on an Agent-assigned Ticket");
         expect(screen.queryByTestId("ticket-detail-status-button-Ready")).not.toBeInTheDocument();
-        expect(screen.getByTestId("ticket-detail-missing-goal")).toHaveAttribute("aria-describedby", "ticket-detail-status-unavailable-Ready");
+        expect(screen.getByTestId("ticket-detail-missing-goal")).not.toHaveAttribute("role");
+        expect(screen.getByTestId("ticket-detail-field-goal")).toHaveAttribute("aria-describedby", "ticket-detail-missing-goal ticket-detail-status-unavailable-Ready");
+        expect(screen.getByTestId("ticket-detail-field-goal")).toHaveAccessibleDescription(`Missing Ready: ${readiness.message}`);
+        expect(screen.getByTestId("ticket-detail-field-repository")).toHaveAttribute("aria-describedby", "ticket-detail-missing-repository ticket-detail-status-unavailable-Ready");
+        expect(screen.getByTestId("ticket-detail-field-success-criteria")).not.toHaveAttribute("aria-describedby");
         expect(screen.getByTestId("ticket-detail-missing-repository")).toBeInTheDocument();
         expect(screen.queryByTestId("ticket-detail-missing-success-criteria")).not.toBeInTheDocument();
       });
@@ -580,7 +584,7 @@ describe("TicketDetail", () => {
 
         const error = await within(screen.getByTestId("ticket-detail-status-control")).findByTestId("ticket-detail-action-error");
         expect(error).toHaveTextContent(readiness.message);
-        expect(screen.getByTestId("ticket-detail-missing-goal")).toHaveAttribute("aria-describedby", "ticket-detail-action-error");
+        expect(screen.getByTestId("ticket-detail-field-goal")).toHaveAccessibleDescription(`Missing ${readiness.message}`);
         expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("Backlog");
       });
 
@@ -612,7 +616,8 @@ describe("TicketDetail", () => {
 
         expect(await screen.findByTestId("ticket-detail-save-error")).toHaveTextContent(rejection.message);
         expect(screen.getByTestId("ticket-detail-textarea-goal")).toHaveAttribute("aria-invalid", "true");
-        expect(screen.getByTestId("ticket-detail-missing-goal")).toHaveAttribute("aria-describedby", "ticket-detail-save-error");
+        expect(screen.getByTestId("ticket-detail-textarea-goal")).toHaveAccessibleDescription(`Missing ${rejection.message}`);
+        expect(screen.getByTestId("ticket-detail-textarea-success-criteria")).not.toHaveAttribute("aria-describedby");
         expect(screen.queryByTestId("ticket-detail-missing-success-criteria")).not.toBeInTheDocument();
       });
     });
