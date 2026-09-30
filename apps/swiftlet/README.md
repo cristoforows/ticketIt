@@ -231,8 +231,8 @@ domain record, mounted inside `AppShell` above `StatusView`. It fetches
 one of: a loading state, an explicit error state
 (`data-testid="ticket-list-error"`), an empty state
 (`data-testid="ticket-list-empty"`, shown for a genuinely empty list —
-not the loading or error case), or the list itself, newest first, in
-whatever order Galley returned (this component never re-sorts). A
+not the loading or error case), or the list itself, in whatever order
+Galley returned (this component never re-sorts). A
 one-field form above it (`data-testid="ticket-capture-form"`) is the
 whole of quick capture: a title input and a submit button, disabled
 until the trimmed title is non-empty. Capture asks for nothing else —
@@ -491,9 +491,8 @@ lifecycle order: Backlog, Ready, In Progress, Blocked, In Review, Done.
 Cards show title and Template and link to `/tickets/:id`. Nothing on
 the board starts or controls execution.
 
-Within each Status, cards retain Galley's list order: newest first by
-`created_at DESC`, with internal `id DESC` as deterministic tiebreak
-(`apps/galley/README.md`, "Ticket ordering"). Grouping only filters
+Within each Status, cards retain Galley's list order, the Owner's
+priority order (`apps/galley/README.md`, "Ticket ordering"). Grouping only filters
 the returned array by its persisted Status; Swiftlet does not infer a
 Status or reorder Tickets. An unrecognized Status produces an error
 instead of silently dropping a Ticket. Load, non-2xx, and expired
@@ -669,6 +668,33 @@ and shows it once, with **Copy** and the instruction to put it in
 for an in-page confirmation (Escape or **Cancel** backs out); after
 pairing again the page says the previous credential is revoked.
 Disconnecting or revoking changes no Ticket.
+
+## Priority order (issue #131)
+
+The list and each board stage show Galley's priority order. The Owner
+reorders within a stage:
+
+- **List and phone board:** **Move up** and **Move down**
+  (`src/components/ReorderButtons.tsx`) send `POST
+  /api/tickets/{id}/position` with the same-Status neighbour as the
+  anchor. At either end of the stage the button is disabled, and its
+  title says why. The archived list has no reorder buttons. On the phone
+  board they sit in the open slip's action panel, which stays open after
+  a move.
+- **Desktop board:** dragging onto another slip in the same stage places
+  the Ticket before that slip on its upper half, and after it on its lower
+  half, with a line showing where it will land. Dropping on another stage
+  is still a Status move.
+
+After each move, successful or rejected, the view refetches and renders
+what Galley returned; it never reorders locally. A rejection shows
+Galley's message (`ticket-list-reorder-error` on the list, the move error
+on the board). Focus returns to the same button, or to the other one when
+the Ticket reached an end.
+
+Tapping another slip's toggle while a slip is open switches the
+selection on click, not on pointerdown. The taller reorder panel would
+otherwise collapse first and move the toggle out from under the tap.
 
 ## Browser-to-backend suite
 
