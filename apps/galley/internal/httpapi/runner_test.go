@@ -436,22 +436,22 @@ func TestOwnerEndpoints_RejectRunnerBearerTokens(t *testing.T) {
 				concrete = "/api/agents/" + agent.Id
 			}
 			covered = append(covered, method+" "+path)
-			for name, call := range map[string]runnerCall{
-				"bearer only":           {token: token},
-				"bearer and session":    {token: token, cookie: f.cookie},
-				"malformed and session": {cookie: f.cookie},
+			for name, c := range map[string]struct {
+				authorization string
+				cookie        *http.Cookie
+			}{
+				"bearer only":           {"Bearer " + token, nil},
+				"bearer and session":    {"Bearer " + token, f.cookie},
+				"lowercase bearer":      {"bearer " + token, f.cookie},
+				"uppercase bearer":      {"BEARER " + token, f.cookie},
+				"malformed and session": {"Bearer not-a-runner-token", f.cookie},
 			} {
 				t.Run(op.OperationID+" "+name, func(t *testing.T) {
-					call.method, call.path, call.body = method, concrete, `{}`
-					req := httptest.NewRequest(call.method, call.path, strings.NewReader(call.body))
+					req := httptest.NewRequest(method, concrete, strings.NewReader(`{}`))
 					req.Header.Set("Content-Type", "application/json")
-					if call.token != "" {
-						req.Header.Set("Authorization", "Bearer "+call.token)
-					} else {
-						req.Header.Set("Authorization", "Bearer not-a-runner-token")
-					}
-					if call.cookie != nil {
-						req.AddCookie(call.cookie)
+					req.Header.Set("Authorization", c.authorization)
+					if c.cookie != nil {
+						req.AddCookie(c.cookie)
 					}
 					rec := httptest.NewRecorder()
 					f.handler.ServeHTTP(rec, req)
@@ -625,5 +625,33 @@ func TestAdvanceDevClock_MovesRunnerHealthInDevelopmentOnly(t *testing.T) {
 	production.heartbeat(t, token, http.StatusOK)
 	if got := production.health(t); got.State != RunnerConnected {
 		t.Fatalf("production health = %+v", got)
+	}
+}
+
+func TestOwnerEndpoints_AcceptNonBearerAuthorizationBesideASession(t *testing.T) {
+	f := newRunnerFixture(t)
+	doc := loadContract(t)
+	var covered int
+	for _, path := range doc.Paths.InMatchingOrder() {
+		op := doc.Paths.Value(path).Get
+		if op == nil || publicOperations[op.OperationID] || strings.HasPrefix(path, "/api/runner/") || strings.Contains(path, "{") {
+			continue
+		}
+		covered++
+		for _, authorization := range []string{"Basic b3duZXI6cHJveHk=", "Digest username=\"owner\""} {
+			t.Run(op.OperationID+" "+strings.Fields(authorization)[0], func(t *testing.T) {
+				req := httptest.NewRequest(http.MethodGet, path, nil)
+				req.Header.Set("Authorization", authorization)
+				req.AddCookie(f.cookie)
+				rec := httptest.NewRecorder()
+				f.handler.ServeHTTP(rec, req)
+				if rec.Code != http.StatusOK {
+					t.Fatalf("GET %s with Authorization %q: status=%d, want 200; body=%s", path, authorization, rec.Code, rec.Body)
+				}
+			})
+		}
+	}
+	if covered < 5 {
+		t.Fatalf("only %d parameterless Owner GET operations found in the contract", covered)
 	}
 }

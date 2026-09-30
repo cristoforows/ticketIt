@@ -162,8 +162,8 @@ func (s *server) requireRunner(w http.ResponseWriter, r *http.Request) (authenti
 		writeUnauthenticated(w)
 		return authenticatedRunner{}, false
 	}
-	scheme, token, found := strings.Cut(headers[0], " ")
-	if !found || !strings.EqualFold(scheme, "Bearer") {
+	token, ok := bearerToken(headers[0])
+	if !ok {
 		writeUnauthenticated(w)
 		return authenticatedRunner{}, false
 	}
@@ -186,6 +186,12 @@ func (s *server) requireRunner(w http.ResponseWriter, r *http.Request) (authenti
 		return authenticatedRunner{}, false
 	}
 	return runner, true
+}
+
+// RFC 9110 auth schemes are case-insensitive.
+func bearerToken(authorization string) (string, bool) {
+	scheme, token, _ := strings.Cut(strings.TrimLeft(authorization, " "), " ")
+	return token, strings.EqualFold(scheme, "Bearer")
 }
 
 func validateRunnerText(w http.ResponseWriter, field, raw string, maxLength int) (string, bool) {

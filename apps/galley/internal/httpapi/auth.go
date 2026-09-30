@@ -160,9 +160,12 @@ func (s *server) SignOut(w http.ResponseWriter, r *http.Request) {
 // generated operation is the wrong shape here.
 func (s *server) requireSession(w http.ResponseWriter, r *http.Request) (auth.OwnerView, bool) {
 	// Bearer credentials are runner credentials, refused on Owner routes (#130).
-	if len(r.Header.Values("Authorization")) > 0 {
-		writeUnauthenticated(w)
-		return auth.OwnerView{}, false
+	// Other schemes pass, so a Basic-auth proxy in front of Galley keeps working.
+	for _, value := range r.Header.Values("Authorization") {
+		if _, ok := bearerToken(value); ok {
+			writeUnauthenticated(w)
+			return auth.OwnerView{}, false
+		}
 	}
 	c, err := r.Cookie(SessionCookieName)
 	if err != nil {

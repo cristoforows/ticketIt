@@ -1144,9 +1144,10 @@ row and is `204` whether or not one existed.
 
 **The auth boundary runs both ways.** Everything under `/api/runner/`
 requires one well-formed, current bearer credential and refuses a
-session cookie, even beside a valid token. `requireSession` refuses any
-request carrying an `Authorization` header, so a runner credential opens
-no Owner route. Every refusal, including a malformed or revoked token,
+session cookie, even beside a valid token. `requireSession` refuses an
+`Authorization` header with the `Bearer` scheme in any casing, so a
+runner credential opens no Owner route. Other schemes pass, so a proxy
+that forwards `Authorization: Basic …` does not lock the Owner out. Every refusal, including a malformed or revoked token,
 is the shared `401 unauthenticated`. Neither Galley nor its logs ever
 see the raw token after issuance.
 
