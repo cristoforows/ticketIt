@@ -272,6 +272,8 @@ func TestRenameAgent_UnknownAndMalformedIdentifiers404(t *testing.T) {
 func ticketWithoutAssignee(ticket Ticket) Ticket {
 	ticket.AssigneeType = ""
 	ticket.AssigneeAgent = nil
+	ticket.AllowedActions = TicketAllowedActions{}
+	ticket.RequestingAgentWork = false
 	ticket.UpdatedAt = ""
 	return ticket
 }
@@ -284,7 +286,7 @@ func TestAssignTicket_AgentOnBothTemplatesAndReassignmentKeepsTheRest(t *testing
 	for _, template := range []TicketTemplate{Basic, Coding} {
 		t.Run(string(template), func(t *testing.T) {
 			created, _, _ := badgeRequest(t, handler, cookie, http.MethodPost, "/api/tickets",
-				fmt.Sprintf(`{"title":%q,"template":%q,"goal":"g","successCriteria":"s"}`, uuid.NewString(), template), http.StatusCreated)
+				fmt.Sprintf(`{"title":%q,"template":%q,"goal":"g","successCriteria":"s","repository":"r"}`, uuid.NewString(), template), http.StatusCreated)
 			path := "/api/tickets/" + decodeAs[Ticket](t, created).Id
 			badgeRequest(t, handler, cookie, http.MethodPut, path+"/badges/"+badge.(map[string]any)["id"].(string), "", http.StatusOK)
 			badgeRequest(t, handler, cookie, http.MethodPost, path+"/status", `{"status":"Ready"}`, http.StatusOK)
@@ -344,7 +346,7 @@ func TestAssignTicket_AgentAllowedInEveryStatus(t *testing.T) {
 	agent := createAgentForTest(t, handler, cookie, uuid.NewString(), AgentKindResearch)
 	for _, status := range allTicketStatuses {
 		t.Run(string(status), func(t *testing.T) {
-			created, _, _ := badgeRequest(t, handler, cookie, http.MethodPost, "/api/tickets", fmt.Sprintf(`{"title":%q}`, uuid.NewString()), http.StatusCreated)
+			created, _, _ := badgeRequest(t, handler, cookie, http.MethodPost, "/api/tickets", fmt.Sprintf(`{"title":%q,"goal":"g","successCriteria":"s"}`, uuid.NewString()), http.StatusCreated)
 			id := decodeAs[Ticket](t, created).Id
 			setTicketStatusDirect(t, pool, ownerID, id, status)
 			result, _, _ := badgeRequest(t, handler, cookie, http.MethodPut, "/api/tickets/"+id+"/assignee", assignAgentBody(agent.Id), http.StatusOK)
@@ -421,7 +423,7 @@ func TestTicketResponses_CarryAssigneeAgentAndReflectRename(t *testing.T) {
 	if listed := getTicketFromList(t, handler, cookie, path); listed.AssigneeAgent == nil || listed.AssigneeAgent.Name != renamed {
 		t.Fatalf("list assigneeAgent = %+v", listed.AssigneeAgent)
 	}
-	edited, _, _ := badgeRequest(t, handler, cookie, http.MethodPatch, path, `{"goal":"still assigned"}`, http.StatusOK)
+	edited, _, _ := badgeRequest(t, handler, cookie, http.MethodPatch, path, `{"goal":"still assigned","successCriteria":"s","repository":"r"}`, http.StatusOK)
 	if fmt.Sprint(edited.(map[string]any)["assigneeAgent"]) != want {
 		t.Fatalf("PATCH response assigneeAgent = %v", edited.(map[string]any)["assigneeAgent"])
 	}

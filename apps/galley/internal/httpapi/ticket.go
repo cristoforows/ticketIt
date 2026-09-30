@@ -216,7 +216,7 @@ func (s *server) UpdateTicket(w http.ResponseWriter, r *http.Request, id string)
 	// insertTicket -- this update never includes it, which is what
 	// makes "retained independently of later edits" true by
 	// construction rather than by a check that could be bypassed here.
-	ticket, found, err := updateTicketForOwner(ctx, s.pool, owner.ID, id, ticketUpdate{
+	ticket, found, rejection, err := updateTicketForOwner(ctx, s.pool, owner.ID, id, ticketUpdate{
 		title:           title,
 		goal:            refinement.goal,
 		context:         refinement.context,
@@ -230,6 +230,10 @@ func (s *server) UpdateTicket(w http.ResponseWriter, r *http.Request, id string)
 	}
 	if !found {
 		writeTicketNotFound(w)
+		return
+	}
+	if rejection != nil {
+		writeTransitionRejection(w, rejection)
 		return
 	}
 	writeJSON(w, http.StatusOK, ticket)
@@ -446,7 +450,6 @@ func scanTicketRow(row ticketRowScanner) (Ticket, error) {
 		at := archivedAt.Time.UTC()
 		ticket.ArchivedAt = &at
 	}
-	ticket.AllowedActions = allowedActionsForTicket(ticket.Status, ticket.CompletionCondition, ticket.ArchivedAt != nil)
 	// NULL means "never assigned", surfaced as "" on the wire -- the
 	// same convention goal/context already use.
 	ticket.AssigneeType = TicketAssigneeType(assigneeType.String)
@@ -457,6 +460,9 @@ func scanTicketRow(row ticketRowScanner) (Ticket, error) {
 	ticket.Repository = repository.String
 	ticket.CreatedAt = createdAt.UTC().Format(time.RFC3339)
 	ticket.UpdatedAt = updatedAt.UTC().Format(time.RFC3339)
+	state := workflowStateOf(ticket)
+	ticket.AllowedActions = allowedActionsForTicket(state, ticket.CompletionCondition)
+	ticket.RequestingAgentWork = decideAgentWorkRequest(state)
 	return ticket, nil
 }
 
@@ -550,15 +556,22 @@ type ticketUpdate struct {
 // function could be passed that would change either column, so no
 // caller of this function -- today or in the future -- can make it
 // recompute or overwrite them.
-func updateTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, publicID string, update ticketUpdate) (Ticket, bool, error) {
+func updateTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, publicID string, update ticketUpdate) (Ticket, bool, *transitionRejection, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
-		return Ticket{}, false, err
+		return Ticket{}, false, nil, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
 	found, err := lockTicketForMutation(ctx, tx, ownerID, publicID, false)
 	if err != nil || !found {
-		return Ticket{}, found, err
+		return Ticket{}, found, nil, err
+	}
+	locked, err := readLockedTicket(ctx, tx, ownerID, publicID)
+	if err != nil {
+		return Ticket{}, false, nil, err
+	}
+	if rejection := decideTicketUpdate(workflowStateOf(locked), update); rejection != nil {
+		return Ticket{}, true, rejection, nil
 	}
 	row := tx.QueryRow(ctx,
 		`UPDATE tickets
@@ -575,18 +588,18 @@ func updateTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64
 	)
 	ticket, err := scanTicketRow(row)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return Ticket{}, false, nil
+		return Ticket{}, false, nil, nil
 	}
 	if err != nil {
-		return Ticket{}, false, err
+		return Ticket{}, false, nil, err
 	}
 	if err := loadTicketBadges(ctx, tx, ownerID, &ticket); err != nil {
-		return Ticket{}, false, err
+		return Ticket{}, false, nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return Ticket{}, false, err
+		return Ticket{}, false, nil, err
 	}
-	return ticket, true, nil
+	return ticket, true, nil, nil
 }
 
 // listTicketsForOwner returns ownerID's Tickets newest first: created_at

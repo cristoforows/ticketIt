@@ -40,6 +40,9 @@ const inlineError = cva("", {
   defaultVariants: { tone: "paper" },
 });
 
-export function InlineError({ tone, className, ...rest }: ComponentPropsWithRef<"p"> & VariantProps<typeof inlineError>) {
-  return <p role="alert" className={cn(inlineError({ tone }), className)} {...rest} />;
+type InlineErrorProps = ComponentPropsWithRef<"p"> & VariantProps<typeof inlineError> & { announce?: boolean };
+
+/** `announce={false}` for a standing marker that a field references, rather than a new error to interrupt with. */
+export function InlineError({ tone, announce = true, className, ...rest }: InlineErrorProps) {
+  return <p role={announce ? "alert" : undefined} className={cn(inlineError({ tone }), className)} {...rest} />;
 }

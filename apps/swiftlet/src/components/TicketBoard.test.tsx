@@ -7,10 +7,11 @@ const ticket = (id: string, status: string, template = "Basic") => ({
   title: `Ticket ${id}`,
   status,
   template,
-  allowedActions: { statusChanges: [], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } } },
+  allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } } },
   completionCondition: "humanAcceptance",
   assigneeType: "",
   assigneeAgent: null,
+  requestingAgentWork: false,
   goal: "",
   context: "",
   successCriteria: "",
@@ -94,6 +95,19 @@ describe("TicketBoard", () => {
     expect(within(screen.getByTestId("board-ticket-nobody")).getByTestId("board-assignee")).toHaveTextContent("Assignee: Unassigned");
   });
 
+  it("shows Queued for the Agent only on slips Galley marks as requesting Agent work", async () => {
+    const agent = { id: "a1", name: "Builder", kind: "coding" };
+    stubTickets([
+      { ...ticket("queued", "Ready"), assigneeType: "agent", assigneeAgent: agent, requestingAgentWork: true },
+      { ...ticket("not-requested", "Ready"), assigneeType: "agent", assigneeAgent: agent, requestingAgentWork: false },
+    ]);
+
+    render(<TicketBoard onUnauthenticated={() => {}} />);
+
+    expect(within(await screen.findByTestId("board-ticket-queued")).getByTestId("board-queued")).toHaveTextContent("Queued for Builder");
+    expect(within(screen.getByTestId("board-ticket-not-requested")).queryByTestId("board-queued")).not.toBeInTheDocument();
+  });
+
   it("shows empty sections even when there are no Tickets", async () => {
     stubTickets([]);
     render(<TicketBoard onUnauthenticated={() => {}} />);
@@ -148,7 +162,7 @@ describe("TicketBoard", () => {
   });
 
   it("highlights only advertised drag targets and sends no disallowed or Done command", async () => {
-    stubTickets([{ ...ticket("moving", "Backlog"), allowedActions: { statusChanges: ["Ready", "Blocked", "Done"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } } } }]);
+    stubTickets([{ ...ticket("moving", "Backlog"), allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked", "Done"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } } } }]);
     render(<TicketBoard onUnauthenticated={() => {}} />);
     const card = await screen.findByTestId("board-ticket-moving");
     expect(within(card).queryByTestId("move-to-trigger")).not.toBeInTheDocument();
@@ -163,7 +177,7 @@ describe("TicketBoard", () => {
   });
 
   it("waits for Galley's response before moving and uses returned actions", async () => {
-    const original = { ...ticket("moving", "Backlog"), allowedActions: { statusChanges: ["Ready"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } } } };
+    const original = { ...ticket("moving", "Backlog"), allowedActions: { statusChangeRejections: [], statusChanges: ["Ready"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } } } };
     const changed = { ...original, status: "Ready", allowedActions: { ...original.allowedActions, statusChanges: ["Backlog", "InProgress"] } };
     let resolveCommand!: (response: unknown) => void;
     const fetchStub = vi.fn().mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ tickets: [original] }) })
@@ -186,7 +200,7 @@ describe("TicketBoard", () => {
   });
 
   it("shows Galley's rejection verbatim without moving the card", async () => {
-    const original = { ...ticket("stale", "Backlog"), allowedActions: { statusChanges: ["Ready"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } } } };
+    const original = { ...ticket("stale", "Backlog"), allowedActions: { statusChangeRejections: [], statusChanges: ["Ready"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } } } };
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ tickets: [original] }) })
       .mockResolvedValueOnce({ ok: false, status: 400, json: async () => ({ error: { code: "invalid_transition", message: "Galley stale move reason" } }) }));
@@ -200,7 +214,7 @@ describe("TicketBoard", () => {
   });
 
   it("keeps focus on a moved card after the follow-up read, not on the Ticket whose modal closed earlier", async () => {
-    const actions = { statusChanges: ["Ready"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } } };
+    const actions = { statusChangeRejections: [], statusChanges: ["Ready"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } } };
     const closed = { ...ticket("closed", "Backlog"), allowedActions: actions };
     const moving = { ...ticket("moving", "Backlog"), allowedActions: actions };
     const changed = { ...moving, status: "Ready", allowedActions: { ...actions, statusChanges: ["Backlog"] } };

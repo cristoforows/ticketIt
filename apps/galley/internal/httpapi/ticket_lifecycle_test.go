@@ -550,7 +550,7 @@ func TestApplyTicketTransition_ScopedToOwner(t *testing.T) {
 	bogusOwnerID := ownerID + 1_000_000_000
 
 	_, found, _, err := applyTicketTransition(ctx, pool, bogusOwnerID, publicID,
-		func(current TicketStatus, _ TicketCompletionCondition) (TicketStatus, *transitionRejection) {
+		func(ticketWorkflowState, TicketCompletionCondition) (TicketStatus, *transitionRejection) {
 			return Ready, nil
 		},
 	)
@@ -569,7 +569,7 @@ func TestSetTicketAssigneeForOwner_ScopedToOwner(t *testing.T) {
 	_, publicID := insertTicketAt(t, pool, ownerID, uniqueTitle(t), time.Now().UTC())
 	bogusOwnerID := ownerID + 1_000_000_000
 
-	_, found, err := setTicketAssigneeForOwner(ctx, pool, bogusOwnerID, publicID, ticketAssignee{kind: TicketAssigneeTypeOwner})
+	_, found, _, err := setTicketAssigneeForOwner(ctx, pool, bogusOwnerID, publicID, ticketAssignee{kind: TicketAssigneeTypeOwner})
 	if err != nil {
 		t.Fatalf("setTicketAssigneeForOwner() returned unexpected error: %v", err)
 	}

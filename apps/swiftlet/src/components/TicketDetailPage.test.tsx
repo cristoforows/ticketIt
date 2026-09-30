@@ -18,11 +18,12 @@ const TICKET = {
   id: TICKET_ID,
   title: "Write the report",
   status: "Backlog",
-  allowedActions: { statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } } },
+  allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } } },
   template: "Basic",
   completionCondition: "humanAcceptance",
   assigneeType: "",
   assigneeAgent: null,
+  requestingAgentWork: false,
   goal: "",
   context: "",
   successCriteria: "",
@@ -89,7 +90,7 @@ describe("TicketDetailPage", () => {
   it("rejects a Ticket missing Galley's allowed actions or an unavailable Accept reason", async () => {
     for (const payload of [
       { ...TICKET, allowedActions: undefined },
-      { ...TICKET, allowedActions: { statusChanges: ["Ready"], accept: { available: false } } },
+      { ...TICKET, allowedActions: { statusChangeRejections: [], statusChanges: ["Ready"], accept: { available: false } } },
     ]) {
       stubFetch(jsonResponse(payload));
       const { unmount } = render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
@@ -174,6 +175,33 @@ describe("TicketDetailPage", () => {
     fireEvent.click(screen.getByTestId("ticket-detail-assign-button"));
     expect(await screen.findByTestId("ticket-detail-action-error")).toHaveTextContent(rejection);
     expect(screen.getByTestId("ticket-detail-assignee")).toHaveTextContent("Unassigned");
+  });
+
+  it.each([
+    { name: "no requestingAgentWork", change: { requestingAgentWork: undefined } },
+    { name: "statusChangeRejections that are not a list", change: { allowedActions: { ...TICKET.allowedActions, statusChangeRejections: {} } } },
+    { name: "a rejection with no reason", change: { allowedActions: { ...TICKET.allowedActions, statusChangeRejections: [{ status: "Ready" }] } } },
+    { name: "a missing input outside the contract", change: { allowedActions: { ...TICKET.allowedActions, statusChangeRejections: [{ status: "Ready", reason: { code: "agent_readiness_incomplete", message: "m", missing: ["title"] } }] } } },
+  ])("rejects a Ticket response with $name", async ({ change }) => {
+    stubFetch(jsonResponse({ ...TICKET, ...change }));
+    render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+    expect(await screen.findByText("Galley's Ticket response was missing a required field.")).toBeInTheDocument();
+  });
+
+  it("carries Galley's missing inputs from a rejected Status change to the receipt", async () => {
+    const rejection = { code: "agent_readiness_incomplete", message: "this Ticket needs Success Criteria before a research Agent can take it from Ready", missing: ["successCriteria"] };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ ...TICKET, assigneeType: "agent", assigneeAgent: { id: AGENTS[0].id, name: "atlas", kind: "research" } }))
+      .mockResolvedValueOnce(jsonResponse({ error: rejection }, 400));
+    stubGalley(fetchMock);
+    render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+    await screen.findByTestId("ticket-detail-title");
+
+    fireEvent.click(screen.getByTestId("ticket-detail-status-button-Ready"));
+
+    expect(await screen.findByTestId("ticket-detail-action-error")).toHaveTextContent(rejection.message);
+    expect(screen.getByTestId("ticket-detail-missing-success-criteria")).toBeInTheDocument();
+    expect(screen.queryByTestId("ticket-detail-missing-goal")).not.toBeInTheDocument();
   });
 
   it("offers a link back to the Backlog", async () => {

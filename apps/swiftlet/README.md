@@ -633,6 +633,26 @@ Board slip show the assigned Agent's name, or Owner / Unassigned. If
 Agents cannot load, **Me** is still offered. Use
 `npm test && npm run build` here and `cd e2e && ./run.sh` at the root.
 
+## Agent readiness (issue #128)
+
+Swiftlet never decides readiness itself. When Galley's
+`requestingAgentWork` is true, the receipt and the Board slip show
+**Queued for <Agent name>** as a `QueuedTag`. It uses the `tag` cva's `queued` variant: an outline in the Ready deep colour on paper (4.74:1), unlike the transient `PendingTag`.
+
+Galley's reasons appear beside the control that caused them:
+
+- **Status control:** each `allowedActions.statusChangeRejections` entry
+  is shown there as "<Status>: <message>", and so is a refused status
+  command.
+- **Assignee control:** a refused assignment is shown below it.
+- **Save area:** a refused save is shown there.
+
+`GalleyError` carries the error's `missing` list. A **Missing** marker then
+appears on each listed field, both on the receipt and in the edit form.
+The field's value element or input names the marker and Galley's message in `aria-describedby`. The marker is an `InlineError` with `announce={false}`, so it is not an alert.
+`parseTicket` requires `requestingAgentWork` and `statusChangeRejections`.
+`e2e/tests/agent-readiness.spec.ts` walks both orderings.
+
 ## Browser-to-backend suite
 
 The tests above stub `fetch`, so they never exercise the real proxy or

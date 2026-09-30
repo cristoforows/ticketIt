@@ -86,17 +86,26 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 	}
 
 	created := createTicketWithTemplate(t, client, baseURL, uniqueTitle(t), Basic)
+	if resp, body := patchTicket(t, client, baseURL, created.Id, UpdateTicketRequest{Goal: strPtr("g"), SuccessCriteria: strPtr("s"), Repository: strPtr("owner/repo")}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("fill Agent inputs: status = %d; body=%s", resp.StatusCode, body)
+	}
 	agent := createAgentHTTP(t, client, baseURL, AgentKindCoding)
-	for _, body := range []AssignTicketRequest{
-		{Type: AssignTicketRequestTypeAgent, AgentId: &agent.Id},
-		{Type: AssignTicketRequestTypeOwner},
-		{Type: AssignTicketRequestTypeAgent, AgentId: &agent.Id},
-	} {
+	assign := func(body AssignTicketRequest) {
+		t.Helper()
 		if resp := doLifecycleRequest(t, client, http.MethodPut, baseURL+"/api/tickets/"+created.Id+"/assignee", body); resp.status != http.StatusOK {
 			t.Fatalf("assign %s: status = %d, want 200; error=%+v", body.Type, resp.status, resp.errBody)
 		}
 	}
-	for _, to := range []TicketStatus{Ready, InProgress, Blocked, InProgress, InReview} {
+	toAgent := AssignTicketRequest{Type: AssignTicketRequestTypeAgent, AgentId: &agent.Id}
+	toOwner := AssignTicketRequest{Type: AssignTicketRequestTypeOwner}
+	assign(toAgent)
+	assign(toOwner)
+	assign(toAgent)
+	if resp := changeStatus(t, client, baseURL, created.Id, Ready); resp.status != http.StatusOK || !resp.ticket.RequestingAgentWork {
+		t.Fatalf("change status to Ready with an Agent: status = %d, requestingAgentWork = %t; error=%+v", resp.status, resp.ticket.RequestingAgentWork, resp.errBody)
+	}
+	assign(toOwner)
+	for _, to := range []TicketStatus{InProgress, Blocked, InProgress, InReview} {
 		if resp := changeStatus(t, client, baseURL, created.Id, to); resp.status != http.StatusOK {
 			t.Fatalf("change status to %s: status = %d, want 200; error=%+v", to, resp.status, resp.errBody)
 		}
@@ -104,8 +113,9 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 	if resp := acceptTicketHTTP(t, client, baseURL, created.Id); resp.status != http.StatusOK {
 		t.Fatalf("accept: status = %d, want 200; error=%+v", resp.status, resp.errBody)
 	}
-	if resp := changeStatus(t, client, baseURL, created.Id, Ready); resp.status != http.StatusOK {
-		t.Fatalf("change status Done -> Ready: status = %d, want 200; error=%+v", resp.status, resp.errBody)
+	assign(toAgent)
+	if resp := changeStatus(t, client, baseURL, created.Id, Ready); resp.status != http.StatusOK || !resp.ticket.RequestingAgentWork {
+		t.Fatalf("change status Done -> Ready with an Agent: status = %d, requestingAgentWork = %t; error=%+v", resp.status, resp.ticket.RequestingAgentWork, resp.errBody)
 	}
 	if resp := unassignHTTP(t, client, baseURL, created.Id); resp.status != http.StatusOK {
 		t.Fatalf("unassign: status = %d, want 200; error=%+v", resp.status, resp.errBody)

@@ -37,6 +37,7 @@ const textPairs: Array<[string, string, string]> = [
   ["muted on paper", "muted", "paper"],
   ["ink on amber", "ink", "amber"],
   ["amber on ink", "amber", "ink"],
+  ["queued tag: status-ready-deep on paper", "status-ready-deep", "paper"],
 ];
 
 describe("token contrast (WCAG AA)", () => {
