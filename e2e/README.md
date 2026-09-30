@@ -259,6 +259,13 @@ to their Galley Status columns on the board. `ticket-restore-after.spec.ts`
 checks the same Status, Badge and fields after a real Galley restart.
 Both are registered in `run.sh` with their exit codes checked.
 
+`tests/agents.spec.ts` creates an Agent on the Agents page, sees Galley's
+duplicate-name rejection, and renames it. It assigns that Agent on a Basic
+Ticket from the Board modal and another Agent on a Coding Ticket from
+full-page detail, then replaces the second with the Owner. Each step is
+checked against Galley's live response, the Ticket list and the slip.
+`run.sh` checks its exit code.
+
 ## The failure-mode spec
 
 `tests/backend-failure.spec.ts` runs *after* `run.sh` stops Galley, and

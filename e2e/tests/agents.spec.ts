@@ -92,6 +92,16 @@ test("create and rename Agents, assign them on Basic and Coding Tickets, then re
   await expect(receipt.getByTestId("ticket-detail-assignee")).toHaveText("Owner");
   expect(await fetchTicket(page, coding.id)).toMatchObject({ assigneeType: "owner", assigneeAgent: null });
 
+  const listed = await page.request.get("/api/tickets");
+  expect(listed.ok()).toBe(true);
+  const { tickets } = await listed.json() as { tickets: Ticket[] };
+  expect(tickets.find(({ id }) => id === basic.id)).toMatchObject({ assigneeType: "agent", assigneeAgent: { id: scout.id, name: renamed, kind: "research" } });
+  expect(tickets.find(({ id }) => id === coding.id)).toMatchObject({ assigneeType: "owner", assigneeAgent: null });
+
+  await page.goto("/");
+  await page.getByTestId(`ticket-item-${basic.id}`).getByRole("link").click();
+  await expect(page.getByRole("dialog", { name: "Ticket details" }).getByTestId("ticket-detail-assignee")).toHaveText(renamed);
+
   await page.goto("/board");
   await expect(page.getByTestId(`board-ticket-${coding.id}`).getByTestId("board-assignee")).toHaveText("Assignee: Owner");
   await expect(basicSlip.getByTestId("board-assignee")).toHaveText(`Assignee: ${renamed}`);
