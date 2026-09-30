@@ -370,6 +370,12 @@ type RenameAgentRequest struct {
 	Name string `json:"name"`
 }
 
+// ReorderTicketRequest Exactly one of `before` or `after`.
+type ReorderTicketRequest struct {
+	After  *string `json:"after,omitempty"`
+	Before *string `json:"before,omitempty"`
+}
+
 // SessionResponse defines model for SessionResponse.
 type SessionResponse struct {
 	// Owner ticketIt's stable internal Owner identity -- independent of any GitHub identifier (docs/deployment.md, "Ownership and sign-in"). `login` is the linked GitHub identity's most recently observed login, shown for display only: matching a sign-in to this Owner always uses the immutable provider account id, never this field.
@@ -577,6 +583,9 @@ type UpdateTicketJSONRequestBody = UpdateTicketRequest
 // AssignTicketJSONRequestBody defines body for AssignTicket for application/json ContentType.
 type AssignTicketJSONRequestBody = AssignTicketRequest
 
+// ReorderTicketJSONRequestBody defines body for ReorderTicket for application/json ContentType.
+type ReorderTicketJSONRequestBody = ReorderTicketRequest
+
 // ChangeTicketStatusJSONRequestBody defines body for ChangeTicketStatus for application/json ContentType.
 type ChangeTicketStatusJSONRequestBody = ChangeTicketStatusRequest
 
@@ -648,6 +657,9 @@ type ServerInterface interface {
 	// AttachTicketBadge Attach an existing Badge to a Ticket
 	// (PUT /api/tickets/{id}/badges/{badgeId})
 	AttachTicketBadge(w http.ResponseWriter, r *http.Request, id string, badgeId string)
+	// ReorderTicket Move a Ticket before or after another in the Owner's priority order
+	// (POST /api/tickets/{id}/position)
+	ReorderTicket(w http.ResponseWriter, r *http.Request, id string)
 	// RestoreTicket Restore an archived Ticket
 	// (POST /api/tickets/{id}/restore)
 	RestoreTicket(w http.ResponseWriter, r *http.Request, id string)
@@ -1176,6 +1188,32 @@ func (siw *ServerInterfaceWrapper) AttachTicketBadge(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// ReorderTicket operation middleware
+func (siw *ServerInterfaceWrapper) ReorderTicket(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReorderTicket(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RestoreTicket operation middleware
 func (siw *ServerInterfaceWrapper) RestoreTicket(w http.ResponseWriter, r *http.Request) {
 
@@ -1370,6 +1408,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/tickets/{id}/badges/{badgeId}", wrapper.AttachTicketBadge)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/archive", wrapper.ArchiveTicket)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/restore", wrapper.RestoreTicket)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/position", wrapper.ReorderTicket)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/session", wrapper.SignOut)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/session", wrapper.GetSession)
 

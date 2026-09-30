@@ -185,10 +185,10 @@ paths:
         archived Tickets when archived=true, optionally matching any
         selected Badge (OR, with each Ticket returned once). Unknown,
         malformed, or foreign Badge ids return 400 invalid_request.
-        Results are ordered by createdAt descending with id descending as
-        the deterministic tiebreak (createdAt alone is not unique --
-        see apps/galley/README.md, "Ticket ordering"). Requires a
-        valid session; returns `401 unauthenticated` otherwise.
+        Unarchived Tickets are in the Owner's priority order, highest
+        first (see `reorderTicket`); archived Tickets are most recently
+        archived first. Requires a valid session; returns
+        `401 unauthenticated` otherwise.
       parameters:
         - name: archived
           in: query
@@ -204,7 +204,7 @@ paths:
           explode: true
       responses:
         "200":
-          description: The Owner's Tickets, newest first.
+          description: The Owner's Tickets, in the order described above.
           content:
             application/json:
               schema:
@@ -240,6 +240,9 @@ paths:
 
         The manual refinement fields are optional and stored in the same
         insert; an invalid one creates nothing.
+
+
+        The new Ticket takes the top of the Owner's priority order.
       requestBody:
         required: true
         content:
@@ -404,6 +407,9 @@ paths:
         `Blocked` are rejected with `agent_owned_transition` (D3 S4),
         and `Ready` with `agent_readiness_incomplete` while an
         AgentReadinessInput is missing.
+
+        Entering `Ready` moves the Ticket to the bottom of the Owner's
+        priority order; every other move keeps its position.
 
         Creates no Round, work request, or queue entry. Requires a
         valid session; returns `401 unauthenticated` otherwise.
@@ -756,7 +762,8 @@ paths:
       tags: [tickets]
       description: >-
         Restoring Ready changes Status to Backlog; every other Status is
-        retained. A Ticket not archived returns 400 not_archived; an unknown,
+        retained. The Ticket keeps the priority position it had when
+        archived. A Ticket not archived returns 400 not_archived; an unknown,
         malformed or foreign id returns the shared 404. Does not start work.
       responses:
         "200":
@@ -767,6 +774,43 @@ paths:
                 $ref: "#/components/schemas/Ticket"
         default:
           description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+  /api/tickets/{id}/position:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid, x-go-type: string}
+    post:
+      operationId: reorderTicket
+      summary: Move a Ticket before or after another in the Owner's priority order
+      tags: [tickets]
+      description: >-
+        The Owner's priority order drives claim order (#108). The anchor
+        must be another unarchived Ticket of the same Owner in the same
+        Status, otherwise `reorder_anchor_invalid`; an archived Ticket
+        is rejected with `archived_ticket`. An unknown, malformed or
+        foreign Ticket id returns the shared 404.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReorderTicketRequest"
+      responses:
+        "200":
+          description: The moved Ticket.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        default:
+          description: >-
+            Error. See `ErrorBody`. Includes `reorder_anchor_invalid`
+            and `archived_ticket`.
           content:
             application/json:
               schema:
@@ -1283,6 +1327,15 @@ components:
       properties:
         status:
           $ref: "#/components/schemas/TicketStatus"
+    ReorderTicketRequest:
+      type: object
+      description: Exactly one of `before` or `after`.
+      additionalProperties: false
+      minProperties: 1
+      maxProperties: 1
+      properties:
+        before: {type: string, format: uuid, x-go-type: string}
+        after: {type: string, format: uuid, x-go-type: string}
     StatusResponse:
       type: object
       description: The fixed GET /api/status payload.
