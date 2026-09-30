@@ -66,7 +66,8 @@
   - a per-row **Rename** with a labelled input. Escape cancels and focus returns to **Rename**.
   - Every change reloads from Galley, and Galley's message is shown verbatim.
 - **Receipt:** the **Assign to** select lists "Me" first, then Galley's Agents in its order, with **Assign** and **Unassign** buttons. The receipt and slip show the Agent's name.
-- `parseTicket` validates `assigneeAgent`, and `api/agents.ts` validates Agent payloads.
+- `parseTicket` and `api/agents.ts` share one Agent guard (`isAgentSummary`), including the kind enum. The authenticated fetch and error-message helpers moved to `api/http.ts`, so `agents.ts` does not depend on `tickets.ts`.
+- A failed reload after a create or rename keeps the rows and says the list may be out of date.
 
 **Browser suite**
 - `tests/agents.spec.ts` is registered in `run.sh` with its exit-code check.
@@ -176,11 +177,8 @@ None of these temporary changes is in the slice.
 
 ```text
  Test Files  15 passed (15)
-      Tests  209 passed (209)
-dist/index.html                   0.39 kB │ gzip:   0.26 kB
-dist/assets/index-CAD8LdXy.css   32.98 kB │ gzip:   7.19 kB
-dist/assets/index-De1cWrMJ.js   355.17 kB │ gzip: 107.93 kB
-✓ built in 317ms
+      Tests  213 passed (213)
+✓ built in 110ms
 ```
 
 **Browser suite: full `e2e/run.sh`**
