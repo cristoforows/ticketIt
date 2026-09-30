@@ -69,13 +69,10 @@ func decidePlainStatusChange(state ticketWorkflowState, target TicketStatus) *tr
 			message: fmt.Sprintf("the transition %s -> %s is not permitted", current, target),
 		}
 	}
-	if state.agentAssigned() && containsStatus(agentOwnedTargets, target) {
+	if _, owned := agentOwnedTargets[target]; state.agentAssigned() && owned {
 		return &transitionRejection{
-			code: agentOwnedTransitionCode,
-			message: fmt.Sprintf(
-				"on an Agent-assigned Ticket, In Progress, In Review and Blocked are set by execution, never a manual status change (attempted %s -> %s)",
-				current, target,
-			),
+			code:    agentOwnedTransitionCode,
+			message: fmt.Sprintf("Execution sets %s on an Agent-assigned Ticket", agentOwnedTargets[target]),
 		}
 	}
 	if target == Ready {

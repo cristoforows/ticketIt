@@ -13,7 +13,7 @@ const agentReadinessIncompleteCode = "agent_readiness_incomplete"
 const agentOwnedTransitionCode = "agent_owned_transition"
 
 // D3 S4: execution owns these moves on an Agent-assigned Ticket.
-var agentOwnedTargets = []TicketStatus{InProgress, InReview, Blocked}
+var agentOwnedTargets = map[TicketStatus]string{InProgress: "In Progress", InReview: "In Review", Blocked: "Blocked"}
 
 type ticketWorkflowState struct {
 	status   TicketStatus

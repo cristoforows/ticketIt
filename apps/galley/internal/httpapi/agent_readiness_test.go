@@ -397,6 +397,12 @@ func TestDecideAgentWorkRequest(t *testing.T) {
 	}
 }
 
+var wantAgentOwnedMessages = map[TicketStatus]string{
+	InProgress: "Execution sets In Progress on an Agent-assigned Ticket",
+	InReview:   "Execution sets In Review on an Agent-assigned Ticket",
+	Blocked:    "Execution sets Blocked on an Agent-assigned Ticket",
+}
+
 func TestTicketAllowedActions_MatchCommandsForEveryAssignee(t *testing.T) {
 	baseURL, client, pool, ownerID := devServerWithSessionAndPoolForTickets(t)
 	f := readinessFixture{baseURL: baseURL, client: client, agents: map[AgentKind]Agent{
@@ -441,7 +447,7 @@ func TestTicketAllowedActions_MatchCommandsForEveryAssignee(t *testing.T) {
 								if result.status != http.StatusOK || result.ticket.Status != target {
 									t.Errorf("%s -> %s advertised, command status %d (%+v)", from, target, result.status, result.errBody)
 								}
-								if agentKind != "" && containsStatus(agentOwnedTargets, target) {
+								if _, owned := agentOwnedTargets[target]; agentKind != "" && owned {
 									t.Errorf("%s -> %s advertised for an Agent-assigned Ticket", from, target)
 								}
 							case advertisedRejection != nil:
@@ -453,9 +459,9 @@ func TestTicketAllowedActions_MatchCommandsForEveryAssignee(t *testing.T) {
 									t.Errorf("%s -> %s not advertised, command status %d %+v", from, target, result.status, result.errBody.Error)
 								}
 							}
-							if agentKind != "" && d3S2AllowedPlainTransitions[[2]TicketStatus{from, target}] && containsStatus(agentOwnedTargets, target) {
-								if result.errBody.Error.Code != agentOwnedTransitionCode {
-									t.Errorf("%s -> %s on an Agent-assigned Ticket: code %q, want %q", from, target, result.errBody.Error.Code, agentOwnedTransitionCode)
+							if want, owned := wantAgentOwnedMessages[target]; agentKind != "" && d3S2AllowedPlainTransitions[[2]TicketStatus{from, target}] && owned {
+								if result.errBody.Error.Code != agentOwnedTransitionCode || result.errBody.Error.Message != want {
+									t.Errorf("%s -> %s on an Agent-assigned Ticket: %+v, want %s %q", from, target, result.errBody.Error, agentOwnedTransitionCode, want)
 								}
 							}
 						}
