@@ -32,6 +32,27 @@ func (e AgentKind) Valid() bool {
 	}
 }
 
+// Defines values for AgentReadinessInput.
+const (
+	AgentReadinessInputGoal            AgentReadinessInput = "goal"
+	AgentReadinessInputRepository      AgentReadinessInput = "repository"
+	AgentReadinessInputSuccessCriteria AgentReadinessInput = "successCriteria"
+)
+
+// Valid indicates whether the value is a known member of the AgentReadinessInput enum.
+func (e AgentReadinessInput) Valid() bool {
+	switch e {
+	case AgentReadinessInputGoal:
+		return true
+	case AgentReadinessInputRepository:
+		return true
+	case AgentReadinessInputSuccessCriteria:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AssignTicketRequestType.
 const (
 	AssignTicketRequestTypeAgent AssignTicketRequestType = "agent"
@@ -247,6 +268,9 @@ type AgentList struct {
 	Agents []Agent `json:"agents"`
 }
 
+// AgentReadinessInput A Ticket field an Agent-assigned Ticket needs before Ready (D3 S1): `goal` and `successCriteria` always, `repository` for a `coding` Agent.
+type AgentReadinessInput string
+
 // AssignTicketRequest `agentId` is required when `type` is `agent` and rejected otherwise.
 type AssignTicketRequest struct {
 	AgentId *string                 `json:"agentId,omitempty"`
@@ -358,6 +382,9 @@ type ErrorDetail struct {
 
 	// Message Human-readable, non-secret explanation.
 	Message string `json:"message"`
+
+	// Missing Present only with `agent_readiness_incomplete`.
+	Missing *[]AgentReadinessInput `json:"missing,omitempty"`
 }
 
 // Owner ticketIt's stable internal Owner identity -- independent of any GitHub identifier (docs/deployment.md, "Ownership and sign-in"). `login` is the linked GitHub identity's most recently observed login, shown for display only: matching a sign-in to this Owner always uses the immutable provider account id, never this field.
@@ -476,13 +503,16 @@ type Ticket struct {
 	// Id Opaque public identifier (issue #57), used in URLs and by GET /api/tickets/{id}. Non-sequential and non-guessable -- never the internal sequential database id, which no Galley endpoint exposes.
 	Id string `json:"id"`
 
-	// Repository One Ticket repository reference (issue #59, D3 S1 check 3), available on either Template -- required by nothing in M2. There is exactly one such field on a Ticket; the Coding Template surfaces it by default, but it is not a competing Basic-only concept. Plain text (e.g. an "owner/repo" name or a URL) with no format enforced yet. Always present on the wire; "" means never set or cleared -- see `goal`'s description for the same convention.
+	// Repository One Ticket repository reference (issue #59, D3 S1 check 3), available on either Template, and required before Ready only by a `coding` Agent's readiness. There is exactly one such field on a Ticket; the Coding Template surfaces it by default, but it is not a competing Basic-only concept. Plain text (e.g. an "owner/repo" name or a URL) with no format enforced yet. Always present on the wire; "" means never set or cleared -- see `goal`'s description for the same convention.
 	Repository string `json:"repository"`
+
+	// RequestingAgentWork Unarchived, Ready, Agent-assigned, and every AgentReadinessInput that Agent needs is present. Creates no Round by itself.
+	RequestingAgentWork bool `json:"requestingAgentWork"`
 
 	// Status A Ticket's lifecycle stage (CONTEXT.md, "Status"). Moves between these values are validated against the persisted current Status per D3 S2 (docs/decisions/d3-agent-template-compatibility.md). `Done` is reachable only through explicit Accept.
 	Status TicketStatus `json:"status"`
 
-	// SuccessCriteria Manual refinement (issue #58 -- prompt "Describe observable conditions that demonstrate the outcome was achieved."). CONTEXT.md's "Success Criteria" term -- not "acceptance criteria". Plain text; see `goal`'s description for the "" convention. Agent-readiness validation of this field is M4's, not this slice's.
+	// SuccessCriteria Manual refinement (issue #58 -- prompt "Describe observable conditions that demonstrate the outcome was achieved."). CONTEXT.md's "Success Criteria" term -- not "acceptance criteria". Plain text; see `goal`'s description for the "" convention.
 	SuccessCriteria string `json:"successCriteria"`
 
 	// Template A Ticket's built-in Template (issue #59), chosen at capture (default Basic). Under the accepted D3 decision (docs/decisions/d3-agent-template-compatibility.md), a Template supplies presentation, required information, and a *default* completion condition only -- it never restricts which Agent or execution engine may be assigned (docs/ticket-creation.md, "Flexible ticket structure"). Changing a Ticket's Template after creation is out of scope for M2: post-delivery Template/repository change is D4, owned by M8.
@@ -504,6 +534,9 @@ type TicketAcceptAvailability struct {
 // TicketAllowedActions defines model for TicketAllowedActions.
 type TicketAllowedActions struct {
 	Accept TicketAcceptAvailability `json:"accept"`
+
+	// StatusChangeRejections Targets D3 S2's table permits from the current Status that this Ticket's Agent assignment or missing inputs rule out, each with the status command's error.
+	StatusChangeRejections []TicketStatusChangeRejection `json:"statusChangeRejections"`
 
 	// StatusChanges Targets accepted by a plain status command from this Ticket's current Status.
 	StatusChanges []TicketStatus `json:"statusChanges"`
@@ -537,6 +570,14 @@ type TicketList struct {
 
 // TicketStatus A Ticket's lifecycle stage (CONTEXT.md, "Status"). Moves between these values are validated against the persisted current Status per D3 S2 (docs/decisions/d3-agent-template-compatibility.md). `Done` is reachable only through explicit Accept.
 type TicketStatus string
+
+// TicketStatusChangeRejection defines model for TicketStatusChangeRejection.
+type TicketStatusChangeRejection struct {
+	Reason ErrorDetail `json:"reason"`
+
+	// Status A Ticket's lifecycle stage (CONTEXT.md, "Status"). Moves between these values are validated against the persisted current Status per D3 S2 (docs/decisions/d3-agent-template-compatibility.md). `Done` is reachable only through explicit Accept.
+	Status TicketStatus `json:"status"`
+}
 
 // TicketTemplate A Ticket's built-in Template (issue #59), chosen at capture (default Basic). Under the accepted D3 decision (docs/decisions/d3-agent-template-compatibility.md), a Template supplies presentation, required information, and a *default* completion condition only -- it never restricts which Agent or execution engine may be assigned (docs/ticket-creation.md, "Flexible ticket structure"). Changing a Ticket's Template after creation is out of scope for M2: post-delivery Template/repository change is D4, owned by M8.
 type TicketTemplate string

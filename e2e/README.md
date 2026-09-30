@@ -266,6 +266,16 @@ full-page detail, then replaces the second with the Owner. Each step is
 checked against Galley's live response, the Ticket list and the slip.
 `run.sh` checks its exit code.
 
+`tests/agent-readiness.spec.ts` walks Agent readiness in both orders. Ready
+then a coding Agent: the assignment is refused beside the assignee control
+with markers on the missing fields, then succeeds once they are filled.
+A research Agent then Ready: a stale Ready is refused inside the Status
+control, the reloaded receipt shows Galley's advertised reasons, and filling
+the inputs lets the Ticket enter Ready. Clearing a required input is then
+refused in the save area. Each case ends with "Queued for" on the receipt and
+the slip, and every message is compared with Galley's live response. `run.sh`
+checks its exit code.
+
 `tests/runner.spec.ts` pairs a runner on the Agents page, reads the
 credential from the page, and spawns a real Michelin
 (`apps/michelin/src/main.ts`, no install needed) against `GALLEY_BASE_URL`.

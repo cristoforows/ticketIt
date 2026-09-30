@@ -1067,11 +1067,57 @@ malformed or foreign Agent id returns the shared `404` with
 `no ticket or agent with that identifier`, leaving the Ticket unchanged.
 
 Assignment is allowed on both Templates and in every Status, and never
-reads the Template, the Agent's kind or any readiness rule. It creates no
+reads the Template. #128 adds one exception: assigning an Agent to a Ready
+Ticket must pass Agent readiness (below). It creates no
 execution record and requests no work: `agents` joins the
 no-execution-artefact allowlist, and the trip wire expects exactly one
 new Agent and one new Ticket. Run `go test ./...`, `go vet ./...`,
 `go build ./...` and `./scripts/check-contract-drift.sh` here.
+
+## Agent readiness and Galley-owned moves (issue #128)
+
+`internal/httpapi/agent_readiness.go` holds the rules. A Ticket assigned
+to an Agent may be Ready only with a non-blank goal and Success Criteria,
+plus a repository when the Agent's kind is `coding`. The Agent's kind
+decides this, never the Template. A human-assigned or unassigned Ticket
+keeps title-only Ready.
+
+Every path into, or through, Ready with an Agent is checked on the locked
+row. All three are rejected with `400 agent_readiness_incomplete`, whose
+`error.missing` lists `goal`, `successCriteria` and `repository` in that
+order:
+
+- `POST /status` to Ready (`decidePlainStatusChange`);
+- `PUT /assignee` of an Agent while Ready (`decideAssignment`);
+- a `PATCH` that leaves a named required field blank while Ready
+  (`decideTicketUpdate`). A `PATCH` that names none of the missing fields
+  still applies, so an older incomplete Ticket can be filled in.
+
+`POST /status` to In Progress, In Review or Blocked on an Agent-assigned
+Ticket is `400 agent_owned_transition`. These moves belong to execution
+(D3 S2).
+
+`decidePlainStatusChange` runs both rules after the D3 table, so
+`allowedActions` stays equal to what the command does. Moves the table
+allows but these rules refuse are omitted from `statusChanges`. They are
+listed in `statusChangeRejections` with the command's exact error.
+
+Every Ticket response carries `requestingAgentWork`. It is
+`decideAgentWorkRequest`: not archived, Ready, Agent-assigned and
+complete. The claim in #132 must use the same function.
+
+Tests:
+
+- `TestAgentReadiness_EitherOrderGrid`: both orderings × both Templates ×
+  both kinds × every missing subset;
+- `TestTicketAllowedActions_MatchCommandsForEveryAssignee`: advertised
+  against actual moves for every Status × assignee;
+- `TestAgentReadiness_ConcurrentClearAndReadinessNeverBothApply`: the race
+  against real PostgreSQL;
+- `TestAgentReadiness_ResponsesMatchContract`.
+
+Checking out the repository reference is M8 #9. See
+[`docs/evidence/m4/128-agent-readiness.md`](../../docs/evidence/m4/128-agent-readiness.md).
 
 ## Runner pairing, bearer authentication, and health (issue #130)
 
@@ -1158,6 +1204,8 @@ uses this shared JSON shape:
 | A Status transition is not on D3 S2's table (#60)  | `400` | `invalid_transition`   |
 | Accept attempted on a `reviewedPrMerge` Ticket (#60, D2/M8 limitation) | `400` | `reviewed_pr_merge_not_implemented` |
 | Badge name already exists for the Owner (#91) | `409` | `duplicate_badge_name` |
+| Ready with an Agent lacks a required input (#128); carries `missing` | `400` | `agent_readiness_incomplete` |
+| Manual In Progress, In Review or Blocked on an Agent-assigned Ticket (#128) | `400` | `agent_owned_transition` |
 
 A `405` response also carries an `Allow` header naming the accepted
 method(s).

@@ -1270,7 +1270,7 @@ func TestUpdateTicket_ScopedToOwner(t *testing.T) {
 
 	bogusOwnerID := ownerID + 1_000_000_000
 
-	_, found, err := updateTicketForOwner(ctx, pool, bogusOwnerID, publicID, ticketUpdate{title: strPtr(uniqueTitle(t) + "-hijacked")})
+	_, found, _, err := updateTicketForOwner(ctx, pool, bogusOwnerID, publicID, ticketUpdate{title: strPtr(uniqueTitle(t) + "-hijacked")})
 	if err != nil {
 		t.Fatalf("updateTicketForOwner() returned unexpected error: %v", err)
 	}

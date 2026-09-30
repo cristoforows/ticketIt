@@ -1,20 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useLayoutEffect } from "react";
 import { TicketDetail } from "./TicketDetail";
 import type { Agent } from "../api/agents";
 import type { Badge, Ticket, TicketAssignee, TicketUpdate } from "../api/tickets";
 import { statusLabel } from "./ui";
+import { GalleyError } from "../api/http";
 
 const TICKET: Ticket = {
   id: "33333333-3333-4333-8333-333333333333",
   title: "Fix login bug on Safari",
   status: "Backlog",
-  allowedActions: { statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } } },
+  allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } } },
   template: "Basic",
   completionCondition: "humanAcceptance",
   assigneeType: "",
   assigneeAgent: null,
+  requestingAgentWork: false,
   goal: "",
   context: "",
   successCriteria: "",
@@ -172,7 +174,7 @@ describe("archive presentation", () => {
 
   it("keeps archived Tickets readable and disables their mutating controls with Galley's reason", () => {
     const reason = { code: "archived_ticket", message: "archived tickets are read-only" };
-    render(<TicketDetail ticket={{ ...TICKET, archivedAt: "2026-09-29T10:00:00Z", badges: [{ id: BADGE.id, name: BADGE.name }], allowedActions: { statusChanges: [], accept: { available: false, reason } } }} onSave={vi.fn()} {...noopActions()} />);
+    render(<TicketDetail ticket={{ ...TICKET, archivedAt: "2026-09-29T10:00:00Z", badges: [{ id: BADGE.id, name: BADGE.name }], allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason } } }} onSave={vi.fn()} {...noopActions()} />);
     expect(screen.getByTestId("ticket-detail-archived")).toHaveTextContent(reason.message);
     expect(screen.getByTestId("ticket-detail-badges")).toHaveTextContent(BADGE.name);
     for (const name of ["Edit", "Archive", "Add badge", "Remove Urgent", "Assign"]) {
@@ -197,7 +199,7 @@ describe("archive presentation", () => {
 
   it("shows Ready becoming Backlog after Restore and unlocks editing", async () => {
     const reason = { code: "archived_ticket", message: "archived tickets are read-only" };
-    const archived = { ...TICKET, status: "Ready" as const, archivedAt: "2026-09-29T10:00:00Z", allowedActions: { statusChanges: [] as Ticket["status"][], accept: { available: false, reason } } };
+    const archived = { ...TICKET, status: "Ready" as const, archivedAt: "2026-09-29T10:00:00Z", allowedActions: { statusChangeRejections: [], statusChanges: [] as Ticket["status"][], accept: { available: false, reason } } };
     const restored: Ticket = { ...TICKET, status: "Backlog", archivedAt: null };
     const onRestore = vi.fn().mockResolvedValue(restored);
     render(<TicketDetail ticket={archived} onSave={vi.fn()} {...noopActions()} onRestore={onRestore} />);
@@ -526,6 +528,98 @@ describe("TicketDetail", () => {
       );
       // Still Ready: a rejection never touches the displayed Status.
       expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("Ready");
+    });
+
+    describe("Agent readiness", () => {
+      const agent = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kind: "coding" as const };
+      const readiness = {
+        code: "agent_readiness_incomplete",
+        message: "this Ticket needs a goal and a repository before a coding Agent can take it from Ready",
+        missing: ["goal", "repository"] as ("goal" | "repository")[],
+      };
+      const agentTicket: Ticket = {
+        ...TICKET,
+        assigneeType: "agent",
+        assigneeAgent: agent,
+        successCriteria: "done",
+        allowedActions: {
+          ...TICKET.allowedActions,
+          statusChanges: [],
+          statusChangeRejections: [
+            { status: "Ready", reason: readiness },
+            { status: "Blocked", reason: { code: "agent_owned_transition", message: "Execution sets Blocked on an Agent-assigned Ticket" } },
+          ],
+        },
+      };
+
+      it("shows Queued for the Agent only when Galley says the Ticket requests Agent work", () => {
+        const { rerender } = render(<TicketDetail ticket={{ ...agentTicket, status: "Ready", requestingAgentWork: true }} onSave={vi.fn()} {...noopActions()} />);
+        expect(screen.getByTestId("ticket-detail-queued")).toHaveTextContent("Queued for atlas");
+
+        rerender(<TicketDetail ticket={{ ...REFINED_TICKET, status: "Ready", assigneeType: "agent", assigneeAgent: agent, requestingAgentWork: false }} onSave={vi.fn()} {...noopActions()} />);
+        expect(screen.queryByTestId("ticket-detail-queued")).not.toBeInTheDocument();
+      });
+
+      it("shows Galley's reasons beside the Status control and marks exactly the fields Galley lists", () => {
+        render(<TicketDetail ticket={agentTicket} onSave={vi.fn()} {...noopActions()} />);
+
+        const control = screen.getByTestId("ticket-detail-status-control");
+        expect(within(control).getByTestId("ticket-detail-status-unavailable-Ready")).toHaveTextContent(`Ready: ${readiness.message}`);
+        expect(within(control).getByTestId("ticket-detail-status-unavailable-Blocked")).toHaveTextContent("Execution sets Blocked on an Agent-assigned Ticket");
+        expect(screen.queryByTestId("ticket-detail-status-button-Ready")).not.toBeInTheDocument();
+        expect(screen.getByTestId("ticket-detail-missing-goal")).not.toHaveAttribute("role");
+        expect(screen.getByTestId("ticket-detail-field-goal")).toHaveAttribute("aria-describedby", "ticket-detail-missing-goal ticket-detail-status-unavailable-Ready");
+        expect(screen.getByTestId("ticket-detail-field-goal")).toHaveAccessibleDescription(`Missing Ready: ${readiness.message}`);
+        expect(screen.getByTestId("ticket-detail-field-repository")).toHaveAttribute("aria-describedby", "ticket-detail-missing-repository ticket-detail-status-unavailable-Ready");
+        expect(screen.getByTestId("ticket-detail-field-success-criteria")).not.toHaveAttribute("aria-describedby");
+        expect(screen.getByTestId("ticket-detail-missing-repository")).toBeInTheDocument();
+        expect(screen.queryByTestId("ticket-detail-missing-success-criteria")).not.toBeInTheDocument();
+      });
+
+      it("shows a rejected Status change inside the Status control", async () => {
+        const onChangeStatus = vi.fn<(status: Ticket["status"]) => Promise<Ticket>>().mockRejectedValue(new GalleyError(readiness));
+        render(<TicketDetail ticket={{ ...TICKET, assigneeType: "agent", assigneeAgent: agent }} onSave={vi.fn()} {...noopActions()} onChangeStatus={onChangeStatus} />);
+
+        fireEvent.click(screen.getByTestId("ticket-detail-status-button-Ready"));
+
+        const error = await within(screen.getByTestId("ticket-detail-status-control")).findByTestId("ticket-detail-action-error");
+        expect(error).toHaveTextContent(readiness.message);
+        expect(screen.getByTestId("ticket-detail-field-goal")).toHaveAccessibleDescription(`Missing ${readiness.message}`);
+        expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("Backlog");
+      });
+
+      it("shows a rejected Agent assignment beside the assignee control and marks the missing fields", async () => {
+        const onAssign = vi.fn<(assignee: TicketAssignee) => Promise<Ticket>>().mockRejectedValue(new GalleyError(readiness));
+        render(<TicketDetail ticket={{ ...TICKET, status: "Ready" }} onSave={vi.fn()} {...noopActions()} onAssign={onAssign} onLoadAgents={vi.fn().mockResolvedValue([{ ...agent, createdAt: "2026-09-30T10:00:00Z" }])} />);
+        await screen.findByRole("option", { name: "atlas" });
+
+        fireEvent.change(screen.getByLabelText("Assign to"), { target: { value: `agent:${agent.id}` } });
+        fireEvent.click(screen.getByTestId("ticket-detail-assign-button"));
+
+        const error = await screen.findByTestId("ticket-detail-action-error");
+        expect(error).toHaveTextContent(readiness.message);
+        expect(screen.getByTestId("ticket-detail-assignee-form").nextElementSibling).toContainElement(error);
+        expect(within(screen.getByTestId("ticket-detail-status-control")).queryByTestId("ticket-detail-action-error")).not.toBeInTheDocument();
+        expect(screen.getByTestId("ticket-detail-missing-goal")).toBeInTheDocument();
+        expect(screen.getByTestId("ticket-detail-missing-repository")).toBeInTheDocument();
+        expect(screen.getByTestId("ticket-detail-assignee")).toHaveTextContent("Unassigned");
+      });
+
+      it("marks the cleared field and keeps Galley's message in the save error when clearing is rejected", async () => {
+        const rejection = { code: "agent_readiness_incomplete", message: "this Ticket needs a goal before a research Agent can take it from Ready", missing: ["goal" as const] };
+        const onSave = vi.fn<(update: TicketUpdate) => Promise<Ticket>>().mockRejectedValue(new GalleyError(rejection));
+        render(<TicketDetail ticket={{ ...REFINED_TICKET, status: "Ready", assigneeType: "agent", assigneeAgent: { ...agent, kind: "research" }, requestingAgentWork: true }} onSave={onSave} {...noopActions()} />);
+
+        fireEvent.click(screen.getByTestId("ticket-detail-edit-button"));
+        fireEvent.change(screen.getByTestId("ticket-detail-textarea-goal"), { target: { value: "" } });
+        fireEvent.click(screen.getByTestId("ticket-detail-save-button"));
+
+        expect(await screen.findByTestId("ticket-detail-save-error")).toHaveTextContent(rejection.message);
+        expect(screen.getByTestId("ticket-detail-textarea-goal")).toHaveAttribute("aria-invalid", "true");
+        expect(screen.getByTestId("ticket-detail-textarea-goal")).toHaveAccessibleDescription(`Missing ${rejection.message}`);
+        expect(screen.getByTestId("ticket-detail-textarea-success-criteria")).not.toHaveAttribute("aria-describedby");
+        expect(screen.queryByTestId("ticket-detail-missing-success-criteria")).not.toBeInTheDocument();
+      });
     });
 
     it("shows Accept when Galley advertises it", () => {

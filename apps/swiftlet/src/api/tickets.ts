@@ -5,7 +5,7 @@
  */
 import type { components } from "./generated/schema";
 import { isAgentSummary } from "./agents";
-import { authenticatedFetch, errorMessage } from "./http";
+import { authenticatedFetch, errorMessage, GalleyError, parseErrorDetail } from "./http";
 
 export type Ticket = components["schemas"]["Ticket"];
 export type Badge = components["schemas"]["Badge"];
@@ -63,6 +63,13 @@ function parseTicket(payload: unknown): Ticket {
   const accept = actions?.accept as Record<string, unknown> | undefined;
   const reason = accept?.reason as Record<string, unknown> | undefined;
   const agent = record.assigneeAgent;
+  const rejections = Array.isArray(actions?.statusChangeRejections)
+    ? actions.statusChangeRejections.map((rejection: unknown) => {
+      const entry = rejection as Record<string, unknown> | null;
+      const detail = parseErrorDetail(entry?.reason);
+      return typeof entry?.status === "string" && detail ? { status: entry.status as Ticket["status"], reason: detail } : undefined;
+    })
+    : undefined;
   if (
     typeof record.id !== "string" ||
     typeof record.title !== "string" ||
@@ -71,6 +78,7 @@ function parseTicket(payload: unknown): Ticket {
     typeof record.completionCondition !== "string" ||
     typeof record.assigneeType !== "string" ||
     !(agent === null || isAgentSummary(agent)) ||
+    typeof record.requestingAgentWork !== "boolean" ||
     typeof record.goal !== "string" ||
     typeof record.context !== "string" ||
     typeof record.successCriteria !== "string" ||
@@ -87,6 +95,8 @@ function parseTicket(payload: unknown): Ticket {
     typeof actions !== "object" ||
     !Array.isArray(actions.statusChanges) ||
     !actions.statusChanges.every((status: unknown) => typeof status === "string") ||
+    !rejections ||
+    !rejections.every((rejection) => rejection !== undefined) ||
     !accept ||
     typeof accept !== "object" ||
     typeof accept.available !== "boolean" ||
@@ -102,6 +112,7 @@ function parseTicket(payload: unknown): Ticket {
     status: record.status as Ticket["status"],
     allowedActions: {
       statusChanges: actions.statusChanges as Ticket["status"][],
+      statusChangeRejections: rejections as Ticket["allowedActions"]["statusChangeRejections"],
       accept: accept.available
         ? { available: true }
         : { available: false, reason: { code: reason!.code as string, message: reason!.message as string } },
@@ -110,6 +121,7 @@ function parseTicket(payload: unknown): Ticket {
     completionCondition: record.completionCondition as Ticket["completionCondition"],
     assigneeType: record.assigneeType as Ticket["assigneeType"],
     assigneeAgent: agent === null ? null : { id: agent.id, name: agent.name, kind: agent.kind },
+    requestingAgentWork: record.requestingAgentWork,
     badges: record.badges as Ticket["badges"],
     archivedAt: record.archivedAt,
     goal: record.goal,
@@ -228,10 +240,9 @@ async function ticketCommand(path: string, init?: RequestInit, notFound: "ticket
   }
   if (!response.ok) {
     const payload: unknown = await response.json();
-    throw new Error(
-      errorMessage(payload) ??
-        `Galley returned an error response: ${response.status} ${response.statusText}`.trim(),
-    );
+    const detail = parseErrorDetail((payload as { error?: unknown } | null)?.error);
+    if (detail) throw new GalleyError(detail);
+    throw new Error(`Galley returned an error response: ${response.status} ${response.statusText}`.trim());
   }
   const payload: unknown = await response.json();
   return parseTicket(payload);

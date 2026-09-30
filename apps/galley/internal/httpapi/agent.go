@@ -167,14 +167,15 @@ func renameAgentForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64,
 	return agent, true, nil
 }
 
-func agentRowIDForOwner(ctx context.Context, db ticketDB, ownerID int64, publicID string) (int64, bool, error) {
+func agentForOwner(ctx context.Context, db ticketDB, ownerID int64, publicID string) (int64, AgentKind, bool, error) {
 	var id int64
-	err := db.QueryRow(ctx, `SELECT id FROM agents WHERE owner_id = $1 AND public_id = $2::uuid`, ownerID, publicID).Scan(&id)
+	var kind AgentKind
+	err := db.QueryRow(ctx, `SELECT id, kind FROM agents WHERE owner_id = $1 AND public_id = $2::uuid`, ownerID, publicID).Scan(&id, &kind)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, false, nil
+		return 0, "", false, nil
 	}
 	if err != nil {
-		return 0, false, err
+		return 0, "", false, err
 	}
-	return id, true, nil
+	return id, kind, true, nil
 }

@@ -328,6 +328,10 @@ paths:
         clears goal/context/successCriteria/constraints/repository, and
         is rejected for title).
 
+        On a Ready, Agent-assigned Ticket, clearing an
+        AgentReadinessInput that Agent needs is rejected with
+        `agent_readiness_incomplete` and no field is updated.
+
         `template` is present in this request schema only so a client
         request naming it can be told apart from one that does not --
         it is never accepted. Changing a Ticket's Template after
@@ -396,6 +400,11 @@ paths:
         `invalid_transition`; notably `Blocked` resumes only to
         `InProgress`, never straight to `Ready`.
 
+        On an Agent-assigned Ticket, `InProgress`, `InReview` and
+        `Blocked` are rejected with `agent_owned_transition` (D3 S4),
+        and `Ready` with `agent_readiness_incomplete` while an
+        AgentReadinessInput is missing.
+
         Creates no Round, work request, or queue entry. Requires a
         valid session; returns `401 unauthenticated` otherwise.
         Identifier handling matches the other `/api/tickets/{id}`
@@ -415,8 +424,8 @@ paths:
                 $ref: "#/components/schemas/Ticket"
         default:
           description: >-
-            Error. See `ErrorBody`. Includes `invalid_transition` for
-            a Status move not on D3 S2's table.
+            Error. See `ErrorBody`. Includes `invalid_transition`,
+            `agent_owned_transition` and `agent_readiness_incomplete`.
           content:
             application/json:
               schema:
@@ -479,8 +488,10 @@ paths:
       tags: [tickets]
       description: >-
         Idempotent, and allowed whatever the Ticket's current Status or
-        Template (D3 S1). Reassignment keeps the Ticket's history and
-        completion condition. An unknown, malformed or foreign Ticket or
+        Template (D3 S1), except that assigning an Agent to a Ready
+        Ticket missing an AgentReadinessInput that Agent needs is
+        rejected with `agent_readiness_incomplete`. Reassignment keeps
+        the Ticket's history and completion condition. An unknown, malformed or foreign Ticket or
         Agent id returns the shared 404 not_found.
 
         Creates no Round, work request, or queue entry. Requires a
@@ -511,8 +522,7 @@ paths:
       description: >-
         Idempotent: unassigning an already-unassigned Ticket returns
         200, matching this contract's last-write-wins conventions
-        elsewhere. Allowed whatever the current Status, as
-        `assignTicket`.
+        elsewhere. Allowed whatever the current Status.
 
         Requires a valid session; returns `401 unauthenticated`
         otherwise. Identifier handling matches the other
@@ -1037,6 +1047,14 @@ components:
       # Without these, "coding" collides with TicketTemplate's Coding and
       # oapi-codegen renames both enums' constants.
       x-enum-varnames: [AgentKindResearch, AgentKindCoding]
+    AgentReadinessInput:
+      type: string
+      description: >-
+        A Ticket field an Agent-assigned Ticket needs before Ready (D3
+        S1): `goal` and `successCriteria` always, `repository` for a
+        `coding` Agent.
+      enum: [goal, successCriteria, repository]
+      x-enum-varnames: [AgentReadinessInputGoal, AgentReadinessInputSuccessCriteria, AgentReadinessInputRepository]
     Agent:
       type: object
       additionalProperties: false
@@ -1092,6 +1110,7 @@ components:
           completionCondition,
           assigneeType,
           assigneeAgent,
+          requestingAgentWork,
           goal,
           context,
           successCriteria,
@@ -1140,6 +1159,12 @@ components:
           oneOf:
             - $ref: "#/components/schemas/TicketAssigneeAgent"
             - type: "null"
+        requestingAgentWork:
+          type: boolean
+          description: >-
+            Unarchived, Ready, Agent-assigned, and every
+            AgentReadinessInput that Agent needs is present. Creates no
+            Round by itself.
         completionCondition:
           $ref: "#/components/schemas/TicketCompletionCondition"
         goal:
@@ -1164,8 +1189,7 @@ components:
             conditions that demonstrate the outcome was achieved.").
             CONTEXT.md's "Success Criteria" term -- not "acceptance
             criteria". Plain text; see `goal`'s description for the ""
-            convention. Agent-readiness validation of this field is
-            M4's, not this slice's.
+            convention.
         constraints:
           type: string
           description: >-
@@ -1176,8 +1200,8 @@ components:
           type: string
           description: >-
             One Ticket repository reference (issue #59, D3 S1 check 3),
-            available on either Template -- required by nothing in M2.
-            There is exactly one such field on a Ticket; the Coding
+            available on either Template, and required before Ready only
+            by a `coding` Agent's readiness. There is exactly one such field on a Ticket; the Coding
             Template surfaces it by default, but it is not a competing
             Basic-only concept. Plain text (e.g. an "owner/repo" name
             or a URL) with no format enforced yet. Always present on
@@ -1241,15 +1265,32 @@ components:
     TicketAllowedActions:
       type: object
       additionalProperties: false
-      required: [statusChanges, accept]
+      required: [statusChanges, statusChangeRejections, accept]
       properties:
         statusChanges:
           type: array
           description: Targets accepted by a plain status command from this Ticket's current Status.
           items:
             $ref: "#/components/schemas/TicketStatus"
+        statusChangeRejections:
+          type: array
+          description: >-
+            Targets D3 S2's table permits from the current Status that
+            this Ticket's Agent assignment or missing inputs rule out,
+            each with the status command's error.
+          items:
+            $ref: "#/components/schemas/TicketStatusChangeRejection"
         accept:
           $ref: "#/components/schemas/TicketAcceptAvailability"
+    TicketStatusChangeRejection:
+      type: object
+      additionalProperties: false
+      required: [status, reason]
+      properties:
+        status:
+          $ref: "#/components/schemas/TicketStatus"
+        reason:
+          $ref: "#/components/schemas/ErrorDetail"
     TicketAcceptAvailability:
       type: object
       additionalProperties: false
@@ -1556,3 +1597,9 @@ components:
         message:
           type: string
           description: Human-readable, non-secret explanation.
+        missing:
+          type: array
+          description: Present only with `agent_readiness_incomplete`.
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/AgentReadinessInput"
