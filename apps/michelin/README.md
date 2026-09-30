@@ -79,7 +79,7 @@ Two independent loops run side by side:
   succeeds, every attempt is a registration. After that, only a `409`
   or `401` leads back to registering; a timeout, an unreachable Galley
   or another failed heartbeat is retried as a heartbeat, so Galley's
-  `registeredAt` stays the time Michelin first registered.
+  `registeredAt` does not move on a network blip.
 
 Requests in one loop never overlap. Each request times out after 5
 seconds. Logs are one JSON object per line on stdout: `time`, `level`,
