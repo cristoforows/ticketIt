@@ -42,11 +42,23 @@ function run(env: Record<string, string>) {
     lines.push(JSON.parse(line) as Record<string, unknown>);
     waiters.splice(0).forEach((wake) => wake());
   });
+  let stderr = "";
+  child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
   const exit = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) =>
-    child.on("exit", (code, signal) => resolve({ code, signal })),
+    child.on("exit", (code, signal) => {
+      resolve({ code, signal });
+      waiters.splice(0).forEach((wake) => wake());
+    }),
   );
   const until = async (msg: string): Promise<void> => {
+    let exited: { code: number | null; signal: NodeJS.Signals | null } | undefined;
+    void exit.then((result) => (exited = result));
     while (!lines.some((line) => line["msg"] === msg)) {
+      if (exited !== undefined) {
+        throw new Error(
+          `michelin exited (code ${exited.code}, signal ${exited.signal}) before logging ${JSON.stringify(msg)}\nstdout: ${JSON.stringify(lines)}\nstderr: ${stderr}`,
+        );
+      }
       await new Promise<void>((resolve) => waiters.push(resolve));
     }
   };

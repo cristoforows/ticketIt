@@ -31,7 +31,7 @@ async function run(options: StatusLoopOptions, signal: AbortSignal): Promise<voi
       fetch: options.fetch,
       galleyUrl,
       signal,
-      ...(options.requestTimeoutMs === undefined ? {} : { timeoutMs: options.requestTimeoutMs }),
+      timeoutMs: options.requestTimeoutMs,
     });
     if (result.ok) {
       const { status } = result;

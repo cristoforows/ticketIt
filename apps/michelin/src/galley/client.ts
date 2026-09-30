@@ -88,7 +88,7 @@ function unreachable(error: unknown): StatusFailure {
   const message = [cause, nested, error]
     .map((candidate) => (candidate instanceof Error ? candidate.message : ""))
     .find((text) => text !== "") ?? code ?? "request failed";
-  return code === undefined ? { reason: "unreachable", error: message } : { reason: "unreachable", error: message, code };
+  return { reason: "unreachable", error: message, code };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -134,10 +134,6 @@ function parseStatusResponse(body: unknown): StatusResponse | string {
     version,
     environment,
     startedAt,
-    database: {
-      status: dbStatus,
-      migrationVersion,
-      ...(error === undefined ? {} : { error }),
-    },
+    database: { status: dbStatus, migrationVersion, error },
   };
 }

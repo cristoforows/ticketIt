@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Drift check (see README.md): regenerate Michelin's schema.d.ts
+# Drift check 3 of 3 (see README.md): regenerate Michelin's schema.d.ts
 # and fail on any diff, which means the contract changed without
 # regenerating or the generated file was hand-edited. Run after
 # `npm ci`. Needs a clean working tree for that file, else unrelated
