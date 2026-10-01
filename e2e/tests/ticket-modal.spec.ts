@@ -16,7 +16,7 @@ for (const view of ["list", "board"] as const) {
     const tickets = await populate(page);
     const ticket = view === "list" ? tickets[0] : tickets[12];
     const row = page.getByTestId(`${view === "list" ? "ticket-item" : "board-ticket"}-${ticket.id}`);
-    await page.goto(view === "list" ? "/" : "/board");
+    await page.goto(view === "list" ? "/list" : "/board");
     await row.getByRole("link").scrollIntoViewIfNeeded();
     const before = await page.evaluate(() => window.scrollY);
     expect(before).toBeGreaterThan(0);
@@ -38,7 +38,7 @@ for (const view of ["list", "board"] as const) {
     }
     await page.keyboard.press("Escape");
     await expect(modal).toHaveCount(0);
-    expect(new URL(page.url()).pathname).toBe(view === "list" ? "/" : "/board");
+    expect(new URL(page.url()).pathname).toBe(view === "list" ? "/list" : "/board");
     expect(await page.evaluate(() => window.scrollY)).toBe(before);
     await expect(row.getByRole("link")).toBeFocused();
 
@@ -58,7 +58,7 @@ for (const view of ["list", "board"] as const) {
     await expect(page.getByTestId("ticket-detail-page").getByTestId("ticket-detail-title")).toHaveText(ticket.title);
     expect(new URL(page.url()).pathname).toBe(`/tickets/${ticket.id}`);
 
-    await page.goto(view === "list" ? "/" : "/board");
+    await page.goto(view === "list" ? "/list" : "/board");
     await row.getByRole("link").click();
     await expect(modal).toBeVisible();
     await page.reload();
@@ -103,7 +103,7 @@ test("list: modal edit and Accept refresh the list from Galley", async ({ page, 
   for (const status of ["Ready", "InProgress", "InReview"] as const) {
     expect((await changeTicketStatusDirect(page, ticket.id, status)).ok).toBe(true);
   }
-  await page.goto("/");
+  await page.goto("/list");
   const row = page.getByTestId(`ticket-item-${ticket.id}`);
   await row.getByRole("link").click();
   const modal = page.getByRole("dialog", { name: "Ticket details" });
@@ -133,7 +133,7 @@ for (const view of ["list", "board"] as const) {
     await signIn(page, request, "owner");
     const tickets = await populate(page);
     const ticket = view === "list" ? tickets[0] : tickets[12];
-    await page.goto(view === "list" ? "/" : "/board");
+    await page.goto(view === "list" ? "/list" : "/board");
     const row = page.getByTestId(`${view === "list" ? "ticket-item" : "board-ticket"}-${ticket.id}`);
     await row.getByRole("link").scrollIntoViewIfNeeded();
     const before = await page.evaluate(() => window.scrollY);
@@ -152,7 +152,7 @@ for (const view of ["list", "board"] as const) {
 test("list: Save completing after modal closes re-fetches Galley", async ({ page, request }) => {
   await signIn(page, request, "owner");
   const ticket = await createTicket(page, `deferred modal edit ${Date.now()}`);
-  await page.goto("/");
+  await page.goto("/list");
   const row = page.getByTestId(`ticket-item-${ticket.id}`);
   await row.getByRole("link").click();
   const modal = page.getByRole("dialog", { name: "Ticket details" });
@@ -208,7 +208,7 @@ test("board: Status change completing after Back re-fetches Galley", async ({ pa
 test("navigating to board after closing list modal keeps focus on board navigation", async ({ page, request }) => {
   await signIn(page, request, "owner");
   const ticket = await createTicket(page, `focus origin ${Date.now()}`);
-  await page.goto("/");
+  await page.goto("/list");
   await page.getByTestId(`ticket-item-${ticket.id}`).getByRole("link").click();
   await page.getByRole("dialog", { name: "Ticket details" }).getByRole("button", { name: "Close" }).click();
   await expect(page.getByTestId(`ticket-item-${ticket.id}`).getByRole("link")).toBeFocused();

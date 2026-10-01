@@ -98,7 +98,7 @@ test("create and rename Agents, assign them on Basic and Coding Tickets, then re
   expect(tickets.find(({ id }) => id === basic.id)).toMatchObject({ assigneeType: "agent", assigneeAgent: { id: scout.id, name: renamed, kind: "research" } });
   expect(tickets.find(({ id }) => id === coding.id)).toMatchObject({ assigneeType: "owner", assigneeAgent: null });
 
-  await page.goto("/");
+  await page.goto("/list");
   await page.getByTestId(`ticket-item-${basic.id}`).getByRole("link").click();
   await expect(page.getByRole("dialog", { name: "Ticket details" }).getByTestId("ticket-detail-assignee")).toHaveText(renamed);
 

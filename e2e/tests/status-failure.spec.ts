@@ -24,6 +24,7 @@ async function expectStatusErrorInsideShell(page: Page, messageFragment: string)
 test.describe("StatusView inside the signed-in shell", () => {
   test.beforeEach(async ({ page, request }) => {
     await signIn(page, request, "owner");
+    await page.goto("/list");
     await expect(page.getByTestId("status-success")).toBeVisible();
   });
 

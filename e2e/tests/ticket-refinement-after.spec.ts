@@ -26,7 +26,7 @@ const SUCCESS_CRITERIA = "Existing users can sign in on Safari.";
 const CONSTRAINTS = "Preserve the existing login flow.";
 
 test("the edited title and manual refinement fields are still there after a Galley restart", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/list");
   await expect(page.getByTestId("app-shell")).toBeVisible();
 
   // Located by the edited title, since the Ticket's id (generated at

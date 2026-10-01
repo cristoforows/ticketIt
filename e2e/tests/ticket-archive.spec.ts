@@ -14,7 +14,7 @@ test("archive Ready and Done from modal; retain direct read-only detail and excl
   const badge = await badgeResponse.json() as { id: string; name: string };
   for (const ticket of [ready, done]) expect((await page.request.put(`/api/tickets/${ticket.id}/badges/${badge.id}`)).ok()).toBe(true);
 
-  await page.goto("/");
+  await page.goto("/list");
   await page.getByTestId("badge-filter").getByRole("checkbox", { name: badge.name }).check();
   for (const ticket of [ready, done]) await expect(page.getByTestId(`ticket-item-${ticket.id}`)).toBeVisible();
   for (const ticket of [ready, done]) {

@@ -24,7 +24,7 @@ test("Archived list combines Badge filter, restores Ready to Backlog and Done un
     expect((await page.request.post(`/api/tickets/${ticket.id}/archive`)).ok()).toBe(true);
   }
 
-  await page.goto("/");
+  await page.goto("/list");
   await page.getByTestId("archived-filter").check();
   await page.getByTestId("badge-filter").getByRole("checkbox", { name: badge.name }).check();
   const filtered = await page.request.get(`/api/tickets?archived=true&badgeId=${badge.id}`);

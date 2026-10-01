@@ -18,7 +18,7 @@ test("Badge OR filter survives reload, board switch and full-page return; detach
   expect((await page.request.put(`/api/tickets/${first.id}/badges/${a.id}`)).ok()).toBe(true);
   expect((await page.request.put(`/api/tickets/${second.id}/badges/${b.id}`)).ok()).toBe(true);
 
-  await page.goto("/");
+  await page.goto("/list");
   const filter = page.getByTestId("badge-filter");
   await filter.getByRole("checkbox", { name: a.name }).check();
   await filter.getByRole("checkbox", { name: b.name }).check();
@@ -54,7 +54,7 @@ test("Badge OR filter survives reload, board switch and full-page return; detach
   await modal.getByRole("link", { name: "Open full page" }).click();
   await expect(page.getByTestId("ticket-detail-page")).toBeVisible();
   await page.getByTestId("back-to-backlog-link").click();
-  expect(new URL(page.url()).pathname).toBe("/");
+  expect(new URL(page.url()).pathname).toBe("/list");
   expect(new URL(page.url()).searchParams.getAll("badgeId")).toEqual([a.id, b.id]);
   await expect(filter.getByRole("checkbox", { name: a.name })).toBeChecked();
   await expect(page.getByTestId(`ticket-item-${first.id}`)).toBeVisible();

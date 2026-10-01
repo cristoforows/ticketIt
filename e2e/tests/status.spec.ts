@@ -30,6 +30,7 @@ test("status page displays the values Galley actually returns", async ({ page, r
   // shell -- GET /api/status itself stays public (apps/galley/README.md,
   // "CORS"), but Swiftlet now only shows it once a session is confirmed.
   await signIn(page, request);
+  await page.goto("/list");
 
   await expect(page.getByTestId("status-success")).toBeVisible();
 

@@ -25,7 +25,7 @@ const SECOND_TITLE = "ticket-persistence: second Ticket";
 test("the two captured Tickets are still listed, in the same order, after a Galley restart", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/list");
   await expect(page.getByTestId("app-shell")).toBeVisible();
 
   const titles = page.locator('[data-testid="ticket-title"]');
