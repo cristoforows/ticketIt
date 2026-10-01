@@ -19,6 +19,15 @@ const TOKEN = `tir_${"c".repeat(43)}`;
 
 let server: Server | undefined;
 let authorizations: (string | undefined)[] = [];
+let runnerPaths: (string | undefined)[] = [];
+
+const claimBody = {
+  roundId: "77777777-7777-4777-8777-777777777777",
+  sequence: 1,
+  claimEpoch: 1,
+  ticket: { id: "88888888-8888-4888-8888-888888888888", title: "Write the report", goal: "g", context: "", successCriteria: "s", constraints: "", repository: "" },
+  agent: { id: "99999999-9999-4999-8999-999999999999", name: "atlas", kind: "research" },
+};
 
 afterEach(async () => {
   await new Promise<void>((resolve) => (server ? server.close(() => resolve()) : resolve()));
@@ -27,6 +36,7 @@ afterEach(async () => {
 
 async function fakeGalley(): Promise<string> {
   authorizations = [];
+  runnerPaths = [];
   server = createServer((req, res) => {
     res.setHeader("content-type", "application/json");
     if (req.url === "/api/status") {
@@ -34,9 +44,15 @@ async function fakeGalley(): Promise<string> {
       return;
     }
     authorizations.push(req.headers.authorization);
+    runnerPaths.push(req.url);
     if (req.headers.authorization !== `Bearer ${TOKEN}`) {
       res.statusCode = 401;
       res.end(JSON.stringify({ error: { code: "unauthenticated", message: "sign-in required" } }));
+      return;
+    }
+    if (req.url === "/api/runner/claims") {
+      res.statusCode = 201;
+      res.end(JSON.stringify(claimBody));
       return;
     }
     res.end(JSON.stringify(req.url === "/api/runner/register" ? { registeredAt: "2026-10-01T12:00:00Z" } : { lastSeenAt: "2026-10-01T12:00:10Z" }));
@@ -80,17 +96,20 @@ function run(env: Record<string, string>) {
 }
 
 describe("michelin process", () => {
-  it("checks Galley, registers, heartbeats, then exits 0 on SIGTERM without logging the token", async () => {
+  it("checks Galley, registers, heartbeats, claims once, then exits 0 on SIGTERM without logging the token", async () => {
     const galleyUrl = await fakeGalley();
     const michelin = run({
       GALLEY_URL: galleyUrl,
       MICHELIN_STATUS_INTERVAL_MS: "60000",
       MICHELIN_HEARTBEAT_INTERVAL_MS: "50",
+      MICHELIN_CLAIM_INTERVAL_MS: "20",
       MICHELIN_RUNNER_TOKEN: TOKEN,
     });
 
     await michelin.until("galley status ok");
     await michelin.until("runner heartbeat ok");
+    await michelin.until("round claimed; claim polling stopped");
+    await new Promise((resolve) => setTimeout(resolve, 200));
     michelin.child.kill("SIGTERM");
 
     expect(await michelin.exit).toEqual({ code: 0, signal: null });
@@ -99,7 +118,17 @@ describe("michelin process", () => {
     expect(messages.slice(-2)).toEqual(["michelin stopping", "michelin stopped"]);
     expect(messages).toContain("galley status ok");
     expect(messages.indexOf("runner registered")).toBeLessThan(messages.indexOf("runner heartbeat ok"));
-    expect(michelin.lines[0]).toMatchObject({ heartbeatIntervalMs: 50, michelinVersion: "0.1.0" });
+    expect(messages.indexOf("runner registered")).toBeLessThan(messages.indexOf("round claimed; claim polling stopped"));
+    expect(runnerPaths[0]).toBe("/api/runner/register");
+    expect(runnerPaths.filter((path) => path === "/api/runner/claims")).toHaveLength(1);
+    expect(michelin.lines.find((line) => line["msg"] === "round claimed; claim polling stopped")).toMatchObject({
+      roundId: claimBody.roundId,
+      sequence: 1,
+      claimEpoch: 1,
+      ticketId: claimBody.ticket.id,
+      ticketTitle: claimBody.ticket.title,
+    });
+    expect(michelin.lines[0]).toMatchObject({ heartbeatIntervalMs: 50, claimIntervalMs: 20, michelinVersion: "0.1.0" });
     expect(authorizations.every((header) => header === `Bearer ${TOKEN}`)).toBe(true);
     expect(JSON.stringify(michelin.lines)).not.toContain(TOKEN.slice(4));
   }, 15_000);

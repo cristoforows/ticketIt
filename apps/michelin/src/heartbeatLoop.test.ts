@@ -17,12 +17,13 @@ const notRegistered = () => json({ error: { code: "runner_not_registered", messa
 
 function setup(fetchFn: FetchFn) {
   const lines: string[] = [];
+  const registration = { registered: false };
   const logger = createLogger((line) => lines.push(line));
   const credential = resolveRunnerCredential({ MICHELIN_RUNNER_TOKEN: TOKEN }, []);
   if (!credential) throw new Error("test credential rejected");
-  const loop = startHeartbeatLoop({ galleyUrl: GALLEY, intervalMs: 1000, fetch: fetchFn, logger, credential, identity: IDENTITY, requestTimeoutMs: 300 });
+  const loop = startHeartbeatLoop({ galleyUrl: GALLEY, intervalMs: 1000, fetch: fetchFn, logger, credential, identity: IDENTITY, registration, requestTimeoutMs: 300 });
   const records = () => lines.map((line) => JSON.parse(line) as Record<string, unknown>);
-  return { loop, lines, records };
+  return { loop, lines, records, registration };
 }
 
 function routes(handlers: Record<string, () => Response | Promise<Response>>) {
