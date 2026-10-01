@@ -95,6 +95,7 @@ func newHandler(cfg config.Config, logger *slog.Logger, srv *server) http.Handle
 	mux.HandleFunc("/api/runner-health", methodNotAllowedHandler("GET"))
 	mux.HandleFunc("/api/runner/register", methodNotAllowedHandler("POST"))
 	mux.HandleFunc("/api/runner/heartbeat", methodNotAllowedHandler("POST"))
+	mux.HandleFunc("/api/runner/claims", methodNotAllowedHandler("POST"))
 	if cfg.Environment == config.EnvDevelopment {
 		mux.HandleFunc(devOnlyPathPrefix+"diagnostic-notes", methodNotAllowedHandler("GET", "POST"))
 		mux.HandleFunc(devOnlyPathPrefix+"clock/advance", methodNotAllowedHandler("POST"))

@@ -21,6 +21,7 @@ type ticketWorkflowState struct {
 	// Empty unless the Ticket is Agent-assigned.
 	agentKind                         AgentKind
 	goal, successCriteria, repository string
+	openRound                         bool
 }
 
 func workflowStateOf(ticket Ticket) ticketWorkflowState {
@@ -30,6 +31,7 @@ func workflowStateOf(ticket Ticket) ticketWorkflowState {
 		goal:            ticket.Goal,
 		successCriteria: ticket.SuccessCriteria,
 		repository:      ticket.Repository,
+		openRound:       ticket.OpenRound != nil,
 	}
 	if ticket.AssigneeAgent != nil {
 		state.agentKind = ticket.AssigneeAgent.Kind
@@ -90,9 +92,10 @@ func decideAgentReadiness(s ticketWorkflowState) *transitionRejection {
 }
 
 // decideAgentWorkRequest is the one definition of a Ticket requesting
-// Agent work; the claim (#132) must call it rather than restate it.
+// Agent work, and the claim's eligibility rule. An open Round has
+// consumed the request.
 func decideAgentWorkRequest(s ticketWorkflowState) bool {
-	return !s.archived && s.status == Ready && s.agentAssigned() && len(missingAgentInputs(s)) == 0
+	return !s.archived && s.status == Ready && s.agentAssigned() && len(missingAgentInputs(s)) == 0 && !s.openRound
 }
 
 func decideAssignment(s ticketWorkflowState, agentKind AgentKind) *transitionRejection {
