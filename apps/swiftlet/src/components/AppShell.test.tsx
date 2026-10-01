@@ -131,6 +131,20 @@ describe("AppShell", () => {
     expect(window.location.pathname).toBe("/board");
   });
 
+  it("opens the Board at the root path and reaches the List at /list", async () => {
+    window.history.pushState({}, "", "/");
+    stubFetchByPath({ "/api/status": jsonResponse({ ok: true }), "/api/tickets": EMPTY_TICKET_LIST });
+
+    render(<AppShell owner={OWNER} onSignedOut={() => {}} onUnauthenticated={() => {}} />);
+
+    expect(await screen.findAllByText("— no orders —")).toHaveLength(6);
+    expect(screen.getByRole("link", { name: "Board" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "List" })).toHaveAttribute("href", "/list");
+    fireEvent.click(screen.getByRole("link", { name: "List" }));
+    expect(await screen.findByTestId("ticket-list-empty")).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/list");
+  });
+
   it("links to the Agents page from the shell and loads /agents directly", async () => {
     stubFetchByPath({ "/api/status": jsonResponse({ ok: true }), "/api/tickets": EMPTY_TICKET_LIST, "/api/agents": jsonResponse({ agents: [] }) });
 

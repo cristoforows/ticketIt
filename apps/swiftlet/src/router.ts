@@ -18,7 +18,7 @@ function modalBackground(): CollectionRoute | undefined {
 }
 
 function parseRoute(pathname: string, background?: CollectionRoute): Route {
-  if (pathname === "/board") return { name: "board" };
+  if (pathname === "/list" || pathname === "/list/") return { name: "backlog" };
   if (pathname === "/agents" || pathname === "/agents/") return { name: "agents" };
   const detailMatch = pathname.match(/^\/tickets\/([^/]+)\/?$/);
   if (detailMatch) {
@@ -28,7 +28,7 @@ function parseRoute(pathname: string, background?: CollectionRoute): Route {
       if (!(error instanceof URIError)) throw error;
     }
   }
-  return { name: "backlog" };
+  return { name: "board" };
 }
 
 function subscribe(callback: () => void): () => void {
@@ -95,7 +95,7 @@ export function setBadgeFilter(ids: string[]): void {
 }
 
 export function collectionPath(view: CollectionRoute): string {
-  return view === "board" ? "/board" : "/";
+  return view === "board" ? "/board" : "/list";
 }
 
 export function fullPageReturnPath(): string {

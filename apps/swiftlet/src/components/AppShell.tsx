@@ -80,8 +80,8 @@ export function AppShell({ owner, onSignedOut, onUnauthenticated }: AppShellProp
     <div data-testid="app-shell">
       <AppHeader>
         <nav aria-label="Ticket views" className="flex gap-1">
-          <NavTab to={`/${collectionQuery()}`} current={background === "backlog"}>List</NavTab>
           <NavTab to={`/board${collectionQuery()}`} current={background === "board"}>Board</NavTab>
+          <NavTab to={`/list${collectionQuery()}`} current={background === "backlog"}>List</NavTab>
         </nav>
         <nav aria-label="Settings" className="flex gap-1">
           <NavTab to="/agents" current={route.name === "agents"}>Agents</NavTab>

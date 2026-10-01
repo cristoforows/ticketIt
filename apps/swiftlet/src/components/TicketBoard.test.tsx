@@ -240,6 +240,65 @@ describe("TicketBoard", () => {
     expect(screen.getByTestId("board-status-Blocked")).not.toHaveAttribute("data-drop-target", "true");
   });
 
+  describe("archive spike", () => {
+    const listResponse = (tickets: unknown[]) => ({ ok: true, status: 200, json: async () => ({ tickets }) });
+    const grab = (card: HTMLElement) => fireEvent.dragStart(card, { dataTransfer: { setData: vi.fn(), effectAllowed: "move" } });
+
+    it("appears only while a slip is dragged, highlights on hover, and leaves when the drag ends elsewhere", async () => {
+      stubTickets([ticket("cancelled", "Backlog")]);
+      render(<TicketBoard onUnauthenticated={() => {}} />);
+      const card = await screen.findByTestId("board-ticket-cancelled");
+      expect(screen.queryByTestId("board-archive-zone")).not.toBeInTheDocument();
+
+      grab(card);
+      const spike = screen.getByTestId("board-archive-zone");
+      expect(spike).not.toHaveAttribute("data-over");
+      fireEvent.dragOver(spike, { dataTransfer: {} });
+      expect(spike).toHaveAttribute("data-over", "true");
+      fireEvent.dragEnd(card);
+
+      expect(screen.queryByTestId("board-archive-zone")).not.toBeInTheDocument();
+      expect(fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("archives the dropped slip once Galley confirms", async () => {
+      const archived = { ...ticket("dumped", "Backlog"), archivedAt: "2026-10-02T09:00:00Z" };
+      let resolveArchive!: (response: unknown) => void;
+      const fetchStub = vi.fn()
+        .mockResolvedValueOnce(listResponse([ticket("dumped", "Backlog"), ticket("kept", "Backlog")]))
+        .mockImplementationOnce(() => new Promise((resolve) => { resolveArchive = resolve; }))
+        .mockResolvedValue(listResponse([ticket("kept", "Backlog")]));
+      vi.stubGlobal("fetch", fetchStub);
+      render(<TicketBoard onUnauthenticated={() => {}} />);
+      const card = await screen.findByTestId("board-ticket-dumped");
+
+      grab(card);
+      fireEvent.drop(screen.getByTestId("board-archive-zone"), { dataTransfer: {} });
+
+      await vi.waitFor(() => expect(fetchStub).toHaveBeenCalledTimes(2));
+      expect(fetchStub).toHaveBeenLastCalledWith("/api/tickets/dumped/archive", expect.objectContaining({ method: "POST" }));
+      expect(screen.queryByTestId("board-archive-zone")).not.toBeInTheDocument();
+      expect(screen.getByTestId("board-ticket-dumped")).toBeInTheDocument();
+      resolveArchive({ ok: true, status: 200, json: async () => archived });
+      await vi.waitFor(() => expect(screen.queryByTestId("board-ticket-dumped")).not.toBeInTheDocument());
+      expect(screen.getByTestId("board-ticket-kept")).toBeInTheDocument();
+    });
+
+    it("shows Galley's rejection verbatim and keeps the slip on the board", async () => {
+      vi.stubGlobal("fetch", vi.fn()
+        .mockResolvedValueOnce(listResponse([ticket("stale", "Backlog")]))
+        .mockResolvedValueOnce({ ok: false, status: 409, json: async () => ({ error: { code: "round_open", message: "Galley archive rejection reason" } }) }));
+      render(<TicketBoard onUnauthenticated={() => {}} />);
+      const card = await screen.findByTestId("board-ticket-stale");
+
+      grab(card);
+      fireEvent.drop(screen.getByTestId("board-archive-zone"), { dataTransfer: {} });
+
+      expect(await screen.findByTestId("ticket-board-move-error")).toHaveTextContent("Galley archive rejection reason");
+      expect(screen.getByTestId("board-status-Backlog")).toContainElement(card);
+    });
+  });
+
   it("shows Galley's rejection verbatim without moving the card", async () => {
     const original = { ...ticket("stale", "Backlog"), allowedActions: { statusChangeRejections: [], statusChanges: ["Ready"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } } } };
     vi.stubGlobal("fetch", vi.fn()

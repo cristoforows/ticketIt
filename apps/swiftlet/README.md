@@ -296,8 +296,8 @@ lets one subscription handle both an in-app `Link` click and a real
 browser back/forward. `src/components/Link.tsx` is a real `<a href>`
 (so middle-click, ctrl/cmd-click, and "open in new tab" behave exactly
 as a plain link) that calls `navigate()` on an unmodified left click
-instead of a full page load. Any path other than `/`, `/board`, or
-`/tickets/:id` falls back to rendering the list — only a Ticket
+instead of a full page load. Any path other than `/list`, `/agents`, or
+`/tickets/:id` falls back to rendering the board (`/` and `/board`) — only a Ticket
 identifier needs its own not-found presentation in this slice (see
 below), not an arbitrary unmapped route. Malformed percent encoding in a
 Ticket URL also falls back to Backlog rather than crashing the router.
@@ -480,10 +480,13 @@ completion conditions through `cd e2e && ./run.sh` from repo root.
 
 ## Status board (issue #88)
 
-`/board` and `/` are switchable through the authenticated shell's List /
-Board links. The board calls the same `GET /api/tickets` as the list;
-there is no board endpoint or separate Ticket state. Capture stays on
-the list. Each of six Status sections renders even when empty, in
+`/` and `/board` show the board, the default view; `/list` shows the list.
+They are switchable through the authenticated shell's Board / List links.
+The board calls the same `GET /api/tickets` as the list; there is no board
+endpoint or separate Ticket state. Capture stays on the list. On desktop,
+a spike appears at the bottom of the screen while a slip is dragged;
+dropping the slip on it calls `POST /api/tickets/:id/archive`. Phones
+archive from the Ticket detail. Each of six Status sections renders even when empty, in
 lifecycle order: Backlog, Ready, In Progress, Blocked, In Review, Done.
 Cards show title and Template and link to `/tickets/:id`. Nothing on
 the board starts or controls execution.
@@ -526,7 +529,7 @@ here and `cd e2e && ./run.sh` from the repo root.
 
 ## Ticket detail modal (issue #89)
 
-Clicking a Ticket link in `/` or `/board` opens its detail in a Radix UI
+Clicking a Ticket link in `/list`, `/` or `/board` opens its detail in a Radix UI
 Dialog over the mounted collection. Address bar shows canonical
 `/tickets/:id`; an unmodified click pushes a history entry carrying the
 background view and a page-load identifier. Back, Escape, or Close

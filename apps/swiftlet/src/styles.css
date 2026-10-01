@@ -91,7 +91,34 @@
     -webkit-mask: radial-gradient(circle at 6px 100%, transparent 4px, #000 4.5px) -6px 0 / 12px 100%;
     mask: radial-gradient(circle at 6px 100%, transparent 4px, #000 4.5px) -6px 0 / 12px 100%;
   }
+  .archive-zone {
+    animation: spike-rise 200ms ease-out;
+    transition: rotate 150ms ease;
+  }
+  .archive-zone .archive-spike {
+    animation: spike-bob 900ms ease-in-out infinite;
+  }
+  .archive-zone[data-over="true"] {
+    rotate: -0.6deg;
+  }
+  .archive-zone[data-over="true"] .archive-spike {
+    animation: spike-jab 300ms ease-in-out infinite alternate;
+  }
+  @keyframes spike-rise {
+    from { translate: 0 1.5rem; opacity: 0; }
+  }
+  @keyframes spike-bob {
+    50% { translate: 0 -0.25rem; }
+  }
+  @keyframes spike-jab {
+    to { translate: 0 -0.4rem; scale: 1.2; }
+  }
   @media (prefers-reduced-motion: reduce) {
+    .archive-zone,
+    .archive-zone .archive-spike {
+      animation: none !important;
+      rotate: none;
+    }
     .slip,
     .slip:hover,
     .slip:focus-within {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type DragEvent } from "react";
 import { UnauthenticatedError } from "../api/session";
-import { changeTicketStatus, fetchTickets, reorderTicket, type Ticket, type TicketPlacement } from "../api/tickets";
-import { BoardColumn, BoardColumns, Caption, ColumnHeader, DropHint, EmptyMessage, ErrorMessage, LoadingMessage, Rail, SlipList, statuses, statusTone } from "./ui";
+import { archiveTicket, changeTicketStatus, fetchTickets, reorderTicket, type Ticket, type TicketPlacement } from "../api/tickets";
+import { ArchiveZone, BoardColumn, BoardColumns, Caption, ColumnHeader, DropHint, EmptyMessage, ErrorMessage, LoadingMessage, Rail, SlipList, statuses, statusTone } from "./ui";
 import { BoardStageSwitcher } from "./BoardStageSwitcher";
 import { scrollBehavior, useIsPhone } from "./usePhone";
 import { focusReorderButton, type ReorderDirection } from "./ReorderButtons";
@@ -18,6 +18,7 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
   const [state, setState] = useState<BoardState>({ kind: "loading" });
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropSlot, setDropSlot] = useState<{ id: string; placement: "before" | "after" } | null>(null);
+  const [overArchive, setOverArchive] = useState(false);
   const [moveError, setMoveError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [moveRefreshKey, setMoveRefreshKey] = useState(0);
@@ -43,7 +44,7 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
   };
 
   const rememberStage = (index: number) => {
-    if (window.location.pathname !== "/board") return;
+    if (window.location.pathname !== "/board" && window.location.pathname !== "/") return;
     const query = new URLSearchParams(window.location.search);
     if (index === 0) query.delete("stage");
     else query.set("stage", statuses[index].value);
@@ -213,6 +214,30 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
     }
   }
 
+  async function archiveOnBoard(ticket: Ticket) {
+    if (commandPending.current) return;
+    commandPending.current = true;
+    setPendingId(ticket.id);
+    setMoveError(null);
+    try {
+      await archiveTicket(ticket.id);
+      requestId.current += 1;
+      setState((current) => current.kind === "loaded"
+        ? { ...current, tickets: current.tickets.filter((item) => item.id !== ticket.id) }
+        : current);
+      setMoveRefreshKey((key) => key + 1);
+    } catch (error) {
+      if (error instanceof UnauthenticatedError) {
+        onUnauthenticated();
+        return;
+      }
+      setMoveError(error instanceof Error ? error.message : "Failed to archive the ticket.");
+    } finally {
+      commandPending.current = false;
+      setPendingId(null);
+    }
+  }
+
   async function reorderOnBoard(ticket: Ticket, placement: TicketPlacement, direction?: ReorderDirection) {
     if (commandPending.current) return;
     commandPending.current = true;
@@ -346,6 +371,7 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
                         onDragEnd={() => {
                           setDraggingId(null);
                           setDropSlot(null);
+                          setOverArchive(false);
                         }}
                       />
                     ))}
@@ -355,6 +381,27 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
             );
           })}
         </BoardColumns>
+      )}
+      {state.kind === "loaded" && !phone && draggingTicket && (
+        <ArchiveZone
+          data-testid="board-archive-zone"
+          aria-hidden="true"
+          over={overArchive}
+          onDragOver={(event) => {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+            setOverArchive(true);
+          }}
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOverArchive(false);
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            setOverArchive(false);
+            setDraggingId(null);
+            void archiveOnBoard(draggingTicket);
+          }}
+        />
       )}
       {state.kind === "loaded" && state.refreshError && (
         <ErrorMessage title="Unable to refresh tickets." data-testid="ticket-board-refresh-error" className="mt-4">
