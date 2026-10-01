@@ -1,14 +1,12 @@
 import type { components } from "./generated/schema";
 import { isAgentSummary } from "./agents";
-import { authenticatedFetch } from "./http";
+import { authenticatedFetch, isNullableString } from "./http";
 import { TicketNotFoundError } from "./tickets";
 
 export type TicketRound = components["schemas"]["TicketRound"];
 export type RoundActivityNote = components["schemas"]["RoundActivityNote"];
 export type RoundUsage = components["schemas"]["RoundUsage"];
 export type UsageCount = components["schemas"]["UsageCount"];
-
-const isNullableString = (value: unknown): value is string | null => value === null || typeof value === "string";
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;

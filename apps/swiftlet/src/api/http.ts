@@ -39,6 +39,8 @@ export function errorMessage(payload: unknown): string | undefined {
   return typeof message === "string" ? message : undefined;
 }
 
+export const isNullableString = (value: unknown): value is string | null => value === null || typeof value === "string";
+
 const READINESS_INPUTS = { goal: true, successCriteria: true, repository: true } as const satisfies Record<ReadinessInput, true>;
 
 function isReadinessInput(value: unknown): value is ReadinessInput {
