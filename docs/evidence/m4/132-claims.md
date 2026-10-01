@@ -397,8 +397,11 @@ $ POST /api/tickets/005db39a-…/status {"status":"Backlog"}   (while claimed)
   then the Owner's slot stays taken. Tests free it with direct SQL
   (`deliverRoundDirect`).
 - **A stranded claim is not recovered.** If Michelin stops, or never
-  starts the Round, the Round stays `claimed`. Recovery belongs to D5,
-  M5 (#6).
+  starts the Round, the Round stays `claimed`. The same happens when
+  Galley commits a claim whose `201` never reaches Michelin intact (a
+  timeout or an unreadable body): Michelin logs `runner claim failed`
+  and keeps polling, and every later poll is `204`. Recovery belongs to
+  D5, M5 (#6).
 - **Michelin claims once per process.** After a `201` it stops polling
   and holds the Round in memory only. A restarted Michelin cannot claim
   again while the Round is open, because the slot returns `204`.
