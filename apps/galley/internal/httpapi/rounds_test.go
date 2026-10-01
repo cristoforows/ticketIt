@@ -116,12 +116,29 @@ func roundRows(t *testing.T, pool *pgxpool.Pool) []roundRow {
 	return out
 }
 
-// Stands in for the later slice that ends a Round, so the slot frees.
-func deliverRoundDirect(t *testing.T, pool *pgxpool.Pool, roundID string) {
+func (f *claimFixture) deliverThroughAPI(t *testing.T, roundID string) {
 	t.Helper()
-	tag, err := pool.Exec(context.Background(), `UPDATE rounds SET state = 'delivered', started_at = claimed_at, ended_at = claimed_at WHERE public_id = $1::uuid`, roundID)
+	var state string
+	var epoch int
+	if err := f.pool.QueryRow(context.Background(), `SELECT state, claim_epoch FROM rounds WHERE public_id = $1::uuid`, roundID).Scan(&state, &epoch); err != nil {
+		t.Fatal(err)
+	}
+	if state == string(RoundClaimed) {
+		f.mustReport(t, roundID, startedEvent(roundID+":start", epoch, eventOccurredAt, eventReference))
+	}
+	f.mustReport(t, roundID, deliveredEvent(t, roundID+":deliver", epoch, standardDeliverable()))
+}
+
+// For Tickets a test moved out of In Progress by SQL, which real delivery refuses.
+func closeRoundDirect(t *testing.T, pool *pgxpool.Pool, roundID string) {
+	t.Helper()
+	tag, err := pool.Exec(context.Background(), `WITH closed AS (
+			UPDATE rounds SET state = 'delivered', started_at = COALESCE(started_at, claimed_at), ended_at = COALESCE(started_at, claimed_at)
+			 WHERE public_id = $1::uuid RETURNING owner_id, id)
+		INSERT INTO round_deliverables (owner_id, round_id, body_markdown, summary, criteria_assessment)
+		SELECT owner_id, id, 'Closed by SQL', 'Closed by SQL', 'Closed by SQL' FROM closed`, roundID)
 	if err != nil || tag.RowsAffected() != 1 {
-		t.Fatalf("deliver round %s: %v (%d rows)", roundID, err, tag.RowsAffected())
+		t.Fatalf("close round %s: %v (%d rows)", roundID, err, tag.RowsAffected())
 	}
 }
 
@@ -187,7 +204,7 @@ func TestClaim_CreatesOneRoundAndLeavesTheTicketReady(t *testing.T) {
 	}
 
 	ticket := f.ticket(t, queued.Id)
-	wantRound := &TicketOpenRound{Id: claim.RoundId, Sequence: 1, State: RoundClaimed, Agent: want.Agent, ClaimedAt: runnerEpoch}
+	wantRound := &TicketOpenRound{Id: claim.RoundId, Sequence: 1, State: OpenRoundClaimed, Agent: want.Agent, ClaimedAt: runnerEpoch}
 	if ticket.Status != Ready || ticket.RequestingAgentWork || ticket.OpenRound == nil || *ticket.OpenRound != *wantRound {
 		t.Fatalf("claimed Ticket: status=%s requestingAgentWork=%t openRound=%+v, want Ready, false, %+v", ticket.Status, ticket.RequestingAgentWork, ticket.OpenRound, wantRound)
 	}
@@ -273,7 +290,7 @@ func TestClaim_FollowsTheOwnerPriorityOrder(t *testing.T) {
 		claim := f.mustClaim(t)
 		claimed = append(claimed, claim.Ticket.Id)
 		assertNoWork(t, f.claim(t))
-		deliverRoundDirect(t, f.pool, claim.RoundId)
+		f.deliverThroughAPI(t, claim.RoundId)
 		badgeRequest(t, f.handler, f.cookie, http.MethodPost, "/api/tickets/"+claim.Ticket.Id+"/archive", "", http.StatusOK)
 	}
 	if want := []string{c.Id, a.Id, b.Id}; !equalStrings(claimed, want) {
@@ -286,7 +303,9 @@ func TestClaim_SequenceCountsRoundsPerTicket(t *testing.T) {
 	f := newClaimFixture(t)
 	queued := f.queue(t, "again")
 	first := f.mustClaim(t)
-	deliverRoundDirect(t, f.pool, first.RoundId)
+	f.deliverThroughAPI(t, first.RoundId)
+	badgeRequest(t, f.handler, f.cookie, http.MethodPost, "/api/tickets/"+queued.Id+"/accept", "", http.StatusOK)
+	badgeRequest(t, f.handler, f.cookie, http.MethodPost, "/api/tickets/"+queued.Id+"/status", `{"status":"Ready"}`, http.StatusOK)
 	if got := f.ticket(t, queued.Id); !got.RequestingAgentWork || got.OpenRound != nil {
 		t.Fatalf("Ticket after its Round ended = %+v, want requesting work again", got)
 	}
@@ -408,7 +427,7 @@ func TestClaimAndArchive_RaceEitherOrder(t *testing.T) {
 				t.Fatalf("trial %d: claim won but Ticket = %+v, claim = %+v", trial, ticket, claim)
 			}
 			outcomes["claim won"]++
-			deliverRoundDirect(t, f.pool, claim.RoundId)
+			f.deliverThroughAPI(t, claim.RoundId)
 			if rec := f.archive(t, queued.Id); rec.Code != http.StatusOK {
 				t.Fatalf("archive after the Round ended: status=%d body=%s", rec.Code, rec.Body.String())
 			}
@@ -461,7 +480,7 @@ func TestArchive_RejectedWhileARoundIsOpenAndAllowedWithout(t *testing.T) {
 	if rec := f.archive(t, waiting.Id); rec.Code != http.StatusOK {
 		t.Fatalf("archive of a queued Ticket with no Round: status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	deliverRoundDirect(t, f.pool, claim.RoundId)
+	f.deliverThroughAPI(t, claim.RoundId)
 	if rec := f.archive(t, claimedTicket.Id); rec.Code != http.StatusOK {
 		t.Fatalf("archive after the Round ended: status=%d body=%s", rec.Code, rec.Body.String())
 	}

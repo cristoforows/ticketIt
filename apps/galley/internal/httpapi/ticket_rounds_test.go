@@ -59,13 +59,14 @@ func TestListTicketRounds_NewestFirst(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	deliverRoundDirect(t, f.pool, first.RoundId)
+	f.deliverThroughAPI(t, first.RoundId)
 	backToReady()
 	second := f.mustClaim(t)
 	if second.Ticket.Id != queued.Id || second.Sequence != 2 {
 		t.Fatalf("second claim = %+v, want Round 2 of the same Ticket", second)
 	}
-	deliverRoundDirect(t, f.pool, second.RoundId)
+	f.deliverThroughAPI(t, second.RoundId)
+	backToReady()
 	third := f.mustClaim(t)
 
 	rounds := decodeRounds(t, f.listRounds(t, queued.Id))
@@ -97,7 +98,7 @@ func TestListTicketRounds_WorksForAnArchivedTicket(t *testing.T) {
 	f := newClaimFixture(t)
 	queued, claim := f.claimTicket(t, "Archived")
 	f.startRound(t, claim, "k")
-	deliverRoundDirect(t, f.pool, claim.RoundId)
+	f.deliverThroughAPI(t, claim.RoundId)
 	if rec := f.archive(t, queued.Id); rec.Code != http.StatusOK {
 		t.Fatalf("archive: status=%d body=%s", rec.Code, rec.Body.String())
 	}

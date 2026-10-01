@@ -415,6 +415,11 @@ const ticketSelectColumns = `public_id::text, title, status, template, completio
 	          'claimedAt', r.claimed_at, 'startedAt', r.started_at)
 	   FROM rounds r JOIN agents a ON a.owner_id = r.owner_id AND a.id = r.agent_id
 	  WHERE r.owner_id = tickets.owner_id AND r.ticket_id = tickets.id AND r.state IN ` + openRoundStatesSQL + `),
+	(SELECT json_build_object('roundId', r.public_id, 'sequence', r.sequence,
+	          'agent', json_build_object('id', a.public_id, 'name', a.name, 'kind', a.kind), 'deliveredAt', r.ended_at)
+	   FROM (SELECT * FROM rounds WHERE owner_id = tickets.owner_id AND ticket_id = tickets.id ORDER BY sequence DESC LIMIT 1) r
+	   JOIN agents a ON a.owner_id = r.owner_id AND a.id = r.agent_id
+	  WHERE r.state = 'delivered'),
 	goal, context, success_criteria, constraints, repository, created_at, updated_at, archived_at`
 
 // ticketRowScanner is satisfied by both pgx.Row (QueryRow) and pgx.Rows
@@ -442,7 +447,7 @@ func scanTicketRow(row ticketRowScanner) (Ticket, error) {
 		archivedAt                                               sql.NullTime
 	)
 	if err := row.Scan(
-		&ticket.Id, &ticket.Title, &status, &template, &completionCondition, &assigneeType, &ticket.AssigneeAgent, &ticket.OpenRound,
+		&ticket.Id, &ticket.Title, &status, &template, &completionCondition, &assigneeType, &ticket.AssigneeAgent, &ticket.OpenRound, &ticket.Delivery,
 		&goal, &ctxField, &successCriteria, &constraints, &repository,
 		&createdAt, &updatedAt, &archivedAt,
 	); err != nil {
@@ -466,6 +471,9 @@ func scanTicketRow(row ticketRowScanner) (Ticket, error) {
 	if ticket.OpenRound != nil {
 		ticket.OpenRound.ClaimedAt = ticket.OpenRound.ClaimedAt.UTC()
 		ticket.OpenRound.StartedAt = utcOrNil(ticket.OpenRound.StartedAt)
+	}
+	if ticket.Delivery != nil {
+		ticket.Delivery.DeliveredAt = ticket.Delivery.DeliveredAt.UTC()
 	}
 	ticket.CreatedAt = createdAt.UTC().Format(time.RFC3339)
 	ticket.UpdatedAt = updatedAt.UTC().Format(time.RFC3339)

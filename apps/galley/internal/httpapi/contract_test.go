@@ -939,7 +939,24 @@ func TestRoundEvents_ResponsesMatchContractAndMethod405(t *testing.T) {
 	if got := decodeRounds(t, listed); len(got[0].Activity) != 50 || got[0].Usage.Observations != 2 || got[0].Usage.Complete || got[0].Usage.CostUsd == nil {
 		t.Fatalf("the validated list = %+v, want a full activity window and a partial usage summary", got[0])
 	}
-	deliverRoundDirect(t, f.pool, claim.RoundId)
+	deliver := func(key string, data map[string]any) runnerCall {
+		return runnerCall{method: http.MethodPost, path: path, body: deliveredEvent(t, key, 1, data), token: f.token}
+	}
+	validate(deliver("d1", deliverableData("", deliveredSummary, deliveredAssessment)), http.StatusBadRequest)
+	oversized := deliveredEvent(t, "d1", 1, standardDeliverable())
+	oversized = oversized[:len(oversized)-1] + strings.Repeat(" ", roundEventBodyMaxBytes+1-len(oversized)) + "}"
+	validate(runnerCall{method: http.MethodPost, path: path, body: oversized, token: f.token}, http.StatusRequestEntityTooLarge)
+	validate(deliver("d1", standardDeliverable()), http.StatusCreated)
+	validate(deliver("d1", standardDeliverable()), http.StatusOK)
+	validate(deliver("d1", deliverableData("changed", deliveredSummary, deliveredAssessment)), http.StatusConflict)
+	validate(deliver("d2", standardDeliverable()), http.StatusConflict)
+	if got := decodeRounds(t, validate(rounds, http.StatusOK)); got[0].State != RoundDelivered || got[0].Deliverable == nil || got[0].EndedAt == nil {
+		t.Fatalf("the validated list after delivery = %+v, want a delivered Round with its deliverable", got[0])
+	}
+	if got := decodeTicketBody(t, validate(runnerCall{method: http.MethodGet, path: "/api/tickets/" + queued.Id, cookie: f.cookie}, http.StatusOK)); got.Status != InReview || got.Delivery == nil {
+		t.Fatalf("the validated Ticket after delivery = %+v, want In Review with its delivery", got)
+	}
+	validate(runnerCall{method: http.MethodGet, path: "/api/tickets", cookie: f.cookie}, http.StatusOK)
 	validate(event("k4", 1, eventReference), http.StatusConflict)
 	validate(progress("p3", "late"), http.StatusConflict)
 
