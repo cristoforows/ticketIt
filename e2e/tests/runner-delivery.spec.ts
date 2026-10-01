@@ -77,10 +77,10 @@ test("a Basic Ticket goes Ready, claimed, running, delivered to In Review on the
     await expect(page.getByTestId("ticket-detail-status")).toHaveText("In Review", { timeout: 20_000 });
     await expect(page.getByTestId("ticket-detail-delivered")).toHaveText(`Delivered by ${agent.name}`);
     await expect(page.getByTestId("ticket-detail-locked")).toHaveCount(0);
-    const delivered = page.getByTestId("ticket-detail-delivered-round");
-    await expect(delivered.getByTestId("ticket-detail-delivered-summary")).toHaveText("The cache was stale.");
-    await expect(delivered.getByTestId("ticket-detail-delivered-assessment")).toHaveText("A written cause: met.");
-    const body = delivered.getByTestId("ticket-detail-delivered-body");
+    const delivered = page.getByTestId("ticket-detail-round");
+    await expect(delivered.getByTestId("ticket-detail-round-summary")).toHaveText("The cache was stale.");
+    await expect(delivered.getByTestId("ticket-detail-round-assessment")).toHaveText("A written cause: met.");
+    const body = delivered.getByTestId("ticket-detail-round-body");
     await expect(body.getByRole("heading", { level: 1, name: "Findings" })).toBeVisible();
     await expect(body.locator("strong")).toHaveText("stale");
     await expect(body.locator("li")).toHaveText(["Reproduced it", "Wrote it up"]);
@@ -91,7 +91,7 @@ test("a Basic Ticket goes Ready, claimed, running, delivered to In Review on the
     await expect(body.locator("img")).toHaveCount(0);
     await expect(body.getByText("tracking pixel")).toBeVisible();
     await expect(body.getByRole("link", { name: "https://tracker.invalid/pixel.png" })).toHaveAttribute("rel", "noopener noreferrer nofollow");
-    await expect(delivered.getByTestId("ticket-detail-delivered-note")).toHaveCount(1);
+    await expect(delivered.getByTestId("ticket-detail-round-note")).toHaveCount(1);
     expect(await page.evaluate(() => (window as { sameDocument?: boolean; pwned?: boolean }).sameDocument === true && (window as { pwned?: boolean }).pwned === undefined)).toBe(true);
 
     const inReview = await ticket(api, queued.id);
@@ -106,8 +106,8 @@ test("a Basic Ticket goes Ready, claimed, running, delivered to In Review on the
     expect((await ticket(api, queued.id)).status).toBe("Done");
     await page.reload();
     await expect(page.getByTestId("ticket-detail-status")).toHaveText("Done");
-    await expect(page.getByTestId("ticket-detail-delivered-summary")).toHaveText("The cache was stale.");
-    await expect(page.getByTestId("ticket-detail-delivered-body").getByRole("heading", { level: 1, name: "Findings" })).toBeVisible();
+    await expect(page.getByTestId("ticket-detail-round-summary")).toHaveText("The cache was stale.");
+    await expect(page.getByTestId("ticket-detail-round-body").getByRole("heading", { level: 1, name: "Findings" })).toBeVisible();
     expect(trackerRequests).toEqual([]);
   } finally {
     await stop(michelin);
@@ -140,7 +140,7 @@ test("a Coding Ticket delivered by the default script stops at In Review, with A
     await expect(page.getByTestId("ticket-detail-delivered")).toHaveText(`Delivered by ${agent.name}`);
     await expect(page.getByTestId("ticket-detail-accept-button")).toHaveCount(0);
     await expect(page.getByTestId("ticket-detail-accept-unavailable")).toHaveText(inReview.allowedActions.accept.reason!.message);
-    await expect(page.getByTestId("ticket-detail-delivered-body").getByRole("heading", { level: 1, name: "Result" })).toBeVisible();
+    await expect(page.getByTestId("ticket-detail-round-body").getByRole("heading", { level: 1, name: "Result" })).toBeVisible();
     expect((await ticket(api, queued.id)).status).toBe("InReview");
   } finally {
     await stop(michelin);

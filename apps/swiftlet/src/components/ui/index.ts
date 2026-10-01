@@ -2,6 +2,7 @@ export { ArchiveZone, BoardColumn, BoardColumns, ColumnHeader, DropHint, Rail, S
 export { buttonClasses, PrimaryButton, SecondaryButton, type ButtonTone } from "./Button";
 export { Caption, capsLinkClasses } from "./Caption";
 export { cn } from "./cn";
+export { Disclosure } from "./Disclosure";
 export { FieldHint, FieldLabel, FieldNote, FieldValue, Select, TextInput, Textarea } from "./Fields";
 export { FilterToggle } from "./FilterToggle";
 export { LockGlyph } from "./Glyphs";

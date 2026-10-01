@@ -201,6 +201,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tickets/{id}/rework": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Return an In Review Ticket to Ready for another Round
+         * @description Returns an Agent-assigned In Review Ticket with no open Round to Ready, at the bottom of the priority order; the next claim creates a new Round. Otherwise `rework_not_available`; a Ticket missing a readiness input gets `agent_readiness_incomplete` with `missing`. Creates no Round itself.
+         */
+        post: operations["requestTicketRework"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tickets/{id}/assignee": {
         parameters: {
             query?: never;
@@ -823,15 +845,16 @@ export interface components {
             statusChanges: components["schemas"]["TicketStatus"][];
             /** @description Targets D3 S2's table permits from the current Status that this Ticket's Agent assignment or missing inputs rule out, each with the status command's error. */
             statusChangeRejections: components["schemas"]["TicketStatusChangeRejection"][];
-            accept: components["schemas"]["TicketAcceptAvailability"];
+            accept: components["schemas"]["TicketCommandAvailability"];
+            rework: components["schemas"]["TicketCommandAvailability"];
         };
         TicketStatusChangeRejection: {
             status: components["schemas"]["TicketStatus"];
             reason: components["schemas"]["ErrorDetail"];
         };
-        TicketAcceptAvailability: {
+        TicketCommandAvailability: {
             available: boolean;
-            /** @description Required when unavailable; absent when available. Matches the Accept command's error. */
+            /** @description Required when unavailable; absent when available. Matches the command's error. */
             reason?: components["schemas"]["ErrorDetail"];
         };
         CreateTicketRequest: {
@@ -956,7 +979,7 @@ export interface components {
             /** Format: uuid */
             roundId: string;
             sequence: number;
-            /** @description Fencing token; events must carry it with `roundId`. */
+            /** @description Fencing token; events must carry it with `roundId`. A Ticket's Rounds get increasing epochs. */
             claimEpoch: number;
             ticket: components["schemas"]["ClaimedTicket"];
             agent: components["schemas"]["TicketAssigneeAgent"];
@@ -1420,6 +1443,37 @@ export interface operations {
                 };
             };
             /** @description Error. See `ErrorBody`. Includes `invalid_transition` (the Ticket is not In Review), `reviewed_pr_merge_not_implemented` (D2/M8 limitation) and `round_open`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    requestTicketRework: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Ticket, now Ready. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ticket"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. Includes `rework_not_available` and `agent_readiness_incomplete`. */
             default: {
                 headers: {
                     [name: string]: unknown;

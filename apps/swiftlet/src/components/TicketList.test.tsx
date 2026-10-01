@@ -19,7 +19,7 @@ const TICKET_A = {
   id: "22222222-2222-4222-8222-222222222222",
   title: "Second captured",
   status: "Backlog",
-  allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } } },
+  allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } },
   template: "Basic",
   completionCondition: "humanAcceptance",
   assigneeType: "",
@@ -41,7 +41,7 @@ const TICKET_B = {
   id: "11111111-1111-4111-8111-111111111111",
   title: "First captured",
   status: "Backlog",
-  allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } } },
+  allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } },
   template: "Basic",
   completionCondition: "humanAcceptance",
   assigneeType: "",
@@ -154,12 +154,13 @@ describe("TicketList", () => {
     expect(openRow.getByTestId("ticket-reorder-up")).toBeInTheDocument();
   });
 
-  describe("refreshing while a Ticket has an open Round", () => {
+  describe("refreshing while a Ticket awaits execution", () => {
     const agent = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kind: "research" };
     const round = { id: "77777777-7777-4777-8777-777777777777", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null };
     const claimed = { ...TICKET_A, status: "Ready", assigneeType: "agent", assigneeAgent: agent, openRound: round };
     const running = { ...claimed, status: "InProgress", openRound: { ...round, state: "running", startedAt: "2026-10-01T10:00:05Z" } };
     const settled = { ...claimed, openRound: null };
+    const queued = { ...settled, requestingAgentWork: true };
 
     beforeEach(() => {
       vi.useFakeTimers();
@@ -208,7 +209,7 @@ describe("TicketList", () => {
       expect(screen.getByTestId(`ticket-item-${claimed.id}`)).toBeInTheDocument();
     });
 
-    it("stops refetching once no Ticket has an open Round", async () => {
+    it("stops refetching once no Ticket has an open Round or is queued", async () => {
       const fetchMock = stubLists([list(claimed), list(settled)]);
       render(<TicketList onUnauthenticated={() => {}} />);
       await flush();
@@ -220,7 +221,20 @@ describe("TicketList", () => {
       expect(vi.getTimerCount()).toBe(0);
     });
 
-    it("never refetches a list in which no Ticket has an open Round", async () => {
+    it("keeps refetching a queued Ticket that has no open Round, and stops once it is neither queued nor claimed", async () => {
+      const fetchMock = stubLists([list(queued), list(queued), list(settled)]);
+      render(<TicketList onUnauthenticated={() => {}} />);
+      await flush();
+      await flush(3000);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      await flush(3000);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      await flush(120_000);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("never refetches a list in which no Ticket has an open Round or is queued", async () => {
       const fetchMock = stubLists([list(TICKET_A, TICKET_B)]);
       render(<TicketList onUnauthenticated={() => {}} />);
       await flush(120_000);

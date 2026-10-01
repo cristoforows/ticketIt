@@ -701,7 +701,7 @@ func TestListTicketRounds_ActivityAndUsageBelongToTheirRoundAndOwner(t *testing.
 	}
 	second := f.mustClaim(t)
 	f.startRound(t, second, "start")
-	f.mustReport(t, second.RoundId, progressEvent(t, "n", 1, eventOccurredAt, "second Round"))
+	f.mustReport(t, second.RoundId, progressEvent(t, "n", second.ClaimEpoch, eventOccurredAt, "second Round"))
 
 	foreignCookie, _ := secondOwnerSession(t, f.pool)
 	foreign := &claimFixture{runnerFixture: f.runnerFixture}

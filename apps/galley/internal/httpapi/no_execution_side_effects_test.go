@@ -117,6 +117,16 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 			t.Fatalf("change status to %s: status = %d, want 200; error=%+v", to, resp.status, resp.errBody)
 		}
 	}
+	assign(toAgent)
+	if resp := requestReworkHTTP(t, client, baseURL, created.Id); resp.status != http.StatusOK || !resp.ticket.RequestingAgentWork {
+		t.Fatalf("request rework: status = %d, requestingAgentWork = %t; error=%+v", resp.status, resp.ticket.RequestingAgentWork, resp.errBody)
+	}
+	assign(toOwner)
+	for _, to := range []TicketStatus{InProgress, InReview} {
+		if resp := changeStatus(t, client, baseURL, created.Id, to); resp.status != http.StatusOK {
+			t.Fatalf("change status to %s: status = %d, want 200; error=%+v", to, resp.status, resp.errBody)
+		}
+	}
 	if resp := acceptTicketHTTP(t, client, baseURL, created.Id); resp.status != http.StatusOK {
 		t.Fatalf("accept: status = %d, want 200; error=%+v", resp.status, resp.errBody)
 	}

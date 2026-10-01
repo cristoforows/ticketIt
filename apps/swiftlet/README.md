@@ -752,13 +752,14 @@ renders that and decides nothing:
   the Agent as its Assignee and the lock glyph, and no **Claimed by
   runner** tag, because that tag shows only while the Round is
   `claimed`.
-- **Rounds section.** A receipt whose Ticket has an open Round shows a
-  **Rounds** section (`ticket-detail-rounds`) with the Round's number,
-  its Agent, and either the time Galley says it started
-  (`ticket-detail-round-started`) or "Claimed, waiting for the runner to
-  start" (`ticket-detail-round-waiting`). Only the open Round is shown;
-  a Ticket with no Round has no section. History and the active card
-  are M5 (#6) and M4.11.
+- **Rounds section.** A receipt whose Ticket has a Round shows a
+  **Rounds** section (`ticket-detail-rounds`), one entry per Round (see
+  "Explicit rework" below): an open Round's outcome is "Claimed, waiting
+  for the runner to start" or "Running" (`ticket-detail-round-state`),
+  with the time Galley says it started (`ticket-detail-round-started`)
+  once it has. A Ticket with no Round has no section. The lock banner
+  and the **Claimed by runner** tag come from `openRound` and show
+  before the Round list has loaded.
 - **Runner disconnected.** While the Round is open, the section shows a
   **Runner disconnected** notice (`ticket-detail-runner-disconnected`)
   when Galley's runner health is anything but Connected. It uses the
@@ -767,35 +768,38 @@ renders that and decides nothing:
   health is loading or could not be read, no notice shows, because
   nothing is known. The notice says lost contact does not mean the Round
   stopped (docs/contracts/execution-interface.md).
-- **Refreshing.** `useOpenRoundRefresh` calls a refresh every 3 s while
-  the receipt's Ticket, or any Ticket on the board or in the list, has
-  an open Round. A tick is skipped while the previous refresh is
+- **Refreshing.** `useExecutionRefresh` calls a refresh every 3 s while
+  the receipt's Ticket, or any Ticket on the board or in the list,
+  `awaitsExecution`: it has an open Round or is requesting Agent work
+  (queued). A tick is skipped while the previous refresh is
   pending; there is no loading state, because the previous data stays
   until the new data arrives; nothing is set when the data is unchanged;
-  and it stops when the Round closes or the component unmounts. With no
-  open Round there is no timer. A failed refresh keeps the previous data
+  and it stops when the Ticket is neither queued nor has an open Round,
+  or the component unmounts. Otherwise there is no timer. The runner
+  health check still runs only while a Round is open. A failed refresh keeps the previous data
   and adds Galley's or the network's message, cleared by the next good
   refresh. A move or reorder in progress skips the tick.
 - **Parsing.** `parseTicket` also requires a `running` Round to carry a
   `startedAt` and a `claimed` one not to.
 
 Tests cover each receipt state (`TicketDetail.test.tsx`) and the refresh
-(`useOpenRoundRefresh.test.tsx` and the page, list and board tests, all
+(`useExecutionRefresh.test.tsx` and the page, list and board tests, all
 with fake timers).
 Evidence: `docs/evidence/m4/134-controlled-engine.md`.
 
 ## Round activity and usage (issue #135)
 
-While the receipt's Ticket has an open Round, the receipt fetches
-`GET /api/tickets/{id}/rounds` (`fetchTicketRounds`, `src/api/rounds.ts`)
-when it loads and on each tick of the same 3 s refresh, after the Ticket
-fetch, so there is no second timer. It shows the record whose `id` is
-`openRound.id`:
+While the receipt's Ticket has an open Round or a delivery, the receipt
+fetches `GET /api/tickets/{id}/rounds` (`fetchTicketRounds`,
+`src/api/rounds.ts`) when it loads and on each tick of the same 3 s
+refresh, after the Ticket fetch, so there is no second timer. Each
+Round's entry shows:
 
 - **Activity** (`ticket-detail-round-activity`): Galley's notes (at most
   the latest 50), oldest first, each with the runner's `occurredAt`.
   "No activity yet." when there are none.
-- **Usage so far** (`ticket-detail-round-usage`): Cost, Input tokens,
+- **Usage so far** for an open Round, **Usage** for an ended one
+  (`ticket-detail-round-usage`): Cost, Input tokens,
   Output tokens and Active time, each shown from Galley's summary:
   - "Unknown" when the sum is `null`, never `$0` or `0`;
   - "≥ x (incomplete)" when the figure is not `complete`;
@@ -833,10 +837,8 @@ later Round is claimed).
   `openRound` is `null` and the 3 s timer stops. There is no second
   timer. The board's existing refresh moves the slip to In Review the
   same way.
-- **Delivered Rounds** (`ticket-detail-delivered-round`, newest first):
-  number, delivering Agent, `endedAt`, Summary, Criteria assessment,
-  the Report (`ticket-detail-delivered-body`), and the Round's activity
-  and usage.
+- **Delivered Rounds** show Summary, Criteria assessment and the Report
+  (`ticket-detail-round-body`) in the Round's entry.
 - **Markdown.** The Report renders with `react-markdown` (pinned
   exactly) and `skipHtml`, with no plugins. Raw HTML is never rendered
   and react-markdown's default URL filter blanks `javascript:`,
@@ -857,6 +859,42 @@ later Round is claimed).
 
 The delivered tag's contrast is in `tokens.test.ts`. Evidence:
 `docs/evidence/m4/136-delivery.md`.
+
+## Explicit rework (issue #137)
+
+`allowedActions.rework` is Galley's answer, in the same shape as
+`accept`. Swiftlet renders it and decides nothing:
+
+- **Request rework** (`ticket-detail-rework-button`) sits beside Accept
+  in the receipt's Workflow section, only when `rework.available`, and
+  calls `POST /api/tickets/{id}/rework` (`requestTicketRework`) through
+  the same action path as Accept: no optimistic update, Galley's
+  rejection shown verbatim. There is no rework control on the slip.
+  The page also adopts the Ticket a command returns, so a Ticket
+  queued by a command starts refreshing at once.
+- **Missing inputs.** When rework is unavailable with
+  `agent_readiness_incomplete`, its message shows
+  (`ticket-detail-rework-unavailable`) and the empty fields point at it
+  through `aria-describedby`. The reasons that explain the missing
+  inputs are chosen in order: a failed action, the Ready rejection,
+  then this one. A `rework_not_available` reason is never shown: a
+  Ticket that cannot be reworked is simply not offered it.
+- **Round history.** `RoundsSection` lists every Round from Galley's
+  list, newest first, without re-sorting. Each entry
+  (`ticket-detail-round`, with `data-round-id` and `data-state`) is a
+  `Disclosure` (`ui/Disclosure.tsx`, a native `<details>`): the latest
+  Round starts open and earlier ones closed. `open` follows the index
+  only when it changes, so the Owner's own toggling survives refreshes,
+  and a newly arrived Round collapses the previous latest one. Lines
+  (Agent, Claimed at, Started at, Delivered at), the deliverable, Activity
+  and Usage sit inside the entry, and their test ids are the same in
+  every entry.
+- **Refresh.** After rework the Ticket is Ready and queued, so the
+  receipt keeps refreshing until Round 2 is claimed, runs and delivers.
+
+Tests: `TicketDetail.test.tsx` (button, rejection, missing inputs, Round
+history) and `TicketDetailPage.test.tsx` (In Review to a second
+delivered Round, fake timers).
 
 ## Browser-to-backend suite
 

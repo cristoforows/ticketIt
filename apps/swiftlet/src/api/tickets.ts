@@ -99,14 +99,26 @@ function parseDelivery(value: unknown): Ticket["delivery"] | undefined {
   return { roundId: delivery.roundId, sequence: delivery.sequence, agent: { id: agent.id, name: agent.name, kind: agent.kind }, deliveredAt: delivery.deliveredAt };
 }
 
+function parseCommandAvailability(value: unknown): Ticket["allowedActions"]["rework"] | undefined {
+  const availability = value as Record<string, unknown> | null | undefined;
+  if (typeof availability !== "object" || availability === null || typeof availability.available !== "boolean") {
+    return undefined;
+  }
+  if (availability.available) {
+    return availability.reason === undefined ? { available: true } : undefined;
+  }
+  const reason = parseErrorDetail(availability.reason);
+  return reason && { available: false, reason };
+}
+
 function parseTicket(payload: unknown): Ticket {
   if (typeof payload !== "object" || payload === null) {
     throw new Error("Galley's response body was not a JSON object.");
   }
   const record = payload as Record<string, unknown>;
   const actions = record.allowedActions as Record<string, unknown> | undefined;
-  const accept = actions?.accept as Record<string, unknown> | undefined;
-  const reason = accept?.reason as Record<string, unknown> | undefined;
+  const accept = parseCommandAvailability(actions?.accept);
+  const rework = parseCommandAvailability(actions?.rework);
   const agent = record.assigneeAgent;
   const openRound = parseOpenRound(record.openRound);
   const delivery = parseDelivery(record.delivery);
@@ -147,11 +159,7 @@ function parseTicket(payload: unknown): Ticket {
     !rejections ||
     !rejections.every((rejection) => rejection !== undefined) ||
     !accept ||
-    typeof accept !== "object" ||
-    typeof accept.available !== "boolean" ||
-    (accept.available
-      ? accept.reason !== undefined
-      : !reason || typeof reason !== "object" || typeof reason.code !== "string" || typeof reason.message !== "string")
+    !rework
   ) {
     throw new Error("Galley's Ticket response was missing a required field.");
   }
@@ -162,9 +170,8 @@ function parseTicket(payload: unknown): Ticket {
     allowedActions: {
       statusChanges: actions.statusChanges as Ticket["status"][],
       statusChangeRejections: rejections as Ticket["allowedActions"]["statusChangeRejections"],
-      accept: accept.available
-        ? { available: true }
-        : { available: false, reason: { code: reason!.code as string, message: reason!.message as string } },
+      accept,
+      rework,
     },
     template: record.template as Ticket["template"],
     completionCondition: record.completionCondition as Ticket["completionCondition"],
@@ -346,6 +353,10 @@ export async function changeTicketStatus(id: string, status: Ticket["status"]): 
  */
 export async function acceptTicket(id: string): Promise<Ticket> {
   return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(id)}/accept`, { method: "POST" });
+}
+
+export async function requestTicketRework(id: string): Promise<Ticket> {
+  return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(id)}/rework`, { method: "POST" });
 }
 
 /** An Agent id Galley cannot find for this Owner shares the Ticket's 404, so its message is shown rather than "not found". */

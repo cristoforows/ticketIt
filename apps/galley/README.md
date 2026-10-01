@@ -1244,7 +1244,7 @@ per Owner. Its predicate is the open states' SQL definition, and
 
 | Case | Response |
 | --- | --- |
-| A Ticket is requesting Agent work and the slot is free | `201` `RunnerClaim`: `roundId`, `sequence`, `claimEpoch` (1), the Ticket's inputs, the Agent |
+| A Ticket is requesting Agent work and the slot is free | `201` `RunnerClaim`: `roundId`, `sequence`, `claimEpoch` (the Ticket's next, from 1), the Ticket's inputs, the Agent |
 | Nothing requesting work, a Round already open, or the runner not Connected (never registered, or last heartbeat 30 s old or more) | `204`, no body |
 | Missing, malformed or revoked credential, or a session cookie | shared `401 unauthenticated` |
 
@@ -1496,7 +1496,8 @@ agent-owned for an Agent-assigned Ticket, so there is no Status change;
 Accept follows the retained completion condition: available for
 `humanAcceptance` (Basic), refused with `reviewed_pr_merge_not_implemented`
 for `reviewedPrMerge` (Coding). Done → Ready queues the Ticket for a new
-Round. Rework from In Review is M4.11 (#137).
+Round. Rework from In Review is `POST /api/tickets/{id}/rework`
+("Explicit rework (issue #137)" below).
 
 `Ticket.delivery` is `{roundId, sequence, agent, deliveredAt}` of the
 Ticket's latest Round when that Round is `delivered`, else `null`.
@@ -1510,6 +1511,41 @@ only where a test first moved the Ticket out of In Progress by SQL,
 which real delivery refuses. `round_deliverables` joins the
 no-execution-artefact allowlist. Evidence:
 `docs/evidence/m4/136-delivery.md`.
+
+## Explicit rework (issue #137)
+
+`POST /api/tickets/{id}/rework` takes no body and returns the Ticket in
+Ready, at the bottom of the Owner's order like any entry into Ready. It
+is the only way a delivered Ticket returns to Ready for another Round;
+no event, timer or reassignment does it. `decideRework` is the one
+decision, shared by the command and by `allowedActions.rework`:
+
+| Check, in order | Rejection |
+| --- | --- |
+| Archived | `400 rework_not_available` |
+| Not Agent-assigned | `400 rework_not_available` |
+| Status is not In Review | `400 rework_not_available` |
+| Open Round (unreachable through the API: an open Round implies a Status other than In Review) | `400 rework_not_available` with `roundId` |
+| Readiness as for Ready (M4.2) | `400 agent_readiness_incomplete` with `missing` |
+
+`transitionLockedTicket` takes the Owner's priority lock and the Ticket
+row lock, in that order, and leaves the archived and open-Round cases to
+`decide`, so rework can answer them with `rework_not_available`.
+`applyTicketTransition` wraps it and keeps the generic guard for the
+other commands.
+
+`claim_epoch` is per Ticket: a claim inserts `max(claim_epoch) + 1` over
+the Ticket's Rounds, as `sequence` is counted. There is no migration or
+unique constraint: claims serialise on the Owner's priority lock and
+the one-open-Round index. An event carrying Round 1's id or epoch is
+refused by the existing ladder (`409 round_not_open` for Round 1's id,
+`409 stale_claim_epoch` for Round 1's epoch sent to Round 2) and changes
+nothing; a replay of Round 1's delivery still returns its stored result. `Ticket.delivery` stays
+set while the reworked Ticket waits in Ready and clears when Round 2 is
+claimed.
+
+Tests: `ticket_rework_test.go`, plus `contract_test.go`. Evidence:
+`docs/evidence/m4/137-rework.md`.
 
 ## Error shape
 

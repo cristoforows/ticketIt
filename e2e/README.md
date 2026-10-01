@@ -347,6 +347,16 @@ before `runner-activity.spec.ts`. No spec depends on another's data.
 Any later spec that needs the slot free must run before them, or get a
 phase of its own.
 
+`tests/runner-rework.spec.ts` (issue #137) drives two real Michelin
+processes with different scripts. The first delivers Round 1 and is
+stopped. The receipt's "Request rework" moves the Ticket to Ready and
+queued without a reload. The second delivers Round 2 while the same
+receipt stays open. The receipt then lists Round 2 open above Round 1
+closed, and opening Round 1 shows its own result, activity and usage.
+Galley's Round list must keep Round 1 unchanged, and nothing may requeue
+the Ticket. Delivered Rounds hold no slot, so the spec needs no reset
+after `runner-delivery.spec.ts`.
+
 `tests/ticket-priority-order.spec.ts` reorders three Ready Tickets by
 dragging onto the upper and lower halves of board slips, then with Move
 up and Move down in the list. After each step the rendered order must

@@ -12,7 +12,7 @@ const CREATED = {
   id: "11111111-1111-4111-8111-111111111111",
   title: "T",
   status: "Backlog",
-  allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } } },
+  allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } },
   template: "Basic",
   completionCondition: "humanAcceptance",
   assigneeType: "",
