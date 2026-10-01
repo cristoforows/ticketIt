@@ -22,13 +22,15 @@ export interface ErrorDetail {
 export interface Round {
   id: string;
   sequence: number;
-  state: "claimed" | "running";
+  state: "claimed" | "running" | "delivered";
   agent: { id: string; name: string; kind: AgentKind };
   claimedAt: string;
   startedAt: string | null;
   endedAt: string | null;
   activity: { seq: number; note: string; occurredAt: string }[];
   usage: RoundUsage;
+  /** Set exactly when `state` is `delivered` (issue #136). */
+  deliverable: { bodyMarkdown: string; summary: string; criteriaAssessment: string } | null;
 }
 
 export interface UsageCount {
@@ -72,6 +74,13 @@ export interface Ticket {
     agent: { id: string; name: string; kind: AgentKind };
     claimedAt: string;
     startedAt: string | null;
+  } | null;
+  /** The latest Round, when it was delivered (issue #136). */
+  delivery: {
+    roundId: string;
+    sequence: number;
+    agent: { id: string; name: string; kind: AgentKind };
+    deliveredAt: string;
   } | null;
   /** Chosen at capture (issue #59), default Basic -- see docs/ticket-creation.md. */
   template: TicketTemplate;

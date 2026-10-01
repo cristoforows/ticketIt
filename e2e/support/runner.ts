@@ -24,7 +24,14 @@ export interface UsageScriptStep {
   providerGenerationId: string | null;
 }
 
-export type EngineScriptStep = { step: "start" } | { step: "wait"; ms: number } | { step: "progress"; note: string } | UsageScriptStep | { step: "hold" };
+export interface DeliverScriptStep {
+  step: "deliver";
+  bodyMarkdown: string;
+  summary: string;
+  criteriaAssessment: string;
+}
+
+export type EngineScriptStep = { step: "start" } | { step: "wait"; ms: number } | { step: "progress"; note: string } | UsageScriptStep | DeliverScriptStep | { step: "hold" };
 
 function writeEngineScript(steps: EngineScriptStep[]): string {
   const file = path.join(mkdtempSync(path.join(tmpdir(), "michelin-e2e-")), "script.json");
