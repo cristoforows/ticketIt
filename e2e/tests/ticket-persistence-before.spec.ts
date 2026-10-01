@@ -34,7 +34,7 @@ test("the Owner captures two Tickets, newest first, before Galley restarts", asy
   // merely happens to be empty.
   await createTicket(page, "ticket-persistence: pre-existing older Ticket");
 
-  await page.goto("/");
+  await page.goto("/list");
   await expect(page.getByTestId("app-shell")).toBeVisible();
 
   // The behavior actually under test (acceptance criterion 1: "a title

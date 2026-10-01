@@ -14,7 +14,7 @@ test.describe("ticket lifecycle controls", () => {
   test("the full human path: capture, refine, Ready, In Progress, In Review, Accept, Done", async ({ page }) => {
     const title = `ticket-lifecycle: full path ${Date.now()}`;
 
-    await page.goto("/");
+    await page.goto("/list");
     await openCapture(page);
     await page.getByTestId("ticket-title-input").fill(title);
     await page.getByTestId("ticket-capture-submit").click();

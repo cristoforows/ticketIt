@@ -22,7 +22,7 @@ test.describe("ticket templates", () => {
   }) => {
     const title = `ticket-templates: coding via form ${Date.now()}`;
 
-    await page.goto("/");
+    await page.goto("/list");
     await openCapture(page);
     await page.getByTestId("ticket-title-input").fill(title);
     await page.getByTestId("ticket-template-select").selectOption("Coding");
@@ -46,7 +46,7 @@ test.describe("ticket templates", () => {
   }) => {
     const title = `ticket-templates: basic via form ${Date.now()}`;
 
-    await page.goto("/");
+    await page.goto("/list");
     await openCapture(page);
     await expect(page.getByTestId("ticket-template-select")).toHaveValue("Basic");
     await page.getByTestId("ticket-title-input").fill(title);

@@ -21,7 +21,7 @@ const names = (ticket: Ticket) => ticket.badges.map((badge) => badge.name);
 test("creates two Badges, attaches one to two Tickets through modal and full-page picker, and shows list and board", async ({ page }) => {
   const first = await createTicket(page, FIRST);
   const second = await createTicket(page, SECOND);
-  await page.goto("/");
+  await page.goto("/list");
   const row = page.getByTestId(`ticket-item-${first.id}`);
   await row.getByRole("link").click();
   const modal = page.getByRole("dialog", { name: "Ticket details" });

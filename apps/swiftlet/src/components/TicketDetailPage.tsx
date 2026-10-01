@@ -21,7 +21,7 @@ import {
 } from "../api/tickets";
 import { fetchAgents, type Agent } from "../api/agents";
 import { fetchTicketRounds } from "../api/rounds";
-import { collectionQuery, fullPageReturnPath, navigate, useEditRequested } from "../router";
+import { collectionPath, collectionQuery, fullPageReturnPath, navigate, useEditRequested } from "../router";
 import { Link } from "./Link";
 import type { RoundRecords } from "./RoundsSection";
 import { useRunnerHealth } from "./RunnerHealthPill";
@@ -214,7 +214,7 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
       className={presentation === "page" ? "mx-auto w-full max-w-(--size-receipt)" : undefined}
     >
       {presentation === "page" && <p className="mb-4">
-        <Link to={`/${collectionQuery()}`} data-testid="back-to-backlog-link" className={capsLinkClasses({ tone: "ground" })}>
+        <Link to={`${collectionPath("backlog")}${collectionQuery()}`} data-testid="back-to-backlog-link" className={capsLinkClasses({ tone: "ground" })}>
           Back to Backlog
         </Link>
       </p>}

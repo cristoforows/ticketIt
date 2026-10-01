@@ -16,7 +16,7 @@ test.describe("New order capture modal", () => {
 
   test.beforeEach(async ({ page, request }) => {
     await signIn(page, request, "owner");
-    await page.goto("/");
+    await page.goto("/list");
   });
 
   test("the action footer ends flush with the modal at 390x844 after scrolling the form to its end", async ({ page }) => {

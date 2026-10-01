@@ -73,7 +73,7 @@ test("reorder a Ready stage by drag on the board and Move up/down in the list; t
   await expect.poll(() => boardOrder(page, ids)).toEqual([a.id, b.id, c.id]);
   expect(await apiReadyOrder(page, ids)).toEqual([a.id, b.id, c.id]);
 
-  await page.goto("/");
+  await page.goto("/list");
   await expect.poll(() => listOrder(page, ids)).toEqual([a.id, b.id, c.id]);
   const rowC = page.getByTestId(`ticket-item-${c.id}`);
   const [upC] = await Promise.all([positionCommand(page, c.id), rowC.getByTestId("ticket-reorder-up").click()]);
@@ -101,7 +101,7 @@ test("a stale Move up shows Galley's anchor rejection verbatim and the order sta
   const second = await createTicket(page, `priority reject second ${stamp}`);
   const ids = [first.id, second.id];
   for (const id of ids) expect((await changeTicketStatusDirect(page, id, "Ready")).ok).toBe(true);
-  await page.goto("/");
+  await page.goto("/list");
   await expect.poll(() => listOrder(page, ids)).toEqual([first.id, second.id]);
 
   expect((await changeTicketStatusDirect(page, first.id, "Backlog")).ok).toBe(true);

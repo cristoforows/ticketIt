@@ -30,7 +30,7 @@ test("Badge definitions and both Ticket attachments survive a Galley process res
     expect(detailResponse.ok()).toBe(true);
     expect((await detailResponse.json() as Ticket).badges).toEqual(ticket.badges);
   }
-  await page.goto("/");
+  await page.goto("/list");
   await expect(page.getByTestId(`ticket-item-${firstTicket.id}`).getByTestId("ticket-badges")).toHaveText(firstTicket.badges.map(({ name }) => name).join(", "));
   await expect(page.getByTestId(`ticket-item-${secondTicket.id}`).getByTestId("ticket-badges")).toHaveText(secondTicket.badges.map(({ name }) => name).join(", "));
   await page.getByTestId(`ticket-item-${firstTicket.id}`).getByRole("link").click();

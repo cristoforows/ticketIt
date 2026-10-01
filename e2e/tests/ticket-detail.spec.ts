@@ -17,7 +17,7 @@ test.describe("ticket detail page", () => {
     const title = `ticket-detail: opened from the list ${Date.now()}`;
     const ticket = await createTicket(page, title);
 
-    await page.goto("/");
+    await page.goto("/list");
     await page.getByTestId(`ticket-item-${ticket.id}`).getByTestId("ticket-title").click();
 
     expect(new URL(page.url()).pathname).toBe(`/tickets/${ticket.id}`);
@@ -60,14 +60,14 @@ test.describe("ticket detail page", () => {
     const title = `ticket-detail: browser back ${Date.now()}`;
     const ticket = await createTicket(page, title);
 
-    await page.goto("/");
+    await page.goto("/list");
     await page.getByTestId(`ticket-item-${ticket.id}`).getByRole("link").click();
     await expect(page.getByTestId("ticket-detail-title")).toHaveText(title);
     expect(new URL(page.url()).pathname).toBe(`/tickets/${ticket.id}`);
 
     await page.goBack();
 
-    expect(new URL(page.url()).pathname).toBe("/");
+    expect(new URL(page.url()).pathname).toBe("/list");
     await expect(page.getByTestId("ticket-list")).toBeVisible();
     await expect(page.getByTestId("ticket-detail-title")).toHaveCount(0);
   });
@@ -81,7 +81,7 @@ test.describe("ticket detail page", () => {
 
     await page.getByTestId("back-to-backlog-link").click();
 
-    expect(new URL(page.url()).pathname).toBe("/");
+    expect(new URL(page.url()).pathname).toBe("/list");
     await expect(page.getByTestId(`ticket-item-${ticket.id}`)).toBeVisible();
   });
 });

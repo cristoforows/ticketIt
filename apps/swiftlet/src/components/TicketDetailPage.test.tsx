@@ -212,7 +212,7 @@ describe("TicketDetailPage", () => {
     render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
     await screen.findByTestId("ticket-detail-title");
 
-    expect(screen.getByTestId("back-to-backlog-link")).toHaveAttribute("href", "/");
+    expect(screen.getByTestId("back-to-backlog-link")).toHaveAttribute("href", "/list");
   });
 
   it("returns to the Backlog with the selected Badge filter", async () => {
@@ -222,7 +222,7 @@ describe("TicketDetailPage", () => {
     render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
     await screen.findByTestId("ticket-detail-title");
 
-    expect(screen.getByTestId("back-to-backlog-link")).toHaveAttribute("href", "/?badgeId=first&badgeId=second");
+    expect(screen.getByTestId("back-to-backlog-link")).toHaveAttribute("href", "/list?badgeId=first&badgeId=second");
     window.history.pushState({}, "", "/");
   });
 
@@ -235,7 +235,7 @@ describe("TicketDetailPage", () => {
 
     render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
     await screen.findByTestId("ticket-detail-title");
-    expect(screen.getByTestId("back-to-backlog-link")).toHaveAttribute("href", "/?badgeId=first");
+    expect(screen.getByTestId("back-to-backlog-link")).toHaveAttribute("href", "/list?badgeId=first");
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));
 
     await waitFor(() => expect(`${window.location.pathname}${window.location.search}`).toBe("/board?badgeId=first"));

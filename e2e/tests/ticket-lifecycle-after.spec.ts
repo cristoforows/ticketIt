@@ -17,7 +17,7 @@ test.beforeAll(() => {
 const TITLE = "ticket-lifecycle: before restart";
 
 test("the Status and Assignee reached before a Galley restart are still there after it", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/list");
   await expect(page.getByTestId("app-shell")).toBeVisible();
 
   // Located by title: the id was generated in the "before" process and
