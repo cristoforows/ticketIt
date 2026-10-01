@@ -55,23 +55,21 @@ export function SlipList({ className, ...rest }: ComponentPropsWithRef<"ul">) {
   return <ul className={cn("-mt-3 flex flex-col gap-4 px-1 group-data-drop-blocked/stage:opacity-40", className)} {...rest} />;
 }
 
-const spikedSlips = [
-  { tilt: -5, stripe: "fill-status-ready" },
-  { tilt: 4, stripe: "fill-status-in-progress" },
-  { tilt: -2, stripe: "fill-status-in-review" },
-];
+const slipTilts = [-4, 3, -2, 5, -3, 2, -5, 4, -1];
+const slipShifts = [0, 0.6, -0.5, 0.4, -0.7, 0.3, -0.4, 0.5, -0.2];
+const slipStripes = ["fill-status-ready", "fill-status-in-progress", "fill-status-in-review"];
 
 function Spike({ slips }: { slips: number }) {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 40" className="archive-spike h-10 w-6 shrink-0 origin-bottom fill-current">
       <path d="M12 0C12.4 8 13.2 19 13.8 31H10.2C10.8 19 11.6 8 12 0Z" />
       <path d="M2 39C2 33.5 6.5 30 12 30S22 33.5 22 39Z" />
-      {spikedSlips.slice(0, slips).map(({ tilt, stripe }, index) => {
-        const y = 25.5 - index * 4.8;
+      {slipTilts.slice(0, slips).map((tilt, index) => {
+        const y = 28.6 - index * 1.5;
         return (
-          <g key={index} transform={`rotate(${tilt} 12 ${y + 2})`} className="stroke-ground" strokeWidth=".5">
-            <rect x="4" y={y} width="16" height="4.5" rx=".6" className="fill-paper" />
-            <rect x="4" y={y} width="16" height="1.2" className={stripe} stroke="none" />
+          <g key={index} transform={`rotate(${tilt} 12 ${y + 0.65})`} className="stroke-ground" strokeWidth=".25">
+            <rect x={4 + slipShifts[index]} y={y} width="16" height="1.3" className="fill-paper" />
+            <rect x={4 + slipShifts[index]} y={y} width="16" height=".4" className={slipStripes[index % slipStripes.length]} stroke="none" />
           </g>
         );
       })}
@@ -89,9 +87,9 @@ export function ArchiveZone({ over, className, ...rest }: ComponentPropsWithRef<
       )}
       {...rest}
     >
-      <Spike slips={2} />
+      <Spike slips={6} />
       {over ? "Yes! Let go to archive it" : "Toss it on the spike!"}
-      <Spike slips={3} />
+      <Spike slips={9} />
     </div>
   );
 }
