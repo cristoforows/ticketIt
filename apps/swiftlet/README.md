@@ -369,12 +369,9 @@ fields, and nothing else in this app reacts to it.
 explicit "Not set." placeholder for whichever are still empty (a
 title-only capture has all four empty). **Edit mode** offers `title`
 plus the four refinement fields as plain `<input>`/`<textarea>`
-elements — **stored and rendered as plain text only; this app never
-parses or renders Markdown anywhere.** Report rendering as Markdown is
-explicitly M7's, per issue #58's own scope statement; if a future
-slice renders these fields as Markdown, that must be stated explicitly
-there and handled safely, not assumed from this slice's plain-text
-choice. Each refinement field's `<textarea>` is paired with its
+elements — **stored and rendered as plain text only.** The only
+Markdown this app renders is a delivered Round's Report (issue #136,
+below); Ticket fields stay plain text. Each refinement field's `<textarea>` is paired with its
 docs/ticket-creation.md guidance prompt, shown verbatim just above it
 (`data-testid="ticket-detail-guidance-goal"` etc.) — issue #58's own
 acceptance criterion requires these to match the source document
@@ -840,7 +837,9 @@ later Round is claimed).
 - **Markdown.** The Report renders with `react-markdown` (pinned
   exactly) and `skipHtml`, with no plugins. Raw HTML is never rendered
   and react-markdown's default URL filter blanks `javascript:`,
-  `vbscript:` and `data:` links (`ui/Markdown.test.tsx`). Typography
+  `vbscript:` and `data:` links (`ui/Markdown.test.tsx`). An image
+  whose source the filter blanked is not rendered, since an empty `src`
+  re-requests the page. Remote `https:` images still load. Typography
   uses the order-rail tokens through `cn()`.
 - **Parsing.** `parseRound` accepts `delivered` and requires a
   deliverable exactly when the state is `delivered`. `parseTicket`

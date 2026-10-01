@@ -1,5 +1,5 @@
 import type { ComponentPropsWithRef } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import { cn } from "./cn";
 
 const markdown = cn(
@@ -14,11 +14,16 @@ const markdown = cn(
   "[&_hr]:border-dashed [&_hr]:border-rule",
 );
 
+// The URL filter blanks an unsafe source, and an empty src makes the browser request the page again.
+const components: Components = {
+  img: ({ node: _node, src, ...props }) => (src ? <img src={src} {...props} /> : null),
+};
+
 // A Report is runner output: no raw HTML, no plugins, and react-markdown's default URL filter.
 export function Markdown({ children, className, ...rest }: { children: string } & Omit<ComponentPropsWithRef<"div">, "children">) {
   return (
     <div className={cn(markdown, className)} {...rest}>
-      <ReactMarkdown skipHtml>{children}</ReactMarkdown>
+      <ReactMarkdown skipHtml components={components}>{children}</ReactMarkdown>
     </div>
   );
 }

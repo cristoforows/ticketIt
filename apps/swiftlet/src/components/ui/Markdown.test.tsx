@@ -33,19 +33,26 @@ describe("Markdown", () => {
 
   it.each([
     ["javascript:", "[click](javascript:alert(1))"],
-    ["an upper-case JavaScript:", "[click](JavaScript:alert(1))"],
-    ["an entity-encoded javascript:", "[click](&#106;avascript:alert(1))"],
+    ["upper-case JavaScript:", "[click](JavaScript:alert(1))"],
+    ["entity-encoded javascript:", "[click](&#106;avascript:alert(1))"],
     ["vbscript:", "[click](vbscript:msgbox(1))"],
     ["data:", "[click](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)"],
-    ["a reference-style javascript:", "[click][x]\n\n[x]: javascript:alert(1)"],
-  ])("neutralises a %s link", (_name, body) => {
+    ["reference-style javascript:", "[click][x]\n\n[x]: javascript:alert(1)"],
+  ])("neutralises a link using %s", (_name, body) => {
     renderReport(body);
     const link = screen.getByText("click").closest("a");
     expect(link?.getAttribute("href") ?? "").not.toMatch(/^\s*(javascript|vbscript|data):/i);
   });
 
+  it("keeps an image with a safe source", () => {
+    const container = renderReport("![chart](https://example.com/chart.png)\n");
+    expect(container.querySelector("img")?.getAttribute("src")).toBe("https://example.com/chart.png");
+    expect(container.querySelector("img")?.getAttribute("alt")).toBe("chart");
+  });
+
   it("neutralises a javascript: image source and autolink", () => {
     const container = renderReport("![pic](javascript:alert(1))\n\n<javascript:alert(1)>\n");
+    expect(container.querySelector("img")).toBeNull();
     for (const element of container.querySelectorAll("[src], [href]")) {
       expect(element.getAttribute("src") ?? element.getAttribute("href")).not.toMatch(/^\s*javascript:/i);
     }
