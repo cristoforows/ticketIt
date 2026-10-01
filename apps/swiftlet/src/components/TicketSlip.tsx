@@ -1,6 +1,6 @@
 import type { DragEvent } from "react";
 import type { Ticket, TicketPlacement } from "../api/tickets";
-import { BadgeList, PendingTag, QueuedTag, Rule, shortDate, Slip, SlipPaper, SlipToggle, slipTilt, ticketSerial } from "./ui";
+import { BadgeList, ClaimedTag, PendingTag, QueuedTag, Rule, shortDate, Slip, SlipPaper, SlipToggle, slipTilt, ticketSerial } from "./ui";
 import { openTicketModal } from "../router";
 import { assigneeLabel } from "./assignee";
 import type { ReorderDirection } from "./ReorderButtons";
@@ -57,6 +57,9 @@ export function TicketSlip({ ticket, stageTickets, phone, pending, anyPending, s
         </div>
         {ticket.requestingAgentWork && ticket.assigneeAgent && (
           <QueuedTag data-testid="board-queued" className="self-start">Queued for {ticket.assigneeAgent.name}</QueuedTag>
+        )}
+        {ticket.openRound?.state === "claimed" && (
+          <ClaimedTag data-testid="board-claimed" className="self-start">Claimed by runner</ClaimedTag>
         )}
         <BadgeList data-testid="board-badges" badges={ticket.badges} />
         {pending && <PendingTag className="self-start">Moving…</PendingTag>}

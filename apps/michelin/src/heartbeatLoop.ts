@@ -11,7 +11,12 @@ export interface HeartbeatLoopOptions {
   logger: Logger;
   credential: RunnerCredential;
   identity: RegisterRunnerRequest;
+  registration: Registration;
   requestTimeoutMs?: number;
+}
+
+export interface Registration {
+  registered: boolean;
 }
 
 export interface HeartbeatLoop {
@@ -30,23 +35,23 @@ export function startHeartbeatLoop(options: HeartbeatLoopOptions): HeartbeatLoop
 }
 
 async function run(options: HeartbeatLoopOptions, signal: AbortSignal): Promise<void> {
-  const { galleyUrl, intervalMs, logger, identity } = options;
+  const { galleyUrl, intervalMs, logger, identity, registration } = options;
   const request = { fetch: options.fetch, galleyUrl, signal, timeoutMs: options.requestTimeoutMs, credential: options.credential };
-  let registered = false;
+  registration.registered = false;
   while (!signal.aborted) {
-    const step = registered ? "heartbeat" : "register";
-    const result = registered ? await sendHeartbeat(request) : await registerRunner(request, identity);
+    const step = registration.registered ? "heartbeat" : "register";
+    const result = registration.registered ? await sendHeartbeat(request) : await registerRunner(request, identity);
     if (result.ok) {
-      if (registered) {
+      if (registration.registered) {
         logger.info("runner heartbeat ok", { galleyUrl: galleyUrl.href, durationMs: result.durationMs, lastSeenAt: result.value });
       } else {
-        registered = true;
+        registration.registered = true;
         logger.info("runner registered", { galleyUrl: galleyUrl.href, durationMs: result.durationMs, registeredAt: result.value, ...identity });
       }
     } else {
       // Registering again rewrites registered_at in Galley, so only a lost registration or credential leads back to it.
       if (result.failure.reason === "not_registered" || result.failure.reason === "credential_rejected") {
-        registered = false;
+        registration.registered = false;
       }
       if (result.failure.reason === "not_registered") {
         logger.warn("runner not registered with galley; registering again", { galleyUrl: galleyUrl.href });

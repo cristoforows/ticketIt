@@ -833,3 +833,42 @@ func TestRunner_ResponsesMatchContractAndMethod405(t *testing.T) {
 	}
 	f.expect(t, runnerCall{method: http.MethodGet, path: "/api/runner/" + uuid.NewString(), token: pairing.Token}, http.StatusNotFound)
 }
+
+func TestClaim_ResponsesMatchContractAndMethod405(t *testing.T) {
+	f := newClaimFixture(t)
+	router, err := legacy.NewRouter(loadContract(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate := func(call runnerCall, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(call.method, call.path, strings.NewReader(call.body))
+		if call.token != "" {
+			req.Header.Set("Authorization", "Bearer "+call.token)
+		}
+		if call.cookie != nil {
+			req.AddCookie(call.cookie)
+		}
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("%s %s: status=%d, want %d; body=%s", call.method, call.path, rec.Code, want, rec.Body.String())
+		}
+		validateAgainstContract(t, router, req, rec)
+		return rec
+	}
+	claim := runnerCall{method: http.MethodPost, path: "/api/runner/claims", token: f.token}
+	validate(claim, http.StatusNoContent)
+	queued := f.queue(t, "contract")
+	validate(claim, http.StatusCreated)
+	validate(claim, http.StatusNoContent)
+	validate(runnerCall{method: http.MethodPost, path: "/api/runner/claims", cookie: f.cookie}, http.StatusUnauthorized)
+	validate(runnerCall{method: http.MethodGet, path: "/api/tickets/" + queued.Id, cookie: f.cookie}, http.StatusOK)
+	validate(runnerCall{method: http.MethodGet, path: "/api/tickets", cookie: f.cookie}, http.StatusOK)
+	validate(runnerCall{method: http.MethodPost, path: "/api/tickets/" + queued.Id + "/archive", cookie: f.cookie}, http.StatusBadRequest)
+
+	rec := f.expect(t, runnerCall{method: http.MethodGet, path: "/api/runner/claims", token: f.token}, http.StatusMethodNotAllowed)
+	if rec.Header().Get("Allow") != "POST" {
+		t.Fatalf("Allow = %q, want POST", rec.Header().Get("Allow"))
+	}
+}

@@ -12,6 +12,7 @@ const ticket = (id: string, status: string, template = "Basic") => ({
   assigneeType: "",
   assigneeAgent: null,
   requestingAgentWork: false,
+  openRound: null,
   goal: "",
   context: "",
   successCriteria: "",
@@ -106,6 +107,24 @@ describe("TicketBoard", () => {
 
     expect(within(await screen.findByTestId("board-ticket-queued")).getByTestId("board-queued")).toHaveTextContent("Queued for Builder");
     expect(within(screen.getByTestId("board-ticket-not-requested")).queryByTestId("board-queued")).not.toBeInTheDocument();
+  });
+
+  it("shows Claimed by runner only on slips whose open Round Galley reports as claimed", async () => {
+    const agent = { id: "a1", name: "Builder", kind: "coding" };
+    const round = { id: "r1", sequence: 1, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null };
+    stubTickets([
+      { ...ticket("claimed", "Ready"), assigneeType: "agent", assigneeAgent: agent, openRound: { ...round, state: "claimed" } },
+      { ...ticket("running", "Ready"), assigneeType: "agent", assigneeAgent: agent, openRound: { ...round, state: "running", startedAt: "2026-10-01T10:01:00Z" } },
+      { ...ticket("queued", "Ready"), assigneeType: "agent", assigneeAgent: agent, requestingAgentWork: true },
+    ]);
+
+    render(<TicketBoard onUnauthenticated={() => {}} />);
+
+    const claimed = within(await screen.findByTestId("board-ticket-claimed"));
+    expect(claimed.getByTestId("board-claimed")).toHaveTextContent("Claimed by runner");
+    expect(claimed.queryByTestId("board-queued")).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("board-ticket-running")).queryByTestId("board-claimed")).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("board-ticket-queued")).queryByTestId("board-claimed")).not.toBeInTheDocument();
   });
 
   it("shows empty sections even when there are no Tickets", async () => {

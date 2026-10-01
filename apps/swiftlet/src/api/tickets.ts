@@ -54,6 +54,35 @@ export class TicketNotFoundError extends Error {
   }
 }
 
+function parseOpenRound(value: unknown): Ticket["openRound"] | undefined {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "object") {
+    return undefined;
+  }
+  const round = value as Record<string, unknown>;
+  if (
+    typeof round.id !== "string" ||
+    typeof round.sequence !== "number" ||
+    (round.state !== "claimed" && round.state !== "running") ||
+    !isAgentSummary(round.agent) ||
+    typeof round.claimedAt !== "string" ||
+    !(round.startedAt === null || typeof round.startedAt === "string")
+  ) {
+    return undefined;
+  }
+  const agent = round.agent;
+  return {
+    id: round.id,
+    sequence: round.sequence,
+    state: round.state,
+    agent: { id: agent.id, name: agent.name, kind: agent.kind },
+    claimedAt: round.claimedAt,
+    startedAt: round.startedAt,
+  };
+}
+
 function parseTicket(payload: unknown): Ticket {
   if (typeof payload !== "object" || payload === null) {
     throw new Error("Galley's response body was not a JSON object.");
@@ -63,6 +92,7 @@ function parseTicket(payload: unknown): Ticket {
   const accept = actions?.accept as Record<string, unknown> | undefined;
   const reason = accept?.reason as Record<string, unknown> | undefined;
   const agent = record.assigneeAgent;
+  const openRound = parseOpenRound(record.openRound);
   const rejections = Array.isArray(actions?.statusChangeRejections)
     ? actions.statusChangeRejections.map((rejection: unknown) => {
       const entry = rejection as Record<string, unknown> | null;
@@ -79,6 +109,7 @@ function parseTicket(payload: unknown): Ticket {
     typeof record.assigneeType !== "string" ||
     !(agent === null || isAgentSummary(agent)) ||
     typeof record.requestingAgentWork !== "boolean" ||
+    openRound === undefined ||
     typeof record.goal !== "string" ||
     typeof record.context !== "string" ||
     typeof record.successCriteria !== "string" ||
@@ -122,6 +153,7 @@ function parseTicket(payload: unknown): Ticket {
     assigneeType: record.assigneeType as Ticket["assigneeType"],
     assigneeAgent: agent === null ? null : { id: agent.id, name: agent.name, kind: agent.kind },
     requestingAgentWork: record.requestingAgentWork,
+    openRound,
     badges: record.badges as Ticket["badges"],
     archivedAt: record.archivedAt,
     goal: record.goal,

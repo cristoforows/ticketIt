@@ -3,6 +3,7 @@ import type { RunnerCredential } from "../credentials.ts";
 import { callGalley, INVALID_JSON, isRecord, type GalleyRequest, type Outcome, type Timed, type TransportFailure } from "./client.ts";
 
 export type RegisterRunnerRequest = components["schemas"]["RegisterRunnerRequest"];
+export type RunnerClaim = components["schemas"]["RunnerClaim"];
 
 export type RunnerFailure =
   | TransportFailure
@@ -12,6 +13,10 @@ export type RunnerFailure =
   | { reason: "invalid_body"; error: string };
 
 export type RunnerResult = Timed<Outcome<string, RunnerFailure>>;
+
+export type ClaimFailure = Exclude<RunnerFailure, { reason: "not_registered" }>;
+
+export type ClaimResult = Timed<Outcome<RunnerClaim | null, ClaimFailure>>;
 
 export interface RunnerRequest extends GalleyRequest {
   credential: RunnerCredential;
@@ -52,4 +57,48 @@ async function runnerCall(request: RunnerRequest, path: string, body: string | u
     }
     return { ok: true, value };
   });
+}
+
+export function claimWork(request: RunnerRequest): Promise<ClaimResult> {
+  const headers = { accept: "application/json", authorization: request.credential.authorizationHeader() };
+  return callGalley<RunnerClaim | null, ClaimFailure>(request, "api/runner/claims", { method: "POST", headers }, async (response, readJson) => {
+    if (response.status === 204) {
+      await response.body?.cancel();
+      return { ok: true, value: null };
+    }
+    if (response.status === 401) {
+      await response.body?.cancel();
+      return { ok: false, failure: { reason: "credential_rejected", httpStatus: 401 } };
+    }
+    if (response.status !== 201) {
+      await response.body?.cancel();
+      return { ok: false, failure: { reason: "http_status", httpStatus: response.status } };
+    }
+    const payload = await readJson();
+    if (payload === INVALID_JSON) {
+      return { ok: false, failure: { reason: "invalid_body", error: "response is not valid JSON" } };
+    }
+    const claim = parseClaim(payload);
+    return typeof claim === "string" ? { ok: false, failure: { reason: "invalid_body", error: claim } } : { ok: true, value: claim };
+  });
+}
+
+function parseClaim(payload: unknown): RunnerClaim | string {
+  if (!isRecord(payload)) {
+    return "body is not a JSON object";
+  }
+  const { roundId, sequence, claimEpoch, ticket, agent } = payload;
+  if (typeof roundId !== "string") {
+    return "roundId is not a string";
+  }
+  if (!Number.isSafeInteger(sequence) || !Number.isSafeInteger(claimEpoch)) {
+    return "sequence or claimEpoch is not an integer";
+  }
+  if (!isRecord(ticket) || !["id", "title", "goal", "context", "successCriteria", "constraints", "repository"].every((field) => typeof ticket[field] === "string")) {
+    return "ticket is not a claimed Ticket";
+  }
+  if (!isRecord(agent) || typeof agent["id"] !== "string" || typeof agent["name"] !== "string" || typeof agent["kind"] !== "string") {
+    return "agent is not an Agent";
+  }
+  return payload as RunnerClaim;
 }

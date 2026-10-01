@@ -49,6 +49,7 @@ const TICKET = {
   assigneeType: "owner",
   assigneeAgent: null,
   requestingAgentWork: false,
+  openRound: null,
   goal: "Original goal",
   context: "",
   successCriteria: "",

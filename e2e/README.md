@@ -283,7 +283,19 @@ It waits for **Runner connected** in the header, stops Michelin, then
 calls the development-only `POST /api/dev/clock/advance` for 30 s so
 Galley's health window passes without a real wait, and waits for
 **Runner disconnected**. The Ticket list must be unchanged, and it
-stays unchanged after **Revoke**. `run.sh` checks its exit code.
+stays unchanged after **Revoke**. Its Michelin's claim interval is an
+hour, so no claim lands in that snapshot. `run.sh` checks its exit code.
+
+`tests/runner-claims.spec.ts` (issue #132) queues a research Ticket at
+the top of the Ready order, pairs through the Agents page
+(`support/runner.ts`, shared with `runner.spec.ts`), and starts a real
+Michelin polling claims every 500 ms. Galley's live Ticket must gain a
+claimed `openRound` while staying Ready with `requestingAgentWork`
+false, and the slip and receipt must show **Claimed by runner**. Archive
+from the receipt must show the live `round_open` message verbatim.
+After Michelin stops and the clock passes the health window, the Round
+is unchanged. It leaves the Owner's slot taken, so `run.sh` runs it
+after every spec that needs the slot free, and checks its exit code.
 
 `tests/ticket-priority-order.spec.ts` reorders three Ready Tickets by
 dragging onto the upper and lower halves of board slips, then with Move

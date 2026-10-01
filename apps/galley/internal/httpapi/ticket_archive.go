@@ -34,6 +34,10 @@ func writeMutationError(w http.ResponseWriter, err error, databaseMessage string
 		writeError(w, http.StatusBadRequest, archivedTicketCode, archivedTicketMessage)
 		return
 	}
+	if errors.Is(err, errRoundOpen) {
+		writeError(w, http.StatusBadRequest, roundOpenCode, roundOpenMessage)
+		return
+	}
 	writeError(w, http.StatusServiceUnavailable, "database_unavailable", databaseMessage)
 }
 
@@ -70,6 +74,13 @@ func archiveTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int6
 	found, err := lockTicketForMutation(ctx, tx, ownerID, id, false)
 	if err != nil || !found {
 		return Ticket{}, found, err
+	}
+	open, err := ticketHasOpenRound(ctx, tx, ownerID, id)
+	if err != nil {
+		return Ticket{}, true, err
+	}
+	if open {
+		return Ticket{}, true, errRoundOpen
 	}
 	row := tx.QueryRow(ctx, `UPDATE tickets SET archived_at = now(), updated_at = now()
 		WHERE owner_id = $1 AND public_id = $2::uuid RETURNING `+ticketSelectColumns, ownerID, id)

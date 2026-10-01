@@ -385,7 +385,7 @@ func TestRunnerCredentials_OneActiveRowPerOwnerIsEnforcedByTheDatabase(t *testin
 func TestRunnerEndpoints_RejectOwnerSessions(t *testing.T) {
 	f := newRunnerFixture(t)
 	token := f.pair(t).Token
-	for _, path := range []string{"/api/runner/register", "/api/runner/heartbeat"} {
+	for _, path := range []string{"/api/runner/register", "/api/runner/heartbeat", "/api/runner/claims"} {
 		for name, call := range map[string]runnerCall{
 			"no credential":             {},
 			"session cookie":            {cookie: f.cookie},

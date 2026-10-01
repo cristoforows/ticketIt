@@ -4,8 +4,10 @@ ticketIt's runner: a long-lived TypeScript/Node process. It checks
 Galley's `GET /api/status` on an interval
 ([#129](https://github.com/cristoforows/ticketIt/issues/129)), and
 registers and heartbeats with its runner credential
-([#130](https://github.com/cristoforows/ticketIt/issues/130)). No
-claims or engine yet. Every connection is outbound; Michelin opens no
+([#130](https://github.com/cristoforows/ticketIt/issues/130)), and
+claims one Round
+([#132](https://github.com/cristoforows/ticketIt/issues/132)). No
+engine yet. Every connection is outbound; Michelin opens no
 listening socket. See
 [ADR 0001](../../docs/adr/0001-single-authority-galley.md): Michelin
 reports facts to Galley and owns no workflow rule.
@@ -37,6 +39,7 @@ when it exists.
 | `GALLEY_URL` | `http://localhost:8080` | Galley's base URL, `http` or `https`. |
 | `MICHELIN_RUNNER_TOKEN` | none (required) | The runner credential from **Pair runner**: `tir_` and 43 base64url characters. |
 | `MICHELIN_HEARTBEAT_INTERVAL_MS` | `10000` | Wait between the end of one register/heartbeat request and the start of the next. Positive integer. |
+| `MICHELIN_CLAIM_INTERVAL_MS` | `5000` | Wait before each claim poll. Positive integer. |
 | `MICHELIN_STATUS_INTERVAL_MS` | `10000` | Wait between the end of one status check and the start of the next. Positive integer. |
 
 A missing or invalid value logs an `invalid configuration` error
@@ -67,7 +70,7 @@ credential immediately; Michelin then logs `runner credential rejected`.
 
 ## Behaviour
 
-Two independent loops run side by side:
+Three loops run side by side:
 
 - **Status:** `GET /api/status` at start, then again
   `MICHELIN_STATUS_INTERVAL_MS` after each check finishes. It reports
@@ -80,6 +83,13 @@ Two independent loops run side by side:
   or `401` leads back to registering; a timeout, an unreachable Galley
   or another failed heartbeat is retried as a heartbeat, so Galley's
   `registeredAt` does not move on a network blip.
+- **Claim:** every `MICHELIN_CLAIM_INTERVAL_MS`, while the runner loop
+  holds a successful registration, `POST /api/runner/claims` with no
+  body. `204` means no work and is not logged. On `201` Michelin logs
+  the Round and stops polling for the rest of the process: it holds that
+  Round, and running it is
+  [#134](https://github.com/cristoforows/ticketIt/issues/134). A claim
+  is not a heartbeat, and a failed claim never stops the runner loop.
 
 Requests in one loop never overlap. Each request times out after 5
 seconds. Logs are one JSON object per line on stdout: `time`, `level`,
@@ -92,9 +102,11 @@ seconds. Logs are one JSON object per line on stdout: `time`, `level`,
 | `galley status check failed` | `error` | See `reason` below. |
 | `runner registered` | `info` | Galley accepted the credential; `registeredAt`, `michelinVersion`, `hostname`. |
 | `runner heartbeat ok` | `info` | Galley recorded `lastSeenAt`. |
-| `runner credential rejected` | `error` | `401` on `step` `register` or `heartbeat`: the credential is wrong or revoked. |
+| `runner credential rejected` | `error` | `401` on `step` `register`, `heartbeat` or `claim`: the credential is wrong or revoked. |
 | `runner not registered with galley; registering again` | `warn` | `409 runner_not_registered`; registers immediately. |
 | `runner register failed`, `runner heartbeat failed` | `error` | See `reason` below. |
+| `round claimed; claim polling stopped` | `info` | `roundId`, `sequence`, `claimEpoch`, `ticketId`, `ticketTitle`. No other Ticket field is logged. |
+| `runner claim failed` | `error` | See `reason` below; polling continues. |
 
 A rejected credential does not stop Michelin: it keeps retrying
 registration at the heartbeat interval, so a supervisor does not
@@ -106,10 +118,10 @@ restart-loop it. Pair again, update `.env`, and restart Michelin.
 |---|---|
 | `unreachable` | No response (`code`, e.g. `ECONNREFUSED`, when the OS gave one). |
 | `timeout` | No complete response within `timeoutMs`. |
-| `http_status` | Non-2xx; `httpStatus` holds it. |
+| `http_status` | Non-2xx, or for a claim anything but `201` or `204`; `httpStatus` holds it. |
 | `invalid_body` | 2xx, but the body is not the expected response. |
 
-`SIGINT` or `SIGTERM` aborts in-flight requests, clears both timers,
+`SIGINT` or `SIGTERM` aborts in-flight requests, clears every timer,
 logs `michelin stopping` and `michelin stopped`, and exits with code 0.
 
 ## Generated types
@@ -132,8 +144,9 @@ src/
 ├── credentials.ts    # the only reader of MICHELIN_RUNNER_TOKEN
 ├── logger.ts         # JSON-lines logger
 ├── statusLoop.ts     # status interval loop and shutdown
-├── heartbeatLoop.ts  # register, then heartbeat
+├── heartbeatLoop.ts  # register, then heartbeat; owns the shared registration flag
+├── claimLoop.ts      # claim poll while registered, until the first Round
 ├── galley/client.ts  # request helper and GET /api/status
-├── galley/runner.ts  # register and heartbeat requests
+├── galley/runner.ts  # register, heartbeat and claim requests
 └── api/generated/schema.d.ts
 ```

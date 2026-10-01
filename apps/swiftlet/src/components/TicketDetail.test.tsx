@@ -17,6 +17,7 @@ const TICKET: Ticket = {
   assigneeType: "",
   assigneeAgent: null,
   requestingAgentWork: false,
+  openRound: null,
   goal: "",
   context: "",
   successCriteria: "",
@@ -558,6 +559,16 @@ describe("TicketDetail", () => {
 
         rerender(<TicketDetail ticket={{ ...REFINED_TICKET, status: "Ready", assigneeType: "agent", assigneeAgent: agent, requestingAgentWork: false }} onSave={vi.fn()} {...noopActions()} />);
         expect(screen.queryByTestId("ticket-detail-queued")).not.toBeInTheDocument();
+      });
+
+      it("shows Claimed by runner only while Galley reports the open Round as claimed", () => {
+        const round = { id: "r1", sequence: 1, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null };
+        const { rerender } = render(<TicketDetail ticket={{ ...agentTicket, status: "Ready", openRound: { ...round, state: "claimed" } }} onSave={vi.fn()} {...noopActions()} />);
+        expect(screen.getByTestId("ticket-detail-claimed")).toHaveTextContent("Claimed by runner");
+        expect(screen.queryByTestId("ticket-detail-queued")).not.toBeInTheDocument();
+
+        rerender(<TicketDetail ticket={{ ...agentTicket, status: "Ready", openRound: { ...round, state: "running", startedAt: "2026-10-01T10:01:00Z" } }} onSave={vi.fn()} {...noopActions()} />);
+        expect(screen.queryByTestId("ticket-detail-claimed")).not.toBeInTheDocument();
       });
 
       it("shows Galley's reasons beside the Status control and marks exactly the fields Galley lists", () => {

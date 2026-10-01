@@ -24,6 +24,7 @@ const TICKET = {
   assigneeType: "",
   assigneeAgent: null,
   requestingAgentWork: false,
+  openRound: null,
   goal: "",
   context: "",
   successCriteria: "",
@@ -238,6 +239,46 @@ describe("TicketDetailPage", () => {
 
     await waitFor(() => expect(`${window.location.pathname}${window.location.search}`).toBe("/board?badgeId=first"));
     window.history.pushState({}, "", "/");
+  });
+
+  describe("an open Round", () => {
+    const agent = { id: AGENTS[0].id, name: "atlas", kind: "research" };
+    const claimedRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null };
+    const claimed = { ...TICKET, status: "Ready", assigneeType: "agent", assigneeAgent: agent, successCriteria: "done", openRound: claimedRound };
+
+    it("shows Claimed by runner from Galley's openRound", async () => {
+      stubFetch(jsonResponse(claimed));
+      render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+      expect(await screen.findByTestId("ticket-detail-claimed")).toHaveTextContent("Claimed by runner");
+      expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("Ready");
+      expect(screen.queryByTestId("ticket-detail-queued")).not.toBeInTheDocument();
+    });
+
+    it("shows Galley's round_open rejection on the archive control and stays on the receipt", async () => {
+      const rejection = "this Ticket has an open Round; it can be archived once the Round ends";
+      vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
+      stubGalley(vi.fn()
+        .mockResolvedValueOnce(jsonResponse(claimed))
+        .mockResolvedValueOnce(jsonResponse({ error: { code: "round_open", message: rejection } }, 400)));
+      render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+      await screen.findByTestId("ticket-detail-claimed");
+
+      fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+
+      expect(await screen.findByTestId("ticket-detail-action-error")).toHaveTextContent(rejection);
+      expect(screen.getByTestId("ticket-detail-claimed")).toBeInTheDocument();
+    });
+
+    it.each([
+      { name: "no openRound", openRound: undefined },
+      { name: "an unknown Round state", openRound: { ...claimedRound, state: "delivered" } },
+      { name: "a Round with no Agent", openRound: { ...claimedRound, agent: null } },
+      { name: "a Round with no claimedAt", openRound: { ...claimedRound, claimedAt: undefined } },
+    ])("rejects a Ticket response with $name", async ({ openRound }) => {
+      stubFetch(jsonResponse({ ...claimed, openRound }));
+      render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+      expect(await screen.findByText("Galley's Ticket response was missing a required field.")).toBeInTheDocument();
+    });
   });
 
   it("re-fetches when the ticketId prop changes", async () => {

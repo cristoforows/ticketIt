@@ -89,6 +89,24 @@ func (e DatabaseStatusStatus) Valid() bool {
 	}
 }
 
+// Defines values for RoundState.
+const (
+	RoundClaimed RoundState = "claimed"
+	RoundRunning RoundState = "running"
+)
+
+// Valid indicates whether the value is a known member of the RoundState enum.
+func (e RoundState) Valid() bool {
+	switch e {
+	case RoundClaimed:
+		return true
+	case RoundRunning:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RunnerHealthState.
 const (
 	RunnerConnected    RunnerHealthState = "connected"
@@ -298,6 +316,17 @@ type ChangeTicketStatusRequest struct {
 	Status TicketStatus `json:"status"`
 }
 
+// ClaimedTicket defines model for ClaimedTicket.
+type ClaimedTicket struct {
+	Constraints     string `json:"constraints"`
+	Context         string `json:"context"`
+	Goal            string `json:"goal"`
+	Id              string `json:"id"`
+	Repository      string `json:"repository"`
+	SuccessCriteria string `json:"successCriteria"`
+	Title           string `json:"title"`
+}
+
 // CreateAgentRequest defines model for CreateAgentRequest.
 type CreateAgentRequest struct {
 	// Kind Set at creation and never changed in M4.
@@ -413,6 +442,20 @@ type ReorderTicketRequest struct {
 	Before *string `json:"before,omitempty"`
 }
 
+// RoundState The open states. A claimed Round leaves the Ticket Ready.
+type RoundState string
+
+// RunnerClaim defines model for RunnerClaim.
+type RunnerClaim struct {
+	Agent TicketAssigneeAgent `json:"agent"`
+
+	// ClaimEpoch Fencing token; events must carry it with `roundId`.
+	ClaimEpoch int           `json:"claimEpoch"`
+	RoundId    string        `json:"roundId"`
+	Sequence   int           `json:"sequence"`
+	Ticket     ClaimedTicket `json:"ticket"`
+}
+
 // RunnerHealth defines model for RunnerHealth.
 type RunnerHealth struct {
 	// CheckedAt Galley's clock when `state` was derived.
@@ -509,10 +552,13 @@ type Ticket struct {
 	// Id Opaque public identifier (issue #57), used in URLs and by GET /api/tickets/{id}. Non-sequential and non-guessable -- never the internal sequential database id, which no Galley endpoint exposes.
 	Id string `json:"id"`
 
+	// OpenRound Null unless the Ticket has an open Round.
+	OpenRound *TicketOpenRound `json:"openRound"`
+
 	// Repository One Ticket repository reference (issue #59, D3 S1 check 3), available on either Template, and required before Ready only by a `coding` Agent's readiness. There is exactly one such field on a Ticket; the Coding Template surfaces it by default, but it is not a competing Basic-only concept. Plain text (e.g. an "owner/repo" name or a URL) with no format enforced yet. Always present on the wire; "" means never set or cleared -- see `goal`'s description for the same convention.
 	Repository string `json:"repository"`
 
-	// RequestingAgentWork Unarchived, Ready, Agent-assigned, and every AgentReadinessInput that Agent needs is present. Creates no Round by itself.
+	// RequestingAgentWork Unarchived, Ready, Agent-assigned, every AgentReadinessInput that Agent needs is present, and no open Round. Creates no Round by itself.
 	RequestingAgentWork bool `json:"requestingAgentWork"`
 
 	// Status A Ticket's lifecycle stage (CONTEXT.md, "Status"). Moves between these values are validated against the persisted current Status per D3 S2 (docs/decisions/d3-agent-template-compatibility.md). `Done` is reachable only through explicit Accept.
@@ -572,6 +618,19 @@ type TicketCompletionCondition string
 // TicketList The signed-in Owner's Tickets, newest first (createdAt descending, id descending as the tiebreak).
 type TicketList struct {
 	Tickets []Ticket `json:"tickets"`
+}
+
+// TicketOpenRound defines model for TicketOpenRound.
+type TicketOpenRound struct {
+	// Agent The Agent assigned when the Round was claimed.
+	Agent     TicketAssigneeAgent `json:"agent"`
+	ClaimedAt time.Time           `json:"claimedAt"`
+	Id        string              `json:"id"`
+	Sequence  int                 `json:"sequence"`
+	StartedAt *time.Time          `json:"startedAt"`
+
+	// State The open states. A claimed Round leaves the Ticket Ready.
+	State RoundState `json:"state"`
 }
 
 // TicketStatus A Ticket's lifecycle stage (CONTEXT.md, "Status"). Moves between these values are validated against the persisted current Status per D3 S2 (docs/decisions/d3-agent-template-compatibility.md). `Done` is reachable only through explicit Accept.
@@ -704,6 +763,9 @@ type ServerInterface interface {
 	// GetRunnerHealth Runner health
 	// (GET /api/runner-health)
 	GetRunnerHealth(w http.ResponseWriter, r *http.Request)
+	// ClaimWork Claim the next Round
+	// (POST /api/runner/claims)
+	ClaimWork(w http.ResponseWriter, r *http.Request)
 	// RunnerHeartbeat Runner heartbeat
 	// (POST /api/runner/heartbeat)
 	RunnerHeartbeat(w http.ResponseWriter, r *http.Request)
@@ -999,6 +1061,20 @@ func (siw *ServerInterfaceWrapper) GetRunnerHealth(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetRunnerHealth(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ClaimWork operation middleware
+func (siw *ServerInterfaceWrapper) ClaimWork(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ClaimWork(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1592,6 +1668,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/runner-health", wrapper.GetRunnerHealth)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner/register", wrapper.RegisterRunner)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner/heartbeat", wrapper.RunnerHeartbeat)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner/claims", wrapper.ClaimWork)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/dev/clock/advance", wrapper.AdvanceDevClock)
 
 	return m

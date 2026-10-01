@@ -736,7 +736,8 @@ paths:
       description: >-
         Retains the Ticket, its Status and Badges while removing it from
         default collections. A second archive is rejected with
-        archived_ticket; an unknown, malformed or foreign id returns 404.
+        archived_ticket, and a Ticket with an open Round with
+        round_open; an unknown, malformed or foreign id returns 404.
       responses:
         "200":
           description: The archived Ticket.
@@ -966,6 +967,33 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorBody"
+  /api/runner/claims:
+    post:
+      operationId: claimWork
+      summary: Claim the next Round
+      tags: [runner-api]
+      description: >-
+        Claims the Owner's highest-priority Ticket that is requesting
+        Agent work and creates its Round. `204` when nothing is
+        requesting work, a Round is already open, or the runner is not
+        connected. Not a heartbeat.
+      security:
+        - runnerBearer: []
+      responses:
+        "201":
+          description: The Round created by this claim.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunnerClaim"
+        "204":
+          description: No Round was claimed.
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
   /api/dev/clock/advance:
     post:
       operationId: advanceDevClock
@@ -1155,6 +1183,7 @@ components:
           assigneeType,
           assigneeAgent,
           requestingAgentWork,
+          openRound,
           goal,
           context,
           successCriteria,
@@ -1206,9 +1235,14 @@ components:
         requestingAgentWork:
           type: boolean
           description: >-
-            Unarchived, Ready, Agent-assigned, and every
-            AgentReadinessInput that Agent needs is present. Creates no
+            Unarchived, Ready, Agent-assigned, every AgentReadinessInput
+            that Agent needs is present, and no open Round. Creates no
             Round by itself.
+        openRound:
+          description: Null unless the Ticket has an open Round.
+          oneOf:
+            - $ref: "#/components/schemas/TicketOpenRound"
+            - type: "null"
         completionCondition:
           $ref: "#/components/schemas/TicketCompletionCondition"
         goal:
@@ -1264,6 +1298,25 @@ components:
             createdAt until a transition (#60) or a refinement edit
             (#58) changes it.
           x-go-type: string
+    RoundState:
+      type: string
+      description: The open states. A claimed Round leaves the Ticket Ready.
+      enum: [claimed, running]
+      x-enum-varnames: [RoundClaimed, RoundRunning]
+    TicketOpenRound:
+      type: object
+      additionalProperties: false
+      required: [id, sequence, state, agent, claimedAt, startedAt]
+      properties:
+        id: {type: string, format: uuid, x-go-type: string}
+        sequence: {type: integer, minimum: 1}
+        state:
+          $ref: "#/components/schemas/RoundState"
+        agent:
+          description: The Agent assigned when the Round was claimed.
+          $ref: "#/components/schemas/TicketAssigneeAgent"
+        claimedAt: {type: string, format: date-time}
+        startedAt: {type: [string, "null"], format: date-time}
     TicketList:
       type: object
       description: >-
@@ -1619,6 +1672,33 @@ components:
       required: [lastSeenAt]
       properties:
         lastSeenAt: {type: string, format: date-time}
+    RunnerClaim:
+      type: object
+      additionalProperties: false
+      required: [roundId, sequence, claimEpoch, ticket, agent]
+      properties:
+        roundId: {type: string, format: uuid, x-go-type: string}
+        sequence: {type: integer, minimum: 1}
+        claimEpoch:
+          type: integer
+          minimum: 1
+          description: Fencing token; events must carry it with `roundId`.
+        ticket:
+          $ref: "#/components/schemas/ClaimedTicket"
+        agent:
+          $ref: "#/components/schemas/TicketAssigneeAgent"
+    ClaimedTicket:
+      type: object
+      additionalProperties: false
+      required: [id, title, goal, context, successCriteria, constraints, repository]
+      properties:
+        id: {type: string, format: uuid, x-go-type: string}
+        title: {type: string}
+        goal: {type: string}
+        context: {type: string}
+        successCriteria: {type: string}
+        constraints: {type: string}
+        repository: {type: string}
     AdvanceDevClockRequest:
       type: object
       additionalProperties: false

@@ -18,6 +18,7 @@ const CREATED = {
   assigneeType: "",
   assigneeAgent: null,
   requestingAgentWork: false,
+  openRound: null,
   goal: "",
   context: "",
   successCriteria: "",

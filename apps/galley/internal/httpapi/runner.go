@@ -33,7 +33,9 @@ type runnerRecord struct {
 
 type authenticatedRunner struct {
 	id         int64
+	ownerID    int64
 	registered bool
+	lastSeenAt *time.Time
 }
 
 // Truncated to PostgreSQL's microsecond precision so a response agrees with the value read back.
@@ -52,7 +54,7 @@ func runnerHealth(now time.Time, rec *runnerRecord) RunnerHealth {
 		return RunnerHealth{State: RunnerNotPaired, CheckedAt: now}
 	}
 	state := RunnerDisconnected
-	if rec.lastSeenAt != nil && now.Sub(*rec.lastSeenAt) < runnerHealthWindow {
+	if runnerConnected(now, rec.lastSeenAt) {
 		state = RunnerConnected
 	}
 	pairedAt := rec.pairedAt.UTC()
@@ -65,6 +67,10 @@ func runnerHealth(now time.Time, rec *runnerRecord) RunnerHealth {
 		MichelinVersion: rec.michelinVersion,
 		Hostname:        rec.hostname,
 	}
+}
+
+func runnerConnected(now time.Time, lastSeenAt *time.Time) bool {
+	return lastSeenAt != nil && now.Sub(*lastSeenAt) < runnerHealthWindow
 }
 
 func utcOrNil(t *time.Time) *time.Time {
@@ -175,8 +181,8 @@ func (s *server) requireRunner(w http.ResponseWriter, r *http.Request) (authenti
 	ctx, cancel := context.WithTimeout(r.Context(), runnerTimeout)
 	defer cancel()
 	var runner authenticatedRunner
-	err := s.pool.QueryRow(ctx, `SELECT id, registered_at IS NOT NULL FROM runners WHERE token_hash = $1`, hash).
-		Scan(&runner.id, &runner.registered)
+	err := s.pool.QueryRow(ctx, `SELECT id, owner_id, registered_at IS NOT NULL, last_seen_at FROM runners WHERE token_hash = $1`, hash).
+		Scan(&runner.id, &runner.ownerID, &runner.registered, &runner.lastSeenAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeUnauthenticated(w)
 		return authenticatedRunner{}, false

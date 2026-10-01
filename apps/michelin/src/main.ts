@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { hostname } from "node:os";
+import { startClaimLoop } from "./claimLoop.ts";
 import { ConfigError, loadConfig } from "./config.ts";
 import { startHeartbeatLoop } from "./heartbeatLoop.ts";
 import { stdoutLogger } from "./logger.ts";
@@ -15,10 +16,12 @@ try {
     galleyUrl: config.galleyUrl.href,
     statusIntervalMs: config.statusIntervalMs,
     heartbeatIntervalMs: config.heartbeatIntervalMs,
+    claimIntervalMs: config.claimIntervalMs,
     node: process.version,
     ...identity,
   });
 
+  const registration = { registered: false };
   const loops = [
     startStatusLoop({ galleyUrl: config.galleyUrl, intervalMs: config.statusIntervalMs, fetch, logger }),
     startHeartbeatLoop({
@@ -28,6 +31,15 @@ try {
       logger,
       credential: config.runnerCredential,
       identity,
+      registration,
+    }),
+    startClaimLoop({
+      galleyUrl: config.galleyUrl,
+      intervalMs: config.claimIntervalMs,
+      fetch,
+      logger,
+      credential: config.runnerCredential,
+      registration,
     }),
   ];
 

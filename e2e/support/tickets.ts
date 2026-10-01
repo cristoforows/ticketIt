@@ -24,6 +24,15 @@ export interface Ticket {
     statusChangeRejections: { status: TicketStatus; reason: ErrorDetail }[];
   };
   requestingAgentWork: boolean;
+  /** Null unless a Round is open (issue #132). */
+  openRound: {
+    id: string;
+    sequence: number;
+    state: "claimed" | "running";
+    agent: { id: string; name: string; kind: AgentKind };
+    claimedAt: string;
+    startedAt: string | null;
+  } | null;
   /** Chosen at capture (issue #59), default Basic -- see docs/ticket-creation.md. */
   template: TicketTemplate;
   /** Derived from template's default once, at creation, and retained thereafter (issue #59, D3). */

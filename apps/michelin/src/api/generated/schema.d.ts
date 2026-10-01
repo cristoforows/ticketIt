@@ -339,7 +339,7 @@ export interface paths {
         put?: never;
         /**
          * Archive a Ticket
-         * @description Retains the Ticket, its Status and Badges while removing it from default collections. A second archive is rejected with archived_ticket; an unknown, malformed or foreign id returns 404.
+         * @description Retains the Ticket, its Status and Badges while removing it from default collections. A second archive is rejected with archived_ticket, and a Ticket with an open Round with round_open; an unknown, malformed or foreign id returns 404.
          */
         post: operations["archiveTicket"];
         delete?: never;
@@ -500,6 +500,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runner/claims": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Claim the next Round
+         * @description Claims the Owner's highest-priority Ticket that is requesting Agent work and creates its Round. `204` when nothing is requesting work, a Round is already open, or the runner is not connected. Not a heartbeat.
+         */
+        post: operations["claimWork"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/dev/clock/advance": {
         parameters: {
             query?: never;
@@ -616,8 +636,10 @@ export interface components {
             assigneeType: components["schemas"]["TicketAssigneeType"];
             /** @description Null unless `assigneeType` is `agent`. */
             assigneeAgent: components["schemas"]["TicketAssigneeAgent"] | null;
-            /** @description Unarchived, Ready, Agent-assigned, and every AgentReadinessInput that Agent needs is present. Creates no Round by itself. */
+            /** @description Unarchived, Ready, Agent-assigned, every AgentReadinessInput that Agent needs is present, and no open Round. Creates no Round by itself. */
             requestingAgentWork: boolean;
+            /** @description Null unless the Ticket has an open Round. */
+            openRound: components["schemas"]["TicketOpenRound"] | null;
             completionCondition: components["schemas"]["TicketCompletionCondition"];
             /** @description Manual refinement (issue #58, docs/ticket-creation.md, "Manual guidance" -- prompt "What outcome do you want?"). Plain text, never Markdown (M7 owns report rendering). Always present on the wire; "" means never set or cleared -- read access never distinguishes those two, only PATCH's request body does (see UpdateTicketRequest). */
             goal: string;
@@ -639,6 +661,23 @@ export interface components {
              * @description RFC3339 UTC timestamp of the Ticket's last change. Equal to createdAt until a transition (#60) or a refinement edit (#58) changes it.
              */
             updatedAt: string;
+        };
+        /**
+         * @description The open states. A claimed Round leaves the Ticket Ready.
+         * @enum {string}
+         */
+        RoundState: "claimed" | "running";
+        TicketOpenRound: {
+            /** Format: uuid */
+            id: string;
+            sequence: number;
+            state: components["schemas"]["RoundState"];
+            /** @description The Agent assigned when the Round was claimed. */
+            agent: components["schemas"]["TicketAssigneeAgent"];
+            /** Format: date-time */
+            claimedAt: string;
+            /** Format: date-time */
+            startedAt: string | null;
         };
         /** @description The signed-in Owner's Tickets, newest first (createdAt descending, id descending as the tiebreak). */
         TicketList: {
@@ -795,6 +834,25 @@ export interface components {
         RunnerHeartbeat: {
             /** Format: date-time */
             lastSeenAt: string;
+        };
+        RunnerClaim: {
+            /** Format: uuid */
+            roundId: string;
+            sequence: number;
+            /** @description Fencing token; events must carry it with `roundId`. */
+            claimEpoch: number;
+            ticket: components["schemas"]["ClaimedTicket"];
+            agent: components["schemas"]["TicketAssigneeAgent"];
+        };
+        ClaimedTicket: {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            goal: string;
+            context: string;
+            successCriteria: string;
+            constraints: string;
+            repository: string;
         };
         AdvanceDevClockRequest: {
             seconds: number;
@@ -1752,6 +1810,42 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["RunnerHeartbeat"];
                 };
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    claimWork: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Round created by this claim. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerClaim"];
+                };
+            };
+            /** @description No Round was claimed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Error. See `ErrorBody`. */
             default: {

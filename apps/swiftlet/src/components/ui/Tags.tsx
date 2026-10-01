@@ -10,6 +10,7 @@ const tag = cva("inline-block rounded-tag text-label uppercase", {
       badge: "bg-ink px-1.5 py-px text-paper",
       pending: "bg-ink px-2 py-0.5 font-bold tracking-label text-amber",
       queued: "border border-status-ready-deep bg-paper px-2 py-px font-bold tracking-label text-status-ready-deep",
+      claimed: "border border-ink bg-paper px-2 py-px font-bold tracking-label text-ink",
     },
   },
 });
@@ -33,6 +34,10 @@ export function BadgeTag({ className, ...rest }: ComponentPropsWithRef<"span">) 
 
 export function QueuedTag({ className, ...rest }: ComponentPropsWithRef<"span">) {
   return <span className={cn(tag({ kind: "queued" }), className)} {...rest} />;
+}
+
+export function ClaimedTag({ className, ...rest }: ComponentPropsWithRef<"span">) {
+  return <span className={cn(tag({ kind: "claimed" }), className)} {...rest} />;
 }
 
 export function PendingTag({ className, ...rest }: ComponentPropsWithRef<"span">) {
