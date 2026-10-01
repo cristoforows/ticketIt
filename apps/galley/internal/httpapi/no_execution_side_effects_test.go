@@ -121,6 +121,13 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 	if resp := unassignHTTP(t, client, baseURL, created.Id); resp.status != http.StatusOK {
 		t.Fatalf("unassign: status = %d, want 200; error=%+v", resp.status, resp.errBody)
 	}
+	neighbour := createTicket(t, client, baseURL, uniqueTitle(t))
+	if resp := changeStatus(t, client, baseURL, neighbour.Id, Ready); resp.status != http.StatusOK {
+		t.Fatalf("change the neighbour to Ready: status = %d, want 200; error=%+v", resp.status, resp.errBody)
+	}
+	if resp := doLifecycleRequest(t, client, http.MethodPost, baseURL+"/api/tickets/"+neighbour.Id+"/position", ReorderTicketRequest{Before: &created.Id}); resp.status != http.StatusOK {
+		t.Fatalf("reorder: status = %d, want 200; error=%+v", resp.status, resp.errBody)
+	}
 	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/tickets/"+created.Id+"/archive", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -160,7 +167,11 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 	for _, table := range knownPublicTables {
 		after := tableRowCount(t, pool, table)
 		switch table {
-		case "tickets", "agents":
+		case "tickets":
+			if after != before[table]+2 {
+				t.Errorf("%s row count = %d, want %d (before %d + the two rows this test created)", table, after, before[table]+2, before[table])
+			}
+		case "agents":
 			if after != before[table]+1 {
 				t.Errorf("%s row count = %d, want %d (before %d + the one row this test created)", table, after, before[table]+1, before[table])
 			}

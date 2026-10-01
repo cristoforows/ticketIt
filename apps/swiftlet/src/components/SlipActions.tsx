@@ -1,18 +1,21 @@
 import { useState } from "react";
-import type { Ticket } from "../api/tickets";
+import type { Ticket, TicketPlacement } from "../api/tickets";
+import { ReorderButtons, type ReorderDirection } from "./ReorderButtons";
 import { PrimaryButton, SecondaryButton, SlipPaper, statusLabel, ticketSerial } from "./ui";
 
 interface SlipActionsProps {
   id: string;
   ticket: Ticket;
+  stageTickets: Ticket[];
   targets: Ticket["status"][];
   disabled: boolean;
   onView: () => void;
   onEdit: () => void;
   onMove: (target: Ticket["status"]) => void;
+  onReorder: (placement: TicketPlacement, direction: ReorderDirection) => void;
 }
 
-export function SlipActions({ id, ticket, targets, disabled, onView, onEdit, onMove }: SlipActionsProps) {
+export function SlipActions({ id, ticket, stageTickets, targets, disabled, onView, onEdit, onMove, onReorder }: SlipActionsProps) {
   const [choosing, setChoosing] = useState(false);
   const archived = ticket.archivedAt !== null;
   const editReason = archived ? ticket.allowedActions.accept.reason?.message ?? "Archived Tickets are read-only." : undefined;
@@ -34,6 +37,7 @@ export function SlipActions({ id, ticket, targets, disabled, onView, onEdit, onM
         >
           Move stage
         </SecondaryButton>
+        {!archived && <ReorderButtons ticket={ticket} tickets={stageTickets} disabled={disabled} testIdPrefix="board-slip" stacked onReorder={onReorder} />}
         {choosing && (
           <ul id={listId} aria-label="Move to" className="m-0 flex list-none flex-col gap-2 p-0">
             {targets.map((target) => (

@@ -147,7 +147,7 @@ function parseTicketList(payload: unknown): Ticket[] {
 
 /**
  * Fetches the signed-in Owner's Tickets, in the order Galley returns
- * them (newest first, apps/galley/README.md's "Ticket ordering").
+ * them (apps/galley/README.md's "Ticket ordering").
  * Throws on every failure -- unreachable, 401, non-2xx, or an
  * off-contract shape -- so callers render an explicit state rather
  * than a partial or stale list.
@@ -359,4 +359,14 @@ export async function archiveTicket(id: string): Promise<Ticket> {
 
 export async function restoreTicket(id: string): Promise<Ticket> {
   return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(id)}/restore`, { method: "POST" });
+}
+
+export type TicketPlacement = { before: string } | { after: string };
+
+export async function reorderTicket(id: string, placement: TicketPlacement): Promise<Ticket> {
+  return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(id)}/position`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(placement),
+  });
 }

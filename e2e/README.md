@@ -285,6 +285,14 @@ Galley's health window passes without a real wait, and waits for
 **Runner disconnected**. The Ticket list must be unchanged, and it
 stays unchanged after **Revoke**. `run.sh` checks its exit code.
 
+`tests/ticket-priority-order.spec.ts` reorders three Ready Tickets by
+dragging onto the upper and lower halves of board slips, then with Move
+up and Move down in the list. After each step the rendered order must
+match Galley's live `GET /api/tickets`, and the same order must survive a
+reload on both views. A second test makes the list stale, and the Move up
+rejection must show Galley's `reorder_anchor_invalid` message verbatim
+without changing the order. `run.sh` checks its exit code.
+
 ## The failure-mode spec
 
 `tests/backend-failure.spec.ts` runs *after* `run.sh` stops Galley, and

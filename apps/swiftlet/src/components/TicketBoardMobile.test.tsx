@@ -121,7 +121,10 @@ describe("TicketBoard on phones", () => {
       expect(toggle).toHaveAttribute("aria-controls", within(a).getByTestId("board-slip-actions").id);
       expect(window.location.pathname).toBe("/");
 
-      fireEvent.click(within(screen.getByTestId("board-ticket-b")).getByTestId("board-slip-toggle"));
+      const toggleB = within(screen.getByTestId("board-ticket-b")).getByTestId("board-slip-toggle");
+      fireEvent.pointerDown(toggleB);
+      expect(within(a).getByTestId("board-slip-actions")).toBeInTheDocument();
+      fireEvent.click(toggleB);
       expect(screen.getAllByTestId("board-slip-actions")).toHaveLength(1);
       expect(within(a).queryByTestId("board-slip-actions")).not.toBeInTheDocument();
     });
@@ -183,6 +186,32 @@ describe("TicketBoard on phones", () => {
       expect(screen.getByTestId("board-stage-current")).toHaveTextContent("Backlog0");
       expect(screen.queryByTestId("board-slip-actions")).not.toBeInTheDocument();
       expect(screen.getByTestId("board-stage-step-Backlog")).toHaveFocus();
+    });
+
+    it("Move up and Move down reorder within the stage, keep the actions open, and disable each end with its reason", async () => {
+      const fetchStub = vi.fn()
+        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ tickets: [ticket("a", "Backlog"), ticket("r", "Ready"), ticket("b", "Backlog")] }) })
+        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ticket("b", "Backlog") })
+        .mockResolvedValue({ ok: true, status: 200, json: async () => ({ tickets: [ticket("b", "Backlog"), ticket("a", "Backlog"), ticket("r", "Ready")] }) });
+      vi.stubGlobal("fetch", fetchStub);
+      render(<TicketBoard onUnauthenticated={() => {}} />);
+      fireEvent.click(within(await screen.findByTestId("board-ticket-b")).getByTestId("board-slip-toggle"));
+      expect(screen.getByTestId("board-slip-reorder-down")).toBeDisabled();
+      expect(screen.getByTestId("board-slip-reorder-down")).toHaveAccessibleDescription("Already last in Backlog");
+
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Move up" })); });
+      expect(fetchStub).toHaveBeenCalledWith("/api/tickets/b/position", expect.objectContaining({ method: "POST", body: JSON.stringify({ before: "a" }) }));
+      await waitFor(() => expect(within(screen.getByTestId("board-status-Backlog")).getAllByTestId(/^board-ticket-/).map((slip) => slip.getAttribute("data-testid")))
+        .toEqual(["board-ticket-b", "board-ticket-a"]));
+      expect(within(screen.getByTestId("board-ticket-b")).getByTestId("board-slip-actions")).toBeInTheDocument();
+      expect(screen.getByTestId("board-slip-reorder-up")).toHaveAccessibleDescription("Already first in Backlog");
+      await waitFor(() => expect(screen.getByTestId("board-slip-reorder-down")).toHaveFocus());
+    });
+
+    it("offers no reorder buttons on an archived Ticket", async () => {
+      await renderBoard();
+      fireEvent.click(within(screen.getByTestId("board-ticket-c")).getByTestId("board-slip-toggle"));
+      expect(screen.queryByTestId("board-slip-reorder-up")).not.toBeInTheDocument();
     });
   });
 });

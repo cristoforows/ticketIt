@@ -134,6 +134,63 @@ describe("TicketList", () => {
     expect(await screen.findByTestId(`ticket-item-${archive.id}`)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Archived Tickets" })).toBeInTheDocument();
     expect(screen.queryByTestId("ticket-capture-form")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("ticket-reorder-up")).not.toBeInTheDocument();
+  });
+
+  describe("reordering", () => {
+    const ready = (id: string, title: string) => ({ ...TICKET_B, id, title, status: "Ready" });
+    const R1 = ready("33333333-3333-4333-8333-333333333333", "Ready first");
+    const R2 = ready("44444444-4444-4444-8444-444444444444", "Ready second");
+    const row = (ticket: { id: string }) => screen.getByTestId(`ticket-item-${ticket.id}`);
+    const listedIds = () => screen.getAllByTestId(/^ticket-item-/).map((item) => item.getAttribute("data-testid"));
+
+    it("sends Move up relative to the same-Status neighbour and renders Galley's refetched order", async () => {
+      const routes = stubFetch({
+        "GET /api/tickets": jsonResponse({ tickets: [R1, TICKET_A, R2] }),
+        [`POST /api/tickets/${R2.id}/position`]: jsonResponse(R2),
+      });
+      render(<TicketList onUnauthenticated={() => {}} />);
+      await screen.findByTestId(`ticket-item-${R2.id}`);
+      expect(within(row(R1)).getByTestId("ticket-reorder-up")).toHaveAccessibleDescription("Already first in Ready");
+      expect(within(row(TICKET_A)).getByTestId("ticket-reorder-down")).toHaveAccessibleDescription("Already last in Backlog");
+
+      routes.set("GET /api/tickets", jsonResponse({ tickets: [R2, TICKET_A, R1] }));
+      await act(async () => { fireEvent.click(within(row(R2)).getByRole("button", { name: "Move up" })); });
+
+      expect(fetch).toHaveBeenCalledWith(`/api/tickets/${R2.id}/position`, expect.objectContaining({ method: "POST", body: JSON.stringify({ before: R1.id }) }));
+      await vi.waitFor(() => expect(listedIds()).toEqual([`ticket-item-${R2.id}`, `ticket-item-${TICKET_A.id}`, `ticket-item-${R1.id}`]));
+      await vi.waitFor(() => expect(within(row(R2)).getByTestId("ticket-reorder-down")).toHaveFocus());
+    });
+
+    it("sends Move down as after the next same-Status neighbour and keeps focus on Move down", async () => {
+      const R3 = ready("55555555-5555-4555-8555-555555555555", "Ready third");
+      const routes = stubFetch({
+        "GET /api/tickets": jsonResponse({ tickets: [R1, R2, R3] }),
+        [`POST /api/tickets/${R1.id}/position`]: jsonResponse(R1),
+      });
+      render(<TicketList onUnauthenticated={() => {}} />);
+      await screen.findByTestId(`ticket-item-${R1.id}`);
+      routes.set("GET /api/tickets", jsonResponse({ tickets: [R2, R1, R3] }));
+      await act(async () => { fireEvent.click(within(row(R1)).getByRole("button", { name: "Move down" })); });
+
+      expect(fetch).toHaveBeenCalledWith(`/api/tickets/${R1.id}/position`, expect.objectContaining({ body: JSON.stringify({ after: R2.id }) }));
+      await vi.waitFor(() => expect(listedIds()).toEqual([`ticket-item-${R2.id}`, `ticket-item-${R1.id}`, `ticket-item-${R3.id}`]));
+      await vi.waitFor(() => expect(within(row(R1)).getByTestId("ticket-reorder-down")).toHaveFocus());
+    });
+
+    it("shows Galley's rejection verbatim and refetches the order", async () => {
+      const routes = stubFetch({
+        "GET /api/tickets": jsonResponse({ tickets: [R1, R2] }),
+        [`POST /api/tickets/${R2.id}/position`]: jsonResponse({ error: { code: "reorder_anchor_invalid", message: "Galley anchor reason" } }, 400),
+      });
+      render(<TicketList onUnauthenticated={() => {}} />);
+      await screen.findByTestId(`ticket-item-${R2.id}`);
+      routes.set("GET /api/tickets", jsonResponse({ tickets: [R2, R1] }));
+      await act(async () => { fireEvent.click(within(row(R2)).getByRole("button", { name: "Move up" })); });
+
+      expect(await screen.findByTestId("ticket-list-reorder-error")).toHaveTextContent("Galley anchor reason");
+      await vi.waitFor(() => expect(listedIds()).toEqual([`ticket-item-${R2.id}`, `ticket-item-${R1.id}`]));
+    });
   });
 
   it("renders every Ticket Galley returns, in the order returned", async () => {

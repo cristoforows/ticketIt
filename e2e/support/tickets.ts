@@ -154,3 +154,8 @@ export async function listAgents(page: Page): Promise<Agent[]> {
   if (!response.ok()) throw new Error(`failed to list Agents: ${response.status()} ${await response.text()}`);
   return (await response.json() as { agents: Agent[] }).agents;
 }
+
+/** Same purpose as changeTicketStatusDirect, for priority order. */
+export async function reorderTicketDirect(page: Page, id: string, placement: { before: string } | { after: string }): Promise<TicketCommandResult> {
+  return ticketCommand(page, "POST", `/api/tickets/${id}/position`, placement);
+}

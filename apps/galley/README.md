@@ -537,16 +537,10 @@ hand-rolled handler). Length is counted in characters (code points,
 means — a byte count would reject a contract-valid CJK or emoji title
 at roughly a third of the documented limit.
 
-**Ticket ordering: newest first, `created_at DESC, id DESC`.**
-`created_at` alone is not a safe sort key — nothing prevents two rows
-from sharing a timestamp at whatever resolution the database clock
-offers — so `id` (monotonic via `GENERATED ALWAYS AS IDENTITY`) is the
-deterministic tiebreak, breaking any tie in the same, newest-first
-direction. `internal/httpapi/ticket_test.go`'s
-`TestListTicketsForOwner_TiebreaksOnIdWhenCreatedAtTies` forces this
-exact tie (two rows inserted directly with an identical `created_at`)
-to prove the tiebreak, since two real, sequential HTTP requests
-essentially never collide on their own.
+**Ticket ordering: the Owner's priority order, `priority_rank, id`.**
+Issue #131 replaced the original newest-first order; see "Priority
+order (issue #131)" below. The Archived filter orders by
+`archived_at DESC, id DESC`.
 
 **Ownership.** Both operations call `requireSession` first: an
 unauthenticated request is rejected with `401 unauthenticated` before
@@ -1000,8 +994,8 @@ any of the Owner's selected Badges. Omit the parameter for all Tickets;
 repeating an id does not duplicate a Ticket. Galley validates that every
 selected id belongs to the Owner; an empty, malformed, unknown, or
 foreign id returns `400 invalid_request`. The `EXISTS` predicate keeps
-one Ticket row per match and preserves newest-first `created_at DESC, id
-DESC` ordering. Later visibility filters can join this same query.
+one Ticket row per match and keeps the list's order ("Ticket
+ordering"). Later visibility filters can join this same query.
 
 ## Archiving Tickets (issue #93)
 
@@ -1028,8 +1022,8 @@ Run `go test ./...`, `go vet ./...`, `go build ./...` and
 
 `GET /api/tickets?archived=true` selects archived Tickets instead of
 unarchived Tickets. Repeated `badgeId` parameters still match any Badge;
-Archived and Badge filtering compose, with newest-first ordering and no
-duplicate Tickets. `archived=false` or omission selects active Tickets.
+Archived and Badge filtering compose, most recently archived first
+(`archived_at DESC, id DESC`, since #131), with no duplicate Tickets. `archived=false` or omission selects active Tickets.
 The board always requests the active collection, regardless of the
 list's Archived URL parameter.
 
@@ -1171,6 +1165,61 @@ gated like the other `/api/dev/` routes and is `404` in production.
 
 `runners` joins the no-execution-artefact allowlist. Run
 `go test ./...`, `go vet ./...` and `./scripts/check-contract-drift.sh`.
+
+## Priority order (issue #131)
+
+Migration `000012_add_ticket_priority_rank.up.sql` adds
+`tickets.priority_rank BIGINT NOT NULL`, lower first. It backfills each
+Owner's Tickets 1024 apart in the old newest-first order, so the list
+looks the same right after the upgrade. It adds `UNIQUE (owner_id,
+priority_rank) DEFERRABLE INITIALLY IMMEDIATE` and drops the unused
+`(owner_id, created_at, id)` index.
+
+Placement:
+
+| Event | Rank |
+| --- | --- |
+| Capture | top: Owner's minimum − 1024, or 1024 for the first Ticket |
+| Entering Ready from another Status | bottom: Owner's maximum + 1024 |
+| Any other Status change, Accept, archive, restore | kept |
+
+`POST /api/tickets/{id}/position` takes exactly one of `{"before":
+"<ticketId>"}` or `{"after": "<ticketId>"}` and returns the moved Ticket.
+Order is exposed only as list order; `Ticket` has no rank field. The move
+takes the midpoint of the gap between the anchor and its neighbour in the
+Owner's whole order, excluding the moved Ticket. Nothing lies between
+the two, so the Ticket also lands beside the anchor within its stage. A
+Ticket already in that gap keeps its rank, so repeating a move changes
+nothing. With no neighbour it takes the anchor's rank ± 1024. When the
+gap is gone, the whole collection, archived Tickets included, is
+renumbered 1024 apart in its current order in the same transaction, and
+the midpoint is taken again. Only the moved Ticket's `updated_at`
+changes.
+
+| Request | Response |
+| --- | --- |
+| Both or neither of `before`/`after`, extra fields | `400 invalid_request` |
+| Unknown, malformed or foreign Ticket id | shared `404` |
+| Archived Ticket | `400 archived_ticket` |
+| Anchor unknown, malformed, foreign, itself, archived, or in another Status | `400 reorder_anchor_invalid` |
+
+**Lock order.** Capture, reorder and every Status transition (Status
+change and Accept, since any transition may enter Ready) first take `pg_advisory_xact_lock(0x7072696f,
+int32(owner id))`, then the Ticket row lock through
+`lockTicketForMutation`, then the anchor row `FOR UPDATE`. The two-int4
+key space cannot collide with golang-migrate's single-bigint lock.
+Taking it unconditionally in `applyTicketTransition` keeps the order
+uniform for every caller that can reach Ready. Field edits, Badges,
+archive and restore hold only one Ticket row lock and skip it.
+
+Tests: `internal/httpapi/ticket_priority_test.go` covers placement, both
+directions across interleaved stages, every rejection leaving the order
+unchanged, renumbering, and three concurrency tests (16 concurrent
+reorders over 5 seeded rounds; 24 concurrent reorders, captures and
+Ready entries; 18 concurrent Accepts and Status changes on different
+Tickets), each asserting a strict total order afterwards.
+`internal/postgres/migrate_priority_rank_test.go` checks the backfill.
+Evidence: `docs/evidence/m4/131-priority-order.md`.
 
 ## Error shape
 

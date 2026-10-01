@@ -151,6 +151,9 @@ func allowedActionsForTicket(state ticketWorkflowState, condition TicketCompleti
 // writes what the closure returned. It creates no Round, work
 // request, or queue entry -- see
 // TestManualLifecycleActionsCreateNoExecutionRecords.
+//
+// Every transition takes the Owner's priority lock first, since any of
+// them may enter Ready and move the Ticket to the bottom of the order.
 func applyTicketTransition(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -164,6 +167,9 @@ func applyTicketTransition(
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
 
+	if err := lockOwnerPriority(ctx, tx, ownerID); err != nil {
+		return Ticket{}, false, nil, fmt.Errorf("failed to take the priority lock: %w", err)
+	}
 	found, err = lockTicketForMutation(ctx, tx, ownerID, publicID, false)
 	if errors.Is(err, errArchivedTicket) {
 		return Ticket{}, true, &transitionRejection{code: archivedTicketCode, message: archivedTicketMessage}, nil
@@ -179,6 +185,11 @@ func applyTicketTransition(
 	nextStatus, rej := decide(workflowStateOf(locked), locked.CompletionCondition)
 	if rej != nil {
 		return Ticket{}, true, rej, nil
+	}
+	if nextStatus == Ready && locked.Status != Ready {
+		if err := moveTicketToBottom(ctx, tx, ownerID, publicID); err != nil {
+			return Ticket{}, true, nil, fmt.Errorf("failed to move the ticket to the bottom of the priority order: %w", err)
+		}
 	}
 
 	row := tx.QueryRow(ctx,

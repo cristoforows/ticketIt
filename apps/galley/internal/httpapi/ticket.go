@@ -479,10 +479,18 @@ func insertTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64, title 
 	// application code. See internal/migrations/000004_....sql.
 	publicID := uuid.NewString()
 	completionCondition := defaultCompletionCondition(template)
-	row := pool.QueryRow(ctx,
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return Ticket{}, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
+	if err := lockOwnerPriority(ctx, tx, ownerID); err != nil {
+		return Ticket{}, err
+	}
+	row := tx.QueryRow(ctx,
 		`INSERT INTO tickets (owner_id, title, status, public_id, template, completion_condition,
-		                      goal, context, success_criteria, constraints, repository)
-		 VALUES ($1, $2, $3, $4::uuid, $5, $6, $7, $8, $9, $10, $11)
+		                      goal, context, success_criteria, constraints, repository, priority_rank)
+		 VALUES ($1, $2, $3, $4::uuid, $5, $6, $7, $8, $9, $10, $11, `+topPriorityRankSQL+`)
 		 RETURNING `+ticketSelectColumns,
 		ownerID, title, string(Backlog), publicID, string(template), string(completionCondition),
 		unsetIfEmpty(refinement.goal), unsetIfEmpty(refinement.context), unsetIfEmpty(refinement.successCriteria),
@@ -490,6 +498,9 @@ func insertTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64, title 
 	)
 	ticket, err := scanTicketRow(row)
 	if err != nil {
+		return Ticket{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return Ticket{}, err
 	}
 	ticket.Badges = []TicketBadge{}
@@ -602,13 +613,6 @@ func updateTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64
 	return ticket, true, nil, nil
 }
 
-// listTicketsForOwner returns ownerID's Tickets newest first: created_at
-// descending, id descending as the deterministic tiebreak for rows
-// sharing a created_at value. id (GENERATED ALWAYS AS IDENTITY) is
-// monotonic in insertion order, so this tiebreak never itself ties --
-// unlike created_at, which two requests can share at whatever
-// resolution the database clock offers. See
-// apps/galley/README.md, "Ticket ordering".
 func listTicketsForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, badgeIDs ...string) ([]Ticket, error) {
 	return listTicketsForOwnerWithVisibility(ctx, pool, ownerID, false, badgeIDs...)
 }
@@ -617,6 +621,10 @@ func listTicketsForOwnerWithVisibility(ctx context.Context, pool *pgxpool.Pool, 
 	if badgeIDs == nil {
 		badgeIDs = []string{}
 	}
+	order := `priority_rank, id`
+	if archived {
+		order = `archived_at DESC, id DESC`
+	}
 	rows, err := pool.Query(ctx,
 		`SELECT `+ticketSelectColumns+`
 		   FROM tickets
@@ -624,7 +632,7 @@ func listTicketsForOwnerWithVisibility(ctx context.Context, pool *pgxpool.Pool, 
 		    SELECT 1 FROM ticket_badges tb JOIN badges b ON b.id = tb.badge_id AND b.owner_id = tb.owner_id
 		    WHERE tb.owner_id = $1 AND tb.ticket_id = tickets.id AND b.public_id::text = ANY($2::text[])
 		  ))
-		  ORDER BY created_at DESC, id DESC`,
+		  ORDER BY `+order,
 		ownerID, badgeIDs, archived,
 	)
 	if err != nil {

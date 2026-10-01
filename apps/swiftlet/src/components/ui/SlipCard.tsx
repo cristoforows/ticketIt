@@ -3,16 +3,22 @@ import type { ComponentPropsWithRef, CSSProperties } from "react";
 import { cn } from "./cn";
 import { statusTone, type TicketStatus } from "./status";
 
-type SlipProps = ComponentPropsWithRef<"li"> & { tilt: number; stacked?: boolean; dragging?: boolean; selected?: boolean };
+type SlipProps = ComponentPropsWithRef<"li"> & { tilt: number; stacked?: boolean; dragging?: boolean; selected?: boolean; dropPosition?: "before" | "after" };
 
-export function Slip({ tilt, stacked, dragging, selected, className, style, ...rest }: SlipProps) {
+export function Slip({ tilt, stacked, dragging, selected, dropPosition, className, style, ...rest }: SlipProps) {
   return (
     <li
       data-stacked={stacked || undefined}
       data-dragging={dragging || undefined}
       data-selected={selected || undefined}
+      data-drop-position={dropPosition}
       style={{ "--tilt": `${tilt}deg`, ...style } as CSSProperties}
-      className={cn("slip group/slip data-stacked:grid data-dragging:opacity-60 [&[draggable=true]]:cursor-grab", className)}
+      className={cn(
+        "slip group/slip relative data-stacked:grid data-dragging:opacity-60 [&[draggable=true]]:cursor-grab",
+        "data-drop-position:before:absolute data-drop-position:before:inset-x-0 data-drop-position:before:h-1 data-drop-position:before:rounded-pill data-drop-position:before:bg-(--status-text)",
+        "data-[drop-position=after]:before:-bottom-2.5 data-[drop-position=before]:before:-top-2.5",
+        className,
+      )}
       {...rest}
     />
   );

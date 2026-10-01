@@ -97,7 +97,7 @@ export interface paths {
         };
         /**
          * List the signed-in Owner's Tickets
-         * @description Returns the signed-in Owner's unarchived Tickets by default, or archived Tickets when archived=true, optionally matching any selected Badge (OR, with each Ticket returned once). Unknown, malformed, or foreign Badge ids return 400 invalid_request. Results are ordered by createdAt descending with id descending as the deterministic tiebreak (createdAt alone is not unique -- see apps/galley/README.md, "Ticket ordering"). Requires a valid session; returns `401 unauthenticated` otherwise.
+         * @description Returns the signed-in Owner's unarchived Tickets by default, or archived Tickets when archived=true, optionally matching any selected Badge (OR, with each Ticket returned once). Unknown, malformed, or foreign Badge ids return 400 invalid_request. Unarchived Tickets are in the Owner's priority order, highest first (see `reorderTicket`); archived Tickets are most recently archived first. Requires a valid session; returns `401 unauthenticated` otherwise.
          */
         get: operations["listTickets"];
         put?: never;
@@ -108,6 +108,8 @@ export interface paths {
          *     `template` (issue #59) is optional and defaults to `Basic` when absent; a title alone is sufficient to capture either Template. `completionCondition` is derived from the chosen Template's default exactly once, here at creation, and stored as its own field -- see `TicketCompletionCondition`.
          *
          *     The manual refinement fields are optional and stored in the same insert; an invalid one creates nothing.
+         *
+         *     The new Ticket takes the top of the Owner's priority order.
          */
         post: operations["createTicket"];
         delete?: never;
@@ -164,6 +166,7 @@ export interface paths {
          *     `Done` is always rejected here, whatever the current Status: it is reachable only through `POST /api/tickets/{id}/accept`, so completion cannot happen by accident.
          *     Any move off D3 S2's table is rejected with `invalid_transition`; notably `Blocked` resumes only to `InProgress`, never straight to `Ready`.
          *     On an Agent-assigned Ticket, `InProgress`, `InReview` and `Blocked` are rejected with `agent_owned_transition` (D3 S4), and `Ready` with `agent_readiness_incomplete` while an AgentReadinessInput is missing.
+         *     Entering `Ready` moves the Ticket to the bottom of the Owner's priority order; every other move keeps its position.
          *     Creates no Round, work request, or queue entry. Requires a valid session; returns `401 unauthenticated` otherwise. Identifier handling matches the other `/api/tickets/{id}` operations.
          */
         post: operations["changeTicketStatus"];
@@ -358,9 +361,31 @@ export interface paths {
         put?: never;
         /**
          * Restore an archived Ticket
-         * @description Restoring Ready changes Status to Backlog; every other Status is retained. A Ticket not archived returns 400 not_archived; an unknown, malformed or foreign id returns the shared 404. Does not start work.
+         * @description Restoring Ready changes Status to Backlog; every other Status is retained. The Ticket keeps the priority position it had when archived. A Ticket not archived returns 400 not_archived; an unknown, malformed or foreign id returns the shared 404. Does not start work.
          */
         post: operations["restoreTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tickets/{id}/position": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Move a Ticket before or after another in the Owner's priority order
+         * @description The Owner's priority order drives claim order (#108). The anchor must be another unarchived Ticket of the same Owner in the same Status, otherwise `reorder_anchor_invalid`; an archived Ticket is rejected with `archived_ticket`. An unknown, malformed or foreign Ticket id returns the shared 404.
+         */
+        post: operations["reorderTicket"];
         delete?: never;
         options?: never;
         head?: never;
@@ -688,6 +713,13 @@ export interface components {
         ChangeTicketStatusRequest: {
             status: components["schemas"]["TicketStatus"];
         };
+        /** @description Exactly one of `before` or `after`. */
+        ReorderTicketRequest: {
+            /** Format: uuid */
+            before?: string;
+            /** Format: uuid */
+            after?: string;
+        };
         /** @description The fixed GET /api/status payload. */
         StatusResponse: {
             /** @constant */
@@ -958,7 +990,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The Owner's Tickets, newest first. */
+            /** @description The Owner's Tickets, in the order described above. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1484,6 +1516,41 @@ export interface operations {
                 };
             };
             /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    reorderTicket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReorderTicketRequest"];
+            };
+        };
+        responses: {
+            /** @description The moved Ticket. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ticket"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. Includes `reorder_anchor_invalid` and `archived_ticket`. */
             default: {
                 headers: {
                     [name: string]: unknown;

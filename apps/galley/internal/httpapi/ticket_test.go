@@ -507,14 +507,7 @@ func TestListTickets_RequiresSession(t *testing.T) {
 	}
 }
 
-// TestListTickets_NewestFirstWithIdTiebreak proves the documented
-// order end to end through the real HTTP handler: a ticket created
-// after another must appear before it. This does not by itself prove
-// the id tiebreak (two sequential real requests essentially never
-// share a created_at value) -- see
-// TestListTicketsForOwner_TiebreaksOnIdWhenCreatedAtTies below for
-// that specific edge case, exercised directly against the query.
-func TestListTickets_NewestFirstWithIdTiebreak(t *testing.T) {
+func TestListTickets_NewCaptureListedFirst(t *testing.T) {
 	baseURL, client := devServerWithSessionForTickets(t)
 
 	older := createTicket(t, client, baseURL, uniqueTitle(t)+"-older")
@@ -540,64 +533,12 @@ func TestListTickets_NewestFirstWithIdTiebreak(t *testing.T) {
 	}
 }
 
-// TestListTicketsForOwner_TiebreaksOnIdWhenCreatedAtTies exercises
-// listTicketsForOwner directly (bypassing HTTP) against two rows
-// inserted with an identical created_at, which two real, sequential
-// POST /api/tickets requests essentially never produce -- this is the
-// only way to actually force the tie the documented order promises to
-// break deterministically.
-func TestListTicketsForOwner_TiebreaksOnIdWhenCreatedAtTies(t *testing.T) {
-	pool := postgres.NewTestPool(t)
-	ctx := context.Background()
-	ownerID := resolveTestOwner(t, pool)
-
-	tiedAt := time.Now().UTC()
-	firstID, firstPublicID := insertTicketAt(t, pool, ownerID, uniqueTitle(t)+"-tied-first", tiedAt)
-	secondID, secondPublicID := insertTicketAt(t, pool, ownerID, uniqueTitle(t)+"-tied-second", tiedAt)
-
-	tickets, err := listTicketsForOwner(ctx, pool, ownerID)
-	if err != nil {
-		t.Fatalf("listTicketsForOwner() returned unexpected error: %v", err)
-	}
-
-	firstIdx, secondIdx := -1, -1
-	for i, ticket := range tickets {
-		if ticket.Id == firstPublicID {
-			firstIdx = i
-		}
-		if ticket.Id == secondPublicID {
-			secondIdx = i
-		}
-	}
-	if firstIdx == -1 || secondIdx == -1 {
-		t.Fatalf("expected both tied tickets (public ids %s, %s) in the list of %d tickets", firstPublicID, secondPublicID, len(tickets))
-	}
-	// secondID > firstID (IDENTITY is monotonic, internal id -- never
-	// exposed by the API, but the only way to know insertion order
-	// here), so with equal created_at the documented "id DESC" tiebreak
-	// must place it first. public_id is random and carries no order of
-	// its own, which is why this test still needs the internal id.
-	if secondID <= firstID {
-		t.Fatalf("test setup error: secondID (%d) is not greater than firstID (%d)", secondID, firstID)
-	}
-	if secondIdx >= firstIdx {
-		t.Errorf("with tied created_at, the ticket inserted second (public id %s) at index %d did not come before the one inserted first (public id %s) at index %d -- want id DESC to break the tie",
-			secondPublicID, secondIdx, firstPublicID, firstIdx)
-	}
-}
-
-// insertTicketAt inserts a row directly with an explicit created_at
-// (bypassing insertTicket, which always uses now()) -- the only way to
-// construct the exact-tie fixture the test above needs. It generates
-// its own public_id (mirroring insertTicket) and returns both that and
-// the internal id -- the latter only to let a test reason about
-// insertion order (IDENTITY is monotonic); no API response ever
-// exposes it.
 func insertTicketAt(t *testing.T, pool *pgxpool.Pool, ownerID int64, title string, at time.Time) (id int64, publicID string) {
 	t.Helper()
 	publicID = uuid.NewString()
 	err := pool.QueryRow(context.Background(),
-		`INSERT INTO tickets (owner_id, title, status, public_id, created_at, updated_at) VALUES ($1, $2, $3, $4::uuid, $5, $5) RETURNING id`,
+		`INSERT INTO tickets (owner_id, title, status, public_id, created_at, updated_at, priority_rank)
+		 VALUES ($1, $2, $3, $4::uuid, $5, $5, `+topPriorityRankSQL+`) RETURNING id`,
 		ownerID, title, string(Backlog), publicID, at,
 	).Scan(&id)
 	if err != nil {

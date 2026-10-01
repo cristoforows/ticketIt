@@ -4,8 +4,20 @@
 
 Use a continuous flow of tickets rather than time-boxed sprints. Both views present the same shared collection and ticket identities:
 
-- **List view:** quick capture and filtering; current ordering is newest first, not manual priority ordering. [#108](https://github.com/cristoforows/ticketIt/issues/108) routes the v1 priority/queue-order choice to M4.
-- **Board view:** tickets arranged by status.
+- **List view:** quick capture and filtering, in the Owner's priority order.
+- **Board view:** tickets arranged by status, each stage in the same priority order.
+
+### Priority order
+
+Each Owner has one persisted priority order across all of their Tickets ([#131](https://github.com/cristoforows/ticketIt/issues/131)). It is the order M4.6's claims follow: the first eligible Ready Ticket is claimed first ([#108](https://github.com/cristoforows/ticketIt/issues/108)).
+
+- A capture goes to the top.
+- Entering Ready goes to the bottom, so newly ready work queues behind work already waiting.
+- Every other Status change, archive and restore keep the position.
+- The Owner reorders within a stage: Move up and Move down in the list and on the phone board, or dragging onto the upper or lower half of a slip in the same stage on the desktop board. Dragging to another stage is still a Status move.
+- Archived Tickets cannot be moved and cannot be an anchor. The Archived filter lists most recently archived first.
+
+Galley owns the order, and Swiftlet renders what Galley returns after each move.
 
 Backlog holds captured work that is not ready to begin. Title-only tickets can be refined here. Agent execution becomes eligible when a ticket is Ready and assigned to an agent, with the goal and success criteria required by `ticket-creation.md`.
 
