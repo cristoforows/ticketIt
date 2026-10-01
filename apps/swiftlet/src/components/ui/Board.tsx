@@ -55,18 +55,29 @@ export function SlipList({ className, ...rest }: ComponentPropsWithRef<"ul">) {
   return <ul className={cn("-mt-3 flex flex-col gap-4 px-1 group-data-drop-blocked/stage:opacity-40", className)} {...rest} />;
 }
 
+function Spike() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 32" className="archive-spike h-8 w-6 shrink-0 origin-bottom fill-current">
+      <path d="M12 0 14 22H10Z" />
+      <rect x="2" y="24" width="20" height="5" rx="1.5" />
+    </svg>
+  );
+}
+
 export function ArchiveZone({ armed, over, className, ...rest }: ComponentPropsWithRef<"div"> & { armed: boolean; over: boolean }) {
   return (
     <div
       data-armed={armed ? "true" : undefined}
       data-over={over ? "true" : undefined}
       className={cn(
-        "mt-2 grid min-h-20 place-items-center border-2 border-dashed border-dim px-4 py-5 text-center text-label tracking-label text-dim uppercase data-armed:border-paper data-armed:text-paper data-over:border-amber data-over:bg-amber/10 data-over:font-bold data-over:text-amber",
+        "archive-zone mt-2 flex min-h-20 items-center justify-center gap-4 border-2 border-dashed border-dim px-4 py-5 text-center text-label tracking-label text-dim uppercase data-armed:border-paper data-armed:text-paper data-over:border-amber data-over:bg-amber/10 data-over:font-bold data-over:text-amber",
         className,
       )}
       {...rest}
     >
-      {over ? "▾ Release to archive" : armed ? "Drop here to archive" : "Drag a slip here to archive it"}
+      <Spike />
+      {over ? "Yes! Let go to archive it" : armed ? "Toss it on the spike!" : "The spike · drag a slip here to archive it"}
+      <Spike />
     </div>
   );
 }
