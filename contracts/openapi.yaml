@@ -431,7 +431,8 @@ paths:
         default:
           description: >-
             Error. See `ErrorBody`. Includes `invalid_transition`,
-            `agent_owned_transition` and `agent_readiness_incomplete`.
+            `agent_owned_transition`, `agent_readiness_incomplete` and
+            `round_open`.
           content:
             application/json:
               schema:
@@ -476,8 +477,9 @@ paths:
         default:
           description: >-
             Error. See `ErrorBody`. Includes `invalid_transition` (the
-            Ticket is not In Review) and
-            `reviewed_pr_merge_not_implemented` (D2/M8 limitation).
+            Ticket is not In Review),
+            `reviewed_pr_merge_not_implemented` (D2/M8 limitation) and
+            `round_open`.
           content:
             application/json:
               schema:
@@ -496,7 +498,8 @@ paths:
         Idempotent, and allowed whatever the Ticket's current Status or
         Template (D3 S1), except that assigning an Agent to a Ready
         Ticket missing an AgentReadinessInput that Agent needs is
-        rejected with `agent_readiness_incomplete`. Reassignment keeps
+        rejected with `agent_readiness_incomplete`, and any assignment
+        with `round_open` while the Ticket has an open Round. Reassignment keeps
         the Ticket's history and completion condition. An unknown, malformed or foreign Ticket or
         Agent id returns the shared 404 not_found.
 
@@ -528,7 +531,8 @@ paths:
       description: >-
         Idempotent: unassigning an already-unassigned Ticket returns
         200, matching this contract's last-write-wins conventions
-        elsewhere. Allowed whatever the current Status.
+        elsewhere. Allowed whatever the current Status; rejected with
+        `round_open` while the Ticket has an open Round.
 
         Requires a valid session; returns `401 unauthenticated`
         otherwise. Identifier handling matches the other
@@ -810,8 +814,8 @@ paths:
                 $ref: "#/components/schemas/Ticket"
         default:
           description: >-
-            Error. See `ErrorBody`. Includes `reorder_anchor_invalid`
-            and `archived_ticket`.
+            Error. See `ErrorBody`. Includes `reorder_anchor_invalid`,
+            `archived_ticket` and `round_open`.
           content:
             application/json:
               schema:
@@ -1239,7 +1243,11 @@ components:
             that Agent needs is present, and no open Round. Creates no
             Round by itself.
         openRound:
-          description: Null unless the Ticket has an open Round.
+          description: >-
+            Null unless the Ticket has an open Round. While it is set,
+            every change to the Ticket's fields, Assignee, Badges,
+            Status or position, Accept and archive is rejected with
+            `round_open`, and `allowedActions` offers none of them.
           oneOf:
             - $ref: "#/components/schemas/TicketOpenRound"
             - type: "null"
@@ -1736,3 +1744,8 @@ components:
           minItems: 1
           items:
             $ref: "#/components/schemas/AgentReadinessInput"
+        roundId:
+          type: string
+          format: uuid
+          x-go-type: string
+          description: Present only with `round_open`; the Ticket's open Round.

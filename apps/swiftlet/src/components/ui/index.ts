@@ -4,6 +4,7 @@ export { Caption, capsLinkClasses } from "./Caption";
 export { cn } from "./cn";
 export { FieldHint, FieldLabel, FieldNote, FieldValue, Select, TextInput, Textarea } from "./Fields";
 export { FilterToggle } from "./FilterToggle";
+export { LockGlyph } from "./Glyphs";
 export { LogRow, LogRowMain, LogStatus } from "./LogRow";
 export { EmptyMessage, ErrorMessage, InlineError, LoadingMessage } from "./Messages";
 export { NavTab } from "./NavTab";

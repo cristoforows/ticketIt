@@ -147,12 +147,9 @@ func reorderTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int6
 	if err := lockOwnerPriority(ctx, tx, ownerID); err != nil {
 		return Ticket{}, false, nil, err
 	}
-	found, err := lockTicketForMutation(ctx, tx, ownerID, publicID, false)
-	if errors.Is(err, errArchivedTicket) {
-		return Ticket{}, true, &transitionRejection{code: archivedTicketCode, message: archivedTicketMessage}, nil
-	}
-	if err != nil || !found {
-		return Ticket{}, found, nil, err
+	found, rejection, err := lockMutableTicket(ctx, tx, ownerID, publicID)
+	if err != nil || !found || rejection != nil {
+		return Ticket{}, found, rejection, err
 	}
 	moved, _, err := readPriorityRow(ctx, tx, ownerID, publicID, false)
 	if err != nil {

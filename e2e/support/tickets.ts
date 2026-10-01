@@ -9,6 +9,7 @@ export interface ErrorDetail {
   code: string;
   message: string;
   missing?: AgentReadinessInput[];
+  roundId?: string;
 }
 
 export interface Ticket {
@@ -92,9 +93,10 @@ export interface TicketCommandResult {
   errorCode?: string;
   errorMessage?: string;
   missing?: AgentReadinessInput[];
+  roundId?: string;
 }
 
-async function ticketCommand(
+export async function ticketCommand(
   page: Page,
   method: "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
@@ -105,7 +107,7 @@ async function ticketCommand(
   if (response.ok()) {
     return { ok: true, status: response.status(), ticket: body as Ticket };
   }
-  return { ok: false, status: response.status(), errorCode: body?.error?.code, errorMessage: body?.error?.message, missing: body?.error?.missing };
+  return { ok: false, status: response.status(), errorCode: body?.error?.code, errorMessage: body?.error?.message, missing: body?.error?.missing, roundId: body?.error?.roundId };
 }
 
 /**

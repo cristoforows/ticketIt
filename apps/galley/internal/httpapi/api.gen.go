@@ -414,6 +414,9 @@ type ErrorDetail struct {
 
 	// Missing Present only with `agent_readiness_incomplete`.
 	Missing *[]AgentReadinessInput `json:"missing,omitempty"`
+
+	// RoundId Present only with `round_open`; the Ticket's open Round.
+	RoundId *string `json:"roundId,omitempty"`
 }
 
 // Owner ticketIt's stable internal Owner identity -- independent of any GitHub identifier (docs/deployment.md, "Ownership and sign-in"). `login` is the linked GitHub identity's most recently observed login, shown for display only: matching a sign-in to this Owner always uses the immutable provider account id, never this field.
@@ -552,7 +555,7 @@ type Ticket struct {
 	// Id Opaque public identifier (issue #57), used in URLs and by GET /api/tickets/{id}. Non-sequential and non-guessable -- never the internal sequential database id, which no Galley endpoint exposes.
 	Id string `json:"id"`
 
-	// OpenRound Null unless the Ticket has an open Round.
+	// OpenRound Null unless the Ticket has an open Round. While it is set, every change to the Ticket's fields, Assignee, Badges, Status or position, Accept and archive is rejected with `round_open`, and `allowedActions` offers none of them.
 	OpenRound *TicketOpenRound `json:"openRound"`
 
 	// Repository One Ticket repository reference (issue #59, D3 S1 check 3), available on either Template, and required before Ready only by a `coding` Agent's readiness. There is exactly one such field on a Ticket; the Coding Template surfaces it by default, but it is not a competing Basic-only concept. Plain text (e.g. an "owner/repo" name or a URL) with no format enforced yet. Always present on the wire; "" means never set or cleared -- see `goal`'s description for the same convention.

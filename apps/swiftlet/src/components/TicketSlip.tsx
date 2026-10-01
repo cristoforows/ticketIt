@@ -1,8 +1,9 @@
 import type { DragEvent } from "react";
 import type { Ticket, TicketPlacement } from "../api/tickets";
-import { BadgeList, ClaimedTag, PendingTag, QueuedTag, Rule, shortDate, Slip, SlipPaper, SlipToggle, slipTilt, ticketSerial } from "./ui";
+import { BadgeList, ClaimedTag, LockGlyph, PendingTag, QueuedTag, Rule, shortDate, Slip, SlipPaper, SlipToggle, slipTilt, ticketSerial } from "./ui";
 import { openTicketModal } from "../router";
 import { assigneeLabel } from "./assignee";
+import { lockedLabel } from "./roundLock";
 import type { ReorderDirection } from "./ReorderButtons";
 import { SlipActions } from "./SlipActions";
 import { TicketModalLink, ticketRowTestId } from "./TicketModalLink";
@@ -37,7 +38,7 @@ export function TicketSlip({ ticket, stageTickets, phone, pending, anyPending, s
       dropPosition={dropPosition}
       data-testid={ticketRowTestId("board", ticket.id)}
       aria-busy={pending}
-      draggable={!pending && !phone}
+      draggable={!pending && !phone && !ticket.openRound}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onDragOver={onDragOver}
@@ -46,7 +47,10 @@ export function TicketSlip({ ticket, stageTickets, phone, pending, anyPending, s
     >
       <SlipPaper status={ticket.status}>
         <div className="flex justify-between text-label text-muted">
-          <span>{ticketSerial(ticket.id)}</span>
+          <span className="flex items-center gap-1">
+            {ticketSerial(ticket.id)}
+            {ticket.openRound && <LockGlyph data-testid="board-locked" label={lockedLabel(ticket.openRound)} className="text-ink" />}
+          </span>
           <time dateTime={ticket.createdAt}>{shortDate(ticket.createdAt)}</time>
         </div>
         <TicketModalLink ticketId={ticket.id} view="board" variant="slip" disabled={pending}>{ticket.title}</TicketModalLink>

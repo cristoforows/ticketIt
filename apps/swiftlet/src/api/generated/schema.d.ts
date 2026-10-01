@@ -213,14 +213,14 @@ export interface paths {
         get?: never;
         /**
          * Assign the signed-in Owner or one of the Owner's Agents
-         * @description Idempotent, and allowed whatever the Ticket's current Status or Template (D3 S1), except that assigning an Agent to a Ready Ticket missing an AgentReadinessInput that Agent needs is rejected with `agent_readiness_incomplete`. Reassignment keeps the Ticket's history and completion condition. An unknown, malformed or foreign Ticket or Agent id returns the shared 404 not_found.
+         * @description Idempotent, and allowed whatever the Ticket's current Status or Template (D3 S1), except that assigning an Agent to a Ready Ticket missing an AgentReadinessInput that Agent needs is rejected with `agent_readiness_incomplete`, and any assignment with `round_open` while the Ticket has an open Round. Reassignment keeps the Ticket's history and completion condition. An unknown, malformed or foreign Ticket or Agent id returns the shared 404 not_found.
          *     Creates no Round, work request, or queue entry. Requires a valid session; returns `401 unauthenticated` otherwise.
          */
         put: operations["assignTicket"];
         post?: never;
         /**
          * Clear a Ticket's Assignee
-         * @description Idempotent: unassigning an already-unassigned Ticket returns 200, matching this contract's last-write-wins conventions elsewhere. Allowed whatever the current Status.
+         * @description Idempotent: unassigning an already-unassigned Ticket returns 200, matching this contract's last-write-wins conventions elsewhere. Allowed whatever the current Status; rejected with `round_open` while the Ticket has an open Round.
          *     Requires a valid session; returns `401 unauthenticated` otherwise. Identifier handling matches the other `/api/tickets/{id}` operations.
          */
         delete: operations["unassignTicket"];
@@ -638,7 +638,7 @@ export interface components {
             assigneeAgent: components["schemas"]["TicketAssigneeAgent"] | null;
             /** @description Unarchived, Ready, Agent-assigned, every AgentReadinessInput that Agent needs is present, and no open Round. Creates no Round by itself. */
             requestingAgentWork: boolean;
-            /** @description Null unless the Ticket has an open Round. */
+            /** @description Null unless the Ticket has an open Round. While it is set, every change to the Ticket's fields, Assignee, Badges, Status or position, Accept and archive is rejected with `round_open`, and `allowedActions` offers none of them. */
             openRound: components["schemas"]["TicketOpenRound"] | null;
             completionCondition: components["schemas"]["TicketCompletionCondition"];
             /** @description Manual refinement (issue #58, docs/ticket-creation.md, "Manual guidance" -- prompt "What outcome do you want?"). Plain text, never Markdown (M7 owns report rendering). Always present on the wire; "" means never set or cleared -- read access never distinguishes those two, only PATCH's request body does (see UpdateTicketRequest). */
@@ -872,6 +872,11 @@ export interface components {
             message: string;
             /** @description Present only with `agent_readiness_incomplete`. */
             missing?: components["schemas"]["AgentReadinessInput"][];
+            /**
+             * Format: uuid
+             * @description Present only with `round_open`; the Ticket's open Round.
+             */
+            roundId?: string;
         };
     };
     responses: never;
@@ -1191,7 +1196,7 @@ export interface operations {
                     "application/json": components["schemas"]["Ticket"];
                 };
             };
-            /** @description Error. See `ErrorBody`. Includes `invalid_transition`, `agent_owned_transition` and `agent_readiness_incomplete`. */
+            /** @description Error. See `ErrorBody`. Includes `invalid_transition`, `agent_owned_transition`, `agent_readiness_incomplete` and `round_open`. */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -1222,7 +1227,7 @@ export interface operations {
                     "application/json": components["schemas"]["Ticket"];
                 };
             };
-            /** @description Error. See `ErrorBody`. Includes `invalid_transition` (the Ticket is not In Review) and `reviewed_pr_merge_not_implemented` (D2/M8 limitation). */
+            /** @description Error. See `ErrorBody`. Includes `invalid_transition` (the Ticket is not In Review), `reviewed_pr_merge_not_implemented` (D2/M8 limitation) and `round_open`. */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -1608,7 +1613,7 @@ export interface operations {
                     "application/json": components["schemas"]["Ticket"];
                 };
             };
-            /** @description Error. See `ErrorBody`. Includes `reorder_anchor_invalid` and `archived_ticket`. */
+            /** @description Error. See `ErrorBody`. Includes `reorder_anchor_invalid`, `archived_ticket` and `round_open`. */
             default: {
                 headers: {
                     [name: string]: unknown;

@@ -904,7 +904,7 @@ via a plain, idempotent `UPDATE` from every Status, with no transaction
 of their own -- there is nothing for them to race against. (#93 later
 put both behind the archive row lock; #127 renamed `AssignTicketOwner`
 to `AssignTicket`, gave it a request body and enumerated
-`assigneeType`.)
+`assigneeType`; #133 refuses both while a Round is open.)
 
 **The no-execution-artifact guardrail
 (`internal/httpapi/no_execution_side_effects_test.go`) is a database-level
@@ -1013,8 +1013,8 @@ attach/detach and archive. Once archived, every command rejects with
 `archived_ticket`, leaving the row unchanged. Published allowed actions
 contain no Status targets and an unavailable Accept carrying that reason.
 The `archived_at` field is the eligibility check M4's claim path must
-exclude. While the Ticket has an open Round, archive is
-`400 round_open` (issue #132, below). Archive does not insert execution
+exclude. While the Ticket has an open Round, archive and every other
+mutation is `400 round_open` (issues #132 and #133, below). Archive does not insert execution
 artefacts.
 Run `go test ./...`, `go vet ./...`, `go build ./...` and
 `./scripts/check-contract-drift.sh` here after generating/staging types.
@@ -1258,21 +1258,57 @@ checks the slot, then locks candidate Ticket rows one at a time in
 priority order through `lockTicketForMutation`, rechecks each locked row
 and skips it when it is no longer eligible, then inserts the Round. This
 is the same order as capture, reorder and transitions (priority lock,
-then rows). Archive takes only its one row lock and then reads `rounds`,
-so it cannot form a cycle with the claim. A unique violation on the
-slot index maps to `204`.
+then rows). Field edits, assignment, Badges and archive take only their
+one row lock and then read `rounds`, so they cannot form a cycle with
+the claim. A unique violation on the slot index maps to `204`.
 
-**What an open Round blocks.** Only archive (`400 round_open`). In
-M4.6, unassigning, reassigning, Status changes, reorder, field edits
-and Badges still succeed while a Round is open; M4.7 (#133) rejects
-them. A claimed Round never closes in M4.6:
-execution start is M4.8 (#134) and delivery M4.10. Stranded claims are
-D5.
+A claimed Round never closes in M4.6: execution start is M4.8 (#134)
+and delivery M4.10. Stranded claims are D5.
 
 `rounds` joins the no-execution-artefact allowlist, which also checks
 that no manual action creates a Round. Tests:
 `internal/httpapi/rounds_test.go`, with `TestClaim_ResponsesMatchContractAndMethod405`
 in `contract_test.go`. Evidence: `docs/evidence/m4/132-claims.md`.
+
+## Open-Round lock (issue #133)
+
+`lockTicketForMutation` returns a `ticketLock`: the row's archived state
+and its open Round's public id, read in a second statement after the
+`FOR UPDATE` so it sees a Round committed by a claim that held the row
+first. `decideTicketMutation` turns that into the one rejection:
+`archived_ticket`, or `400 round_open` with `error.roundId` set to the
+open Round. Every Owner mutation of a Ticket goes through
+`lockMutableTicket` (the lock plus that decision) before its own rule:
+
+| Command | Path |
+| --- | --- |
+| Edit title, goal, context, Success Criteria, constraints, repository | `PATCH /api/tickets/{id}` |
+| Assign the Owner, assign or reassign an Agent, unassign | `PUT`/`DELETE /api/tickets/{id}/assignee` |
+| Attach or detach a Badge | `PUT`/`DELETE /api/tickets/{id}/badges/{badgeId}` |
+| Plain Status change, Accept | `POST /api/tickets/{id}/status`, `/accept` |
+| Reorder | `POST /api/tickets/{id}/position` |
+| Archive | `POST /api/tickets/{id}/archive` |
+
+`allowedActionsForTicket` consults the same `decideTicketMutation` on
+`workflowStateOf(ticket)`, whose `ticketLock` comes from the Ticket's
+`openRound`. A locked Ticket therefore advertises no Status targets, no
+Status rejections, and Accept unavailable with the identical
+`round_open` detail. The rule applies while the Round is claimed or
+running (the open states, `openRoundStatesSQL`).
+
+Not changed by the lock:
+
+- `template` in a PATCH is still `invalid_request` before any lookup:
+  it has no write path at all (D4, M8).
+- Restore keeps its rules. An archived Ticket cannot hold an open Round
+  (archive refuses one, and a claim skips archived Tickets), and an
+  unarchived one gets `not_archived`.
+- Another Ticket may be reordered or moved beside a locked one. That
+  changes the other Ticket's rank, not the locked Ticket's row.
+- Agent rename, Badge creation and pairing are not Ticket mutations.
+
+Tests: `internal/httpapi/ticket_open_round_lock_test.go`. Evidence:
+`docs/evidence/m4/133-open-round-lock.md`.
 
 ## Error shape
 

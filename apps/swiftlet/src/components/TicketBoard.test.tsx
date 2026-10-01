@@ -127,6 +127,27 @@ describe("TicketBoard", () => {
     expect(within(screen.getByTestId("board-ticket-queued")).queryByTestId("board-claimed")).not.toBeInTheDocument();
   });
 
+  it("marks a Ticket with an open Round, claimed or running, with a named lock glyph and keeps it from being dragged", async () => {
+    const agent = { id: "a1", name: "Builder", kind: "coding" };
+    const round = { id: "r1", sequence: 3, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null };
+    stubTickets([
+      { ...ticket("claimed", "Ready"), assigneeType: "agent", assigneeAgent: agent, openRound: { ...round, state: "claimed" } },
+      { ...ticket("running", "Ready"), assigneeType: "agent", assigneeAgent: agent, openRound: { ...round, state: "running", startedAt: "2026-10-01T10:01:00Z" } },
+      { ...ticket("open", "Ready"), assigneeType: "agent", assigneeAgent: agent },
+    ]);
+
+    render(<TicketBoard onUnauthenticated={() => {}} />);
+
+    for (const id of ["claimed", "running"]) {
+      const slip = await screen.findByTestId(`board-ticket-${id}`);
+      expect(within(slip).getByRole("img", { name: "Locked while Builder works on Round 3" })).toBe(within(slip).getByTestId("board-locked"));
+      expect(slip).toHaveAttribute("draggable", "false");
+    }
+    const open = screen.getByTestId("board-ticket-open");
+    expect(within(open).queryByTestId("board-locked")).not.toBeInTheDocument();
+    expect(open).toHaveAttribute("draggable", "true");
+  });
+
   it("shows empty sections even when there are no Tickets", async () => {
     stubTickets([]);
     render(<TicketBoard onUnauthenticated={() => {}} />);

@@ -19,16 +19,7 @@ const openRoundStatesSQL = `('claimed', 'running', 'waiting_for_input')`
 const oneOpenRoundPerOwnerIndex = "rounds_one_open_per_owner"
 
 const roundOpenCode = "round_open"
-const roundOpenMessage = "this Ticket has an open Round; it can be archived once the Round ends"
-
-var errRoundOpen = errors.New(roundOpenMessage)
-
-func ticketHasOpenRound(ctx context.Context, tx pgx.Tx, ownerID int64, publicID string) (bool, error) {
-	var open bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM rounds r JOIN tickets t ON t.owner_id = r.owner_id AND t.id = r.ticket_id
-		WHERE t.owner_id = $1 AND t.public_id = $2::uuid AND r.state IN `+openRoundStatesSQL+`)`, ownerID, publicID).Scan(&open)
-	return open, err
-}
+const roundOpenMessage = "this Ticket has an open Round; it can be changed once the Round ends"
 
 func (s *server) ClaimWork(w http.ResponseWriter, r *http.Request) {
 	runner, ok := s.requireRunner(w, r)
@@ -77,12 +68,12 @@ func claimRoundForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, 
 		return RunnerClaim{}, false, err
 	}
 	for _, id := range candidates {
-		found, err := lockTicketForMutation(ctx, tx, ownerID, id, false)
-		if errors.Is(err, errArchivedTicket) || (err == nil && !found) {
-			continue
-		}
+		_, found, err := lockTicketForMutation(ctx, tx, ownerID, id)
 		if err != nil {
 			return RunnerClaim{}, false, err
+		}
+		if !found {
+			continue
 		}
 		locked, err := readLockedTicket(ctx, tx, ownerID, id)
 		if err != nil {
