@@ -1013,8 +1013,9 @@ attach/detach and archive. Once archived, every command rejects with
 `archived_ticket`, leaving the row unchanged. Published allowed actions
 contain no Status targets and an unavailable Accept carrying that reason.
 The `archived_at` field is the eligibility check M4's claim path must
-exclude; the same decision point can later reject mutations while a
-Round is open (M4/M5). Archive does not insert execution artefacts.
+exclude. While the Ticket has an open Round, archive is
+`400 round_open` (issue #132, below). Archive does not insert execution
+artefacts.
 Run `go test ./...`, `go vet ./...`, `go build ./...` and
 `./scripts/check-contract-drift.sh` here after generating/staging types.
 
@@ -1128,6 +1129,7 @@ registration and last heartbeat, set together or not at all).
 | `GET /api/runner-health` | Owner | session cookie |
 | `POST /api/runner/register` | Michelin | `Authorization: Bearer tir_…` |
 | `POST /api/runner/heartbeat` | Michelin | `Authorization: Bearer tir_…` |
+| `POST /api/runner/claims` | Michelin | `Authorization: Bearer tir_…` (issue #132) |
 | `POST /api/dev/clock/advance` | tests | session cookie, development only |
 
 **Pairing** returns `201` with `tir_` plus 32 random bytes in unpadded
@@ -1220,6 +1222,57 @@ Ready entries; 18 concurrent Accepts and Status changes on different
 Tickets), each asserting a strict total order afterwards.
 `internal/postgres/migrate_priority_rank_test.go` checks the backfill.
 Evidence: `docs/evidence/m4/131-priority-order.md`.
+
+## Work claims and Rounds (issue #132)
+
+Migration `000013_create_rounds.up.sql` adds `rounds`: a Galley-issued
+`public_id` (UUID v4), the Ticket and the Agent assigned at claim time
+(both owner-scoped foreign keys), `sequence` (1, 2, … per Ticket,
+unique), `state`, `claim_epoch`, and `claimed_at`, `started_at` and
+`ended_at`. It holds no engine reference. CHECKs allow M4's states
+(`claimed`, `running`, `delivered`) with the timestamps each one
+requires; M5 (#6) replaces them. The partial unique index
+`rounds_one_open_per_owner` on `owner_id WHERE state IN ('claimed',
+'running', 'waiting_for_input')` is the sequential slot: one open Round
+per Owner. Its predicate is the open states' SQL definition, and
+`openRoundStatesSQL` in `rounds.go` is the Go one;
+`TestOpenRoundStates_MatchTheSlotIndexPredicate` compares the two.
+
+`POST /api/runner/claims` takes no body.
+
+| Case | Response |
+| --- | --- |
+| A Ticket is requesting Agent work and the slot is free | `201` `RunnerClaim`: `roundId`, `sequence`, `claimEpoch` (1), the Ticket's inputs, the Agent |
+| Nothing requesting work, a Round already open, or the runner not Connected (never registered, or last heartbeat 30 s old or more) | `204`, no body |
+| Missing, malformed or revoked credential, or a session cookie | shared `401 unauthenticated` |
+
+A claim is not a heartbeat. It picks the Owner's highest-priority
+Ticket for which `decideAgentWorkRequest` holds, the same function that
+publishes `requestingAgentWork`. The Ticket keeps its Status, rank,
+Assignee and `updated_at`; Galley then reports it with `openRound` set
+and `requestingAgentWork` false. `Ticket.openRound` is `null` or the open
+Round's `id`, `sequence`, `state`, `agent`, `claimedAt` and `startedAt`.
+
+**Lock order.** The claim takes the Owner's priority advisory lock, then
+checks the slot, then locks candidate Ticket rows one at a time in
+priority order through `lockTicketForMutation`, rechecks each locked row
+and skips it when it is no longer eligible, then inserts the Round. This
+is the same order as capture, reorder and transitions (priority lock,
+then rows). Archive takes only its one row lock and then reads `rounds`,
+so it cannot form a cycle with the claim. A unique violation on the
+slot index maps to `204`.
+
+**What an open Round blocks.** Only archive (`400 round_open`). In
+M4.6, unassigning, reassigning, Status changes, reorder, field edits
+and Badges still succeed while a Round is open; M4.7 (#133) rejects
+them. A claimed Round never closes in M4.6:
+execution start is M4.8 (#134) and delivery M4.10. Stranded claims are
+D5.
+
+`rounds` joins the no-execution-artefact allowlist, which also checks
+that no manual action creates a Round. Tests:
+`internal/httpapi/rounds_test.go`, with `TestClaim_ResponsesMatchContractAndMethod405`
+in `contract_test.go`. Evidence: `docs/evidence/m4/132-claims.md`.
 
 ## Error shape
 
@@ -1499,6 +1552,7 @@ apps/galley/
         ├── ticket_lifecycle.go                 # issue #60: Status transitions, Accept, Assignee
         ├── ticket_lifecycle_test.go            # issue #60: transition-table, Accept, and concurrency tests
         ├── runner.go       # issue #130: pairing, revoke, register, heartbeat, derived health, requireRunner
+        ├── rounds.go       # issue #132: atomic claims, the sequential slot, the open-state definition
         ├── devclock.go     # issue #130: development-only clock advance for the browser suite
         └── no_execution_side_effects_test.go   # issue #60: the no-Round/queue/work-request guardrail
 ```

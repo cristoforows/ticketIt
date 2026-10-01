@@ -696,6 +696,21 @@ Tapping another slip's toggle while a slip is open switches the
 selection on click, not on pointerdown. The taller reorder panel would
 otherwise collapse first and move the toggle out from under the tap.
 
+## Claimed by runner (issue #132)
+
+While Galley's `openRound.state` is `claimed`, the slip
+(`board-claimed`) and the receipt (`ticket-detail-claimed`) show
+**Claimed by runner** as a `ClaimedTag`, the `tag` cva's `claimed`
+variant: an ink outline with ink text on paper (14.91:1, `tokens.test.ts`
+"claimed tag: ink on paper"). It differs from the Ready-deep **Queued
+for** outline, and the two never show together, because Galley reports
+`requestingAgentWork` false while a Round is open. The Ticket stays in
+its Status column. Swiftlet computes nothing: `parseTicket` requires
+`openRound`, either `null` or a Round with a known state, and rejects
+anything else. **Archive** on a Ticket with an open Round shows Galley's
+`round_open` message in the action error, and the receipt stays open.
+`e2e/tests/runner-claims.spec.ts` covers this against a real Michelin.
+
 ## Browser-to-backend suite
 
 The tests above stub `fetch`, so they never exercise the real proxy or
