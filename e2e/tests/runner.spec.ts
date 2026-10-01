@@ -1,12 +1,8 @@
-import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { test, expect, type Page } from "@playwright/test";
 import { signIn } from "../support/sign-in";
+import { pairRunnerViaUI, startMichelin } from "../support/runner";
 import { createTicket } from "../support/tickets";
-
-const MICHELIN_MAIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../apps/michelin/src/main.ts");
 
 async function ticketSnapshot(page: Page): Promise<unknown> {
   const response = await page.request.get("/api/tickets");
@@ -14,53 +10,16 @@ async function ticketSnapshot(page: Page): Promise<unknown> {
   return response.json();
 }
 
-function startMichelin(token: string): { child: ChildProcess; output: () => string } {
-  const galleyUrl = process.env.GALLEY_BASE_URL;
-  if (!galleyUrl) throw new Error("GALLEY_BASE_URL is required: run.sh points Michelin at the real Galley");
-  const child = spawn(process.execPath, [MICHELIN_MAIN], {
-    env: {
-      PATH: process.env.PATH,
-      GALLEY_URL: galleyUrl,
-      MICHELIN_RUNNER_TOKEN: token,
-      MICHELIN_HEARTBEAT_INTERVAL_MS: "500",
-      MICHELIN_STATUS_INTERVAL_MS: "5000",
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let output = "";
-  child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
-  child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
-  return { child, output: () => output };
-}
-
 test("a paired Michelin shows Connected, and once it stops, Runner disconnected with no Ticket changed", async ({ page, request }) => {
   await signIn(page, request, "owner");
   await createTicket(page, `Runner watch ${Date.now()}`);
 
-  await page.goto("/agents");
+  const token = await pairRunnerViaUI(page);
   const section = page.getByRole("region", { name: "Runner" });
   const headerPill = page.getByRole("banner").getByTestId("runner-health-pill");
-  await expect(headerPill).toHaveAttribute("data-health", /not_paired|connected|disconnected/);
 
-  const repair = section.getByRole("button", { name: "Pair again" });
-  const [paired] = await Promise.all([
-    page.waitForResponse((r) => r.url().endsWith("/api/runner-credential") && r.request().method() === "POST"),
-    (async () => {
-      if (await repair.isVisible()) {
-        await repair.click();
-        await section.getByRole("button", { name: "Pair new runner" }).click();
-      } else {
-        await section.getByRole("button", { name: "Pair runner" }).click();
-      }
-    })(),
-  ]);
-  expect(paired.status()).toBe(201);
-  const token = await section.getByLabel("Runner credential").inputValue();
-  expect(token).toMatch(/^tir_[A-Za-z0-9_-]{43}$/);
-  await section.getByRole("button", { name: "Done" }).click();
-  await expect(section.getByLabel("Runner credential")).toHaveCount(0);
-
-  const michelin = startMichelin(token);
+  // Claims are tests/runner-claims.spec.ts's; this spec's Ticket snapshot must not see one.
+  const michelin = startMichelin(token, 3_600_000);
   let stopped = false;
   try {
     await expect(headerPill).toHaveAttribute("data-health", "connected", { timeout: 15_000 });
