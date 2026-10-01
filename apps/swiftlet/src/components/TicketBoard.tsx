@@ -382,14 +382,12 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
           })}
         </BoardColumns>
       )}
-      {state.kind === "loaded" && !phone && (
+      {state.kind === "loaded" && !phone && draggingTicket && (
         <ArchiveZone
           data-testid="board-archive-zone"
           aria-hidden="true"
-          armed={draggingTicket !== undefined}
           over={overArchive}
           onDragOver={(event) => {
-            if (!draggingTicket) return;
             event.preventDefault();
             event.dataTransfer.dropEffect = "move";
             setOverArchive(true);
@@ -401,7 +399,7 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
             event.preventDefault();
             setOverArchive(false);
             setDraggingId(null);
-            if (draggingTicket) void archiveOnBoard(draggingTicket);
+            void archiveOnBoard(draggingTicket);
           }}
         />
       )}

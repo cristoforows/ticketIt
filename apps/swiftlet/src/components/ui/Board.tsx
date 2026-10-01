@@ -64,19 +64,18 @@ function Spike() {
   );
 }
 
-export function ArchiveZone({ armed, over, className, ...rest }: ComponentPropsWithRef<"div"> & { armed: boolean; over: boolean }) {
+export function ArchiveZone({ over, className, ...rest }: ComponentPropsWithRef<"div"> & { over: boolean }) {
   return (
     <div
-      data-armed={armed ? "true" : undefined}
       data-over={over ? "true" : undefined}
       className={cn(
-        "archive-zone mt-2 flex min-h-20 items-center justify-center gap-4 border-2 border-dashed border-dim px-4 py-5 text-center text-label tracking-label text-dim uppercase data-armed:border-paper data-armed:text-paper data-over:border-amber data-over:bg-amber/10 data-over:font-bold data-over:text-amber",
+        "archive-zone fixed inset-x-0 bottom-4 z-30 mx-auto flex w-fit items-end justify-center gap-4 px-10 pt-8 pb-2 text-center text-label tracking-label text-paper uppercase data-over:font-bold data-over:text-amber",
         className,
       )}
       {...rest}
     >
       <Spike />
-      {over ? "Yes! Let go to archive it" : armed ? "Toss it on the spike!" : "The spike · drag a slip here to archive it"}
+      {over ? "Yes! Let go to archive it" : "Toss it on the spike!"}
       <Spike />
     </div>
   );

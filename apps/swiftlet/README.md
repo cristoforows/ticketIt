@@ -484,8 +484,9 @@ completion conditions through `cd e2e && ./run.sh` from repo root.
 They are switchable through the authenticated shell's Board / List links.
 The board calls the same `GET /api/tickets` as the list; there is no board
 endpoint or separate Ticket state. Capture stays on the list. On desktop,
-dropping a slip on the archive zone below the columns calls
-`POST /api/tickets/:id/archive`; phones archive from the Ticket detail. Each of six Status sections renders even when empty, in
+a spike appears at the bottom of the screen while a slip is dragged;
+dropping the slip on it calls `POST /api/tickets/:id/archive`. Phones
+archive from the Ticket detail. Each of six Status sections renders even when empty, in
 lifecycle order: Backlog, Ready, In Progress, Blocked, In Review, Done.
 Cards show title and Template and link to `/tickets/:id`. Nothing on
 the board starts or controls execution.
