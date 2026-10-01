@@ -710,7 +710,7 @@ its Status column. Swiftlet computes nothing: `parseTicket` requires
 anything else. A command Galley refuses because a claim landed after the
 receipt loaded shows Galley's `round_open` message in the action error,
 and the receipt stays open. `e2e/tests/runner-claims.spec.ts` covers
-this against a real Michelin.
+this against a claim made directly with the runner credential.
 
 ## Locked while a Round is open (issue #133)
 
@@ -741,6 +741,49 @@ While `openRound` is set:
 `tokens.test.ts` "lock notice and lock glyph: ink on paper" pins the
 contrast (14.91:1). Nothing animates. The greyed active card,
 animation and View/Stop controls are M5 (#6).
+
+## Rounds, In Progress and refreshing (issue #134)
+
+Once the runner reports Execution started, Galley reports the Ticket as
+In Progress with `openRound.state` `running` and a `startedAt`. Swiftlet
+renders that and decides nothing:
+
+- **Slip and row.** The slip moves to the In Progress column. It shows
+  the Agent as its Assignee and the lock glyph, and no **Claimed by
+  runner** tag, because that tag shows only while the Round is
+  `claimed`.
+- **Rounds section.** A receipt whose Ticket has an open Round shows a
+  **Rounds** section (`ticket-detail-rounds`) with the Round's number,
+  its Agent, and either the time Galley says it started
+  (`ticket-detail-round-started`) or "Claimed, waiting for the runner to
+  start" (`ticket-detail-round-waiting`). Only the open Round is shown;
+  a Ticket with no Round has no section. History and the active card
+  are M5 (#6) and M4.11.
+- **Runner disconnected.** While the Round is open, the section shows a
+  **Runner disconnected** notice (`ticket-detail-runner-disconnected`)
+  when Galley's runner health is anything but Connected. It uses the
+  header's `useRunnerHealth` (`enabled` only while a Round is open), not
+  a second fetch mechanism, so it follows the 10 s cadence. While the
+  health is loading or could not be read, no notice shows, because
+  nothing is known. The notice says lost contact does not mean the Round
+  stopped (docs/contracts/execution-interface.md).
+- **Refreshing.** `useOpenRoundRefresh` calls a refresh every 3 s while
+  the receipt's Ticket, or any Ticket on the board or in the list, has
+  an open Round. A tick is skipped while the previous refresh is
+  pending; there is no loading state, because the previous data stays
+  until the new data arrives; nothing is set when the data is unchanged;
+  and it stops when the Round closes or the component unmounts. With no
+  open Round there is no timer. A failed refresh keeps the previous data
+  and adds Galley's or the network's message, cleared by the next good
+  refresh. A move or reorder in progress skips the tick.
+- **Parsing.** `parseTicket` also requires a `running` Round to carry a
+  `startedAt` and a `claimed` one not to. Swiftlet does not call
+  `GET /api/tickets/{id}/rounds` yet; M4.9 (#135) adds the consumer.
+
+Tests cover each receipt state (`TicketDetail.test.tsx`) and the refresh
+(`useOpenRoundRefresh.test.tsx` and the page, list and board tests, all
+with fake timers).
+Evidence: `docs/evidence/m4/134-controlled-engine.md`.
 
 ## Browser-to-backend suite
 

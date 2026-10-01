@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TicketDetailPage } from "./TicketDetailPage";
 
 type MockResponse = Pick<Response, "ok" | "status" | "statusText" | "json">;
@@ -284,10 +284,182 @@ describe("TicketDetailPage", () => {
       { name: "an unknown Round state", openRound: { ...claimedRound, state: "delivered" } },
       { name: "a Round with no Agent", openRound: { ...claimedRound, agent: null } },
       { name: "a Round with no claimedAt", openRound: { ...claimedRound, claimedAt: undefined } },
+      { name: "a running Round that has not started", openRound: { ...claimedRound, state: "running", startedAt: null } },
+      { name: "a claimed Round that has started", openRound: { ...claimedRound, startedAt: "2026-10-01T10:01:00Z" } },
+      { name: "a running Round with a numeric startedAt", openRound: { ...claimedRound, state: "running", startedAt: 5 } },
     ])("rejects a Ticket response with $name", async ({ openRound }) => {
       stubFetch(jsonResponse({ ...claimed, openRound }));
       render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
       expect(await screen.findByText("Galley's Ticket response was missing a required field.")).toBeInTheDocument();
+    });
+  });
+
+  describe("refreshing while the Ticket has an open Round", () => {
+    const agent = { id: AGENTS[0].id, name: "atlas", kind: "research" };
+    const round = { id: "66666666-6666-4666-8666-666666666666", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null };
+    const lockedActions = { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: round.id } } };
+    const claimed = { ...TICKET, status: "Ready", assigneeType: "agent", assigneeAgent: agent, openRound: round, allowedActions: lockedActions };
+    const running = { ...claimed, status: "InProgress", openRound: { ...round, state: "running", startedAt: "2026-10-01T10:00:05Z" }, updatedAt: "2026-10-01T10:00:05Z" };
+    const closed = { ...TICKET, status: "InReview", assigneeType: "agent", assigneeAgent: agent, updatedAt: "2026-10-01T10:05:00Z" };
+    const CONNECTED = { state: "connected", checkedAt: "2026-10-01T10:00:10Z", pairedAt: "2026-10-01T09:00:00Z", registeredAt: "2026-10-01T09:00:00Z", lastSeenAt: "2026-10-01T10:00:05Z", michelinVersion: "0.1.0", hostname: "runner-host" };
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const flush = (ms = 0) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+
+    function stubRound(tickets: (() => Promise<MockResponse>)[], health: () => MockResponse = () => jsonResponse(CONNECTED)) {
+      const queue = [...tickets];
+      const fetchMock = vi.fn((input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path === "/api/agents") return Promise.resolve(jsonResponse({ agents: AGENTS }));
+        if (path === "/api/runner-health") return Promise.resolve(health());
+        if (path === `/api/tickets/${TICKET_ID}`) return (queue.length > 1 ? queue.shift() : queue[0])!();
+        throw new Error(`unexpected fetch ${path}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      return fetchMock;
+    }
+    const answer = (body: unknown, status = 200) => () => Promise.resolve(jsonResponse(body, status));
+    const ticketFetches = (fetchMock: ReturnType<typeof stubRound>) => fetchMock.mock.calls.filter(([path]) => String(path) === `/api/tickets/${TICKET_ID}`).length;
+    const healthFetches = (fetchMock: ReturnType<typeof stubRound>) => fetchMock.mock.calls.filter(([path]) => String(path) === "/api/runner-health").length;
+
+    it("refetches every 3 seconds and shows what Galley now reports, never returning to the loading state", async () => {
+      const fetchMock = stubRound([answer(claimed), answer(running)]);
+      render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+      await flush();
+      expect(screen.getByTestId("ticket-detail-claimed")).toBeInTheDocument();
+      expect(screen.getByTestId("ticket-detail-round-waiting")).toBeInTheDocument();
+      expect(ticketFetches(fetchMock)).toBe(1);
+
+      await flush(2999);
+      expect(ticketFetches(fetchMock)).toBe(1);
+      await flush(1);
+      expect(ticketFetches(fetchMock)).toBe(2);
+      expect(screen.queryByTestId("ticket-detail-loading")).not.toBeInTheDocument();
+      expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("In Progress");
+      expect(screen.getByTestId("ticket-detail-round-started")).toHaveTextContent("2026-10-01T10:00:05Z");
+      expect(screen.queryByTestId("ticket-detail-claimed")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("ticket-detail-round-waiting")).not.toBeInTheDocument();
+
+      await flush(3000);
+      expect(ticketFetches(fetchMock)).toBe(3);
+      expect(screen.getByTestId("ticket-detail-title")).toBeInTheDocument();
+    });
+
+    it("keeps showing the previous receipt while a refetch is pending", async () => {
+      let release: (response: MockResponse) => void = () => {};
+      stubRound([answer(claimed), () => new Promise<MockResponse>((resolve) => { release = resolve; })]);
+      render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+      await flush();
+      await flush(3000);
+      expect(screen.queryByTestId("ticket-detail-loading")).not.toBeInTheDocument();
+      expect(screen.getByTestId("ticket-detail-round-waiting")).toBeInTheDocument();
+      release(jsonResponse(running));
+      await flush();
+      expect(screen.getByTestId("ticket-detail-round-started")).toBeInTheDocument();
+    });
+
+    it("never overlaps refetches: a slow one is waited for", async () => {
+      const fetchMock = stubRound([answer(claimed), () => new Promise<MockResponse>(() => {})]);
+      render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+      await flush();
+      await flush(30_000);
+      expect(ticketFetches(fetchMock)).toBe(2);
+    });
+
+    it("stops refetching once the Round has closed, and stops asking about the runner", async () => {
+      const fetchMock = stubRound([answer(running), answer(closed)]);
+      render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+      await flush();
+      await flush(3000);
+      expect(ticketFetches(fetchMock)).toBe(2);
+      expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("In Review");
+      expect(screen.queryByTestId("ticket-detail-rounds")).not.toBeInTheDocument();
+      const healthBefore = healthFetches(fetchMock);
+
+      await flush(120_000);
+      expect(ticketFetches(fetchMock)).toBe(2);
+      expect(healthFetches(fetchMock)).toBe(healthBefore);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("never refetches, or asks about the runner, for a Ticket with no open Round", async () => {
+      const fetchMock = stubRound([answer(TICKET)]);
+      render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+      await flush(120_000);
+      expect(ticketFetches(fetchMock)).toBe(1);
+      expect(healthFetches(fetchMock)).toBe(0);
+      expect(screen.queryByTestId("ticket-detail-rounds")).not.toBeInTheDocument();
+    });
+
+    it("stops refetching on unmount", async () => {
+      const fetchMock = stubRound([answer(claimed)]);
+      const { unmount } = render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+      await flush();
+      unmount();
+      expect(vi.getTimerCount()).toBe(0);
+      await flush(60_000);
+      expect(ticketFetches(fetchMock)).toBe(1);
+    });
+
+    it("keeps the receipt and says the refresh failed, then clears the note once a refetch succeeds", async () => {
+      stubRound([answer(claimed), answer({ error: { code: "database_unavailable", message: "x" } }, 503), answer(claimed), answer(running)]);
+      render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+      await flush();
+      await flush(3000);
+      expect(screen.getByTestId("ticket-detail-refresh-error")).toBeInTheDocument();
+      expect(screen.getByTestId("ticket-detail-refresh-error-message")).toHaveTextContent("Galley returned an error response: 503");
+      expect(screen.getByTestId("ticket-detail-round-waiting")).toBeInTheDocument();
+
+      await flush(3000);
+      expect(screen.queryByTestId("ticket-detail-refresh-error")).not.toBeInTheDocument();
+      expect(screen.getByTestId("ticket-detail-round-waiting")).toBeInTheDocument();
+
+      await flush(3000);
+      expect(screen.getByTestId("ticket-detail-round-started")).toBeInTheDocument();
+    });
+
+    it("hands the Owner to sign-in when a refetch comes back unauthenticated", async () => {
+      const onSignedOut = vi.fn();
+      stubRound([answer(claimed), answer({ error: { code: "unauthenticated", message: "sign-in required" } }, 401)]);
+      render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onSignedOut} />);
+      await flush();
+      await flush(3000);
+      expect(onSignedOut).toHaveBeenCalled();
+    });
+
+    describe("with the runner's health", () => {
+      it("overlays Runner disconnected when Galley says the runner is not Connected", async () => {
+        stubRound([answer(running)], () => jsonResponse({ ...CONNECTED, state: "disconnected" }));
+        render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+        await flush();
+        expect(screen.getByTestId("ticket-detail-runner-disconnected")).toHaveTextContent("Runner disconnected");
+        expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("In Progress");
+      });
+
+      it("shows no overlay while the runner is Connected, and shows it when a later check says otherwise", async () => {
+        const states = [CONNECTED, { ...CONNECTED, state: "disconnected" }];
+        stubRound([answer(running)], () => jsonResponse(states.length > 1 ? states.shift() : states[0]));
+        render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+        await flush();
+        expect(screen.queryByTestId("ticket-detail-runner-disconnected")).not.toBeInTheDocument();
+        await flush(10_000);
+        expect(screen.getByTestId("ticket-detail-runner-disconnected")).toBeInTheDocument();
+      });
+
+      it("reuses the header's runner health request and shows no overlay when it fails", async () => {
+        const fetchMock = stubRound([answer(running)], () => jsonResponse({ error: { code: "database_unavailable", message: "x" } }, 503));
+        render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+        await flush();
+        expect(fetchMock).toHaveBeenCalledWith("/api/runner-health", undefined);
+        expect(screen.getByTestId("ticket-detail-rounds")).toBeInTheDocument();
+        expect(screen.queryByTestId("ticket-detail-runner-disconnected")).not.toBeInTheDocument();
+      });
     });
   });
 

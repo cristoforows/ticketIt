@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -62,6 +63,7 @@ type server struct {
 	githubClient *auth.GitHubClient
 	now          func() time.Time
 	devClock     *devClock
+	logger       *slog.Logger
 }
 
 // newServer computes the fixed status fields once. startedAt is

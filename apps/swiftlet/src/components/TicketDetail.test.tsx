@@ -6,6 +6,7 @@ import type { Agent } from "../api/agents";
 import type { Badge, Ticket, TicketAssignee, TicketUpdate } from "../api/tickets";
 import { statusLabel } from "./ui";
 import { GalleyError } from "../api/http";
+import type { HealthView } from "./RunnerHealthPill";
 
 const TICKET: Ticket = {
   id: "33333333-3333-4333-8333-333333333333",
@@ -723,5 +724,88 @@ describe("TicketDetail", () => {
       expect(screen.getAllByTestId("ticket-detail-accept-unavailable")).toHaveLength(2);
     });
 
+  });
+});
+
+describe("the Rounds section", () => {
+  afterEach(cleanup);
+
+  const agent = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kind: "research" as const };
+  const claimedRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 3, state: "claimed" as const, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null };
+  const runningRound = { ...claimedRound, state: "running" as const, startedAt: "2026-10-01T10:01:00Z" };
+  const roundTicket = (openRound: Ticket["openRound"], status: Ticket["status"] = "Ready"): Ticket => ({
+    ...REFINED_TICKET,
+    status,
+    assigneeType: "agent",
+    assigneeAgent: agent,
+    openRound,
+    allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: claimedRound.id } } },
+  });
+  const health = (state: "connected" | "disconnected" | "not_paired"): HealthView => ({
+    kind: "loaded",
+    health: { state, checkedAt: "2026-10-01T10:02:00Z", pairedAt: null, registeredAt: null, lastSeenAt: null, michelinVersion: null, hostname: null },
+  });
+
+  it("does not appear for a Ticket with no Round", () => {
+    render(<TicketDetail ticket={TICKET} onSave={vi.fn()} {...noopActions()} runnerHealth={health("disconnected")} />);
+    expect(screen.queryByTestId("ticket-detail-rounds")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("ticket-detail-runner-disconnected")).not.toBeInTheDocument();
+  });
+
+  it("shows a claimed Round as waiting for the runner, with its number and Agent and no started time", () => {
+    render(<TicketDetail ticket={roundTicket(claimedRound)} onSave={vi.fn()} {...noopActions()} runnerHealth={health("connected")} />);
+    const section = within(screen.getByTestId("ticket-detail-rounds"));
+    expect(section.getByRole("heading", { name: "Rounds" })).toBeInTheDocument();
+    expect(section.getByTestId("ticket-detail-round-number")).toHaveTextContent("3");
+    expect(section.getByTestId("ticket-detail-round-agent")).toHaveTextContent("atlas");
+    expect(section.getByTestId("ticket-detail-round-waiting")).toHaveTextContent("Claimed, waiting for the runner to start");
+    expect(section.queryByTestId("ticket-detail-round-started")).not.toBeInTheDocument();
+  });
+
+  it("shows a running Round with the time Galley reports it started", () => {
+    render(<TicketDetail ticket={roundTicket(runningRound, "InProgress")} onSave={vi.fn()} {...noopActions()} runnerHealth={health("connected")} />);
+    const section = within(screen.getByTestId("ticket-detail-rounds"));
+    expect(section.getByTestId("ticket-detail-round-number")).toHaveTextContent("3");
+    expect(section.getByTestId("ticket-detail-round-agent")).toHaveTextContent("atlas");
+    expect(section.getByTestId("ticket-detail-round-started")).toHaveTextContent("2026-10-01T10:01:00Z");
+    expect(section.queryByTestId("ticket-detail-round-waiting")).not.toBeInTheDocument();
+    expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("In Progress");
+    expect(screen.queryByTestId("ticket-detail-claimed")).not.toBeInTheDocument();
+    expect(screen.getByTestId("ticket-detail-locked")).toHaveTextContent("Locked while atlas works on Round 3");
+  });
+
+  it.each([
+    ["disconnected", "disconnected"],
+    ["not paired", "not_paired"],
+  ] as const)("overlays Runner disconnected on an open Round when the runner is %s", (_name, state) => {
+    render(<TicketDetail ticket={roundTicket(runningRound, "InProgress")} onSave={vi.fn()} {...noopActions()} runnerHealth={health(state)} />);
+    const overlay = within(screen.getByTestId("ticket-detail-rounds")).getByTestId("ticket-detail-runner-disconnected");
+    expect(overlay).toHaveTextContent("Runner disconnected");
+    expect(overlay).toHaveAttribute("role", "status");
+    expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("In Progress");
+    expect(screen.getByTestId("ticket-detail-round-started")).toHaveTextContent("2026-10-01T10:01:00Z");
+  });
+
+  it.each([
+    ["connected", health("connected")],
+    ["still being checked", { kind: "loading" } as HealthView],
+    ["unknown because the check failed", { kind: "error" } as HealthView],
+  ])("shows no overlay while the runner is %s", (_name, runnerHealth) => {
+    render(<TicketDetail ticket={roundTicket(runningRound, "InProgress")} onSave={vi.fn()} {...noopActions()} runnerHealth={runnerHealth} />);
+    expect(screen.getByTestId("ticket-detail-rounds")).toBeInTheDocument();
+    expect(screen.queryByTestId("ticket-detail-runner-disconnected")).not.toBeInTheDocument();
+  });
+
+  it("shows no overlay when the runner health is not supplied", () => {
+    render(<TicketDetail ticket={roundTicket(runningRound, "InProgress")} onSave={vi.fn()} {...noopActions()} />);
+    expect(screen.queryByTestId("ticket-detail-runner-disconnected")).not.toBeInTheDocument();
+  });
+
+  it("follows Galley when the Round moves from claimed to running", () => {
+    const { rerender } = render(<TicketDetail ticket={roundTicket(claimedRound)} onSave={vi.fn()} {...noopActions()} />);
+    expect(screen.getByTestId("ticket-detail-round-waiting")).toBeInTheDocument();
+    rerender(<TicketDetail ticket={roundTicket(runningRound, "InProgress")} onSave={vi.fn()} {...noopActions()} />);
+    expect(screen.queryByTestId("ticket-detail-round-waiting")).not.toBeInTheDocument();
+    expect(screen.getByTestId("ticket-detail-round-started")).toHaveTextContent("2026-10-01T10:01:00Z");
   });
 });

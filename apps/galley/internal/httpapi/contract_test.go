@@ -872,3 +872,60 @@ func TestClaim_ResponsesMatchContractAndMethod405(t *testing.T) {
 		t.Fatalf("Allow = %q, want POST", rec.Header().Get("Allow"))
 	}
 }
+
+func TestRoundEvents_ResponsesMatchContractAndMethod405(t *testing.T) {
+	f := newClaimFixture(t)
+	router, err := legacy.NewRouter(loadContract(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate := func(call runnerCall, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(call.method, call.path, strings.NewReader(call.body))
+		if call.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if call.token != "" {
+			req.Header.Set("Authorization", "Bearer "+call.token)
+		}
+		if call.cookie != nil {
+			req.AddCookie(call.cookie)
+		}
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("%s %s: status=%d, want %d; body=%s", call.method, call.path, rec.Code, want, rec.Body.String())
+		}
+		validateAgainstContract(t, router, req, rec)
+		return rec
+	}
+	queued, claim := f.claimTicket(t, "contract")
+	path := "/api/runner/rounds/" + claim.RoundId + "/events"
+	event := func(key string, epoch int, reference string) runnerCall {
+		return runnerCall{method: http.MethodPost, path: path, body: startedEvent(key, epoch, eventOccurredAt, reference), token: f.token}
+	}
+	rounds := runnerCall{method: http.MethodGet, path: "/api/tickets/" + queued.Id + "/rounds", cookie: f.cookie}
+
+	validate(rounds, http.StatusOK)
+	validate(event("k", 1, eventReference), http.StatusCreated)
+	validate(event("k", 1, eventReference), http.StatusOK)
+	validate(rounds, http.StatusOK)
+	validate(event("k", 1, "controlled:other"), http.StatusConflict)
+	validate(event("k2", 2, eventReference), http.StatusConflict)
+	validate(event("k3", 1, eventReference), http.StatusConflict)
+	validate(runnerCall{method: http.MethodPost, path: path, body: `{}`, token: f.token}, http.StatusBadRequest)
+	validate(runnerCall{method: http.MethodPost, path: path, body: startedEvent("k", 1, eventOccurredAt, eventReference)}, http.StatusUnauthorized)
+	validate(runnerCall{method: http.MethodPost, path: path, body: startedEvent("k", 1, eventOccurredAt, eventReference), cookie: f.cookie}, http.StatusUnauthorized)
+	validate(runnerCall{method: http.MethodPost, path: "/api/runner/rounds/" + uuid.NewString() + "/events", body: startedEvent("k", 1, eventOccurredAt, eventReference), token: f.token}, http.StatusNotFound)
+	deliverRoundDirect(t, f.pool, claim.RoundId)
+	validate(event("k4", 1, eventReference), http.StatusConflict)
+
+	validate(runnerCall{method: http.MethodGet, path: "/api/tickets/" + uuid.NewString() + "/rounds", cookie: f.cookie}, http.StatusNotFound)
+	validate(runnerCall{method: http.MethodGet, path: "/api/tickets/" + queued.Id + "/rounds"}, http.StatusUnauthorized)
+
+	rec := f.expect(t, runnerCall{method: http.MethodGet, path: path, token: f.token}, http.StatusMethodNotAllowed)
+	if rec.Header().Get("Allow") != "POST" {
+		t.Fatalf("Allow = %q, want POST", rec.Header().Get("Allow"))
+	}
+	f.expect(t, runnerCall{method: http.MethodPut, path: "/api/tickets/" + queued.Id + "/rounds", cookie: f.cookie}, http.StatusMethodNotAllowed)
+}

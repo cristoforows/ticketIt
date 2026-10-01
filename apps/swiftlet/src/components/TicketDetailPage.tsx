@@ -22,8 +22,10 @@ import {
 import { fetchAgents, type Agent } from "../api/agents";
 import { collectionQuery, fullPageReturnPath, navigate, useEditRequested } from "../router";
 import { Link } from "./Link";
+import { useRunnerHealth } from "./RunnerHealthPill";
 import { TicketDetail } from "./TicketDetail";
 import { capsLinkClasses, EmptyMessage, ErrorMessage, LoadingMessage, Paper } from "./ui";
+import { sameData, useOpenRoundRefresh } from "./useOpenRoundRefresh";
 
 interface TicketDetailPageProps {
   ticketId: string;
@@ -35,7 +37,7 @@ interface TicketDetailPageProps {
 
 type DetailState =
   | { kind: "loading" }
-  | { kind: "loaded"; ticket: Ticket }
+  | { kind: "loaded"; ticket: Ticket; refreshError?: string }
   | { kind: "not-found" }
   | { kind: "error"; message: string };
 
@@ -44,6 +46,28 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
   const editRequested = useEditRequested();
 
   const loaded = state.kind === "loaded";
+  const hasOpenRound = state.kind === "loaded" && state.ticket.openRound !== null;
+  const { view: runnerHealth } = useRunnerHealth(onUnauthenticated, hasOpenRound);
+
+  const refreshTicket = async () => {
+    try {
+      const ticket = await fetchTicket(ticketId);
+      setState((current) => {
+        if (current.kind !== "loaded" || current.ticket.id !== ticket.id) return current;
+        if (sameData(current.ticket, ticket)) return current.refreshError === undefined ? current : { kind: "loaded", ticket: current.ticket };
+        return { kind: "loaded", ticket };
+      });
+    } catch (error) {
+      if (error instanceof UnauthenticatedError) {
+        onUnauthenticated();
+        return;
+      }
+      const message = error instanceof TicketNotFoundError ? "This ticket could not be found." : error instanceof Error ? error.message : "Unknown error refreshing the ticket.";
+      setState((current) => (current.kind === "loaded" ? { ...current, refreshError: message } : current));
+    }
+  };
+  useOpenRoundRefresh(hasOpenRound, refreshTicket);
+
   useEffect(() => {
     if (!loaded || !editRequested) return;
     const query = new URLSearchParams(window.location.search);
@@ -156,6 +180,7 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
       onArchive={() => runCommand(() => archiveTicket(ticketId))}
       onRestore={() => runCommand(() => restoreTicket(ticketId))}
       editRequested={editRequested}
+      runnerHealth={runnerHealth}
       onArchived={() => (onArchiveSucceeded ? onArchiveSucceeded() : navigate(fullPageReturnPath()))}
     />
   );
@@ -183,6 +208,11 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
       {state.kind === "error" && (
         <ErrorMessage title="Unable to load this ticket." data-testid="ticket-detail-error">
           <p data-testid="ticket-detail-error-message">{state.message}</p>
+        </ErrorMessage>
+      )}
+      {state.kind === "loaded" && state.refreshError && (
+        <ErrorMessage title="Unable to refresh this ticket." data-testid="ticket-detail-refresh-error" className="mb-4">
+          <p data-testid="ticket-detail-refresh-error-message">{state.refreshError}</p>
         </ErrorMessage>
       )}
       {receipt && (presentation === "page" ? <Paper className="p-6">{receipt}</Paper> : receipt)}

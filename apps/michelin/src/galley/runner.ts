@@ -4,6 +4,8 @@ import { callGalley, INVALID_JSON, isRecord, type GalleyRequest, type Outcome, t
 
 export type RegisterRunnerRequest = components["schemas"]["RegisterRunnerRequest"];
 export type RunnerClaim = components["schemas"]["RunnerClaim"];
+export type RoundEventRequest = components["schemas"]["RoundEventRequest"];
+export type RoundEventResult = components["schemas"]["RoundEventResult"];
 
 export type RunnerFailure =
   | TransportFailure
@@ -101,4 +103,51 @@ function parseClaim(payload: unknown): RunnerClaim | string {
     return "agent is not an Agent";
   }
   return payload as RunnerClaim;
+}
+
+export type RoundEventFailure =
+  | TransportFailure
+  | { reason: "http_status"; httpStatus: number; errorCode?: string }
+  | { reason: "invalid_body"; error: string };
+
+export type RoundEventOutcome = { result: RoundEventResult; replayed: boolean };
+
+export type RoundEventReport = Timed<Outcome<RoundEventOutcome, RoundEventFailure>>;
+
+// The body arrives serialised so every retry of one event sends the same bytes.
+export function reportRoundEvent(request: RunnerRequest, roundId: string, body: string): Promise<RoundEventReport> {
+  const headers = { accept: "application/json", "content-type": "application/json", authorization: request.credential.authorizationHeader() };
+  const path = `api/runner/rounds/${encodeURIComponent(roundId)}/events`;
+  return callGalley<RoundEventOutcome, RoundEventFailure>(request, path, { method: "POST", headers, body }, async (response, readJson) => {
+    const payload = await readJson();
+    if (response.status !== 200 && response.status !== 201) {
+      const errorCode = isRecord(payload) && isRecord(payload["error"]) && typeof payload["error"]["code"] === "string" ? payload["error"]["code"] : undefined;
+      return { ok: false, failure: { reason: "http_status", httpStatus: response.status, errorCode } };
+    }
+    if (payload === INVALID_JSON) {
+      return { ok: false, failure: { reason: "invalid_body", error: "response is not valid JSON" } };
+    }
+    const result = parseRoundEventResult(payload, roundId);
+    return typeof result === "string" ? { ok: false, failure: { reason: "invalid_body", error: result } } : { ok: true, value: { result, replayed: response.status === 200 } };
+  });
+}
+
+function parseRoundEventResult(payload: unknown, roundId: string): RoundEventResult | string {
+  if (!isRecord(payload)) {
+    return "body is not a JSON object";
+  }
+  const { roundId: reportedRound, type, state, startedAt } = payload;
+  if (reportedRound !== roundId) {
+    return "roundId is not the Round the event was sent for";
+  }
+  if (type !== "execution_started") {
+    return "type is not execution_started";
+  }
+  if (state !== "claimed" && state !== "running") {
+    return "state is not claimed or running";
+  }
+  if (typeof startedAt !== "string") {
+    return "startedAt is not a string";
+  }
+  return { roundId: reportedRound, type, state, startedAt };
 }

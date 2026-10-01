@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, createEvent, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, createEvent, fireEvent, render, screen, within } from "@testing-library/react";
 import { TicketBoard } from "./TicketBoard";
 
 const ticket = (id: string, status: string, template = "Basic") => ({
@@ -342,5 +342,129 @@ describe("TicketBoard", () => {
       dragAt("drop", slipAt("r1", 0), 10);
       expect(await screen.findByTestId("ticket-board-move-error")).toHaveTextContent("Galley anchor reason");
     });
+  });
+});
+
+describe("TicketBoard refreshing while a Ticket has an open Round", () => {
+  const agent = { id: "a1", name: "Builder", kind: "coding" };
+  const round = { id: "r1", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null };
+  const claimed = { ...ticket("work", "Ready"), assigneeType: "agent", assigneeAgent: agent, openRound: round };
+  const running = { ...claimed, status: "InProgress", openRound: { ...round, state: "running", startedAt: "2026-10-01T10:00:05Z" } };
+  const settled = { ...claimed, openRound: null };
+  const other = ticket("other", "Backlog");
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  const flush = (ms = 0) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+
+  type Reply = () => Promise<{ ok: boolean; status: number; statusText?: string; json: () => Promise<unknown> }>;
+  const list = (...tickets: unknown[]): Reply => () => Promise.resolve({ ok: true, status: 200, json: async () => ({ tickets }) });
+
+  function stubLists(replies: Reply[]) {
+    const queue = [...replies];
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      if (String(input) !== "/api/tickets") throw new Error(`unexpected fetch ${String(input)}`);
+      return (queue.length > 1 ? queue.shift() : queue[0])!();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("refetches every 3 seconds and moves the slip to In Progress with its Agent, locked and without the claimed tag", async () => {
+    const fetchMock = stubLists([list(claimed, other), list(running, other)]);
+    render(<TicketBoard onUnauthenticated={() => {}} />);
+    await flush();
+    expect(within(screen.getByTestId("board-status-Ready")).getByTestId("board-ticket-work")).toBeInTheDocument();
+    expect(within(screen.getByTestId("board-ticket-work")).getByTestId("board-claimed")).toBeInTheDocument();
+
+    await flush(2999);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await flush(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId("ticket-board-loading")).not.toBeInTheDocument();
+    const slip = within(screen.getByTestId("board-status-InProgress")).getByTestId("board-ticket-work");
+    expect(within(slip).getByTestId("board-assignee")).toHaveTextContent("Assignee: Builder");
+    expect(within(slip).getByRole("img", { name: "Locked while Builder works on Round 1" })).toBeInTheDocument();
+    expect(within(slip).queryByTestId("board-claimed")).not.toBeInTheDocument();
+    expect(slip).toHaveAttribute("draggable", "false");
+    expect(within(screen.getByTestId("board-status-Ready")).queryByTestId("board-ticket-work")).not.toBeInTheDocument();
+  });
+
+  it("keeps the board on screen while a refetch is pending and never overlaps refetches", async () => {
+    const fetchMock = stubLists([list(claimed), () => new Promise(() => {})]);
+    render(<TicketBoard onUnauthenticated={() => {}} />);
+    await flush();
+    await flush(30_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId("ticket-board-loading")).not.toBeInTheDocument();
+    expect(screen.getByTestId("board-ticket-work")).toBeInTheDocument();
+  });
+
+  it("stops refetching once no Ticket has an open Round", async () => {
+    const fetchMock = stubLists([list(claimed), list(settled)]);
+    render(<TicketBoard onUnauthenticated={() => {}} />);
+    await flush();
+    await flush(3000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId("board-locked")).not.toBeInTheDocument();
+    await flush(120_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("never refetches a board in which no Ticket has an open Round", async () => {
+    const fetchMock = stubLists([list(other)]);
+    render(<TicketBoard onUnauthenticated={() => {}} />);
+    await flush(120_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("stops refetching on unmount", async () => {
+    const fetchMock = stubLists([list(claimed)]);
+    const { unmount } = render(<TicketBoard onUnauthenticated={() => {}} />);
+    await flush();
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+    await flush(60_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the board and says the refresh failed, then clears the note once a refetch succeeds", async () => {
+    stubLists([list(claimed), () => Promise.resolve({ ok: false, status: 503, statusText: "Service Unavailable", json: async () => ({}) }), list(claimed), list(running)]);
+    render(<TicketBoard onUnauthenticated={() => {}} />);
+    await flush();
+    await flush(3000);
+    expect(screen.getByTestId("ticket-board-refresh-error-message")).toHaveTextContent("Galley returned an error response: 503");
+    expect(screen.getByTestId("board-ticket-work")).toBeInTheDocument();
+    await flush(3000);
+    expect(screen.queryByTestId("ticket-board-refresh-error")).not.toBeInTheDocument();
+    await flush(3000);
+    expect(within(screen.getByTestId("board-status-InProgress")).getByTestId("board-ticket-work")).toBeInTheDocument();
+  });
+
+  it("rejects a refetched Ticket with an unknown Status and keeps the previous board", async () => {
+    stubLists([list(claimed), list({ ...claimed, status: "Archived" })]);
+    render(<TicketBoard onUnauthenticated={() => {}} />);
+    await flush();
+    await flush(3000);
+    expect(screen.getByTestId("ticket-board-refresh-error-message")).toHaveTextContent("unknown Status");
+    expect(within(screen.getByTestId("board-status-Ready")).getByTestId("board-ticket-work")).toBeInTheDocument();
+  });
+
+  it("hands the Owner to sign-in when a refetch comes back unauthenticated", async () => {
+    const onUnauthenticated = vi.fn();
+    stubLists([list(claimed), () => Promise.resolve({ ok: false, status: 401, statusText: "", json: async () => ({}) })]);
+    render(<TicketBoard onUnauthenticated={onUnauthenticated} />);
+    await flush();
+    await flush(3000);
+    expect(onUnauthenticated).toHaveBeenCalledTimes(1);
   });
 });

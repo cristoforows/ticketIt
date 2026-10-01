@@ -1,7 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, type Page } from "@playwright/test";
+import { expect, type APIRequestContext, type Page } from "@playwright/test";
 
 const MICHELIN_MAIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../apps/michelin/src/main.ts");
 
@@ -10,7 +12,15 @@ export interface RunningMichelin {
   output: () => string;
 }
 
-export function startMichelin(token: string, claimIntervalMs: number): RunningMichelin {
+export type EngineScriptStep = { step: "start" } | { step: "wait"; ms: number } | { step: "hold" };
+
+function writeEngineScript(steps: EngineScriptStep[]): string {
+  const file = path.join(mkdtempSync(path.join(tmpdir(), "michelin-e2e-")), "script.json");
+  writeFileSync(file, JSON.stringify({ steps }));
+  return file;
+}
+
+export function startMichelin(token: string, claimIntervalMs: number, engineScript?: EngineScriptStep[]): RunningMichelin {
   const galleyUrl = process.env.GALLEY_BASE_URL;
   if (!galleyUrl) throw new Error("GALLEY_BASE_URL is required: run.sh points Michelin at the real Galley");
   const child = spawn(process.execPath, [MICHELIN_MAIN], {
@@ -21,6 +31,7 @@ export function startMichelin(token: string, claimIntervalMs: number): RunningMi
       MICHELIN_HEARTBEAT_INTERVAL_MS: "500",
       MICHELIN_STATUS_INTERVAL_MS: "5000",
       MICHELIN_CLAIM_INTERVAL_MS: String(claimIntervalMs),
+      ...(engineScript ? { MICHELIN_ENGINE_SCRIPT: writeEngineScript(engineScript) } : {}),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -54,4 +65,40 @@ export async function pairRunnerViaUI(page: Page): Promise<string> {
   await section.getByRole("button", { name: "Done" }).click();
   await expect(section.getByLabel("Runner credential")).toHaveCount(0);
   return token;
+}
+
+/** Pairs through Galley's API with a signed-in context and returns the one-time credential. */
+export async function pairRunnerViaApi(api: APIRequestContext): Promise<string> {
+  const response = await api.post("/api/runner-credential");
+  expect(response.status()).toBe(201);
+  const { token } = await response.json() as { token: string };
+  expect(token).toMatch(/^tir_[A-Za-z0-9_-]{43}$/);
+  return token;
+}
+
+export interface RunnerClaim {
+  roundId: string;
+  sequence: number;
+  claimEpoch: number;
+  ticket: { id: string; title: string };
+  agent: { id: string; name: string; kind: string };
+}
+
+/**
+ * The runner's own calls, made directly with the credential. `runner` must be a
+ * context with no Owner session cookie: Galley refuses a cookie beside a bearer.
+ */
+export function runnerCalls(runner: APIRequestContext, token: string) {
+  const headers = { authorization: `Bearer ${token}` };
+  return {
+    async register(): Promise<void> {
+      const response = await runner.post("/api/runner/register", { headers, data: { michelinVersion: "e2e-direct", hostname: "e2e-direct" } });
+      expect(response.status()).toBe(200);
+    },
+    async claim(): Promise<RunnerClaim> {
+      const response = await runner.post("/api/runner/claims", { headers });
+      expect(response.status()).toBe(201);
+      return response.json();
+    },
+  };
 }

@@ -17,6 +17,7 @@ try {
     statusIntervalMs: config.statusIntervalMs,
     heartbeatIntervalMs: config.heartbeatIntervalMs,
     claimIntervalMs: config.claimIntervalMs,
+    engineSteps: config.engineScript.steps.map(({ step }) => step),
     node: process.version,
     ...identity,
   });
@@ -40,6 +41,7 @@ try {
       logger,
       credential: config.runnerCredential,
       registration,
+      engineScript: config.engineScript,
     }),
   ];
 

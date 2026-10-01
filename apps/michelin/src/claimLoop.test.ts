@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startClaimLoop } from "./claimLoop.ts";
 import { resolveRunnerCredential } from "./credentials.ts";
+import { DEFAULT_ENGINE_SCRIPT, type EngineScript } from "./engineScript.ts";
 import type { FetchFn } from "./galley/client.ts";
 import { startHeartbeatLoop } from "./heartbeatLoop.ts";
 import { createLogger } from "./logger.ts";
@@ -25,6 +26,9 @@ const noWork = () => new Response(null, { status: 204 });
 const claimed = () => json(CLAIM, 201);
 const unauthenticated = () => json({ error: { code: "unauthenticated", message: "sign-in required" } }, 401);
 const refused = () => new TypeError("fetch failed", { cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:8080"), { code: "ECONNREFUSED" }) });
+const unreachable = (): Response => {
+  throw refused();
+};
 const hang: FetchFn = (_input, init) =>
   new Promise((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
 
@@ -34,14 +38,33 @@ function credential() {
   return resolved;
 }
 
-function setup(fetchFn: FetchFn, registered = true) {
+function setup(fetchFn: FetchFn, registered = true, engineScript: EngineScript = DEFAULT_ENGINE_SCRIPT, engineDeps?: Parameters<typeof startClaimLoop>[0]["engineDeps"]) {
   const lines: string[] = [];
   const logger = createLogger((line) => lines.push(line));
   const registration = { registered };
-  const loop = startClaimLoop({ galleyUrl: GALLEY, intervalMs: 1000, fetch: fetchFn, logger, credential: credential(), registration, requestTimeoutMs: 300 });
+  const loop = startClaimLoop({ galleyUrl: GALLEY, intervalMs: 1000, fetch: fetchFn, logger, credential: credential(), registration, requestTimeoutMs: 300, engineScript, engineDeps });
   const records = () => lines.map((line) => JSON.parse(line) as Record<string, unknown>);
   return { loop, lines, records, registration };
 }
+
+const eventPath = `/api/runner/rounds/${CLAIM.roundId}/events`;
+const eventResult = () => json({ roundId: CLAIM.roundId, type: "execution_started", state: "running", startedAt: "2026-10-01T12:00:00Z" }, 201);
+const created = eventResult;
+
+function routed(routes: { claims: (() => Response)[]; events: (() => Response)[] }) {
+  const { claims, events } = routes;
+  return vi.fn<FetchFn>(async (input) => {
+    const path = new URL(String(input)).pathname;
+    const queue = path === "/api/runner/claims" ? claims : path === eventPath ? events : undefined;
+    if (!queue) throw new Error(`unexpected ${String(input)}`);
+    const next = queue.length > 1 ? queue.shift() : queue[0];
+    if (!next) throw new Error("no response queued");
+    return next();
+  });
+}
+
+const claimCalls = (fetchFn: ReturnType<typeof routed>) => fetchFn.mock.calls.filter(([input]) => new URL(String(input)).pathname === "/api/runner/claims").length;
+const eventCalls = (fetchFn: ReturnType<typeof routed>) => fetchFn.mock.calls.filter(([input]) => new URL(String(input)).pathname === eventPath);
 
 function sequence(...responses: (() => Response)[]) {
   return vi.fn<FetchFn>(async (input) => {
@@ -95,15 +118,14 @@ describe("claim loop", () => {
     await loop.stop();
   });
 
-  it("logs the claimed Round and stops polling", async () => {
-    const fetchFn = sequence(noWork, claimed, noWork);
+  it("logs the claimed Round with no Ticket field beyond its id and title", async () => {
+    const fetchFn = routed({ claims: [noWork, claimed, noWork], events: [created] });
     const { loop, records } = setup(fetchFn);
 
     await vi.advanceTimersByTimeAsync(2000);
-    expect(records()).toHaveLength(1);
     expect(records()[0]).toMatchObject({
       level: "info",
-      msg: "round claimed; claim polling stopped",
+      msg: "round claimed",
       roundId: CLAIM.roundId,
       sequence: 2,
       claimEpoch: 1,
@@ -111,11 +133,101 @@ describe("claim loop", () => {
       ticketTitle: CLAIM.ticket.title,
     });
     expect(Object.keys(records()[0] ?? {})).not.toContain("goal");
-
-    await vi.advanceTimersByTimeAsync(5000);
-    expect(fetchFn).toHaveBeenCalledTimes(2);
-    expect(vi.getTimerCount()).toBe(0);
     await loop.stop();
+  });
+
+  it("reports Execution started with the claim's epoch and never polls while the script holds", async () => {
+    const fetchFn = routed({ claims: [claimed, noWork], events: [created] });
+    const { loop, records } = setup(fetchFn);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(claimCalls(fetchFn)).toBe(1);
+    expect(eventCalls(fetchFn)).toHaveLength(1);
+    expect(JSON.parse(String(eventCalls(fetchFn)[0]?.[1]?.body))).toMatchObject({ type: "execution_started", idempotencyKey: `${CLAIM.roundId}:0`, claimEpoch: 1 });
+
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(claimCalls(fetchFn)).toBe(1);
+    expect(eventCalls(fetchFn)).toHaveLength(1);
+    expect(records().map((record) => record["msg"])).toEqual(["round claimed", "execution started reported", "engine holding"]);
+    await loop.stop();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not poll while the Round's script runs, and resumes polling once a finite script ends", async () => {
+    const fetchFn = routed({ claims: [claimed, noWork], events: [created] });
+    const { loop, records } = setup(fetchFn, true, { steps: [{ step: "start" }, { step: "wait", ms: 5000 }] });
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(claimCalls(fetchFn)).toBe(1);
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(claimCalls(fetchFn)).toBe(1);
+    expect(records().map((record) => record["msg"])).toEqual(["round claimed", "execution started reported"]);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(records().map((record) => record["msg"])).toEqual(["round claimed", "execution started reported", "engine script finished"]);
+    expect(claimCalls(fetchFn)).toBe(1);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(claimCalls(fetchFn)).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(claimCalls(fetchFn)).toBe(2);
+    await loop.stop();
+  });
+
+  it("resumes polling after Galley refuses the event and the Round is abandoned locally", async () => {
+    const fetchFn = routed({ claims: [claimed, noWork], events: [() => json({ error: { code: "stale_claim_epoch", message: "x" } }, 409)] });
+    const { loop, records } = setup(fetchFn);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(records().map((record) => record["msg"])).toEqual(["round claimed", "round event refused; round abandoned locally"]);
+    expect(claimCalls(fetchFn)).toBe(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(claimCalls(fetchFn)).toBe(2);
+    expect(eventCalls(fetchFn)).toHaveLength(1);
+    await loop.stop();
+  });
+
+  it("keeps retrying the event, without polling, while Galley is unreachable", async () => {
+    const fetchFn = routed({ claims: [claimed, noWork], events: [unreachable, unreachable, created] });
+    const { loop, records } = setup(fetchFn);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(eventCalls(fetchFn)).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(eventCalls(fetchFn)).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(eventCalls(fetchFn)).toHaveLength(3);
+    expect(claimCalls(fetchFn)).toBe(1);
+    expect(records().filter((record) => record["level"] === "warn")).toHaveLength(2);
+    await loop.stop();
+  });
+
+  it("survives an unexpected engine error, logs it, and resumes polling", async () => {
+    const fetchFn = routed({ claims: [claimed, noWork], events: [created] });
+    const { loop, records } = setup(fetchFn, true, DEFAULT_ENGINE_SCRIPT, {
+      newReference: () => {
+        throw new Error("engine broke");
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(records().map((record) => record["msg"])).toEqual(["round claimed", "engine failed unexpectedly"]);
+    expect(records()[1]).toMatchObject({ level: "error", roundId: CLAIM.roundId, error: "engine broke" });
+    expect(claimCalls(fetchFn)).toBe(2);
+    await loop.stop();
+  });
+
+  it.each([
+    ["waiting", { steps: [{ step: "start" }, { step: "wait", ms: 60_000 }] } satisfies EngineScript],
+    ["holding", DEFAULT_ENGINE_SCRIPT],
+  ])("stops promptly on shutdown while the Round's script is %s", async (_name, script) => {
+    const fetchFn = routed({ claims: [claimed], events: [created] });
+    const { loop } = setup(fetchFn, true, script);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await loop.stop();
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(claimCalls(fetchFn)).toBe(1);
   });
 
   it("logs a rejected credential distinctly and keeps polling", async () => {
@@ -181,7 +293,7 @@ describe("claim loop beside the heartbeat loop", () => {
     const common = { galleyUrl: GALLEY, fetch: fetchFn, logger, credential: credential(), registration, requestTimeoutMs: 300 };
     const loops = [
       startHeartbeatLoop({ ...common, intervalMs: 1000, identity: IDENTITY }),
-      startClaimLoop({ ...common, intervalMs: 500 }),
+      startClaimLoop({ ...common, intervalMs: 500, engineScript: DEFAULT_ENGINE_SCRIPT }),
     ];
     const paths = () => fetchFn.mock.calls.map(([input]) => new URL(String(input)).pathname);
     const stop = () => Promise.all(loops.map((loop) => loop.stop()));
@@ -203,6 +315,21 @@ describe("claim loop beside the heartbeat loop", () => {
     await vi.advanceTimersByTimeAsync(1000);
     const all = paths();
     expect(all.lastIndexOf("/api/runner/register")).toBeLessThan(all.indexOf("/api/runner/claims"));
+    await stop();
+  });
+
+  it("keeps heartbeating while a claimed Round's script holds", async () => {
+    const { paths, stop } = both({
+      "/api/runner/register": () => json({ registeredAt: "t" }),
+      "/api/runner/heartbeat": () => json({ lastSeenAt: "t" }),
+      "/api/runner/claims": claimed,
+      [eventPath]: created,
+    });
+
+    await vi.advanceTimersByTimeAsync(5500);
+    expect(paths().filter((path) => path === "/api/runner/claims")).toHaveLength(1);
+    expect(paths().filter((path) => path === eventPath)).toHaveLength(1);
+    expect(paths().filter((path) => path === "/api/runner/heartbeat")).toHaveLength(5);
     await stop();
   });
 

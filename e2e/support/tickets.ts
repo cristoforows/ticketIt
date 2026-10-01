@@ -1,4 +1,11 @@
-import type { Page } from "@playwright/test";
+import type { APIRequestContext, Page } from "@playwright/test";
+
+/** A signed-in page, or a signed-in API context for a spec that must not open a browser. */
+export type Api = Page | APIRequestContext;
+
+function apiOf(from: Api): APIRequestContext {
+  return "request" in from ? from.request : from;
+}
 
 export type TicketTemplate = "Basic" | "Coding";
 export type AgentKind = "research" | "coding";
@@ -10,6 +17,16 @@ export interface ErrorDetail {
   message: string;
   missing?: AgentReadinessInput[];
   roundId?: string;
+}
+
+export interface Round {
+  id: string;
+  sequence: number;
+  state: "claimed" | "running";
+  agent: { id: string; name: string; kind: AgentKind };
+  claimedAt: string;
+  startedAt: string | null;
+  endedAt: string | null;
 }
 
 export interface Ticket {
@@ -70,8 +87,8 @@ export interface Ticket {
  * `template` (issue #59) defaults to Basic, mirroring Galley's own
  * CreateTicketRequest default, when a spec does not need to name it.
  */
-export async function createTicket(page: Page, title: string, template: TicketTemplate = "Basic"): Promise<Ticket> {
-  const response = await page.request.post("/api/tickets", { data: { title, template } });
+export async function createTicket(from: Api, title: string, template: TicketTemplate = "Basic"): Promise<Ticket> {
+  const response = await apiOf(from).post("/api/tickets", { data: { title, template } });
   if (!response.ok()) {
     throw new Error(
       `failed to create Ticket ${JSON.stringify(title)} via POST /api/tickets: ${response.status()} ${await response.text()}`,
@@ -97,12 +114,12 @@ export interface TicketCommandResult {
 }
 
 export async function ticketCommand(
-  page: Page,
+  from: Api,
   method: "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
   data?: unknown,
 ): Promise<TicketCommandResult> {
-  const response = await page.request.fetch(path, { method, data });
+  const response = await apiOf(from).fetch(path, { method, data });
   const body = await response.json();
   if (response.ok()) {
     return { ok: true, status: response.status(), ticket: body as Ticket };
@@ -114,25 +131,25 @@ export async function ticketCommand(
  * For background state a spec is not itself testing, and for capturing
  * Galley's live rejection to assert the UI shows it verbatim.
  */
-export async function changeTicketStatusDirect(page: Page, id: string, status: TicketStatus): Promise<TicketCommandResult> {
-  return ticketCommand(page, "POST", `/api/tickets/${id}/status`, { status });
+export async function changeTicketStatusDirect(from: Api, id: string, status: TicketStatus): Promise<TicketCommandResult> {
+  return ticketCommand(from, "POST", `/api/tickets/${id}/status`, { status });
 }
 
 /** Same purpose as changeTicketStatusDirect, for Accept. */
-export async function acceptTicketDirect(page: Page, id: string): Promise<TicketCommandResult> {
-  return ticketCommand(page, "POST", `/api/tickets/${id}/accept`);
+export async function acceptTicketDirect(from: Api, id: string): Promise<TicketCommandResult> {
+  return ticketCommand(from, "POST", `/api/tickets/${id}/accept`);
 }
 
 export type TicketAssignee = { type: "owner" } | { type: "agent"; agentId: string };
 
 /** Same purpose as changeTicketStatusDirect, for assignment. */
-export async function assignTicketDirect(page: Page, id: string, assignee: TicketAssignee): Promise<TicketCommandResult> {
-  return ticketCommand(page, "PUT", `/api/tickets/${id}/assignee`, assignee);
+export async function assignTicketDirect(from: Api, id: string, assignee: TicketAssignee): Promise<TicketCommandResult> {
+  return ticketCommand(from, "PUT", `/api/tickets/${id}/assignee`, assignee);
 }
 
 /** Same purpose as changeTicketStatusDirect, for editing Ticket fields. */
-export async function updateTicketDirect(page: Page, id: string, fields: Partial<Pick<Ticket, "title" | "goal" | "context" | "successCriteria" | "constraints" | "repository">>): Promise<TicketCommandResult> {
-  return ticketCommand(page, "PATCH", `/api/tickets/${id}`, fields);
+export async function updateTicketDirect(from: Api, id: string, fields: Partial<Pick<Ticket, "title" | "goal" | "context" | "successCriteria" | "constraints" | "repository">>): Promise<TicketCommandResult> {
+  return ticketCommand(from, "PATCH", `/api/tickets/${id}`, fields);
 }
 
 export function statusLabel(status: TicketStatus): string {
@@ -152,21 +169,27 @@ export interface Agent {
 }
 
 /** Same data-setup convention as createTicket, for Agents (issue #127). */
-export async function createAgent(page: Page, name: string, kind: AgentKind): Promise<Agent> {
-  const response = await page.request.post("/api/agents", { data: { name, kind } });
+export async function createAgent(from: Api, name: string, kind: AgentKind): Promise<Agent> {
+  const response = await apiOf(from).post("/api/agents", { data: { name, kind } });
   if (!response.ok()) {
     throw new Error(`failed to create Agent ${JSON.stringify(name)} via POST /api/agents: ${response.status()} ${await response.text()}`);
   }
   return response.json();
 }
 
-export async function listAgents(page: Page): Promise<Agent[]> {
-  const response = await page.request.get("/api/agents");
+export async function listAgents(from: Api): Promise<Agent[]> {
+  const response = await apiOf(from).get("/api/agents");
   if (!response.ok()) throw new Error(`failed to list Agents: ${response.status()} ${await response.text()}`);
   return (await response.json() as { agents: Agent[] }).agents;
 }
 
 /** Same purpose as changeTicketStatusDirect, for priority order. */
-export async function reorderTicketDirect(page: Page, id: string, placement: { before: string } | { after: string }): Promise<TicketCommandResult> {
-  return ticketCommand(page, "POST", `/api/tickets/${id}/position`, placement);
+export async function reorderTicketDirect(from: Api, id: string, placement: { before: string } | { after: string }): Promise<TicketCommandResult> {
+  return ticketCommand(from, "POST", `/api/tickets/${id}/position`, placement);
+}
+
+export async function listRounds(from: Api, ticketId: string): Promise<Round[]> {
+  const response = await apiOf(from).get(`/api/tickets/${ticketId}/rounds`);
+  if (!response.ok()) throw new Error(`failed to list Rounds of ${ticketId}: ${response.status()} ${await response.text()}`);
+  return (await response.json() as { rounds: Round[] }).rounds;
 }

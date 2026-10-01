@@ -63,3 +63,20 @@ export async function signIn(
   await page.getByTestId("sign-in-with-github").click();
   await page.waitForLoadState("load");
 }
+
+/**
+ * The same sign-in without a browser, for a spec that must act before any
+ * page exists: following Galley's start redirect through the substitute
+ * provider leaves the session cookie in `api`.
+ */
+export async function signInWithoutBrowser(api: APIRequestContext, preset: FakeIdentityPreset = "owner"): Promise<void> {
+  await setFakeIdentity(api, preset);
+  const followed = await api.get("/api/auth/github/start");
+  if (!followed.ok()) {
+    throw new Error(`sign-in without a browser ended on ${followed.status()} ${followed.url()}`);
+  }
+  const session = await api.get("/api/session");
+  if (!session.ok()) {
+    throw new Error(`no session after sign-in without a browser: ${session.status()}`);
+  }
+}

@@ -4,7 +4,9 @@ import { missingInputsOf, type ReadinessInput } from "../api/http";
 import type { Badge, Ticket, TicketAssignee, TicketUpdate } from "../api/tickets";
 import { assigneeLabel } from "./assignee";
 import { refinementGuidance } from "./refinementGuidance";
+import type { HealthView } from "./RunnerHealthPill";
 import { lockedLabel } from "./roundLock";
+import { RoundsSection } from "./RoundsSection";
 import { BadgeTag, ClaimedTag, ErrorMessage, FieldHint, FieldLabel, FieldNote, FieldValue, InlineError, LockGlyph, PrimaryButton, QueuedTag, ReceiptLine, Rule, SecondaryButton, Select, StatusTag, statusLabel, TextInput, Textarea, ticketSerial } from "./ui";
 
 interface TicketDetailProps {
@@ -23,6 +25,7 @@ interface TicketDetailProps {
   onRestore: () => Promise<Ticket>;
   onArchived?: () => void;
   editRequested?: boolean;
+  runnerHealth?: HealthView;
 }
 
 interface EditableFields {
@@ -56,7 +59,7 @@ function completionConditionLabel(condition: Ticket["completionCondition"]): str
   return condition === "reviewedPrMerge" ? "Reviewed pull request merged" : "Human acceptance";
 }
 
-export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssign, onUnassign, onLoadAgents, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge, onArchive, onRestore, onArchived, editRequested = false }: TicketDetailProps) {
+export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssign, onUnassign, onLoadAgents, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge, onArchive, onRestore, onArchived, editRequested = false, runnerHealth = { kind: "loading" } }: TicketDetailProps) {
   const previousTicket = useRef(ticket);
   const [current, setCurrent] = useState(ticket);
   const [mode, setMode] = useState<"view" | "editing">(editRequested && !ticket.archivedAt && !ticket.openRound ? "editing" : "view");
@@ -210,6 +213,12 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
             <ReceiptLine label="Created" data-testid="ticket-detail-created-at">{current.createdAt}</ReceiptLine>
             <ReceiptLine label="Updated" data-testid="ticket-detail-updated-at">{current.updatedAt}</ReceiptLine>
           </dl>
+          {current.openRound && (
+            <>
+              <Rule />
+              <RoundsSection round={current.openRound} runnerHealth={runnerHealth} />
+            </>
+          )}
           <Rule />
           <section aria-label="Badges" data-testid="ticket-detail-badges">
             <FieldLabel as="h3">Badges</FieldLabel>

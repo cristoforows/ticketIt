@@ -820,6 +820,33 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorBody"
+  /api/tickets/{id}/rounds:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid, x-go-type: string}
+    get:
+      operationId: listTicketRounds
+      summary: List a Ticket's Rounds
+      tags: [tickets]
+      description: >-
+        The Ticket's Rounds, newest first (`sequence` descending). Works
+        for an archived Ticket. An unknown, malformed or foreign id
+        returns the shared 404.
+      responses:
+        "200":
+          description: The Ticket's Rounds.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketRoundList"
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
   /api/session:
     get:
       operationId: getSession
@@ -994,6 +1021,56 @@ paths:
           description: No Round was claimed.
         default:
           description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+  /api/runner/rounds/{roundId}/events:
+    parameters:
+      - name: roundId
+        in: path
+        required: true
+        schema: {type: string, format: uuid, x-go-type: string}
+    post:
+      operationId: reportRoundEvent
+      summary: Report an execution event for a Round
+      tags: [runner-api]
+      description: >-
+        An event is a fact the runner reports, recorded once per
+        `(roundId, idempotencyKey)`. The same key with the same payload
+        returns the original result with `200`; a different payload is
+        `409 idempotency_key_conflict`. Checked in that order, then
+        `409 stale_claim_epoch` for a `claimEpoch` other than the
+        Round's, `409 round_not_open` for a Round that has ended, and
+        `409 event_out_of_order` for a type the Round's state cannot
+        take. A rejection changes nothing. An unknown, malformed or
+        foreign Round id returns the shared 404. A runner that is not
+        Connected is still accepted, and an event is not a heartbeat.
+      security:
+        - runnerBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RoundEventRequest"
+      responses:
+        "200":
+          description: A replay; the result recorded for this key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoundEventResult"
+        "201":
+          description: The event was recorded and applied.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoundEventResult"
+        default:
+          description: >-
+            Error. See `ErrorBody`. Includes `idempotency_key_conflict`,
+            `stale_claim_epoch`, `round_not_open` and `event_out_of_order`.
           content:
             application/json:
               schema:
@@ -1308,7 +1385,9 @@ components:
           x-go-type: string
     RoundState:
       type: string
-      description: The open states. A claimed Round leaves the Ticket Ready.
+      description: >-
+        The open states. A claimed Round leaves the Ticket Ready; a
+        running one has moved it to In Progress.
       enum: [claimed, running]
       x-enum-varnames: [RoundClaimed, RoundRunning]
     TicketOpenRound:
@@ -1325,6 +1404,30 @@ components:
           $ref: "#/components/schemas/TicketAssigneeAgent"
         claimedAt: {type: string, format: date-time}
         startedAt: {type: [string, "null"], format: date-time}
+    TicketRound:
+      type: object
+      additionalProperties: false
+      required: [id, sequence, state, agent, claimedAt, startedAt, endedAt]
+      properties:
+        id: {type: string, format: uuid, x-go-type: string}
+        sequence: {type: integer, minimum: 1}
+        state:
+          $ref: "#/components/schemas/RoundState"
+        agent:
+          description: The Agent assigned when the Round was claimed.
+          $ref: "#/components/schemas/TicketAssigneeAgent"
+        claimedAt: {type: string, format: date-time}
+        startedAt: {type: [string, "null"], format: date-time}
+        endedAt: {type: [string, "null"], format: date-time}
+    TicketRoundList:
+      type: object
+      additionalProperties: false
+      required: [rounds]
+      properties:
+        rounds:
+          type: array
+          items:
+            $ref: "#/components/schemas/TicketRound"
     TicketList:
       type: object
       description: >-
@@ -1707,6 +1810,58 @@ components:
         successCriteria: {type: string}
         constraints: {type: string}
         repository: {type: string}
+    RoundEventType:
+      type: string
+      description: Grows by slice.
+      enum: [execution_started]
+      x-enum-varnames: [RoundEventExecutionStarted]
+    ExecutionStartedData:
+      type: object
+      additionalProperties: false
+      required: [engineReference]
+      properties:
+        engineReference:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Attached as the Round's current engine execution reference.
+    RoundEventRequest:
+      type: object
+      additionalProperties: false
+      required: [type, idempotencyKey, claimEpoch, occurredAt, data]
+      properties:
+        type:
+          $ref: "#/components/schemas/RoundEventType"
+        idempotencyKey:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Taken verbatim; identity is never trimmed.
+        claimEpoch:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
+          description: The fencing token from the claim.
+        occurredAt:
+          type: string
+          format: date-time
+          x-go-type: string
+          description: The runner's clock; Galley keeps it and times the Round by its own.
+        data:
+          description: The payload for `type`; `ExecutionStartedData` for `execution_started`.
+          oneOf:
+            - $ref: "#/components/schemas/ExecutionStartedData"
+    RoundEventResult:
+      type: object
+      additionalProperties: false
+      required: [roundId, type, state, startedAt]
+      properties:
+        roundId: {type: string, format: uuid, x-go-type: string}
+        type:
+          $ref: "#/components/schemas/RoundEventType"
+        state:
+          $ref: "#/components/schemas/RoundState"
+        startedAt: {type: string, format: date-time}
     AdvanceDevClockRequest:
       type: object
       additionalProperties: false

@@ -7,6 +7,7 @@ import { scrollBehavior, useIsPhone } from "./usePhone";
 import { focusReorderButton, type ReorderDirection } from "./ReorderButtons";
 import { focusTicketRow, refocusTicketRowIfFocusLost, ticketRowTestId } from "./TicketModalLink";
 import { TicketSlip } from "./TicketSlip";
+import { sameData, useOpenRoundRefresh } from "./useOpenRoundRefresh";
 
 type BoardState =
   | { kind: "loading" }
@@ -128,6 +129,32 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
       });
     return () => { cancelled = true; };
   }, [onUnauthenticated, refreshKey, moveRefreshKey, badgeIds.join(",")]);
+
+  const refreshOpenRounds = async () => {
+    if (commandPending.current) return;
+    const id = ++requestId.current;
+    try {
+      const tickets = await fetchTickets(badgeIds);
+      if (tickets.some((ticket) => !statuses.some(({ value }) => value === ticket.status))) {
+        throw new Error("Galley returned a Ticket with an unknown Status.");
+      }
+      if (id !== requestId.current) return;
+      setState((current) => {
+        if (current.kind !== "loaded") return current;
+        if (!sameData(current.tickets, tickets)) return { kind: "loaded", tickets, refreshKey: current.refreshKey };
+        return current.refreshError === undefined ? current : { ...current, refreshError: undefined };
+      });
+    } catch (error) {
+      if (error instanceof UnauthenticatedError) {
+        onUnauthenticated();
+        return;
+      }
+      if (id !== requestId.current) return;
+      const message = error instanceof Error ? error.message : "Unknown error loading tickets.";
+      setState((current) => (current.kind === "loaded" ? { ...current, refreshError: message } : current));
+    }
+  };
+  useOpenRoundRefresh(state.kind === "loaded" && state.tickets.some((ticket) => ticket.openRound !== null), refreshOpenRounds);
 
   useEffect(() => {
     if (refreshKey > focusedRefreshKey.current && state.kind === "loaded" && state.refreshKey === refreshKey && focusTicketId) {
