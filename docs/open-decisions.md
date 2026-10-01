@@ -382,6 +382,38 @@ the row-locked mutation guard and #87 shares the action/command decision
 functions. M4/M5 must add persisted open-Round facts and archived claim
 exclusion before any execution-policy claim can be verified.
 
+## What M4 observed, per decision
+
+[M4's gate](evidence/m4/README.md) on #127–#137 resolves no open decision. D1, D6, D8 and D9 are untouched: M4 has no OpenCode, Grill Mode, Permission or cleanup behavior. M4 uses only Michelin's scripted controlled engine.
+
+### Queue order — Owner decision on #108, shipped
+
+The Owner decided on [#108](https://github.com/cristoforows/ticketIt/issues/108) (2026-09-30) that manual Ticket ordering is required in v1 and controls the sequential claim order; `created_at` is not priority. [#131](https://github.com/cristoforows/ticketIt/issues/131) persists one rank per Ticket per Owner and adds `POST /api/tickets/{id}/position` (`before` or `after` an anchor in the same Status). Capture goes to the top, entering Ready (including rework) to the bottom, and every other Status change, archive and restore keep the position. [#132](https://github.com/cristoforows/ticketIt/issues/132)'s claim takes the first eligible Ready Ticket by `(priority_rank, id)` under the Owner's priority lock. List and board render Galley's order ([docs/ticket-views.md](ticket-views.md)).
+
+### D5 — Stranded runner and stop recovery — the case is now real
+
+A `claimed` ([#132](https://github.com/cristoforows/ticketIt/issues/132)) or `running` ([#134](https://github.com/cristoforows/ticketIt/issues/134)) Round outlives its runner, and [#133](https://github.com/cristoforows/ticketIt/issues/133)'s lock then freezes the whole Ticket, not only the slot. Nothing recovers it. M4 observed these inputs for M5 ([#6](https://github.com/cristoforows/ticketIt/issues/6)):
+
+- The claim is not idempotency-keyed, so a committed claim whose `201` is lost strands the Round; later polls get `204`.
+- A restarted Michelin does not resume a Round and cannot claim while the slot is taken.
+- Runner events are scoped to the Owner, not to a runner identity: after re-pairing, the new credential can report on the open Round and the old one cannot.
+- Health gives a last-seen time and a 30 s window ([#130](https://github.com/cristoforows/ticketIt/issues/130)); a disconnect changes no Ticket.
+- A stale epoch, an event for an ended Round and a replayed delivery each change nothing, so a late report cannot reopen or duplicate work.
+
+The reconciliation rule in [execution-interface.md](contracts/execution-interface.md) no longer makes a failed check Interrupted. D5 stays open.
+
+### D2 / D4 — Delivered Coding Tickets wait in In Review
+
+A delivered Coding Ticket stays In Review with Accept refused (`reviewed_pr_merge_not_implemented`); delivery is not merge evidence ([#136](https://github.com/cristoforows/ticketIt/issues/136)). A Done Agent Ticket moved to Ready queues a new Round without the rework command, as D3 permits ("subject to D4"); whether that stays the reopen route is [#154](https://github.com/cristoforows/ticketIt/issues/154). D2 and D4 remain with M8.
+
+### D7 — Reports are kept in PostgreSQL
+
+[#136](https://github.com/cristoforows/ticketIt/issues/136) stores each Round's Report in PostgreSQL (1 MiB, one row per Round), so a later move to object storage is per row. No store is selected; D7 remains open.
+
+### D3 — Implemented, not further resolved
+
+Readiness follows the Agent's kind, never the Template; Agent-assigned In Progress, In Review and Blocked are execution-owned; assignment and field edits are locked during an open Round ([#128](https://github.com/cristoforows/ticketIt/issues/128), [#133](https://github.com/cristoforows/ticketIt/issues/133)). `TestNoTemplateToCapabilityMapping` is unchanged.
+
 ## Engineering decisions within the approved design
 
 These need implementation design and validation, but not new user-facing scope by default:
@@ -390,7 +422,7 @@ These need implementation design and validation, but not new user-facing scope b
 - Owner bootstrap, app-session transport, runner pairing/credential lifecycle, and local secret-storage mechanism.
 - Round/engine ID mapping, claim fencing, command/event deduplication, checkpoint persistence, and notification reconciliation.
 - Concrete permission actions/resources, precedence, storage access, and engine adapter mappings within D1/D3.
-- Queue ordering for the simple sequential scheduler; persistent ordering must be documented rather than accidentally determined by database queries.
+- Queue ordering for the simple sequential scheduler: resolved by the Owner's [#108](https://github.com/cristoforows/ticketIt/issues/108) decision; see "What M4 observed."
 - Recipe/skill/report upload limits, Markdown rendering, and version/object metadata consistency.
 - Usage normalization, provider cost reconciliation, missing-data quality flags, and active/wait/disconnect timing.
 - GitHub synchronization transport, worktree paths/setup, process supervision, and durable pending controls.

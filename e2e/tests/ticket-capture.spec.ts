@@ -78,13 +78,14 @@ test.describe("New order capture modal", () => {
     await page.getByTestId("new-order-input").fill(title);
     await page.getByTestId("new-order-input").press("Enter");
     await expect(page.getByTestId("ticket-title-input")).toHaveValue(title);
+    const created = page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/api/tickets"));
     await page.getByTestId("ticket-capture-submit").click();
+    const { id } = await (await created).json() as Ticket;
 
     const listed = await (await page.request.get("/api/tickets")).json() as { tickets: Ticket[] };
-    const ticket = listed.tickets.find((item) => item.title === title);
-    expect(ticket).toBeDefined();
-    expect(ticket?.goal).toBe("");
-    await expect(page.getByTestId(`ticket-item-${ticket!.id}`)).toBeVisible();
+    const ticket = listed.tickets.find((item) => item.id === id);
+    expect(ticket).toMatchObject({ title, goal: "" });
+    await expect(page.getByTestId(`ticket-item-${id}`)).toBeVisible();
   });
 
   test("Cancel, Escape and the overlay create nothing and return focus to the bar", async ({ page }) => {
