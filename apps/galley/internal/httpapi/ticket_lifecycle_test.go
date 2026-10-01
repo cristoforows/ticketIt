@@ -549,7 +549,7 @@ func TestApplyTicketTransition_ScopedToOwner(t *testing.T) {
 	_, publicID := insertTicketAt(t, pool, ownerID, uniqueTitle(t), time.Now().UTC())
 	bogusOwnerID := ownerID + 1_000_000_000
 
-	_, found, _, err := applyTicketTransition(ctx, pool, bogusOwnerID, publicID, true,
+	_, found, _, err := applyTicketTransition(ctx, pool, bogusOwnerID, publicID,
 		func(ticketWorkflowState, TicketCompletionCondition) (TicketStatus, *transitionRejection) {
 			return Ready, nil
 		},

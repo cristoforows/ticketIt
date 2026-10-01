@@ -490,7 +490,10 @@ func (f *priorityFixture) race(t *testing.T, requests []concurrentRequest) []str
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			data, _ := json.Marshal(r.body)
+			var data []byte
+			if r.body != nil {
+				data, _ = json.Marshal(r.body)
+			}
 			<-start
 			resp, err := f.client.Post(f.baseURL+r.path, "application/json", bytes.NewReader(data))
 			if err != nil {
@@ -597,6 +600,37 @@ func TestPriority_ConcurrentReorderCaptureAndReadyEntry(t *testing.T) {
 	}
 	if got := f.stage(t, Ready); len(got) != len(ready)+len(backlog) {
 		t.Errorf("Ready = %v, want all %d Tickets", got, len(ready)+len(backlog))
+	}
+	f.assertStrictOrder(t)
+}
+
+func TestPriority_ConcurrentAcceptsAndStatusChangesOnDifferentTicketsAllSucceed(t *testing.T) {
+	f := newPriorityFixture(t)
+	var requests []concurrentRequest
+	for i := range 6 {
+		review, progress, backlog := fmt.Sprintf("V%d", i), fmt.Sprintf("P%d", i), fmt.Sprintf("B%d", i)
+		for _, name := range []string{review, progress, backlog} {
+			f.capture(t, name)
+		}
+		for _, step := range []string{"Ready", "InProgress", "InReview"} {
+			f.apply(t, review, step)
+		}
+		for _, step := range []string{"Ready", "InProgress"} {
+			f.apply(t, progress, step)
+		}
+		requests = append(requests,
+			concurrentRequest{"/api/tickets/" + f.ids[review] + "/accept", nil},
+			concurrentRequest{"/api/tickets/" + f.ids[progress] + "/status", ChangeTicketStatusRequest{Status: Blocked}},
+			concurrentRequest{"/api/tickets/" + f.ids[backlog] + "/status", ChangeTicketStatusRequest{Status: Ready}},
+		)
+	}
+	if failures := f.race(t, requests); len(failures) > 0 {
+		t.Fatalf("%d of %d requests failed: %v", len(failures), len(requests), failures)
+	}
+	for status, want := range map[TicketStatus]int{Done: 6, Blocked: 6, Ready: 6} {
+		if got := f.stage(t, status); len(got) != want {
+			t.Errorf("%s = %v, want %d Tickets", status, got, want)
+		}
 	}
 	f.assertStrictOrder(t)
 }

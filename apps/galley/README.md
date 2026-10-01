@@ -1203,19 +1203,21 @@ changes.
 | Archived Ticket | `400 archived_ticket` |
 | Anchor unknown, malformed, foreign, itself, archived, or in another Status | `400 reorder_anchor_invalid` |
 
-**Lock order.** Every write to an Owner's ranks (capture, entering
-Ready, reorder) first takes `pg_advisory_xact_lock(0x7072696f,
+**Lock order.** Capture, reorder and every Status transition (Status
+change and Accept, since any transition may enter Ready) first take `pg_advisory_xact_lock(0x7072696f,
 int32(owner id))`, then the Ticket row lock through
 `lockTicketForMutation`, then the anchor row `FOR UPDATE`. The two-int4
 key space cannot collide with golang-migrate's single-bigint lock.
-Status changes that cannot enter Ready (Accept, and Status changes to any
-other target) skip the advisory lock and keep their existing row lock.
+Taking it unconditionally in `applyTicketTransition` keeps the order
+uniform for every caller that can reach Ready. Field edits, Badges,
+archive and restore hold only one Ticket row lock and skip it.
 
 Tests: `internal/httpapi/ticket_priority_test.go` covers placement, both
 directions across interleaved stages, every rejection leaving the order
-unchanged, renumbering, and two concurrency tests (16 concurrent
+unchanged, renumbering, and three concurrency tests (16 concurrent
 reorders over 5 seeded rounds; 24 concurrent reorders, captures and
-Ready entries), each asserting a strict total order afterwards.
+Ready entries; 18 concurrent Accepts and Status changes on different
+Tickets), each asserting a strict total order afterwards.
 `internal/postgres/migrate_priority_rank_test.go` checks the backfill.
 Evidence: `docs/evidence/m4/131-priority-order.md`.
 

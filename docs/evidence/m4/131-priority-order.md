@@ -49,9 +49,9 @@ and both `schema.d.ts` files:
 - `ticket.go`: capture runs in a transaction under the advisory lock and
   takes the top rank. The active list sorts by `priority_rank, id`, and
   the Archived filter by `archived_at DESC, id DESC`.
-- `ticket_lifecycle.go`: a Status change to Ready takes the advisory lock
-  before the row lock, and entering Ready from another Status takes the
-  bottom rank. Accept and other targets are unchanged.
+- `ticket_lifecycle.go`: `applyTicketTransition` (Status change and
+  Accept) takes the advisory lock before the row lock, and entering Ready
+  from another Status takes the bottom rank.
 - `handler.go`: 405 with `Allow: POST` on the new route.
 
 **Swiftlet**
@@ -89,10 +89,15 @@ and `e2e/README.md`.
   from golang-migrate's single-bigint lock. Owners whose ids share the low
   32 bits would share a lock, which only serializes them. Order: advisory
   lock, then the moved Ticket's row lock (`lockTicketForMutation`), then
-  the anchor row `FOR UPDATE`. Writers that do not take the advisory lock
-  (Accept, non-Ready Status changes, field edits, Badges, archive,
-  restore) hold only one Ticket row lock. So a renumber waiting on one of
-  those rows cannot form a cycle.
+  the anchor row `FOR UPDATE`. Every Status transition, Accept included,
+  takes the advisory lock unconditionally, so no caller that can reach
+  Ready needs to declare it, and the lock order cannot be skipped. An
+  earlier revision took it only for requests targeting Ready and returned
+  503 if any other path entered Ready. Review replaced that with the
+  unconditional lock; for a single-Owner app the extra serialization is
+  negligible. Writers that skip the advisory lock (field edits, Badges,
+  archive, restore) hold only one Ticket row lock, so a renumber waiting
+  on one of those rows cannot form a cycle.
 - **Neighbour rule.** For `before X`, the gap is X's predecessor in the
   Owner's whole order, excluding the moved Ticket, up to X. For `after X`,
   it runs from X to X's successor. Nothing lies between X and that
@@ -177,7 +182,7 @@ provider (`cmd/githubfake`) with `curl -L` and a cookie jar.
 
 | Check | Result |
 | --- | --- |
-| Galley `go test ./...` | every package `ok` (3 with no test files); 818 tests and subtests passed, 0 failed |
+| Galley `go test ./...` | every package `ok` (3 with no test files); 819 tests and subtests passed, 0 failed |
 | Drift checks | all three printed `OK … (no drift)` |
 | Swiftlet `npm test` | 19 files, 273 tests passed |
 | Swiftlet `npm run build` | succeeded |
@@ -199,6 +204,7 @@ Priority tests:
     ticket_priority_test.go:527: seed 1790787852039893000
 --- PASS: TestReorder_ConcurrentReordersKeepAStrictTotalOrder (0.15s)
 --- PASS: TestPriority_ConcurrentReorderCaptureAndReadyEntry (0.11s)
+--- PASS: TestPriority_ConcurrentAcceptsAndStatusChangesOnDifferentTicketsAllSucceed (0.28s)
 ```
 
 What the tests cover:
@@ -213,11 +219,14 @@ What the tests cover:
 - The first concurrency test runs 16 concurrent random reorders in each
   of 5 seeded rounds.
 - The second runs 24 concurrent reorders, captures and Ready entries.
-- Both concurrency tests require every request to succeed. Afterwards
+- The third runs 6 Accepts, 6 In Progress → Blocked and 6 Backlog → Ready
+  on 18 different Tickets at once, proving the shared lock serializes
+  them without a deadlock.
+- All three concurrency tests require every request to succeed. Afterwards
   they require a strictly increasing, duplicate-free rank per Ticket.
 
-**Falsification.** With `lockOwnerPriority` changed to return `nil`, both
-concurrency tests failed. Without the lock, concurrent writers compute
+**Falsification.** With `lockOwnerPriority` changed to return `nil`, the
+reorder and the mixed reorder/capture/Ready concurrency tests both failed. Without the lock, concurrent writers compute
 the same rank and one fails the unique constraint. The change was
 reverted before committing.
 
