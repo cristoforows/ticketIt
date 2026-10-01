@@ -55,11 +55,26 @@ export function SlipList({ className, ...rest }: ComponentPropsWithRef<"ul">) {
   return <ul className={cn("-mt-3 flex flex-col gap-4 px-1 group-data-drop-blocked/stage:opacity-40", className)} {...rest} />;
 }
 
-function Spike() {
+const spikedSlips = [
+  { tilt: -5, stripe: "fill-status-ready" },
+  { tilt: 4, stripe: "fill-status-in-progress" },
+  { tilt: -2, stripe: "fill-status-in-review" },
+];
+
+function Spike({ slips }: { slips: number }) {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 40" className="archive-spike h-10 w-6 shrink-0 origin-bottom fill-current">
       <path d="M12 0C12.4 8 13.2 19 13.8 31H10.2C10.8 19 11.6 8 12 0Z" />
       <path d="M2 39C2 33.5 6.5 30 12 30S22 33.5 22 39Z" />
+      {spikedSlips.slice(0, slips).map(({ tilt, stripe }, index) => {
+        const y = 25.5 - index * 4.8;
+        return (
+          <g key={index} transform={`rotate(${tilt} 12 ${y + 2})`} className="stroke-ground" strokeWidth=".5">
+            <rect x="4" y={y} width="16" height="4.5" rx=".6" className="fill-paper" />
+            <rect x="4" y={y} width="16" height="1.2" className={stripe} stroke="none" />
+          </g>
+        );
+      })}
     </svg>
   );
 }
@@ -74,9 +89,9 @@ export function ArchiveZone({ over, className, ...rest }: ComponentPropsWithRef<
       )}
       {...rest}
     >
-      <Spike />
+      <Spike slips={2} />
       {over ? "Yes! Let go to archive it" : "Toss it on the spike!"}
-      <Spike />
+      <Spike slips={3} />
     </div>
   );
 }
