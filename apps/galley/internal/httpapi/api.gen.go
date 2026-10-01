@@ -6,6 +6,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -83,6 +84,21 @@ func (e DatabaseStatusStatus) Valid() bool {
 	case DatabaseStatusStatusError:
 		return true
 	case DatabaseStatusStatusOk:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RoundEventType.
+const (
+	RoundEventExecutionStarted RoundEventType = "execution_started"
+)
+
+// Valid indicates whether the value is a known member of the RoundEventType enum.
+func (e RoundEventType) Valid() bool {
+	switch e {
+	case RoundEventExecutionStarted:
 		return true
 	default:
 		return false
@@ -419,6 +435,12 @@ type ErrorDetail struct {
 	RoundId *string `json:"roundId,omitempty"`
 }
 
+// ExecutionStartedData defines model for ExecutionStartedData.
+type ExecutionStartedData struct {
+	// EngineReference Attached as the Round's current engine execution reference.
+	EngineReference string `json:"engineReference"`
+}
+
 // Owner ticketIt's stable internal Owner identity -- independent of any GitHub identifier (docs/deployment.md, "Ownership and sign-in"). `login` is the linked GitHub identity's most recently observed login, shown for display only: matching a sign-in to this Owner always uses the immutable provider account id, never this field.
 type Owner struct {
 	// Id ticketIt's own Owner id -- not a GitHub identifier.
@@ -445,7 +467,45 @@ type ReorderTicketRequest struct {
 	Before *string `json:"before,omitempty"`
 }
 
-// RoundState The open states. A claimed Round leaves the Ticket Ready.
+// RoundEventRequest defines model for RoundEventRequest.
+type RoundEventRequest struct {
+	// ClaimEpoch The fencing token from the claim.
+	ClaimEpoch int `json:"claimEpoch"`
+
+	// Data The payload for `type`; `ExecutionStartedData` for `execution_started`.
+	Data RoundEventRequest_Data `json:"data"`
+
+	// IdempotencyKey Taken verbatim; identity is never trimmed.
+	IdempotencyKey string `json:"idempotencyKey"`
+
+	// OccurredAt The runner's clock; Galley keeps it and times the Round by its own.
+	OccurredAt string `json:"occurredAt"`
+
+	// Type Grows by slice.
+	Type RoundEventType `json:"type"`
+}
+
+// RoundEventRequest_Data The payload for `type`; `ExecutionStartedData` for `execution_started`.
+type RoundEventRequest_Data struct {
+	union json.RawMessage
+}
+
+// RoundEventResult defines model for RoundEventResult.
+type RoundEventResult struct {
+	RoundId   string    `json:"roundId"`
+	StartedAt time.Time `json:"startedAt"`
+
+	// State The open states. A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress.
+	State RoundState `json:"state"`
+
+	// Type Grows by slice.
+	Type RoundEventType `json:"type"`
+}
+
+// RoundEventType Grows by slice.
+type RoundEventType string
+
+// RoundState The open states. A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress.
 type RoundState string
 
 // RunnerClaim defines model for RunnerClaim.
@@ -632,8 +692,27 @@ type TicketOpenRound struct {
 	Sequence  int                 `json:"sequence"`
 	StartedAt *time.Time          `json:"startedAt"`
 
-	// State The open states. A claimed Round leaves the Ticket Ready.
+	// State The open states. A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress.
 	State RoundState `json:"state"`
+}
+
+// TicketRound defines model for TicketRound.
+type TicketRound struct {
+	// Agent The Agent assigned when the Round was claimed.
+	Agent     TicketAssigneeAgent `json:"agent"`
+	ClaimedAt time.Time           `json:"claimedAt"`
+	EndedAt   *time.Time          `json:"endedAt"`
+	Id        string              `json:"id"`
+	Sequence  int                 `json:"sequence"`
+	StartedAt *time.Time          `json:"startedAt"`
+
+	// State The open states. A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress.
+	State RoundState `json:"state"`
+}
+
+// TicketRoundList defines model for TicketRoundList.
+type TicketRoundList struct {
+	Rounds []TicketRound `json:"rounds"`
 }
 
 // TicketStatus A Ticket's lifecycle stage (CONTEXT.md, "Status"). Moves between these values are validated against the persisted current Status per D3 S2 (docs/decisions/d3-agent-template-compatibility.md). `Done` is reachable only through explicit Accept.
@@ -710,6 +789,9 @@ type CreateDiagnosticNoteJSONRequestBody = CreateDiagnosticNoteRequest
 // RegisterRunnerJSONRequestBody defines body for RegisterRunner for application/json ContentType.
 type RegisterRunnerJSONRequestBody = RegisterRunnerRequest
 
+// ReportRoundEventJSONRequestBody defines body for ReportRoundEvent for application/json ContentType.
+type ReportRoundEventJSONRequestBody = RoundEventRequest
+
 // CreateTicketJSONRequestBody defines body for CreateTicket for application/json ContentType.
 type CreateTicketJSONRequestBody = CreateTicketRequest
 
@@ -724,6 +806,42 @@ type ReorderTicketJSONRequestBody = ReorderTicketRequest
 
 // ChangeTicketStatusJSONRequestBody defines body for ChangeTicketStatus for application/json ContentType.
 type ChangeTicketStatusJSONRequestBody = ChangeTicketStatusRequest
+
+// AsExecutionStartedData returns the union data inside the RoundEventRequest_Data as a ExecutionStartedData
+func (t RoundEventRequest_Data) AsExecutionStartedData() (ExecutionStartedData, error) {
+	var body ExecutionStartedData
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromExecutionStartedData overwrites any union data inside the RoundEventRequest_Data as the provided ExecutionStartedData
+func (t *RoundEventRequest_Data) FromExecutionStartedData(v ExecutionStartedData) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeExecutionStartedData performs a merge with any union data inside the RoundEventRequest_Data, using the provided ExecutionStartedData
+func (t *RoundEventRequest_Data) MergeExecutionStartedData(v ExecutionStartedData) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t RoundEventRequest_Data) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *RoundEventRequest_Data) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -775,6 +893,9 @@ type ServerInterface interface {
 	// RegisterRunner Register a runner
 	// (POST /api/runner/register)
 	RegisterRunner(w http.ResponseWriter, r *http.Request)
+	// ReportRoundEvent Report an execution event for a Round
+	// (POST /api/runner/rounds/{roundId}/events)
+	ReportRoundEvent(w http.ResponseWriter, r *http.Request, roundId string)
 	// SignOut Sign out
 	// (DELETE /api/session)
 	SignOut(w http.ResponseWriter, r *http.Request)
@@ -820,6 +941,9 @@ type ServerInterface interface {
 	// RestoreTicket Restore an archived Ticket
 	// (POST /api/tickets/{id}/restore)
 	RestoreTicket(w http.ResponseWriter, r *http.Request, id string)
+	// ListTicketRounds List a Ticket's Rounds
+	// (GET /api/tickets/{id}/rounds)
+	ListTicketRounds(w http.ResponseWriter, r *http.Request, id string)
 	// ChangeTicketStatus Change a Ticket's Status
 	// (POST /api/tickets/{id}/status)
 	ChangeTicketStatus(w http.ResponseWriter, r *http.Request, id string)
@@ -1106,6 +1230,32 @@ func (siw *ServerInterfaceWrapper) RegisterRunner(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RegisterRunner(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReportRoundEvent operation middleware
+func (siw *ServerInterfaceWrapper) ReportRoundEvent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "roundId" -------------
+	var roundId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "roundId", r.PathValue("roundId"), &roundId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "roundId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReportRoundEvent(w, r, roundId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1495,6 +1645,32 @@ func (siw *ServerInterfaceWrapper) RestoreTicket(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// ListTicketRounds operation middleware
+func (siw *ServerInterfaceWrapper) ListTicketRounds(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListTicketRounds(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ChangeTicketStatus operation middleware
 func (siw *ServerInterfaceWrapper) ChangeTicketStatus(w http.ResponseWriter, r *http.Request) {
 
@@ -1664,6 +1840,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/archive", wrapper.ArchiveTicket)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/restore", wrapper.RestoreTicket)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/position", wrapper.ReorderTicket)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/tickets/{id}/rounds", wrapper.ListTicketRounds)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/session", wrapper.SignOut)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/session", wrapper.GetSession)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/runner-credential", wrapper.RevokeRunner)
@@ -1672,6 +1849,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner/register", wrapper.RegisterRunner)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner/heartbeat", wrapper.RunnerHeartbeat)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner/claims", wrapper.ClaimWork)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner/rounds/{roundId}/events", wrapper.ReportRoundEvent)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/dev/clock/advance", wrapper.AdvanceDevClock)
 
 	return m

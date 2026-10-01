@@ -288,21 +288,50 @@ hour, so no claim lands in that snapshot. `run.sh` checks its exit code.
 
 `tests/runner-claims.spec.ts` (issue #132) queues a research Ticket at
 the top of the Ready order, pairs through the Agents page
-(`support/runner.ts`, shared with `runner.spec.ts`), and starts a real
-Michelin polling claims every 500 ms. Galley's live Ticket must gain a
-claimed `openRound` while staying Ready with `requestingAgentWork`
-false, and the slip and receipt must show **Claimed by runner**. The
-receipt's Archive is disabled, and a direct archive is refused with
-`round_open` naming the Round. The lock (issue #133) is asserted on the
-same claim: the slip carries the lock glyph named "Locked while <Agent>
-works on Round <n>" and is not draggable, and the receipt shows that
-copy with every mutating control disabled and titled with Galley's live
-reason. Direct field, Assignee, Badge, Status, Accept, reorder and
-archive commands are each refused with `round_open` and the Round's id,
-and the Ticket is unchanged afterwards. After Michelin stops and the clock passes
-the health window, the Round is unchanged. It leaves the Owner's slot
-taken, so `run.sh` runs it after every spec that needs the slot free,
-and checks its exit code.
+(`support/runner.ts`, shared with `runner.spec.ts`), registers the
+credential and claims directly with `POST /api/runner/claims` from a
+context that carries no Owner cookie (`runnerCalls`). It does not start a
+Michelin: a real one starts the Round within milliseconds
+(`runner-engine.spec.ts`), and this spec's subject is the claimed state.
+Galley's live Ticket must gain a claimed `openRound` while staying Ready
+with `requestingAgentWork` false, and the slip and receipt must show
+**Claimed by runner**. The receipt's Rounds section says "Claimed,
+waiting for the runner to start". The receipt's Archive is disabled, and
+a direct archive is refused with `round_open` naming the Round. The lock
+(issue #133) is asserted on the same claim: the slip carries the lock
+glyph named "Locked while <Agent> works on Round <n>" and is not
+draggable, and the receipt shows that copy with every mutating control
+disabled and titled with Galley's live reason. Direct field, Assignee,
+Badge, Status, Accept, reorder and archive commands are each refused with
+`round_open` and the Round's id, and the Ticket is unchanged afterwards.
+After the clock passes the health window, the Round is unchanged and the
+receipt shows **Runner disconnected**. It leaves the Owner's slot taken,
+so `run.sh` runs it after every spec that needs the slot free, and
+checks its exit code.
+
+`tests/runner-engine.spec.ts` (issue #134) drives a real Michelin with a
+controlled script written to a temporary file (`start`, `hold`). Up to
+the point it opens a browser it uses no page: it signs in through the
+substitute provider with an API context (`signInWithoutBrowser`),
+creates an Agent and a Ready Agent-assigned Ticket, pairs a runner, and
+starts Michelin. Galley's live Ticket must become In Progress with
+`openRound.state` `running`, `GET /api/tickets/{id}/rounds` must list
+that Round, and Michelin's log must name the Round, show the
+`controlled:<uuid>` reference and not contain the credential. Only then
+does it open a browser: the slip is in the In Progress column with the
+Agent and the lock glyph, and the receipt's Rounds section shows the
+Round's number, Agent and the start time Galley reports. Closing that
+browser changes nothing, and a second browser sees the same. Stopping
+Michelin (exit code 0) and passing the health window through
+`POST /api/dev/clock/advance` makes the open receipt show **Runner
+disconnected** while the Ticket stays In Progress with the same Round.
+It leaves the Owner's slot taken.
+
+Because a Round cannot end before M4.10 (#136) and an Owner has one open
+Round at a time, `run.sh` resets and migrates the database and restarts
+Galley between `runner-claims.spec.ts` and `runner-engine.spec.ts`, the
+way it prepares the database at the start of the run. Any later spec that
+needs the slot free must run before them, or get a phase of its own.
 
 `tests/ticket-priority-order.spec.ts` reorders three Ready Tickets by
 dragging onto the upper and lower halves of board slips, then with Move

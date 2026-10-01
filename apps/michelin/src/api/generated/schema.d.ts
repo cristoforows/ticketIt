@@ -392,6 +392,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tickets/{id}/rounds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List a Ticket's Rounds
+         * @description The Ticket's Rounds, newest first (`sequence` descending). Works for an archived Ticket. An unknown, malformed or foreign id returns the shared 404.
+         */
+        get: operations["listTicketRounds"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/session": {
         parameters: {
             query?: never;
@@ -514,6 +536,28 @@ export interface paths {
          * @description Claims the Owner's highest-priority Ticket that is requesting Agent work and creates its Round. `204` when nothing is requesting work, a Round is already open, or the runner is not connected. Not a heartbeat.
          */
         post: operations["claimWork"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runner/rounds/{roundId}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roundId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report an execution event for a Round
+         * @description An event is a fact the runner reports, recorded once per `(roundId, idempotencyKey)`. The same key with the same payload returns the original result with `200`; a different payload is `409 idempotency_key_conflict`. Checked in that order, then `409 stale_claim_epoch` for a `claimEpoch` other than the Round's, `409 round_not_open` for a Round that has ended, and `409 event_out_of_order` for a type the Round's state cannot take. A rejection changes nothing. An unknown, malformed or foreign Round id returns the shared 404. A runner that is not Connected is still accepted, and an event is not a heartbeat.
+         */
+        post: operations["reportRoundEvent"];
         delete?: never;
         options?: never;
         head?: never;
@@ -663,7 +707,7 @@ export interface components {
             updatedAt: string;
         };
         /**
-         * @description The open states. A claimed Round leaves the Ticket Ready.
+         * @description The open states. A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress.
          * @enum {string}
          */
         RoundState: "claimed" | "running";
@@ -678,6 +722,23 @@ export interface components {
             claimedAt: string;
             /** Format: date-time */
             startedAt: string | null;
+        };
+        TicketRound: {
+            /** Format: uuid */
+            id: string;
+            sequence: number;
+            state: components["schemas"]["RoundState"];
+            /** @description The Agent assigned when the Round was claimed. */
+            agent: components["schemas"]["TicketAssigneeAgent"];
+            /** Format: date-time */
+            claimedAt: string;
+            /** Format: date-time */
+            startedAt: string | null;
+            /** Format: date-time */
+            endedAt: string | null;
+        };
+        TicketRoundList: {
+            rounds: components["schemas"]["TicketRound"][];
         };
         /** @description The signed-in Owner's Tickets, newest first (createdAt descending, id descending as the tiebreak). */
         TicketList: {
@@ -853,6 +914,37 @@ export interface components {
             successCriteria: string;
             constraints: string;
             repository: string;
+        };
+        /**
+         * @description Grows by slice.
+         * @enum {string}
+         */
+        RoundEventType: "execution_started";
+        ExecutionStartedData: {
+            /** @description Attached as the Round's current engine execution reference. */
+            engineReference: string;
+        };
+        RoundEventRequest: {
+            type: components["schemas"]["RoundEventType"];
+            /** @description Taken verbatim; identity is never trimmed. */
+            idempotencyKey: string;
+            /** @description The fencing token from the claim. */
+            claimEpoch: number;
+            /**
+             * Format: date-time
+             * @description The runner's clock; Galley keeps it and times the Round by its own.
+             */
+            occurredAt: string;
+            /** @description The payload for `type`; `ExecutionStartedData` for `execution_started`. */
+            data: components["schemas"]["ExecutionStartedData"];
+        };
+        RoundEventResult: {
+            /** Format: uuid */
+            roundId: string;
+            type: components["schemas"]["RoundEventType"];
+            state: components["schemas"]["RoundState"];
+            /** Format: date-time */
+            startedAt: string;
         };
         AdvanceDevClockRequest: {
             seconds: number;
@@ -1624,6 +1716,37 @@ export interface operations {
             };
         };
     };
+    listTicketRounds: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Ticket's Rounds. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketRoundList"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     getSession: {
         parameters: {
             query?: never;
@@ -1853,6 +1976,50 @@ export interface operations {
                 content?: never;
             };
             /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    reportRoundEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roundId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoundEventRequest"];
+            };
+        };
+        responses: {
+            /** @description A replay; the result recorded for this key. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoundEventResult"];
+                };
+            };
+            /** @description The event was recorded and applied. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoundEventResult"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. Includes `idempotency_key_conflict`, `stale_claim_epoch`, `round_not_open` and `event_out_of_order`. */
             default: {
                 headers: {
                     [name: string]: unknown;

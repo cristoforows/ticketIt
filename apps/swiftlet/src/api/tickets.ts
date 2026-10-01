@@ -68,6 +68,7 @@ function parseOpenRound(value: unknown): Ticket["openRound"] | undefined {
     (round.state !== "claimed" && round.state !== "running") ||
     !isAgentSummary(round.agent) ||
     typeof round.claimedAt !== "string" ||
+    (round.state === "running") !== (typeof round.startedAt === "string") ||
     !(round.startedAt === null || typeof round.startedAt === "string")
   ) {
     return undefined;

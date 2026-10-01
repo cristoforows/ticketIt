@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ConfigError, loadConfig } from "./config.ts";
+import { DEFAULT_ENGINE_SCRIPT } from "./engineScript.ts";
 
 const TOKEN = `tir_${"a".repeat(43)}`;
 const base = { MICHELIN_RUNNER_TOKEN: TOKEN };
@@ -38,17 +39,74 @@ describe("loadConfig", () => {
     }
   });
 
+  it("uses the default engine script when MICHELIN_ENGINE_SCRIPT is unset", () => {
+    const config = loadConfig(base, () => {
+      throw new Error("no file should be read");
+    });
+    expect(config.engineScript).toEqual(DEFAULT_ENGINE_SCRIPT);
+  });
+
+  it("reads the engine script from the file MICHELIN_ENGINE_SCRIPT names", () => {
+    const paths: string[] = [];
+    const config = loadConfig({ ...base, MICHELIN_ENGINE_SCRIPT: "/scripts/wait.json" }, (path) => {
+      paths.push(path);
+      return '{"steps":[{"step":"start"},{"step":"wait","ms":1500},{"step":"hold"}]}';
+    });
+    expect(paths).toEqual(["/scripts/wait.json"]);
+    expect(config.engineScript).toEqual({ steps: [{ step: "start" }, { step: "wait", ms: 1500 }, { step: "hold" }] });
+  });
+
+  it("rejects a script file that cannot be read, naming the variable and the reason", () => {
+    const missing = () => {
+      throw Object.assign(new Error("ENOENT: no such file or directory, open '/nope.json'"), { code: "ENOENT" });
+    };
+    try {
+      loadConfig({ ...base, MICHELIN_ENGINE_SCRIPT: "/nope.json" }, missing);
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigError);
+      expect((error as ConfigError).problems).toEqual([expect.stringMatching(/^MICHELIN_ENGINE_SCRIPT .*could not be read.*ENOENT/)]);
+    }
+  });
+
+  it("rejects an invalid script, naming the variable, the file and the step index", () => {
+    try {
+      loadConfig({ ...base, MICHELIN_ENGINE_SCRIPT: "/scripts/bad.json" }, () => '{"steps":[{"step":"start"},{"step":"wait","ms":0}]}');
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigError);
+      expect((error as ConfigError).problems).toEqual([expect.stringMatching(/^MICHELIN_ENGINE_SCRIPT "\/scripts\/bad\.json": steps\[1\]: "ms" must be an integer/)]);
+    }
+  });
+
+  it("rejects a script that uses a step a later slice adds", () => {
+    expect(() => loadConfig({ ...base, MICHELIN_ENGINE_SCRIPT: "s.json" }, () => '{"steps":[{"step":"start"},{"step":"progress","note":"x"}]}')).toThrow(/steps\[1\]: "progress" is not supported yet; M4\.9/);
+  });
+
+  it("rejects an empty MICHELIN_ENGINE_SCRIPT", () => {
+    expect(() => loadConfig({ ...base, MICHELIN_ENGINE_SCRIPT: "" }, () => "{}")).toThrow(/MICHELIN_ENGINE_SCRIPT must be the path of a JSON file/);
+  });
+
+  it("never echoes the runner token or the script's content in a problem", () => {
+    try {
+      loadConfig({ ...base, MICHELIN_ENGINE_SCRIPT: "s.json" }, () => `not json ${TOKEN}`);
+      expect.unreachable();
+    } catch (error) {
+      expect((error as ConfigError).message).not.toContain(TOKEN.slice(4));
+    }
+  });
+
   it("requires MICHELIN_RUNNER_TOKEN", () => {
     expect(() => loadConfig({})).toThrow(/MICHELIN_RUNNER_TOKEN is required/);
   });
 
   it("reports every problem at once", () => {
     try {
-      loadConfig({ GALLEY_URL: "nope", MICHELIN_STATUS_INTERVAL_MS: "0", MICHELIN_HEARTBEAT_INTERVAL_MS: "x", MICHELIN_CLAIM_INTERVAL_MS: "-1" });
+      loadConfig({ GALLEY_URL: "nope", MICHELIN_STATUS_INTERVAL_MS: "0", MICHELIN_HEARTBEAT_INTERVAL_MS: "x", MICHELIN_CLAIM_INTERVAL_MS: "-1", MICHELIN_ENGINE_SCRIPT: "" });
       expect.unreachable();
     } catch (error) {
       expect(error).toBeInstanceOf(ConfigError);
-      expect((error as ConfigError).problems).toHaveLength(5);
+      expect((error as ConfigError).problems).toHaveLength(6);
     }
   });
 });

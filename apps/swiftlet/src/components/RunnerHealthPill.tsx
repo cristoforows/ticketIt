@@ -16,7 +16,7 @@ export function runnerHealthLabel(health: RunnerHealth): string {
   }
 }
 
-export function useRunnerHealth(onUnauthenticated: () => void): { view: HealthView; reload: () => Promise<void> } {
+export function useRunnerHealth(onUnauthenticated: () => void, enabled = true): { view: HealthView; reload: () => Promise<void> } {
   const [view, setView] = useState<HealthView>({ kind: "loading" });
   const latest = useRef(0);
 
@@ -32,6 +32,7 @@ export function useRunnerHealth(onUnauthenticated: () => void): { view: HealthVi
   }, [onUnauthenticated]);
 
   useEffect(() => {
+    if (!enabled) return;
     void reload();
     const timer = window.setInterval(() => void reload(), RUNNER_HEALTH_REFRESH_MS);
     const onChanged = () => void reload();
@@ -41,7 +42,7 @@ export function useRunnerHealth(onUnauthenticated: () => void): { view: HealthVi
       window.clearInterval(timer);
       window.removeEventListener(RUNNER_HEALTH_CHANGED, onChanged);
     };
-  }, [reload]);
+  }, [reload, enabled]);
 
   return { view, reload };
 }

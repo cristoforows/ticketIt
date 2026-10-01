@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { NewOrderBar } from "./NewOrderBar";
 import { TicketList } from "./TicketList";
@@ -150,6 +150,125 @@ describe("TicketList", () => {
     const openRow = within(screen.getByTestId(`ticket-item-${TICKET_B.id}`));
     expect(openRow.queryByTestId("ticket-locked")).not.toBeInTheDocument();
     expect(openRow.getByTestId("ticket-reorder-up")).toBeInTheDocument();
+  });
+
+  describe("refreshing while a Ticket has an open Round", () => {
+    const agent = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kind: "research" };
+    const round = { id: "77777777-7777-4777-8777-777777777777", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null };
+    const claimed = { ...TICKET_A, status: "Ready", assigneeType: "agent", assigneeAgent: agent, openRound: round };
+    const running = { ...claimed, status: "InProgress", openRound: { ...round, state: "running", startedAt: "2026-10-01T10:00:05Z" } };
+    const settled = { ...claimed, openRound: null };
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const flush = (ms = 0) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+
+    function stubLists(lists: (() => Promise<MockResponse>)[]) {
+      const queue = [...lists];
+      const fetchMock = vi.fn((input: RequestInfo | URL) => {
+        if (String(input) !== "/api/tickets") throw new Error(`unexpected fetch ${String(input)}`);
+        return (queue.length > 1 ? queue.shift() : queue[0])!();
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      return fetchMock;
+    }
+    const list = (...tickets: unknown[]) => () => Promise.resolve(jsonResponse({ tickets }));
+
+    it("refetches every 3 seconds and shows the Status Galley now reports, without a loading state", async () => {
+      const fetchMock = stubLists([list(claimed, TICKET_B), list(running, TICKET_B)]);
+      render(<TicketList onUnauthenticated={() => {}} />);
+      await flush();
+      expect(within(screen.getByTestId(`ticket-item-${claimed.id}`)).getByTestId("ticket-status")).toHaveTextContent("Ready");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      await flush(2999);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await flush(1);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(screen.queryByTestId("ticket-list-loading")).not.toBeInTheDocument();
+      expect(within(screen.getByTestId(`ticket-item-${claimed.id}`)).getByTestId("ticket-status")).toHaveTextContent("In Progress");
+      expect(within(screen.getByTestId(`ticket-item-${claimed.id}`)).getByTestId("ticket-locked")).toBeInTheDocument();
+      expect(screen.getByTestId("ticket-list-total")).toHaveTextContent("TOTAL — 2 orders");
+    });
+
+    it("keeps the list on screen while a refetch is pending and never overlaps refetches", async () => {
+      const fetchMock = stubLists([list(claimed), () => new Promise<MockResponse>(() => {})]);
+      render(<TicketList onUnauthenticated={() => {}} />);
+      await flush();
+      await flush(30_000);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(screen.queryByTestId("ticket-list-loading")).not.toBeInTheDocument();
+      expect(screen.getByTestId(`ticket-item-${claimed.id}`)).toBeInTheDocument();
+    });
+
+    it("stops refetching once no Ticket has an open Round", async () => {
+      const fetchMock = stubLists([list(claimed), list(settled)]);
+      render(<TicketList onUnauthenticated={() => {}} />);
+      await flush();
+      await flush(3000);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(screen.queryByTestId("ticket-locked")).not.toBeInTheDocument();
+      await flush(120_000);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("never refetches a list in which no Ticket has an open Round", async () => {
+      const fetchMock = stubLists([list(TICKET_A, TICKET_B)]);
+      render(<TicketList onUnauthenticated={() => {}} />);
+      await flush(120_000);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("stops refetching on unmount", async () => {
+      const fetchMock = stubLists([list(claimed)]);
+      const { unmount } = render(<TicketList onUnauthenticated={() => {}} />);
+      await flush();
+      unmount();
+      expect(vi.getTimerCount()).toBe(0);
+      await flush(60_000);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the list and says the refresh failed, then clears the note once a refetch succeeds", async () => {
+      stubLists([list(claimed), () => Promise.resolve(jsonResponse({ error: { code: "database_unavailable", message: "x" } }, 503, "Service Unavailable")), list(claimed), list(running)]);
+      render(<TicketList onUnauthenticated={() => {}} />);
+      await flush();
+      await flush(3000);
+      expect(screen.getByTestId("ticket-list-refresh-error-message")).toHaveTextContent("Galley returned an error response: 503");
+      expect(screen.getByTestId(`ticket-item-${claimed.id}`)).toBeInTheDocument();
+      await flush(3000);
+      expect(screen.queryByTestId("ticket-list-refresh-error")).not.toBeInTheDocument();
+      await flush(3000);
+      expect(within(screen.getByTestId(`ticket-item-${claimed.id}`)).getByTestId("ticket-status")).toHaveTextContent("In Progress");
+    });
+
+    it("hands the Owner to sign-in when a refetch comes back unauthenticated", async () => {
+      const onUnauthenticated = vi.fn();
+      stubLists([list(claimed), () => Promise.resolve(jsonResponse({ error: { code: "unauthenticated", message: "sign-in required" } }, 401))]);
+      render(<TicketList onUnauthenticated={onUnauthenticated} />);
+      await flush();
+      await flush(3000);
+      expect(onUnauthenticated).toHaveBeenCalledTimes(1);
+    });
+
+    it("refetches with the same filters the list was loaded with", async () => {
+      const fetchMock = vi.fn((input: RequestInfo | URL) => {
+        if (String(input) !== "/api/tickets?badgeId=b1") throw new Error(`unexpected fetch ${String(input)}`);
+        return Promise.resolve(jsonResponse({ tickets: [claimed] }));
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      render(<TicketList badgeIds={["b1"]} onUnauthenticated={() => {}} />);
+      await flush();
+      await flush(6000);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
   });
 
   describe("reordering", () => {

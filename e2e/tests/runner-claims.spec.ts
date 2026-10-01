@@ -1,7 +1,6 @@
-import { once } from "node:events";
 import { test, expect, type Page } from "@playwright/test";
 import { signIn } from "../support/sign-in";
-import { pairRunnerViaUI, startMichelin } from "../support/runner";
+import { pairRunnerViaUI, runnerCalls } from "../support/runner";
 import { assignTicketDirect, changeTicketStatusDirect, createAgent, createTicket, reorderTicketDirect, ticketCommand, updateTicketDirect, type Ticket } from "../support/tickets";
 
 async function tickets(page: Page): Promise<Ticket[]> {
@@ -16,7 +15,9 @@ async function ticket(page: Page, id: string): Promise<Ticket> {
   return response.json();
 }
 
-test("a paired Michelin claims the top queued Ticket; it stays Ready, shows Claimed by runner, is locked against every mutation, and keeps its Round after Michelin stops", async ({ page, request }) => {
+// The claim is made directly with the runner credential, not by a real Michelin: a real one starts the Round
+// within milliseconds (tests/runner-engine.spec.ts), and the claimed state is what this spec shows.
+test("a paired runner's claim of the top queued Ticket leaves it Ready, shows Claimed by runner, locks it against every mutation, and keeps its Round after the runner goes Disconnected", async ({ page, request, playwright }) => {
   await signIn(page, request, "owner");
   expect((await tickets(page)).filter((t) => t.openRound !== null)).toEqual([]);
 
@@ -31,18 +32,19 @@ test("a paired Michelin claims the top queued Ticket; it stays Ready, shows Clai
   expect(before).toMatchObject({ status: "Ready", requestingAgentWork: true, openRound: null });
 
   const token = await pairRunnerViaUI(page);
-  const michelin = startMichelin(token, 500);
-  let stopped = false;
+  const runner = await playwright.request.newContext({ baseURL: process.env.E2E_BASE_URL });
   try {
-    await expect.poll(async () => (await ticket(page, queued.id)).openRound, { timeout: 15_000 }).not.toBeNull();
+    const calls = runnerCalls(runner, token);
+    await calls.register();
+    const claim = await calls.claim();
+    expect(claim).toMatchObject({ sequence: 1, claimEpoch: 1, ticket: { id: queued.id }, agent: { id: agent.id, name: agent.name, kind: "research" } });
+
     const claimed = await ticket(page, queued.id);
     expect(claimed.status).toBe("Ready");
     expect(claimed.requestingAgentWork).toBe(false);
     expect(claimed.updatedAt).toBe(before.updatedAt);
-    expect(claimed.openRound).toMatchObject({ sequence: 1, state: "claimed", agent: { id: agent.id, name: agent.name, kind: "research" }, startedAt: null });
+    expect(claimed.openRound).toMatchObject({ id: claim.roundId, sequence: 1, state: "claimed", agent: { id: agent.id, name: agent.name, kind: "research" }, startedAt: null });
     expect((await tickets(page)).filter((t) => t.openRound !== null).map((t) => t.id)).toEqual([queued.id]);
-    await expect.poll(() => michelin.output()).toContain(claimed.openRound!.id);
-    expect(michelin.output()).toContain("round claimed; claim polling stopped");
     const round = claimed.openRound!;
     const lockCopy = `Locked while ${round.agent.name} works on Round ${round.sequence}`;
     const reason = claimed.allowedActions.accept.reason!;
@@ -70,6 +72,11 @@ test("a paired Michelin claims the top queued Ticket; it stays Ready, shows Clai
     await expect(page.getByTestId("ticket-detail-status-actions")).toHaveCount(0);
     await expect(page.getByTestId("ticket-detail-accept-button")).toHaveCount(0);
     await expect(page.getByTestId("ticket-detail-accept-unavailable")).toHaveText(reason.message);
+    const rounds = page.getByTestId("ticket-detail-rounds");
+    await expect(rounds.getByTestId("ticket-detail-round-number")).toHaveText(String(round.sequence));
+    await expect(rounds.getByTestId("ticket-detail-round-agent")).toHaveText(round.agent.name);
+    await expect(rounds.getByTestId("ticket-detail-round-waiting")).toHaveText("Claimed, waiting for the runner to start");
+    await expect(rounds.getByTestId("ticket-detail-round-started")).toHaveCount(0);
 
     await expect(page.getByTestId("ticket-detail-archive-button")).toBeDisabled();
     const archive = await page.request.post(`/api/tickets/${queued.id}/archive`);
@@ -101,20 +108,19 @@ test("a paired Michelin claims the top queued Ticket; it stays Ready, shows Clai
     }
     expect(await ticket(page, queued.id)).toEqual(claimed);
 
-    michelin.child.kill("SIGTERM");
-    const [code] = await once(michelin.child, "exit");
-    stopped = true;
-    expect(code).toBe(0);
-    expect(michelin.output()).not.toContain(token);
-
     const advanced = await page.request.post("/api/dev/clock/advance", { data: { seconds: 30 } });
     expect(advanced.status()).toBe(200);
     expect((await (await page.request.get("/api/runner-health")).json()).state).toBe("disconnected");
-    const afterStop = await ticket(page, queued.id);
-    expect(afterStop.openRound).toEqual(claimed.openRound);
-    expect(afterStop.status).toBe("Ready");
-    expect(afterStop.requestingAgentWork).toBe(false);
+    const afterLoss = await ticket(page, queued.id);
+    expect(afterLoss.openRound).toEqual(claimed.openRound);
+    expect(afterLoss.status).toBe("Ready");
+    expect(afterLoss.requestingAgentWork).toBe(false);
+
+    await page.goto(`/tickets/${queued.id}`);
+    await expect(page.getByTestId("ticket-detail-runner-disconnected")).toContainText("Runner disconnected");
+    await expect(page.getByTestId("ticket-detail-round-waiting")).toBeVisible();
+    await expect(page.getByTestId("ticket-detail-locked")).toHaveText(lockCopy);
   } finally {
-    if (!stopped) michelin.child.kill("SIGKILL");
+    await runner.dispose();
   }
 });

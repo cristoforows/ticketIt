@@ -2,7 +2,7 @@
   "name": "michelin",
   "version": "0.1.0",
   "private": true,
-  "description": "ticketIt runner. Registers with Galley using its runner credential, heartbeats, and checks Galley's status; no claims or engine yet.",
+  "description": "ticketIt runner. Registers with Galley using its runner credential, heartbeats, checks Galley's status, claims Rounds, and runs each with a scripted, controlled engine.",
   "type": "module",
   "engines": {
     "node": "26.9.0"

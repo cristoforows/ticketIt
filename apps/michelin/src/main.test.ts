@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -20,6 +23,8 @@ const TOKEN = `tir_${"c".repeat(43)}`;
 let server: Server | undefined;
 let authorizations: (string | undefined)[] = [];
 let runnerPaths: (string | undefined)[] = [];
+let eventBodies: Record<string, unknown>[] = [];
+let scriptDirectory: string | undefined;
 
 const claimBody = {
   roundId: "77777777-7777-4777-8777-777777777777",
@@ -32,11 +37,21 @@ const claimBody = {
 afterEach(async () => {
   await new Promise<void>((resolve) => (server ? server.close(() => resolve()) : resolve()));
   server = undefined;
+  if (scriptDirectory) rmSync(scriptDirectory, { recursive: true, force: true });
+  scriptDirectory = undefined;
 });
+
+function scriptFile(contents: string): string {
+  scriptDirectory ??= mkdtempSync(join(tmpdir(), "michelin-script-"));
+  const path = join(scriptDirectory, "script.json");
+  writeFileSync(path, contents);
+  return path;
+}
 
 async function fakeGalley(): Promise<string> {
   authorizations = [];
   runnerPaths = [];
+  eventBodies = [];
   server = createServer((req, res) => {
     res.setHeader("content-type", "application/json");
     if (req.url === "/api/status") {
@@ -53,6 +68,16 @@ async function fakeGalley(): Promise<string> {
     if (req.url === "/api/runner/claims") {
       res.statusCode = 201;
       res.end(JSON.stringify(claimBody));
+      return;
+    }
+    if (req.url === `/api/runner/rounds/${claimBody.roundId}/events`) {
+      let body = "";
+      req.on("data", (chunk: Buffer) => (body += chunk.toString()));
+      req.on("end", () => {
+        eventBodies.push(JSON.parse(body) as Record<string, unknown>);
+        res.statusCode = 201;
+        res.end(JSON.stringify({ roundId: claimBody.roundId, type: "execution_started", state: "running", startedAt: "2026-10-01T12:00:01Z" }));
+      });
       return;
     }
     res.end(JSON.stringify(req.url === "/api/runner/register" ? { registeredAt: "2026-10-01T12:00:00Z" } : { lastSeenAt: "2026-10-01T12:00:10Z" }));
@@ -96,7 +121,7 @@ function run(env: Record<string, string>) {
 }
 
 describe("michelin process", () => {
-  it("checks Galley, registers, heartbeats, claims once, then exits 0 on SIGTERM without logging the token", async () => {
+  it("checks Galley, registers, heartbeats, claims and starts one Round, holds it, then exits 0 on SIGTERM without logging the token", async () => {
     const galleyUrl = await fakeGalley();
     const michelin = run({
       GALLEY_URL: galleyUrl,
@@ -108,7 +133,8 @@ describe("michelin process", () => {
 
     await michelin.until("galley status ok");
     await michelin.until("runner heartbeat ok");
-    await michelin.until("round claimed; claim polling stopped");
+    await michelin.until("round claimed");
+    await michelin.until("engine holding");
     await new Promise((resolve) => setTimeout(resolve, 200));
     michelin.child.kill("SIGTERM");
 
@@ -118,10 +144,13 @@ describe("michelin process", () => {
     expect(messages.slice(-2)).toEqual(["michelin stopping", "michelin stopped"]);
     expect(messages).toContain("galley status ok");
     expect(messages.indexOf("runner registered")).toBeLessThan(messages.indexOf("runner heartbeat ok"));
-    expect(messages.indexOf("runner registered")).toBeLessThan(messages.indexOf("round claimed; claim polling stopped"));
+    expect(messages.indexOf("runner registered")).toBeLessThan(messages.indexOf("round claimed"));
+    expect(messages.indexOf("round claimed")).toBeLessThan(messages.indexOf("execution started reported"));
     expect(runnerPaths[0]).toBe("/api/runner/register");
     expect(runnerPaths.filter((path) => path === "/api/runner/claims")).toHaveLength(1);
-    expect(michelin.lines.find((line) => line["msg"] === "round claimed; claim polling stopped")).toMatchObject({
+    expect(eventBodies).toHaveLength(1);
+    expect(eventBodies[0]).toMatchObject({ type: "execution_started", idempotencyKey: `${claimBody.roundId}:0`, claimEpoch: 1 });
+    expect(michelin.lines.find((line) => line["msg"] === "round claimed")).toMatchObject({
       roundId: claimBody.roundId,
       sequence: 1,
       claimEpoch: 1,
@@ -130,6 +159,29 @@ describe("michelin process", () => {
     });
     expect(michelin.lines[0]).toMatchObject({ heartbeatIntervalMs: 50, claimIntervalMs: 20, michelinVersion: "0.1.0" });
     expect(authorizations.every((header) => header === `Bearer ${TOKEN}`)).toBe(true);
+    expect(JSON.stringify(michelin.lines)).not.toContain(TOKEN.slice(4));
+  }, 15_000);
+
+  it("runs the script MICHELIN_ENGINE_SCRIPT names: a finite script ends and claiming resumes", async () => {
+    const galleyUrl = await fakeGalley();
+    const michelin = run({
+      GALLEY_URL: galleyUrl,
+      MICHELIN_STATUS_INTERVAL_MS: "60000",
+      MICHELIN_HEARTBEAT_INTERVAL_MS: "50",
+      MICHELIN_CLAIM_INTERVAL_MS: "20",
+      MICHELIN_RUNNER_TOKEN: TOKEN,
+      MICHELIN_ENGINE_SCRIPT: scriptFile('{"steps":[{"step":"start"},{"step":"wait","ms":30}]}'),
+    });
+
+    await michelin.until("engine script finished");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    michelin.child.kill("SIGTERM");
+
+    expect(await michelin.exit).toEqual({ code: 0, signal: null });
+    expect(runnerPaths.filter((path) => path === "/api/runner/claims").length).toBeGreaterThanOrEqual(2);
+    expect(eventBodies.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(eventBodies.map((body) => (body["data"] as { engineReference: string }).engineReference)).size).toBe(eventBodies.length);
+    expect(michelin.lines.map((line) => line["msg"])).not.toContain("engine holding");
     expect(JSON.stringify(michelin.lines)).not.toContain(TOKEN.slice(4));
   }, 15_000);
 
@@ -150,6 +202,27 @@ describe("michelin process", () => {
     expect(await michelin.exit).toEqual({ code: 1, signal: null });
     expect(michelin.lines).toHaveLength(1);
     expect(michelin.lines[0]).toMatchObject({ level: "error", msg: "invalid configuration" });
+  }, 15_000);
+
+  it("exits 1 naming the step when MICHELIN_ENGINE_SCRIPT holds an invalid script", async () => {
+    const michelin = run({
+      MICHELIN_RUNNER_TOKEN: TOKEN,
+      MICHELIN_ENGINE_SCRIPT: scriptFile('{"steps":[{"step":"start"},{"step":"wait","ms":0},{"step":"deliver"}]}'),
+    });
+    expect(await michelin.exit).toEqual({ code: 1, signal: null });
+    expect(michelin.lines).toHaveLength(1);
+    expect(michelin.lines[0]).toMatchObject({ level: "error", msg: "invalid configuration" });
+    const problems = michelin.lines[0]?.["problems"] as string[];
+    expect(problems.some((problem) => problem.includes("MICHELIN_ENGINE_SCRIPT") && problem.includes("steps[1]"))).toBe(true);
+    expect(problems.some((problem) => problem.includes("steps[2]") && problem.includes("deliver") && problem.includes("M4.10"))).toBe(true);
+    expect(JSON.stringify(michelin.lines)).not.toContain(TOKEN.slice(4));
+  }, 15_000);
+
+  it("exits 1 when MICHELIN_ENGINE_SCRIPT names a file that does not exist", async () => {
+    const michelin = run({ MICHELIN_RUNNER_TOKEN: TOKEN, MICHELIN_ENGINE_SCRIPT: join(tmpdir(), "michelin-no-such-script.json") });
+    expect(await michelin.exit).toEqual({ code: 1, signal: null });
+    expect(michelin.lines).toHaveLength(1);
+    expect(String((michelin.lines[0]?.["problems"] as string[])[0])).toMatch(/^MICHELIN_ENGINE_SCRIPT .*could not be read \(ENOENT\)/);
   }, 15_000);
 
   it("exits 1 naming MICHELIN_RUNNER_TOKEN when it is missing", async () => {

@@ -1,6 +1,8 @@
 import type { RunnerCredential } from "./credentials.ts";
+import { runControlledEngine, type EngineDeps } from "./engine.ts";
+import type { EngineScript } from "./engineScript.ts";
 import type { FetchFn } from "./galley/client.ts";
-import { claimWork, type ClaimResult } from "./galley/runner.ts";
+import { claimWork, type ClaimResult, type RunnerClaim } from "./galley/runner.ts";
 import type { Registration } from "./heartbeatLoop.ts";
 import type { Logger } from "./logger.ts";
 import { sleep } from "./statusLoop.ts";
@@ -12,6 +14,8 @@ export interface ClaimLoopOptions {
   logger: Logger;
   credential: RunnerCredential;
   registration: Readonly<Registration>;
+  engineScript: EngineScript;
+  engineDeps?: Partial<EngineDeps>;
   requestTimeoutMs?: number;
 }
 
@@ -30,7 +34,7 @@ export function startClaimLoop(options: ClaimLoopOptions): ClaimLoop {
   };
 }
 
-// Execution of the claimed Round is M4.8 (#134); until then the first claim ends polling for this process.
+// One Round at a time: polling resumes only after the claimed Round's script ends or is abandoned.
 async function run(options: ClaimLoopOptions, signal: AbortSignal): Promise<void> {
   const { galleyUrl, intervalMs, logger, registration } = options;
   const request = { fetch: options.fetch, galleyUrl, signal, timeoutMs: options.requestTimeoutMs, credential: options.credential };
@@ -42,7 +46,7 @@ async function run(options: ClaimLoopOptions, signal: AbortSignal): Promise<void
     const result = await claimWork(request);
     if (result.ok && result.value !== null) {
       const { roundId, sequence, claimEpoch, ticket } = result.value;
-      logger.info("round claimed; claim polling stopped", {
+      logger.info("round claimed", {
         galleyUrl: galleyUrl.href,
         durationMs: result.durationMs,
         roundId,
@@ -51,11 +55,30 @@ async function run(options: ClaimLoopOptions, signal: AbortSignal): Promise<void
         ticketId: ticket.id,
         ticketTitle: ticket.title,
       });
-      return;
+      await runRound(options, result.value, signal);
+      continue;
     }
     if (!result.ok) {
       logFailure(logger, galleyUrl, result);
     }
+  }
+}
+
+async function runRound(options: ClaimLoopOptions, claim: RunnerClaim, signal: AbortSignal): Promise<void> {
+  try {
+    await runControlledEngine({
+      galleyUrl: options.galleyUrl,
+      fetch: options.fetch,
+      logger: options.logger,
+      credential: options.credential,
+      claim,
+      script: options.engineScript,
+      signal,
+      requestTimeoutMs: options.requestTimeoutMs,
+      deps: options.engineDeps,
+    });
+  } catch (error) {
+    options.logger.error("engine failed unexpectedly", { roundId: claim.roundId, error: error instanceof Error ? error.message : String(error) });
   }
 }
 

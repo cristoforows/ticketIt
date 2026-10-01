@@ -1130,6 +1130,8 @@ registration and last heartbeat, set together or not at all).
 | `POST /api/runner/register` | Michelin | `Authorization: Bearer tir_…` |
 | `POST /api/runner/heartbeat` | Michelin | `Authorization: Bearer tir_…` |
 | `POST /api/runner/claims` | Michelin | `Authorization: Bearer tir_…` (issue #132) |
+| `POST /api/runner/rounds/{roundId}/events` | Michelin | `Authorization: Bearer tir_…` (issue #134) |
+| `GET /api/tickets/{id}/rounds` | Owner | session cookie (issue #134) |
 | `POST /api/dev/clock/advance` | tests | session cookie, development only |
 
 **Pairing** returns `201` with `tir_` plus 32 random bytes in unpadded
@@ -1262,8 +1264,8 @@ then rows). Field edits, assignment, Badges and archive take only their
 one row lock and then read `rounds`, so they cannot form a cycle with
 the claim. A unique violation on the slot index maps to `204`.
 
-A claimed Round never closes in M4.6: execution start is M4.8 (#134)
-and delivery M4.10. Stranded claims are D5.
+A claimed Round starts with an `execution_started` event (M4.8, #134,
+below). Delivery is M4.10. Stranded claims are D5.
 
 `rounds` joins the no-execution-artefact allowlist, which also checks
 that no manual action creates a Round. Tests:
@@ -1309,6 +1311,87 @@ Not changed by the lock:
 
 Tests: `internal/httpapi/ticket_open_round_lock_test.go`. Evidence:
 `docs/evidence/m4/133-open-round-lock.md`.
+
+## Execution started and event ingestion (issue #134)
+
+Migration `000014_create_round_events_and_engine_references.up.sql`
+adds `rounds_owner_id_id_unique` (so child tables can carry the
+owner-scoped composite key `rounds` itself uses) and two tables:
+
+- `round_events`: one row per accepted event, `UNIQUE (round_id,
+  idempotency_key)`, with `type`, `claim_epoch`, the runner's
+  `occurred_at`, Galley's `received_at`, a SHA-256 `payload_hash` and
+  the `result` it answered with as JSONB. `round_events_type_m4` allows
+  `execution_started` only; M4.9 (#135) and M4.10 (#136) replace it.
+- `round_engine_references`: the engine's execution reference, kept
+  apart from the Round id (ADR 0002). The partial unique index
+  `round_engine_references_one_current_per_round` allows one
+  `is_current` row per Round; `attachEngineReference` retires the
+  current one before inserting the next and never deletes.
+
+`POST /api/runner/rounds/{roundId}/events` takes `{type,
+idempotencyKey, claimEpoch, occurredAt, data}`. For `execution_started`,
+`data` is exactly `{"engineReference": "<1-200 characters>"}`.
+`idempotencyKey` is 1-200 characters without control characters and is
+used as sent, never trimmed. The response is `RoundEventResult`
+(`roundId`, `type`, `state`, `startedAt`).
+
+The decision ladder, in order. Steps 1-3 run before any lock; 4-9 run
+in one transaction.
+
+| # | Check | Outcome |
+| --- | --- | --- |
+| 1 | Bearer credential (`requireRunner`); a session cookie is refused beside a valid bearer | `401 unauthenticated` |
+| 2 | `{roundId}` is a UUID | shared `404 not_found` |
+| 3 | Strict body: known `type`, key, positive int32 `claimEpoch`, RFC 3339 `occurredAt`, `data` for the type | `400 invalid_request` |
+| 4 | Lock the Owner's priority lock, the Ticket row, then the Round row `FOR UPDATE`; the Round must be this Owner's | unknown, foreign, or a Ticket's id: `404 not_found` |
+| 5 | `(round, idempotencyKey)` already recorded | same payload hash: `200` with the stored result; different: `409 idempotency_key_conflict` |
+| 6 | `claimEpoch` is the Round's | else `409 stale_claim_epoch` |
+| 7 | Round is open | else `409 round_not_open` |
+| 8 | The type suits the Round's state (`execution_started` needs `claimed`) | else `409 event_out_of_order` |
+| 9 | Apply | `201` |
+
+Step 5 precedes 6 and 7 so a retry of an applied event is answered the
+same way after the Round has moved on. No rejection changes state or
+records a row. The runner need not be Connected, and an event is not a
+heartbeat: events are facts, and refusing a late one would strand a
+claimed Round.
+
+Applying `execution_started`, in the one transaction: the Round becomes
+`running` with `started_at` set from Galley's clock (never the runner's
+`occurredAt`, which is kept in `round_events`, so runner clock skew
+cannot break `rounds_timestamps_ordered`; it never precedes
+`claimed_at`); the engine reference becomes current; the Ticket moves
+`Ready` → `In Progress`, guarded by `AND status = 'Ready'`; and the
+`round_events` row stores the result. If the guard matches no row an
+invariant broke: nothing is recorded and the answer is `500
+internal_error`, logged with the Round id.
+
+`payload_hash` is SHA-256 of the canonical JSON of `{claimEpoch, data,
+occurredAt, type}`: object keys sorted bytewise at every depth, array
+order kept, numbers kept as written, `occurredAt` as the UTC instant in
+RFC 3339 with nanoseconds and trailing zeros trimmed. The key and the
+Round id are not hashed. A replay re-encodes the stored result into
+`RoundEventResult`, which gives the bytes the first answer had.
+
+This path never calls `lockMutableTicket` or `decideTicketMutation`:
+they reject because of the open Round. It is the one writer that
+changes a Ticket under its own Round, and only that Round's Ticket. The
+lock order is the priority lock, the Ticket row, then the Round row,
+which is the order every other Ticket-mutating path uses for its first
+two.
+
+`GET /api/tickets/{id}/rounds` returns `{"rounds": [...]}`, newest
+first by `sequence`, for any of the Owner's Tickets including an
+archived one. `RoundState` on the wire is still `claimed` and
+`running`; a Round in a later state would appear with that state before
+the contract widens.
+
+Tests: `round_events_test.go`, `round_event_hash_test.go`,
+`ticket_rounds_test.go`, and `TestRoundEvents_ResponsesMatchContractAndMethod405`
+in `contract_test.go`. `round_events` and `round_engine_references`
+join the no-execution-artefact allowlist, which checks that no manual
+action creates either. Evidence: `docs/evidence/m4/134-controlled-engine.md`.
 
 ## Error shape
 
@@ -1562,7 +1645,7 @@ apps/galley/
 │                           #   real port -- test/development only, never cmd/galley
 └── internal/
     ├── config/             # environment parsing and validation (incl. DATABASE_URL, #52; owner/OAuth, #54)
-    ├── migrations/         # embedded, versioned, forward-only SQL files (#52, #54, #56, #57, #59, #60)
+    ├── migrations/         # embedded, versioned, forward-only SQL files (#52, #54, #56, #57, #59, #60, #134)
     ├── postgres/           # issue #52: pgxpool wrapper, live health check, migration runner,
     │                       #   and the real-PostgreSQL test-setup helper (NewTestPool)
     ├── auth/                # issue #54: tokens/hashing, sessions, oauth state, Owner
@@ -1589,6 +1672,9 @@ apps/galley/
         ├── ticket_lifecycle_test.go            # issue #60: transition-table, Accept, and concurrency tests
         ├── runner.go       # issue #130: pairing, revoke, register, heartbeat, derived health, requireRunner
         ├── rounds.go       # issue #132: atomic claims, the sequential slot, the open-state definition
+        ├── round_events.go # issue #134: event ingestion, the decision ladder, engine references
+        ├── round_event_hash.go  # issue #134: canonical JSON and the payload hash
+        ├── ticket_rounds.go     # issue #134: GET /api/tickets/{id}/rounds
         ├── devclock.go     # issue #130: development-only clock advance for the browser suite
         └── no_execution_side_effects_test.go   # issue #60: the no-Round/queue/work-request guardrail
 ```
