@@ -174,6 +174,42 @@ describe("claim loop", () => {
     await loop.stop();
   });
 
+  it("resumes polling once the Round delivers, and runs the next claim's Round", async () => {
+    const second = { ...CLAIM, roundId: "66666666-6666-4666-8666-666666666666", ticket: { ...CLAIM.ticket, id: "55555555-5555-4555-8555-555555555555", title: "Next" } };
+    const claims = [claimed, () => json(second, 201), noWork];
+    const fetchFn = vi.fn<FetchFn>(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/api/runner/claims") return (claims.length > 1 ? claims.shift()! : claims[0]!)();
+      const roundId = /^\/api\/runner\/rounds\/([^/]+)\/events$/.exec(path)?.[1];
+      if (roundId === undefined) throw new Error(`unexpected ${path}`);
+      const event = JSON.parse(String(init?.body)) as { type: string };
+      const delivered = event.type === "delivered";
+      return json({ roundId, type: event.type, state: delivered ? "delivered" : "running", startedAt: "2026-10-01T12:00:00Z", ...(delivered ? { endedAt: "2026-10-01T12:00:01Z" } : {}) }, 201);
+    });
+    const deliver = { step: "deliver" as const, bodyMarkdown: "# Done", summary: "Done.", criteriaAssessment: "Met." };
+    const { loop, records } = setup(fetchFn, true, { steps: [{ step: "start" }, deliver] });
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(records().map((record) => [record["msg"], record["roundId"]])).toEqual([
+      ["round claimed", CLAIM.roundId],
+      ["execution started reported", CLAIM.roundId],
+      ["delivery reported", CLAIM.roundId],
+      ["engine delivered", CLAIM.roundId],
+    ]);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(records().slice(4).map((record) => [record["msg"], record["roundId"]])).toEqual([
+      ["round claimed", second.roundId],
+      ["execution started reported", second.roundId],
+      ["delivery reported", second.roundId],
+      ["engine delivered", second.roundId],
+    ]);
+    await vi.advanceTimersByTimeAsync(1000);
+    const paths = fetchFn.mock.calls.map(([input]) => new URL(String(input)).pathname);
+    expect(paths.filter((path) => path === "/api/runner/claims")).toHaveLength(3);
+    await loop.stop();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("resumes polling after Galley refuses the event and the Round is abandoned locally", async () => {
     const fetchFn = routed({ claims: [claimed, noWork], events: [() => json({ error: { code: "stale_claim_epoch", message: "x" } }, 409)] });
     const { loop, records } = setup(fetchFn);

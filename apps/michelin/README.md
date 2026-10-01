@@ -10,7 +10,9 @@ Round
 it with a scripted, controlled engine
 ([#134](https://github.com/cristoforows/ticketIt/issues/134)) that also
 reports activity notes and usage observations
-([#135](https://github.com/cristoforows/ticketIt/issues/135)): no model,
+([#135](https://github.com/cristoforows/ticketIt/issues/135)) and
+delivers a result
+([#136](https://github.com/cristoforows/ticketIt/issues/136)): no model,
 provider or network call beyond Galley. Every connection is outbound;
 Michelin opens no listening socket. See
 [ADR 0001](../../docs/adr/0001-single-authority-galley.md): Michelin
@@ -117,7 +119,8 @@ makes no model or provider call. Each reporting step sends one event to
   {"step": "usage", "provider": "controlled", "model": "scripted",
    "inputTokens": 1200, "outputTokens": 300, "costUsd": "0.004500",
    "activeMs": 2000, "basis": "reported", "providerGenerationId": null},
-  {"step": "hold"}
+  {"step": "deliver", "bodyMarkdown": "# Result\n\n- Found the cause\n",
+   "summary": "Found the cause.", "criteriaAssessment": "A written cause: met."}
 ]}
 ```
 
@@ -127,31 +130,33 @@ makes no model or provider call. Each reporting step sends one event to
 | `progress` | `progress` | `<roundId>:<step index>` | Append `note` (1 to 2000 characters, not blank, no control characters but tab and line feed) to the Round's activity. |
 | `usage` | `usage_observed` | the `observationId` | Report one usage observation. `observationId` is a UUID generated once when the step runs. `provider` and `model` are required, 1 to 200 characters. `inputTokens`, `outputTokens` and `activeMs` are integers from 0 to 2^53−1. `costUsd` is a decimal string with at most 6 places, from `"0"` to `"999999.999999"`. `providerGenerationId` is optional. A figure that is absent or `null` is reported as unknown. `basis` is `reported` or `estimated`. |
 | `wait` | none | none | Sleep `ms` (an integer, 1 to 3600000). |
-| `hold` | none | none | Wait until Michelin stops. Only the last step. |
+| `deliver` | `delivered` | `<roundId>:<step index>` | Deliver the result: `bodyMarkdown` (1 to 1048576 bytes of UTF-8), `summary` (1 to 2000 characters) and `criteriaAssessment` (1 to 10000 characters), each not blank, with no control characters but tab and line feed. Galley moves the Ticket to In Review and frees the slot; the engine returns and the claim loop polls again. Only the last step. |
+| `hold` | none | none | Wait until Michelin stops. Only the last step, so a script holds or delivers, never both. |
 
 With `MICHELIN_ENGINE_SCRIPT` unset, the script is: `start`; progress
 "Reading the Ticket", "Working towards the goal" and "Writing up the
 result", one second apart; one `reported` usage observation from
 provider `controlled`, model `scripted` (1200 in, 300 out, `"0.004500"`
-USD, 2000 ms); then `hold`. It holds where M4.10
-([#136](https://github.com/cristoforows/ticketIt/issues/136)) will
-deliver.
+USD, 2000 ms); then `deliver` with a short Markdown Report that says it
+was written by a scripted engine.
 
 The script is read and checked when Michelin starts, against the same
 limits Galley enforces. An unknown step, an unknown key, an invalid
-field, or `deliver` (M4.10) is a configuration error. The error names
+field, or a `deliver` or `hold` that is not the last step is a configuration error. The error names
 the step and the steps supported now, so a script can never silently
-do nothing and a bad note or figure never abandons a Round.
+do nothing and a bad note, figure or deliverable never abandons a Round.
+"Not blank" uses Go's `unicode.IsSpace`, as Galley does, not
+JavaScript's `\s`.
 
 **Retry.** A network failure, a timeout, a `5xx`, or a `200`/`201` whose
 body is not the expected result is retried with the identical request:
-the same key, body, `occurredAt`, reference and `observationId`. A
+the same key, body, `occurredAt`, reference, `observationId` and deliverable. A
 retried usage observation therefore never records a second observation
 in Galley. Waits are 1, 2, 4, 8,
 16 then 30 seconds, repeating at 30. Both `200` (a replay) and `201` are
 success. Anything else is final: Michelin logs `round event refused;
 round abandoned locally` with Galley's error code (`400`, `401`, `404`
-and `409` among them, including `observation_id_conflict`), stops that Round's script, and sends nothing
+`409` and `413` among them, including `observation_id_conflict`), stops that Round's script, and sends nothing
 further for it. It never closes, fails or unlocks the Round, and never
 exits. If Michelin restarts, it does not resume a Round it no longer
 holds; a Round left `claimed` or `running` is recovered by
@@ -180,6 +185,7 @@ context fields. The credential is never logged.
 | `execution started reported` | `info` | `roundId`, `step`, `stepIndex`, `attempt`, `engineReference`, `httpStatus` (`200` replay or `201`). |
 | `progress reported` | `info` | As above, plus the note's `seq` from Galley. |
 | `usage observation reported` | `info` | As above, plus `observationId`. |
+| `delivery reported`, `engine delivered` | `info` | As above, plus Galley's `endedAt`; then the engine returns and polling resumes. |
 | `round event failed; retrying` | `warn` | `roundId`, `step`, `attempt`, `reason`, `httpStatus`, `errorCode`, `retryInMs`. |
 | `round event refused; round abandoned locally` | `error` | `roundId`, `step`, `attempt`, `httpStatus`, Galley's `errorCode`. |
 | `engine holding`, `engine script finished` | `info` | The script reached `hold`, or its last step. |

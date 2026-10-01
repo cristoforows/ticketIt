@@ -12,7 +12,14 @@ export interface UsageStep {
   providerGenerationId: string | null;
 }
 
-export type EngineStep = { step: "start" } | { step: "wait"; ms: number } | { step: "progress"; note: string } | UsageStep | { step: "hold" };
+export interface DeliverStep {
+  step: "deliver";
+  bodyMarkdown: string;
+  summary: string;
+  criteriaAssessment: string;
+}
+
+export type EngineStep = { step: "start" } | { step: "wait"; ms: number } | { step: "progress"; note: string } | UsageStep | DeliverStep | { step: "hold" };
 
 export interface EngineScript {
   steps: readonly EngineStep[];
@@ -22,8 +29,10 @@ export const MAX_WAIT_MS = 3_600_000;
 export const NOTE_MAX_LENGTH = 2000;
 export const LABEL_MAX_LENGTH = 200;
 export const MAX_USAGE_COUNT = Number.MAX_SAFE_INTEGER;
+export const BODY_MARKDOWN_MAX_BYTES = 1_048_576;
+export const SUMMARY_MAX_LENGTH = 2000;
+export const CRITERIA_ASSESSMENT_MAX_LENGTH = 10_000;
 
-// Deliver is M4.10 (#136); until then the default holds where it will deliver.
 export const DEFAULT_ENGINE_SCRIPT: EngineScript = {
   steps: [
     { step: "start" },
@@ -43,19 +52,35 @@ export const DEFAULT_ENGINE_SCRIPT: EngineScript = {
       basis: "reported",
       providerGenerationId: null,
     },
-    { step: "hold" },
+    {
+      step: "deliver",
+      bodyMarkdown: [
+        "# Result",
+        "",
+        "The controlled engine worked through the Ticket's goal and wrote up what it found.",
+        "",
+        "## Findings",
+        "",
+        "- Read the goal and the success criteria",
+        "- Worked towards the goal in three recorded steps",
+        "- Recorded the usage it reported",
+        "",
+        "This Report was written by a scripted engine; no model ran.",
+        "",
+      ].join("\n"),
+      summary: "A scripted write-up of the Ticket's goal from the controlled engine.",
+      criteriaAssessment: "Each success criterion is addressed by the scripted write-up; the Owner judges whether it is met.",
+    },
   ],
 };
 
-const SUPPORTED_STEPS = "start, wait, progress, usage, hold";
-
-const LATER_STEPS: Readonly<Record<string, string>> = {
-  deliver: "M4.10 (#136)",
-};
+const SUPPORTED_STEPS = "start, wait, progress, usage, deliver, hold";
 
 const USAGE_KEYS = ["provider", "model", "inputTokens", "outputTokens", "costUsd", "activeMs", "basis", "providerGenerationId"];
 
-// Mirrors Galley's limits (round_activity.go, usage_observations.go) so a bad script fails at startup, not by abandoning a Round.
+const DELIVER_KEYS = ["bodyMarkdown", "summary", "criteriaAssessment"];
+
+// Mirrors Galley's limits (round_activity.go, usage_observations.go, round_deliverables.go) so a bad script fails at startup, not by abandoning a Round.
 const COST_USD = /^(0|[1-9][0-9]{0,5})(\.[0-9]{1,6})?$/;
 
 export function parseEngineScript(text: string, problems: string[]): EngineScript | undefined {
@@ -111,8 +136,13 @@ function parseStep(raw: unknown, index: number, total: number, problems: string[
     case "start":
       break;
     case "hold":
+    case "deliver":
       if (index < total - 1) {
-        problems.push(`${at}: "hold" may only be the last step`);
+        problems.push(`${at}: ${JSON.stringify(name)} may only be the last step; "hold" and "deliver" are mutually exclusive`);
+      }
+      if (name === "deliver") {
+        DELIVER_KEYS.forEach((key) => known.add(key));
+        checkDeliverable(fields, at, problems);
       }
       break;
     case "wait":
@@ -131,15 +161,9 @@ function parseStep(raw: unknown, index: number, total: number, problems: string[
       USAGE_KEYS.forEach((key) => known.add(key));
       checkUsage(fields, at, problems);
       break;
-    default: {
-      const slice = LATER_STEPS[name];
-      problems.push(
-        slice === undefined
-          ? `${at}: unknown step ${JSON.stringify(name)}; supported steps are ${SUPPORTED_STEPS}`
-          : `${at}: ${JSON.stringify(name)} is not supported yet; ${slice} adds it. Supported steps are ${SUPPORTED_STEPS}`,
-      );
+    default:
+      problems.push(`${at}: unknown step ${JSON.stringify(name)}; supported steps are ${SUPPORTED_STEPS}`);
       return undefined;
-    }
   }
   for (const key of Object.keys(fields)) {
     if (!known.has(key)) {
@@ -166,6 +190,8 @@ function parseStep(raw: unknown, index: number, total: number, problems: string[
         basis: fields["basis"] as UsageBasis,
         providerGenerationId: (fields["providerGenerationId"] ?? null) as string | null,
       };
+    case "deliver":
+      return { step: "deliver", bodyMarkdown: fields["bodyMarkdown"] as string, summary: fields["summary"] as string, criteriaAssessment: fields["criteriaAssessment"] as string };
     default:
       return { step: name as "start" | "hold" };
   }
@@ -178,10 +204,33 @@ function hasControl(text: string, allowed: string): boolean {
   });
 }
 
-function validNote(value: unknown): value is string {
+// Go's unicode.IsSpace, which Galley's blank check uses; JavaScript's \s differs at U+0085 and U+FEFF.
+const NOT_GO_SPACE = /[^\t\n\v\f\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]/u;
+
+function validMultilineText(value: unknown, measure: (text: string) => number, maxLength: number): value is string {
   if (typeof value !== "string") return false;
-  const length = [...value].length;
-  return length >= 1 && length <= NOTE_MAX_LENGTH && /[^\s]/u.test(value) && !hasControl(value, "\t\n");
+  const length = measure(value);
+  return length >= 1 && length <= maxLength && NOT_GO_SPACE.test(value) && !hasControl(value, "\t\n");
+}
+
+const codePoints = (text: string): number => [...text].length;
+const utf8Bytes = (text: string): number => Buffer.byteLength(text, "utf8");
+
+function validNote(value: unknown): value is string {
+  return validMultilineText(value, codePoints, NOTE_MAX_LENGTH);
+}
+
+function checkDeliverable(fields: Record<string, unknown>, at: string, problems: string[]): void {
+  const rule = "not blank, without control characters other than tab and line feed";
+  if (!validMultilineText(fields["bodyMarkdown"], utf8Bytes, BODY_MARKDOWN_MAX_BYTES)) {
+    problems.push(`${at}: "bodyMarkdown" must be 1 to ${BODY_MARKDOWN_MAX_BYTES} bytes of UTF-8, ${rule}`);
+  }
+  if (!validMultilineText(fields["summary"], codePoints, SUMMARY_MAX_LENGTH)) {
+    problems.push(`${at}: "summary" must be 1 to ${SUMMARY_MAX_LENGTH} characters, ${rule}`);
+  }
+  if (!validMultilineText(fields["criteriaAssessment"], codePoints, CRITERIA_ASSESSMENT_MAX_LENGTH)) {
+    problems.push(`${at}: "criteriaAssessment" must be 1 to ${CRITERIA_ASSESSMENT_MAX_LENGTH} characters, ${rule}`);
+  }
 }
 
 function validLabel(value: unknown): value is string {
