@@ -212,6 +212,32 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
     return event.clientY < box.top + box.height / 2 ? "before" : "after";
   };
 
+  const reorderDropHandlers = (ticket: Ticket) => {
+    const reorderable = draggingTicket !== undefined && draggingTicket.status === ticket.status && draggingTicket.id !== ticket.id;
+    return {
+      onDragOver: (event: DragEvent<HTMLLIElement>) => {
+        if (!reorderable) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = "move";
+        const placement = dropPlacement(event);
+        if (dropSlot?.id !== ticket.id || dropSlot.placement !== placement) setDropSlot({ id: ticket.id, placement });
+      },
+      onDragLeave: (event: DragEvent<HTMLLIElement>) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropSlot(null);
+      },
+      onDrop: (event: DragEvent<HTMLLIElement>) => {
+        if (!reorderable) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const placement = dropPlacement(event);
+        setDraggingId(null);
+        setDropSlot(null);
+        void reorderOnBoard(draggingTicket, placement === "before" ? { before: ticket.id } : { after: ticket.id });
+      },
+    };
+  };
+
   return (
     <section data-testid="ticket-board" className="min-w-0">
       <Caption as="h2" tone="ground" className="mb-3">Board</Caption>
@@ -264,9 +290,7 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
                 <Rail />
                 {tickets.length === 0 ? <p className="pt-4 text-center text-label text-dim">— no orders —</p> : (
                   <SlipList>
-                    {tickets.map((ticket) => {
-                      const reorderable = draggingTicket !== undefined && draggingTicket.status === ticket.status && draggingTicket.id !== ticket.id;
-                      return (
+                    {tickets.map((ticket) => (
                       <TicketSlip
                         key={ticket.id}
                         ticket={ticket}
@@ -282,26 +306,7 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
                         onMove={(target) => void moveTicket(ticket, target)}
                         onReorder={(placement, direction) => void reorderOnBoard(ticket, placement, direction)}
                         dropPosition={dropSlot?.id === ticket.id ? dropSlot.placement : undefined}
-                        onDragOver={(event) => {
-                          if (!reorderable) return;
-                          event.preventDefault();
-                          event.stopPropagation();
-                          event.dataTransfer.dropEffect = "move";
-                          const placement = dropPlacement(event);
-                          if (dropSlot?.id !== ticket.id || dropSlot.placement !== placement) setDropSlot({ id: ticket.id, placement });
-                        }}
-                        onDragLeave={(event) => {
-                          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropSlot(null);
-                        }}
-                        onDrop={(event) => {
-                          if (!reorderable) return;
-                          event.preventDefault();
-                          event.stopPropagation();
-                          const placement = dropPlacement(event);
-                          setDraggingId(null);
-                          setDropSlot(null);
-                          void reorderOnBoard(draggingTicket, placement === "before" ? { before: ticket.id } : { after: ticket.id });
-                        }}
+                        {...reorderDropHandlers(ticket)}
                         onDragStart={(event) => {
                           if (commandPending.current) {
                             event.preventDefault();
@@ -316,8 +321,7 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
                           setDropSlot(null);
                         }}
                       />
-                      );
-                    })}
+                    ))}
                   </SlipList>
                 )}
               </BoardColumn>
