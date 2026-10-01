@@ -2,7 +2,7 @@ import { once } from "node:events";
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import { signIn, signInWithoutBrowser } from "../support/sign-in";
 import { pairRunnerViaApi, startMichelin } from "../support/runner";
-import { assignTicketDirect, changeTicketStatusDirect, createAgent, createTicket, listRounds, updateTicketDirect, type Ticket } from "../support/tickets";
+import { assignTicketDirect, changeTicketStatusDirect, createAgent, createTicket, listRounds, NO_USAGE, updateTicketDirect, type Ticket } from "../support/tickets";
 
 async function ticket(api: APIRequestContext, id: string): Promise<Ticket> {
   const response = await api.get(`/api/tickets/${id}`);
@@ -44,6 +44,8 @@ test("a real Michelin starts a claimed Round with no browser open, and the slip 
       claimedAt: started.openRound!.claimedAt,
       startedAt: started.openRound!.startedAt,
       endedAt: null,
+      activity: [],
+      usage: NO_USAGE,
     }]);
     expect(Date.parse(rounds[0]!.startedAt!)).toBeGreaterThanOrEqual(Date.parse(rounds[0]!.claimedAt));
 
@@ -88,7 +90,9 @@ test("a real Michelin starts a claimed Round with no browser open, and the slip 
     await signIn(reopened, request, "owner");
     const healthRead = reopened.waitForResponse((r) => r.url().endsWith("/api/runner-health"));
     await reopened.goto(`/tickets/${queued.id}`);
-    expect((await (await healthRead).json()).state).toBe("connected");
+    // This navigation can discard the body of a response from the page signIn left.
+    expect((await healthRead).status()).toBe(200);
+    expect((await (await api.get("/api/runner-health")).json()).state).toBe("connected");
     await expect(reopened.getByTestId("ticket-detail-round-started")).toHaveText(started.openRound!.startedAt!);
     await expect(reopened.getByTestId("ticket-detail-runner-disconnected")).toHaveCount(0);
 

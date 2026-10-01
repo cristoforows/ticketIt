@@ -8,7 +8,9 @@ registers and heartbeats with its runner credential
 Round
 ([#132](https://github.com/cristoforows/ticketIt/issues/132)), and runs
 it with a scripted, controlled engine
-([#134](https://github.com/cristoforows/ticketIt/issues/134)): no model,
+([#134](https://github.com/cristoforows/ticketIt/issues/134)) that also
+reports activity notes and usage observations
+([#135](https://github.com/cristoforows/ticketIt/issues/135)): no model,
 provider or network call beyond Galley. Every connection is outbound;
 Michelin opens no listening socket. See
 [ADR 0001](../../docs/adr/0001-single-authority-galley.md): Michelin
@@ -43,7 +45,7 @@ when it exists.
 | `MICHELIN_HEARTBEAT_INTERVAL_MS` | `10000` | Wait between the end of one register/heartbeat request and the start of the next. Positive integer. |
 | `MICHELIN_CLAIM_INTERVAL_MS` | `5000` | Wait before each claim poll. Positive integer. |
 | `MICHELIN_STATUS_INTERVAL_MS` | `10000` | Wait between the end of one status check and the start of the next. Positive integer. |
-| `MICHELIN_ENGINE_SCRIPT` | the built-in `start`, `hold` | Path of a JSON file holding the controlled engine's script (see "Controlled engine"). |
+| `MICHELIN_ENGINE_SCRIPT` | the built-in default script | Path of a JSON file holding the controlled engine's script (see "Controlled engine"). |
 
 A missing or invalid value logs an `invalid configuration` error
 naming every problem and exits with code 1. A malformed token is
@@ -103,37 +105,53 @@ times out after 5 seconds.
 ## Controlled engine
 
 For each claimed Round the engine follows a deterministic script. It
-makes no model or provider call. `start` reports `execution_started`
-to `POST /api/runner/rounds/{roundId}/events` with a
-`controlled:<uuid>` engine reference generated once per Round, the
-claim's `claimEpoch`, the time the event was built, and the key
-`<roundId>:<step index>`.
+makes no model or provider call. Each reporting step sends one event to
+`POST /api/runner/rounds/{roundId}/events` with the claim's
+`claimEpoch` and the time the event was built.
 
 ```json
-{"steps": [{"step": "start"}, {"step": "wait", "ms": 1500}, {"step": "hold"}]}
+{"steps": [
+  {"step": "start"},
+  {"step": "progress", "note": "Reading the Ticket"},
+  {"step": "wait", "ms": 1500},
+  {"step": "usage", "provider": "controlled", "model": "scripted",
+   "inputTokens": 1200, "outputTokens": 300, "costUsd": "0.004500",
+   "activeMs": 2000, "basis": "reported", "providerGenerationId": null},
+  {"step": "hold"}
+]}
 ```
 
-| Step | Meaning |
-|---|---|
-| `start` | Report Execution started. Must be the first step, and appears once. |
-| `wait` | Sleep `ms` (an integer, 1 to 3600000). |
-| `hold` | Wait until Michelin stops. Only the last step. |
+| Step | Event | Idempotency key | Meaning |
+|---|---|---|---|
+| `start` | `execution_started` | `<roundId>:<step index>` | Report Execution started with a `controlled:<uuid>` engine reference generated once per Round. Must be the first step, and appears once. |
+| `progress` | `progress` | `<roundId>:<step index>` | Append `note` (1 to 2000 characters, not blank, no control characters but tab and line feed) to the Round's activity. |
+| `usage` | `usage_observed` | the `observationId` | Report one usage observation. `observationId` is a UUID generated once when the step runs. `provider` and `model` are required, 1 to 200 characters. `inputTokens`, `outputTokens` and `activeMs` are integers from 0 to 2^53−1. `costUsd` is a decimal string with at most 6 places, from `"0"` to `"999999.999999"`. `providerGenerationId` is optional. A figure that is absent or `null` is reported as unknown. `basis` is `reported` or `estimated`. |
+| `wait` | none | none | Sleep `ms` (an integer, 1 to 3600000). |
+| `hold` | none | none | Wait until Michelin stops. Only the last step. |
 
-The script is read and checked when Michelin starts. An unknown step,
-an unknown key, or a step a later slice adds (`progress` and `usage` in
-M4.9, `deliver` in M4.10) is a configuration error that names the step
-and the steps supported now, so a script can never silently do nothing.
-With `MICHELIN_ENGINE_SCRIPT` unset the script is `start`, `hold`. The
-full default (start, three progress notes a second apart, one usage
-observation, deliver) lands with M4.9 and M4.10.
+With `MICHELIN_ENGINE_SCRIPT` unset, the script is: `start`; progress
+"Reading the Ticket", "Working towards the goal" and "Writing up the
+result", one second apart; one `reported` usage observation from
+provider `controlled`, model `scripted` (1200 in, 300 out, `"0.004500"`
+USD, 2000 ms); then `hold`. It holds where M4.10
+([#136](https://github.com/cristoforows/ticketIt/issues/136)) will
+deliver.
+
+The script is read and checked when Michelin starts, against the same
+limits Galley enforces. An unknown step, an unknown key, an invalid
+field, or `deliver` (M4.10) is a configuration error. The error names
+the step and the steps supported now, so a script can never silently
+do nothing and a bad note or figure never abandons a Round.
 
 **Retry.** A network failure, a timeout, a `5xx`, or a `200`/`201` whose
 body is not the expected result is retried with the identical request:
-the same key, body, `occurredAt` and reference. Waits are 1, 2, 4, 8,
+the same key, body, `occurredAt`, reference and `observationId`. A
+retried usage observation therefore never records a second observation
+in Galley. Waits are 1, 2, 4, 8,
 16 then 30 seconds, repeating at 30. Both `200` (a replay) and `201` are
 success. Anything else is final: Michelin logs `round event refused;
 round abandoned locally` with Galley's error code (`400`, `401`, `404`
-and `409` among them), stops that Round's script, and sends nothing
+and `409` among them, including `observation_id_conflict`), stops that Round's script, and sends nothing
 further for it. It never closes, fails or unlocks the Round, and never
 exits. If Michelin restarts, it does not resume a Round it no longer
 holds; a Round left `claimed` or `running` is recovered by
@@ -160,6 +178,8 @@ context fields. The credential is never logged.
 | `round claimed` | `info` | `roundId`, `sequence`, `claimEpoch`, `ticketId`, `ticketTitle`. No other Ticket field is logged. |
 | `runner claim failed` | `error` | See `reason` below; polling continues. |
 | `execution started reported` | `info` | `roundId`, `step`, `stepIndex`, `attempt`, `engineReference`, `httpStatus` (`200` replay or `201`). |
+| `progress reported` | `info` | As above, plus the note's `seq` from Galley. |
+| `usage observation reported` | `info` | As above, plus `observationId`. |
 | `round event failed; retrying` | `warn` | `roundId`, `step`, `attempt`, `reason`, `httpStatus`, `errorCode`, `retryInMs`. |
 | `round event refused; round abandoned locally` | `error` | `roundId`, `step`, `attempt`, `httpStatus`, Galley's `errorCode`. |
 | `engine holding`, `engine script finished` | `info` | The script reached `hold`, or its last step. |

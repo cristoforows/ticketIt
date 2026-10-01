@@ -93,12 +93,18 @@ func (e DatabaseStatusStatus) Valid() bool {
 // Defines values for RoundEventType.
 const (
 	RoundEventExecutionStarted RoundEventType = "execution_started"
+	RoundEventProgress         RoundEventType = "progress"
+	RoundEventUsageObserved    RoundEventType = "usage_observed"
 )
 
 // Valid indicates whether the value is a known member of the RoundEventType enum.
 func (e RoundEventType) Valid() bool {
 	switch e {
 	case RoundEventExecutionStarted:
+		return true
+	case RoundEventProgress:
+		return true
+	case RoundEventUsageObserved:
 		return true
 	default:
 		return false
@@ -279,6 +285,24 @@ func (e TicketTemplate) Valid() bool {
 	}
 }
 
+// Defines values for UsageObservedDataBasis.
+const (
+	UsageBasisEstimated UsageObservedDataBasis = "estimated"
+	UsageBasisReported  UsageObservedDataBasis = "reported"
+)
+
+// Valid indicates whether the value is a known member of the UsageObservedDataBasis enum.
+func (e UsageObservedDataBasis) Valid() bool {
+	switch e {
+	case UsageBasisEstimated:
+		return true
+	case UsageBasisReported:
+		return true
+	default:
+		return false
+	}
+}
+
 // AdvanceDevClockRequest defines model for AdvanceDevClockRequest.
 type AdvanceDevClockRequest struct {
 	Seconds int `json:"seconds"`
@@ -450,6 +474,12 @@ type Owner struct {
 	Login string `json:"login"`
 }
 
+// ProgressData defines model for ProgressData.
+type ProgressData struct {
+	// Note Counted in Unicode code points. Not blank; no control characters but tab and line feed.
+	Note string `json:"note"`
+}
+
 // RegisterRunnerRequest defines model for RegisterRunnerRequest.
 type RegisterRunnerRequest struct {
 	Hostname        string `json:"hostname"`
@@ -467,12 +497,23 @@ type ReorderTicketRequest struct {
 	Before *string `json:"before,omitempty"`
 }
 
+// RoundActivityNote defines model for RoundActivityNote.
+type RoundActivityNote struct {
+	Note string `json:"note"`
+
+	// OccurredAt The runner's clock.
+	OccurredAt time.Time `json:"occurredAt"`
+
+	// Seq Galley's arrival order within the Round, without gaps.
+	Seq int `json:"seq"`
+}
+
 // RoundEventRequest defines model for RoundEventRequest.
 type RoundEventRequest struct {
 	// ClaimEpoch The fencing token from the claim.
 	ClaimEpoch int `json:"claimEpoch"`
 
-	// Data The payload for `type`; `ExecutionStartedData` for `execution_started`.
+	// Data The payload for `type`: `ExecutionStartedData`, `ProgressData` or `UsageObservedData`.
 	Data RoundEventRequest_Data `json:"data"`
 
 	// IdempotencyKey Taken verbatim; identity is never trimmed.
@@ -485,14 +526,19 @@ type RoundEventRequest struct {
 	Type RoundEventType `json:"type"`
 }
 
-// RoundEventRequest_Data The payload for `type`; `ExecutionStartedData` for `execution_started`.
+// RoundEventRequest_Data The payload for `type`: `ExecutionStartedData`, `ProgressData` or `UsageObservedData`.
 type RoundEventRequest_Data struct {
 	union json.RawMessage
 }
 
 // RoundEventResult defines model for RoundEventResult.
 type RoundEventResult struct {
-	RoundId   string    `json:"roundId"`
+	// ObservationId For `usage_observed`, the observation recorded.
+	ObservationId *string `json:"observationId,omitempty"`
+	RoundId       string  `json:"roundId"`
+
+	// Seq For `progress`, the note's place in the Round's activity.
+	Seq       *int      `json:"seq,omitempty"`
 	StartedAt time.Time `json:"startedAt"`
 
 	// State The open states. A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress.
@@ -507,6 +553,28 @@ type RoundEventType string
 
 // RoundState The open states. A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress.
 type RoundState string
+
+// RoundUsage Sums of the known values. Unknown is never counted as zero.
+type RoundUsage struct {
+	// ActiveMs `complete` and `estimated` mean for this figure what they mean for the cost in `RoundUsage`.
+	ActiveMs UsageCount `json:"activeMs"`
+
+	// Complete At least one observation, and every observation has a known cost.
+	Complete bool `json:"complete"`
+
+	// CostUsd Null when no observation has a known cost.
+	CostUsd *string `json:"costUsd"`
+
+	// Estimated An observation with a known cost is `estimated`.
+	Estimated bool `json:"estimated"`
+
+	// InputTokens `complete` and `estimated` mean for this figure what they mean for the cost in `RoundUsage`.
+	InputTokens  UsageCount `json:"inputTokens"`
+	Observations int        `json:"observations"`
+
+	// OutputTokens `complete` and `estimated` mean for this figure what they mean for the cost in `RoundUsage`.
+	OutputTokens UsageCount `json:"outputTokens"`
+}
 
 // RunnerClaim defines model for RunnerClaim.
 type RunnerClaim struct {
@@ -698,6 +766,9 @@ type TicketOpenRound struct {
 
 // TicketRound defines model for TicketRound.
 type TicketRound struct {
+	// Activity The latest 50 notes, oldest first.
+	Activity []RoundActivityNote `json:"activity"`
+
 	// Agent The Agent assigned when the Round was claimed.
 	Agent     TicketAssigneeAgent `json:"agent"`
 	ClaimedAt time.Time           `json:"claimedAt"`
@@ -708,6 +779,9 @@ type TicketRound struct {
 
 	// State The open states. A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress.
 	State RoundState `json:"state"`
+
+	// Usage Sums of the known values. Unknown is never counted as zero.
+	Usage RoundUsage `json:"usage"`
 }
 
 // TicketRoundList defines model for TicketRoundList.
@@ -752,6 +826,37 @@ type UpdateTicketRequest struct {
 	// Title If present, trimmed and validated exactly like CreateTicketRequest.title. A value that trims to empty is rejected with invalid_request rather than clearing the title -- every Ticket must keep one. Absent leaves the title unchanged.
 	Title *string `json:"title,omitempty"`
 }
+
+// UsageCount `complete` and `estimated` mean for this figure what they mean for the cost in `RoundUsage`.
+type UsageCount struct {
+	Complete  bool `json:"complete"`
+	Estimated bool `json:"estimated"`
+
+	// Sum Null when no observation has a known value.
+	Sum *int `json:"sum"`
+}
+
+// UsageObservedData Every key is required; null means unknown, never zero.
+type UsageObservedData struct {
+	ActiveMs *int                   `json:"activeMs"`
+	Basis    UsageObservedDataBasis `json:"basis"`
+
+	// CostUsd US dollars as a decimal string, so no binary float touches it.
+	CostUsd     *string `json:"costUsd"`
+	InputTokens *int    `json:"inputTokens"`
+	Model       string  `json:"model"`
+
+	// ObservationId The observation's identity, generated by the runner. Lowercase canonical form, not the nil UUID, and equal to the event's `idempotencyKey`.
+	ObservationId string `json:"observationId"`
+	OutputTokens  *int   `json:"outputTokens"`
+	Provider      string `json:"provider"`
+
+	// ProviderGenerationId Not unique and never identity; the join point for later enrichment (M9 #10).
+	ProviderGenerationId *string `json:"providerGenerationId"`
+}
+
+// UsageObservedDataBasis defines model for UsageObservedData.Basis.
+type UsageObservedDataBasis string
 
 // CompleteGithubOAuthParams defines parameters for CompleteGithubOAuth.
 type CompleteGithubOAuthParams struct {
@@ -823,6 +928,58 @@ func (t *RoundEventRequest_Data) FromExecutionStartedData(v ExecutionStartedData
 
 // MergeExecutionStartedData performs a merge with any union data inside the RoundEventRequest_Data, using the provided ExecutionStartedData
 func (t *RoundEventRequest_Data) MergeExecutionStartedData(v ExecutionStartedData) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsProgressData returns the union data inside the RoundEventRequest_Data as a ProgressData
+func (t RoundEventRequest_Data) AsProgressData() (ProgressData, error) {
+	var body ProgressData
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromProgressData overwrites any union data inside the RoundEventRequest_Data as the provided ProgressData
+func (t *RoundEventRequest_Data) FromProgressData(v ProgressData) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeProgressData performs a merge with any union data inside the RoundEventRequest_Data, using the provided ProgressData
+func (t *RoundEventRequest_Data) MergeProgressData(v ProgressData) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsUsageObservedData returns the union data inside the RoundEventRequest_Data as a UsageObservedData
+func (t RoundEventRequest_Data) AsUsageObservedData() (UsageObservedData, error) {
+	var body UsageObservedData
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromUsageObservedData overwrites any union data inside the RoundEventRequest_Data as the provided UsageObservedData
+func (t *RoundEventRequest_Data) FromUsageObservedData(v UsageObservedData) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeUsageObservedData performs a merge with any union data inside the RoundEventRequest_Data, using the provided UsageObservedData
+func (t *RoundEventRequest_Data) MergeUsageObservedData(v UsageObservedData) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err

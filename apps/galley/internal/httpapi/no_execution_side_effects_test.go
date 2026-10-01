@@ -26,6 +26,7 @@ var knownPublicTables = []string{
 	"oauth_states",
 	"owner_identities",
 	"owners",
+	"round_activity",
 	"round_engine_references",
 	"round_events",
 	"rounds",
@@ -34,6 +35,7 @@ var knownPublicTables = []string{
 	"sessions",
 	"tickets",
 	"ticket_badges",
+	"usage_observations",
 }
 
 func publicTableNames(t *testing.T, pool *pgxpool.Pool) []string {
@@ -185,6 +187,10 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 		case "round_events", "round_engine_references":
 			if after != before[table] {
 				t.Errorf("%s row count changed from %d to %d -- a manual action recorded a runner event or an engine reference; only a runner's event may", table, before[table], after)
+			}
+		case "round_activity", "usage_observations":
+			if after != before[table] {
+				t.Errorf("%s row count changed from %d to %d -- a manual action recorded Round activity or usage; only a runner's progress or usage_observed event may", table, before[table], after)
 			}
 		default:
 			if after != before[table] {

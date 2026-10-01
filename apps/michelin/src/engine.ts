@@ -6,12 +6,21 @@ import { reportRoundEvent, type RoundEventFailure, type RoundEventRequest, type 
 import type { Logger } from "./logger.ts";
 import { sleep } from "./statusLoop.ts";
 
+interface PendingEvent {
+  step: "start" | "progress" | "usage";
+  stepIndex: number;
+  event: RoundEventRequest;
+  reported: string;
+  context: Record<string, unknown>;
+}
+
 export type EngineOutcome = "completed" | "abandoned" | "aborted";
 
 export interface EngineDeps {
   sleep: (ms: number, signal: AbortSignal) => Promise<void>;
   now: () => Date;
   newReference: () => string;
+  newObservationId: () => string;
 }
 
 export interface EngineOptions {
@@ -49,26 +58,47 @@ function isRetryable(failure: RoundEventFailure): boolean {
 
 export async function runControlledEngine(options: EngineOptions): Promise<EngineOutcome> {
   const { logger, signal, claim } = options;
-  const deps: EngineDeps = { sleep, now: () => new Date(), newReference: () => `controlled:${randomUUID()}`, ...options.deps };
+  const deps: EngineDeps = {
+    sleep,
+    now: () => new Date(),
+    newReference: () => `controlled:${randomUUID()}`,
+    newObservationId: () => randomUUID(),
+    ...options.deps,
+  };
   const roundId = claim.roundId;
+  const envelope = (type: RoundEventRequest["type"], idempotencyKey: string, data: RoundEventRequest["data"]): RoundEventRequest => ({
+    type,
+    idempotencyKey,
+    claimEpoch: claim.claimEpoch,
+    occurredAt: deps.now().toISOString(),
+    data,
+  });
   let stepIndex = 0;
   for (const step of options.script.steps) {
     if (signal.aborted) {
       return "aborted";
     }
+    let pending: PendingEvent | undefined;
     switch (step.step) {
       case "start": {
-        const event: RoundEventRequest = {
-          type: "execution_started",
-          idempotencyKey: `${roundId}:${stepIndex}`,
-          claimEpoch: claim.claimEpoch,
-          occurredAt: deps.now().toISOString(),
-          data: { engineReference: deps.newReference() },
+        const engineReference = deps.newReference();
+        pending = {
+          step: "start",
+          stepIndex,
+          event: envelope("execution_started", `${roundId}:${stepIndex}`, { engineReference }),
+          reported: "execution started reported",
+          context: { engineReference },
         };
-        const outcome = await sendEvent(options, deps, "start", stepIndex, JSON.stringify(event), event.data.engineReference);
-        if (outcome !== "sent") {
-          return outcome;
-        }
+        break;
+      }
+      case "progress":
+        pending = { step: "progress", stepIndex, event: envelope("progress", `${roundId}:${stepIndex}`, { note: step.note }), reported: "progress reported", context: {} };
+        break;
+      case "usage": {
+        // The observation's identity is its key, so a retry can never record a second observation.
+        const observationId = deps.newObservationId();
+        const { step: _step, ...figures } = step;
+        pending = { step: "usage", stepIndex, event: envelope("usage_observed", observationId, { observationId, ...figures }), reported: "usage observation reported", context: { observationId } };
         break;
       }
       case "wait":
@@ -79,6 +109,12 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
         await untilAborted(signal);
         return "aborted";
     }
+    if (pending !== undefined) {
+      const outcome = await sendEvent(options, deps, pending);
+      if (outcome !== "sent") {
+        return outcome;
+      }
+    }
     stepIndex++;
   }
   if (signal.aborted) {
@@ -88,18 +124,22 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
   return "completed";
 }
 
-async function sendEvent(options: EngineOptions, deps: EngineDeps, step: "start", stepIndex: number, body: string, engineReference: string): Promise<"sent" | "abandoned" | "aborted"> {
+async function sendEvent(options: EngineOptions, deps: EngineDeps, pending: PendingEvent): Promise<"sent" | "abandoned" | "aborted"> {
   const { logger, signal, claim } = options;
   const request = { fetch: options.fetch, galleyUrl: options.galleyUrl, signal, timeoutMs: options.requestTimeoutMs, credential: options.credential };
+  const body = JSON.stringify(pending.event);
+  const expected = { type: pending.event.type, observationId: pending.step === "usage" ? pending.event.idempotencyKey : undefined };
   for (let attempt = 1; ; attempt++) {
-    const report = await reportRoundEvent(request, claim.roundId, body);
-    const context = { roundId: claim.roundId, step, stepIndex, attempt };
+    const report = await reportRoundEvent(request, claim.roundId, body, expected);
+    const context = { roundId: claim.roundId, step: pending.step, stepIndex: pending.stepIndex, attempt };
     if (report.ok) {
-      logger.info("execution started reported", {
+      const { result, replayed } = report.value;
+      logger.info(pending.reported, {
         ...context,
-        engineReference,
-        httpStatus: report.value.replayed ? 200 : 201,
-        replayed: report.value.replayed,
+        ...pending.context,
+        ...(result.seq === undefined ? {} : { seq: result.seq }),
+        httpStatus: replayed ? 200 : 201,
+        replayed,
         durationMs: report.durationMs,
       });
       return "sent";

@@ -312,12 +312,23 @@ describe("TicketDetailPage", () => {
 
     const flush = (ms = 0) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
 
-    function stubRound(tickets: (() => Promise<MockResponse>)[], health: () => MockResponse = () => jsonResponse(CONNECTED)) {
+    const unknownUsage = { sum: null, complete: false, estimated: false };
+    const record = (activity: unknown[] = [], usage: unknown = { observations: 0, complete: false, estimated: false, costUsd: null, inputTokens: unknownUsage, outputTokens: unknownUsage, activeMs: unknownUsage }) => ({
+      ...running.openRound,
+      endedAt: null,
+      activity,
+      usage,
+    });
+    const roundsOf = (...records: unknown[]) => () => Promise.resolve(jsonResponse({ rounds: records }));
+
+    function stubRound(tickets: (() => Promise<MockResponse>)[], health: () => MockResponse = () => jsonResponse(CONNECTED), rounds: (() => Promise<MockResponse>)[] = [roundsOf(record())]) {
       const queue = [...tickets];
+      const roundQueue = [...rounds];
       const fetchMock = vi.fn((input: RequestInfo | URL) => {
         const path = String(input);
         if (path === "/api/agents") return Promise.resolve(jsonResponse({ agents: AGENTS }));
         if (path === "/api/runner-health") return Promise.resolve(health());
+        if (path === `/api/tickets/${TICKET_ID}/rounds`) return (roundQueue.length > 1 ? roundQueue.shift() : roundQueue[0])!();
         if (path === `/api/tickets/${TICKET_ID}`) return (queue.length > 1 ? queue.shift() : queue[0])!();
         throw new Error(`unexpected fetch ${path}`);
       });
@@ -327,6 +338,7 @@ describe("TicketDetailPage", () => {
     const answer = (body: unknown, status = 200) => () => Promise.resolve(jsonResponse(body, status));
     const ticketFetches = (fetchMock: ReturnType<typeof stubRound>) => fetchMock.mock.calls.filter(([path]) => String(path) === `/api/tickets/${TICKET_ID}`).length;
     const healthFetches = (fetchMock: ReturnType<typeof stubRound>) => fetchMock.mock.calls.filter(([path]) => String(path) === "/api/runner-health").length;
+    const roundFetches = (fetchMock: ReturnType<typeof stubRound>) => fetchMock.mock.calls.filter(([path]) => String(path) === `/api/tickets/${TICKET_ID}/rounds`).length;
 
     it("refetches every 3 seconds and shows what Galley now reports, never returning to the loading state", async () => {
       const fetchMock = stubRound([answer(claimed), answer(running)]);
@@ -431,6 +443,127 @@ describe("TicketDetailPage", () => {
       await flush();
       await flush(3000);
       expect(onSignedOut).toHaveBeenCalled();
+    });
+
+    describe("activity and usage", () => {
+      const note = (seq: number, text: string) => ({ seq, note: text, occurredAt: `2026-10-01T10:00:0${seq}Z` });
+      const count = (sum: number | null, complete = true, estimated = false) => ({ sum, complete, estimated });
+      const usage = (fields: Record<string, unknown>) => ({ observations: 1, complete: true, estimated: false, costUsd: "0.004500", inputTokens: count(1200), outputTokens: count(300), activeMs: count(2000), ...fields });
+      const usageText = (figure: string) => screen.getByTestId(`ticket-detail-round-usage-${figure}`).textContent;
+      const notes = () => screen.queryAllByTestId("ticket-detail-round-note").map((item) => item.textContent);
+
+      it("loads with the Ticket and shows no activity and usage as Unknown, never as zero", async () => {
+        const fetchMock = stubRound([answer(running)]);
+        render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+        await flush();
+        expect(roundFetches(fetchMock)).toBe(1);
+        expect(screen.getByTestId("ticket-detail-round-activity-empty")).toHaveTextContent("No activity yet.");
+        for (const figure of ["cost", "input-tokens", "output-tokens", "active-time"]) {
+          expect(usageText(figure)).toBe("Unknown");
+        }
+        expect(screen.queryByText("est.")).not.toBeInTheDocument();
+        expect(screen.queryByText(/\$0/)).not.toBeInTheDocument();
+      });
+
+      it("refreshes on the same 3-second tick as the Ticket, showing new notes oldest first and the usage so far", async () => {
+        const fetchMock = stubRound([answer(running)], undefined, [
+          roundsOf(record([note(1, "Reading the Ticket")])),
+          roundsOf(record([note(1, "Reading the Ticket"), note(2, "Working towards the goal")], usage({}))),
+        ]);
+        render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+        await flush();
+        expect(notes()).toEqual(["2026-10-01T10:00:01ZReading the Ticket"]);
+
+        await flush(2999);
+        expect(roundFetches(fetchMock)).toBe(1);
+        await flush(1);
+        expect(roundFetches(fetchMock)).toBe(2);
+        expect(ticketFetches(fetchMock)).toBe(2);
+        expect(notes()).toEqual(["2026-10-01T10:00:01ZReading the Ticket", "2026-10-01T10:00:02ZWorking towards the goal"]);
+        expect(usageText("cost")).toBe("$0.0045");
+        expect(usageText("input-tokens")).toBe("1,200");
+        expect(usageText("output-tokens")).toBe("300");
+        expect(usageText("active-time")).toBe("2.0 s");
+
+        await flush(3000);
+        expect(roundFetches(fetchMock)).toBe(ticketFetches(fetchMock));
+      });
+
+      it.each([
+        ["complete and reported", usage({}), { cost: "$0.0045", "input-tokens": "1,200" }],
+        ["complete with an estimated cost", usage({ estimated: true, inputTokens: count(1200, true, true) }), { cost: "$0.0045 est.", "input-tokens": "1,200 est." }],
+        ["incomplete: one cost unknown", usage({ observations: 2, complete: false, costUsd: "0.300000", inputTokens: count(10, false) }), { cost: "≥ $0.30 (incomplete)", "input-tokens": "≥ 10 (incomplete)" }],
+        ["incomplete and estimated", usage({ observations: 2, complete: false, estimated: true, costUsd: "1000123.750000" }), { cost: "≥ $1,000,123.75 (incomplete) est." }],
+        ["observed but every cost unknown", usage({ complete: false, costUsd: null, inputTokens: count(null, false), activeMs: count(65_000) }), { cost: "Unknown", "input-tokens": "Unknown", "active-time": "1 min 5 s" }],
+      ])("shows usage %s as Galley summarised it", async (_name, summary, expected) => {
+        stubRound([answer(running)], undefined, [roundsOf(record([], summary))]);
+        render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+        await flush();
+        for (const [figure, text] of Object.entries(expected)) {
+          expect(usageText(figure)).toBe(text);
+        }
+      });
+
+      it("shows the open Round's record, not another Round's", async () => {
+        const ended = { ...record([note(1, "An earlier Round")]), id: "77777777-7777-4777-8777-777777777777", sequence: 0, endedAt: "2026-10-01T09:00:00Z" };
+        stubRound([answer(running)], undefined, [roundsOf(ended, record([note(1, "This Round")]))]);
+        render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+        await flush();
+        expect(notes()).toEqual(["2026-10-01T10:00:01ZThis Round"]);
+      });
+
+      it("keeps the last activity when a refresh fails, says so, and clears the note once one succeeds", async () => {
+        stubRound([answer(running)], undefined, [
+          roundsOf(record([note(1, "Reading the Ticket")])),
+          answer({ error: { code: "database_unavailable", message: "x" } }, 503),
+          roundsOf(record([note(1, "Reading the Ticket"), note(2, "Next")])),
+        ]);
+        render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+        await flush();
+        await flush(3000);
+        expect(screen.getByTestId("ticket-detail-round-records-error")).toHaveTextContent("Unable to refresh activity and usage: Galley returned an error response: 503");
+        expect(notes()).toHaveLength(1);
+        await flush(3000);
+        expect(screen.queryByTestId("ticket-detail-round-records-error")).not.toBeInTheDocument();
+        expect(notes()).toHaveLength(2);
+      });
+
+      it.each([
+        ["a note without seq", record([{ note: "x", occurredAt: "t" }])],
+        ["usage without a cost field", record([], { observations: 0, complete: false, estimated: false, inputTokens: unknownUsage, outputTokens: unknownUsage, activeMs: unknownUsage })],
+        ["a numeric cost", record([], usage({ costUsd: 0.0045 }))],
+        ["a count without complete", record([], usage({ activeMs: { sum: 1, estimated: false } }))],
+        ["no activity array", { ...record(), activity: undefined }],
+      ])("rejects a Round list with %s rather than showing part of it", async (_name, bad) => {
+        stubRound([answer(running)], undefined, [roundsOf(bad)]);
+        render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+        await flush();
+        expect(screen.getByTestId("ticket-detail-round-records-error")).toHaveTextContent("Galley's Round list was missing a required field.");
+        expect(screen.queryByTestId("ticket-detail-round-usage")).not.toBeInTheDocument();
+      });
+
+      it("hands the Owner to sign-in when the Round list comes back unauthenticated", async () => {
+        const onSignedOut = vi.fn();
+        stubRound([answer(running)], undefined, [answer({ error: { code: "unauthenticated", message: "sign-in required" } }, 401)]);
+        render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onSignedOut} />);
+        await flush();
+        expect(onSignedOut).toHaveBeenCalled();
+      });
+
+      it("stops fetching the Round list once the Round closes, and never fetches it without an open Round", async () => {
+        const fetchMock = stubRound([answer(running), answer(closed)]);
+        render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+        await flush();
+        await flush(3000);
+        await flush(60_000);
+        expect(roundFetches(fetchMock)).toBe(1);
+
+        cleanup();
+        const idle = stubRound([answer(TICKET)]);
+        render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+        await flush(60_000);
+        expect(roundFetches(idle)).toBe(0);
+      });
     });
 
     describe("with the runner's health", () => {

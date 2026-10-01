@@ -6,7 +6,7 @@ import { assigneeLabel } from "./assignee";
 import { refinementGuidance } from "./refinementGuidance";
 import type { HealthView } from "./RunnerHealthPill";
 import { lockedLabel } from "./roundLock";
-import { RoundsSection } from "./RoundsSection";
+import { RoundsSection, type RoundRecords } from "./RoundsSection";
 import { BadgeTag, ClaimedTag, ErrorMessage, FieldHint, FieldLabel, FieldNote, FieldValue, InlineError, LockGlyph, PrimaryButton, QueuedTag, ReceiptLine, Rule, SecondaryButton, Select, StatusTag, statusLabel, TextInput, Textarea, ticketSerial } from "./ui";
 
 interface TicketDetailProps {
@@ -26,6 +26,7 @@ interface TicketDetailProps {
   onArchived?: () => void;
   editRequested?: boolean;
   runnerHealth?: HealthView;
+  roundRecords?: RoundRecords;
 }
 
 interface EditableFields {
@@ -59,7 +60,7 @@ function completionConditionLabel(condition: Ticket["completionCondition"]): str
   return condition === "reviewedPrMerge" ? "Reviewed pull request merged" : "Human acceptance";
 }
 
-export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssign, onUnassign, onLoadAgents, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge, onArchive, onRestore, onArchived, editRequested = false, runnerHealth = { kind: "loading" } }: TicketDetailProps) {
+export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssign, onUnassign, onLoadAgents, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge, onArchive, onRestore, onArchived, editRequested = false, runnerHealth = { kind: "loading" }, roundRecords }: TicketDetailProps) {
   const previousTicket = useRef(ticket);
   const [current, setCurrent] = useState(ticket);
   const [mode, setMode] = useState<"view" | "editing">(editRequested && !ticket.archivedAt && !ticket.openRound ? "editing" : "view");
@@ -216,7 +217,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
           {current.openRound && (
             <>
               <Rule />
-              <RoundsSection round={current.openRound} runnerHealth={runnerHealth} />
+              <RoundsSection round={current.openRound} runnerHealth={runnerHealth} records={roundRecords} />
             </>
           )}
           <Rule />

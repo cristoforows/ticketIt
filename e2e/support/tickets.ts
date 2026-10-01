@@ -27,7 +27,29 @@ export interface Round {
   claimedAt: string;
   startedAt: string | null;
   endedAt: string | null;
+  activity: { seq: number; note: string; occurredAt: string }[];
+  usage: RoundUsage;
 }
+
+export interface UsageCount {
+  sum: number | null;
+  complete: boolean;
+  estimated: boolean;
+}
+
+export interface RoundUsage {
+  observations: number;
+  complete: boolean;
+  estimated: boolean;
+  costUsd: string | null;
+  inputTokens: UsageCount;
+  outputTokens: UsageCount;
+  activeMs: UsageCount;
+}
+
+const UNKNOWN_COUNT: UsageCount = { sum: null, complete: false, estimated: false };
+
+export const NO_USAGE: RoundUsage = { observations: 0, complete: false, estimated: false, costUsd: null, inputTokens: UNKNOWN_COUNT, outputTokens: UNKNOWN_COUNT, activeMs: UNKNOWN_COUNT };
 
 export interface Ticket {
   /** Opaque public identifier (issue #57) -- never the internal sequential database id. */

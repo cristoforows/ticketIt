@@ -777,13 +777,43 @@ renders that and decides nothing:
   and adds Galley's or the network's message, cleared by the next good
   refresh. A move or reorder in progress skips the tick.
 - **Parsing.** `parseTicket` also requires a `running` Round to carry a
-  `startedAt` and a `claimed` one not to. Swiftlet does not call
-  `GET /api/tickets/{id}/rounds` yet; M4.9 (#135) adds the consumer.
+  `startedAt` and a `claimed` one not to.
 
 Tests cover each receipt state (`TicketDetail.test.tsx`) and the refresh
 (`useOpenRoundRefresh.test.tsx` and the page, list and board tests, all
 with fake timers).
 Evidence: `docs/evidence/m4/134-controlled-engine.md`.
+
+## Round activity and usage (issue #135)
+
+While the receipt's Ticket has an open Round, the receipt fetches
+`GET /api/tickets/{id}/rounds` (`fetchTicketRounds`, `src/api/rounds.ts`)
+when it loads and on each tick of the same 3 s refresh, after the Ticket
+fetch, so there is no second timer. It shows the record whose `id` is
+`openRound.id`:
+
+- **Activity** (`ticket-detail-round-activity`): Galley's notes (at most
+  the latest 50), oldest first, each with the runner's `occurredAt`.
+  "No activity yet." when there are none.
+- **Usage so far** (`ticket-detail-round-usage`): Cost, Input tokens,
+  Output tokens and Active time, each shown from Galley's summary:
+  - "Unknown" when the sum is `null`, never `$0` or `0`;
+  - "≥ x (incomplete)" when the figure is not `complete`;
+  - otherwise the figure itself.
+
+  An **est.** tag (`EstimateTag`, muted on paper) follows any figure
+  Galley marks `estimated`. Swiftlet sums nothing and decides nothing
+  about completeness; it only formats. The cost stays a string from
+  Galley to the screen (`dollars()` in `roundUsage.ts`), so no float
+  rounds it.
+
+The list is parsed in full: a malformed record rejects the response
+rather than showing part of it. A failed fetch keeps the last activity
+and usage and shows "Unable to refresh activity and usage" with the
+message, cleared by the next good fetch. A `401` hands the Owner to
+sign-in. Tests: `TicketDetailPage.test.tsx` (fake timers) and
+`roundUsage.test.ts`. The estimate tag's contrast is in
+`tokens.test.ts`. Evidence: `docs/evidence/m4/135-activity-usage.md`.
 
 ## Browser-to-backend suite
 

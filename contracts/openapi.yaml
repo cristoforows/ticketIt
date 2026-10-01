@@ -831,9 +831,10 @@ paths:
       summary: List a Ticket's Rounds
       tags: [tickets]
       description: >-
-        The Ticket's Rounds, newest first (`sequence` descending). Works
-        for an archived Ticket. An unknown, malformed or foreign id
-        returns the shared 404.
+        The Ticket's Rounds, newest first (`sequence` descending), each
+        with its latest activity and its usage summary. Works for an
+        archived Ticket. An unknown, malformed or foreign id returns the
+        shared 404.
       responses:
         "200":
           description: The Ticket's Rounds.
@@ -1043,9 +1044,13 @@ paths:
         `409 stale_claim_epoch` for a `claimEpoch` other than the
         Round's, `409 round_not_open` for a Round that has ended, and
         `409 event_out_of_order` for a type the Round's state cannot
-        take. A rejection changes nothing. An unknown, malformed or
-        foreign Round id returns the shared 404. A runner that is not
-        Connected is still accepted, and an event is not a heartbeat.
+        take: `execution_started` needs a claimed Round, `progress` and
+        `usage_observed` a running one. A `usage_observed` whose
+        `observationId` is already recorded for another Round is
+        `409 observation_id_conflict`. A rejection changes nothing. An
+        unknown, malformed or foreign Round id returns the shared 404. A
+        runner that is not Connected is still accepted, and an event is
+        not a heartbeat.
       security:
         - runnerBearer: []
       requestBody:
@@ -1070,7 +1075,8 @@ paths:
         default:
           description: >-
             Error. See `ErrorBody`. Includes `idempotency_key_conflict`,
-            `stale_claim_epoch`, `round_not_open` and `event_out_of_order`.
+            `stale_claim_epoch`, `round_not_open`, `event_out_of_order`
+            and `observation_id_conflict`.
           content:
             application/json:
               schema:
@@ -1407,7 +1413,7 @@ components:
     TicketRound:
       type: object
       additionalProperties: false
-      required: [id, sequence, state, agent, claimedAt, startedAt, endedAt]
+      required: [id, sequence, state, agent, claimedAt, startedAt, endedAt, activity, usage]
       properties:
         id: {type: string, format: uuid, x-go-type: string}
         sequence: {type: integer, minimum: 1}
@@ -1419,6 +1425,66 @@ components:
         claimedAt: {type: string, format: date-time}
         startedAt: {type: [string, "null"], format: date-time}
         endedAt: {type: [string, "null"], format: date-time}
+        activity:
+          type: array
+          maxItems: 50
+          description: The latest 50 notes, oldest first.
+          items:
+            $ref: "#/components/schemas/RoundActivityNote"
+        usage:
+          $ref: "#/components/schemas/RoundUsage"
+    RoundActivityNote:
+      type: object
+      additionalProperties: false
+      required: [seq, note, occurredAt]
+      properties:
+        seq:
+          type: integer
+          minimum: 1
+          description: Galley's arrival order within the Round, without gaps.
+        note: {type: string, minLength: 1, maxLength: 2000}
+        occurredAt:
+          type: string
+          format: date-time
+          description: The runner's clock.
+    RoundUsage:
+      type: object
+      additionalProperties: false
+      required: [observations, complete, estimated, costUsd, inputTokens, outputTokens, activeMs]
+      description: >-
+        Sums of the known values. Unknown is never counted as zero.
+      properties:
+        observations: {type: integer, minimum: 0}
+        complete:
+          type: boolean
+          description: At least one observation, and every observation has a known cost.
+        estimated:
+          type: boolean
+          description: An observation with a known cost is `estimated`.
+        costUsd:
+          type: [string, "null"]
+          pattern: '^[0-9]+\.[0-9]{6}$'
+          description: Null when no observation has a known cost.
+        inputTokens:
+          $ref: "#/components/schemas/UsageCount"
+        outputTokens:
+          $ref: "#/components/schemas/UsageCount"
+        activeMs:
+          $ref: "#/components/schemas/UsageCount"
+    UsageCount:
+      type: object
+      additionalProperties: false
+      required: [sum, complete, estimated]
+      description: >-
+        `complete` and `estimated` mean for this figure what they mean
+        for the cost in `RoundUsage`.
+      properties:
+        sum:
+          type: [integer, "null"]
+          minimum: 0
+          description: Null when no observation has a known value.
+        complete: {type: boolean}
+        estimated: {type: boolean}
     TicketRoundList:
       type: object
       additionalProperties: false
@@ -1813,8 +1879,8 @@ components:
     RoundEventType:
       type: string
       description: Grows by slice.
-      enum: [execution_started]
-      x-enum-varnames: [RoundEventExecutionStarted]
+      enum: [execution_started, progress, usage_observed]
+      x-enum-varnames: [RoundEventExecutionStarted, RoundEventProgress, RoundEventUsageObserved]
     ExecutionStartedData:
       type: object
       additionalProperties: false
@@ -1825,6 +1891,52 @@ components:
           minLength: 1
           maxLength: 200
           description: Attached as the Round's current engine execution reference.
+    ProgressData:
+      type: object
+      additionalProperties: false
+      required: [note]
+      properties:
+        note:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: >-
+            Counted in Unicode code points. Not blank; no control
+            characters but tab and line feed.
+    UsageObservedData:
+      type: object
+      additionalProperties: false
+      required: [observationId, provider, model, inputTokens, outputTokens, costUsd, activeMs, basis, providerGenerationId]
+      description: Every key is required; null means unknown, never zero.
+      properties:
+        observationId:
+          type: string
+          format: uuid
+          x-go-type: string
+          description: >-
+            The observation's identity, generated by the runner. Lowercase
+            canonical form, not the nil UUID, and equal to the event's
+            `idempotencyKey`.
+        provider: {type: string, minLength: 1, maxLength: 200}
+        model: {type: string, minLength: 1, maxLength: 200}
+        inputTokens: {type: [integer, "null"], minimum: 0, maximum: 9007199254740991}
+        outputTokens: {type: [integer, "null"], minimum: 0, maximum: 9007199254740991}
+        costUsd:
+          type: [string, "null"]
+          pattern: '^(0|[1-9][0-9]{0,5})(\.[0-9]{1,6})?$'
+          description: US dollars as a decimal string, so no binary float touches it.
+        activeMs: {type: [integer, "null"], minimum: 0, maximum: 9007199254740991}
+        basis:
+          type: string
+          enum: [reported, estimated]
+          x-enum-varnames: [UsageBasisReported, UsageBasisEstimated]
+        providerGenerationId:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 200
+          description: >-
+            Not unique and never identity; the join point for later
+            enrichment (M9 #10).
     RoundEventRequest:
       type: object
       additionalProperties: false
@@ -1848,9 +1960,13 @@ components:
           x-go-type: string
           description: The runner's clock; Galley keeps it and times the Round by its own.
         data:
-          description: The payload for `type`; `ExecutionStartedData` for `execution_started`.
+          description: >-
+            The payload for `type`: `ExecutionStartedData`,
+            `ProgressData` or `UsageObservedData`.
           oneOf:
             - $ref: "#/components/schemas/ExecutionStartedData"
+            - $ref: "#/components/schemas/ProgressData"
+            - $ref: "#/components/schemas/UsageObservedData"
     RoundEventResult:
       type: object
       additionalProperties: false
@@ -1862,6 +1978,15 @@ components:
         state:
           $ref: "#/components/schemas/RoundState"
         startedAt: {type: string, format: date-time}
+        seq:
+          type: integer
+          minimum: 1
+          description: For `progress`, the note's place in the Round's activity.
+        observationId:
+          type: string
+          format: uuid
+          x-go-type: string
+          description: For `usage_observed`, the observation recorded.
     AdvanceDevClockRequest:
       type: object
       additionalProperties: false
