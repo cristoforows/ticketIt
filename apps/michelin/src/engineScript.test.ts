@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_ENGINE_SCRIPT, parseEngineScript } from "./engineScript.ts";
+import { BODY_MARKDOWN_MAX_BYTES, DEFAULT_ENGINE_SCRIPT, type DeliverStep, parseEngineScript } from "./engineScript.ts";
 
 function parse(text: string) {
   const problems: string[] = [];
@@ -10,8 +10,13 @@ function parse(text: string) {
 const scriptOf = (...steps: unknown[]) => JSON.stringify({ steps });
 
 describe("the built-in default script", () => {
-  it("starts, notes progress three times a second apart, observes usage once, then holds where M4.10 will deliver", () => {
-    expect(DEFAULT_ENGINE_SCRIPT.steps.map((step) => step.step)).toEqual(["start", "progress", "wait", "progress", "wait", "progress", "usage", "hold"]);
+  it("starts, notes progress three times a second apart, observes usage once, then delivers a Markdown Report", () => {
+    expect(DEFAULT_ENGINE_SCRIPT.steps.map((step) => step.step)).toEqual(["start", "progress", "wait", "progress", "wait", "progress", "usage", "deliver"]);
+    const deliver = DEFAULT_ENGINE_SCRIPT.steps.at(-1) as DeliverStep;
+    expect(deliver.bodyMarkdown).toMatch(/^# Result\n/);
+    expect(deliver.bodyMarkdown).toContain("\n- ");
+    expect(deliver.summary.length).toBeGreaterThan(0);
+    expect(deliver.criteriaAssessment.length).toBeGreaterThan(0);
     expect(DEFAULT_ENGINE_SCRIPT.steps.filter((step) => step.step === "wait")).toEqual([
       { step: "wait", ms: 1000 },
       { step: "wait", ms: 1000 },
@@ -36,6 +41,8 @@ const USAGE = {
   basis: "estimated",
   providerGenerationId: "gen-1",
 };
+const DELIVER = { step: "deliver", bodyMarkdown: "# Done\n\n- one\n", summary: "Done.", criteriaAssessment: "Met." };
+const deliverWith = (fields: Record<string, unknown>) => scriptOf({ step: "start" }, { ...DELIVER, ...fields });
 const UNKNOWN_USAGE = { step: "usage", provider: "p", model: "m", inputTokens: null, outputTokens: null, costUsd: null, activeMs: null, basis: "reported", providerGenerationId: null };
 
 describe("parseEngineScript", () => {
@@ -51,6 +58,13 @@ describe("parseEngineScript", () => {
     ["a usage with every figure null", scriptOf({ step: "start" }, UNKNOWN_USAGE), [{ step: "start" }, UNKNOWN_USAGE]],
     ["a usage with absent figures, read as unknown", scriptOf({ step: "start" }, { step: "usage", provider: "p", model: "m", basis: "reported" }), [{ step: "start" }, UNKNOWN_USAGE]],
     ["usage at the count and cost bounds", scriptOf({ step: "start" }, { ...USAGE, inputTokens: Number.MAX_SAFE_INTEGER, costUsd: "999999.999999" }), [{ step: "start" }, { ...USAGE, inputTokens: Number.MAX_SAFE_INTEGER, costUsd: "999999.999999" }]],
+    ["start then deliver", scriptOf({ step: "start" }, DELIVER), [{ step: "start" }, DELIVER]],
+    ["progress, usage, then deliver", scriptOf({ step: "start" }, { step: "progress", note: "n" }, USAGE, DELIVER), [{ step: "start" }, { step: "progress", note: "n" }, USAGE, DELIVER]],
+    ["a body of exactly 1 MiB", deliverWith({ bodyMarkdown: "a".repeat(BODY_MARKDOWN_MAX_BYTES) }), [{ step: "start" }, { ...DELIVER, bodyMarkdown: "a".repeat(BODY_MARKDOWN_MAX_BYTES) }]],
+    ["a body of exactly 1 MiB in two-byte characters", deliverWith({ bodyMarkdown: "é".repeat(BODY_MARKDOWN_MAX_BYTES / 2) }), [{ step: "start" }, { ...DELIVER, bodyMarkdown: "é".repeat(BODY_MARKDOWN_MAX_BYTES / 2) }]],
+    ["summary and assessment at their bounds", deliverWith({ summary: "é".repeat(2000), criteriaAssessment: "😀".repeat(10_000) }), [{ step: "start" }, { ...DELIVER, summary: "é".repeat(2000), criteriaAssessment: "😀".repeat(10_000) }]],
+    ["tabs and line feeds in a deliverable", deliverWith({ bodyMarkdown: "a\tb\n", summary: "a\tb\n", criteriaAssessment: "a\tb\n" }), [{ step: "start" }, { ...DELIVER, bodyMarkdown: "a\tb\n", summary: "a\tb\n", criteriaAssessment: "a\tb\n" }]],
+    ["a note of only U+FEFF, which Galley does not read as blank", scriptOf({ step: "start" }, { step: "progress", note: "\ufeff" }), [{ step: "start" }, { step: "progress", note: "\ufeff" }]],
   ])("accepts %s", (_name, text, steps) => {
     const { script, problems } = parse(text);
     expect(problems).toEqual([]);
@@ -82,7 +96,29 @@ describe("parseEngineScript", () => {
     ["a step that is not an object", scriptOf({ step: "start" }, "wait"), /steps\[1\].*must be an object/],
     ["a step without a name", scriptOf({ step: "start" }, { ms: 5 }), /steps\[1\].*"step" must be a string/],
     ["a step name that is not a string", scriptOf({ step: "start" }, { step: 7 }), /steps\[1\].*"step" must be a string/],
-    ["an unknown step name", scriptOf({ step: "start" }, { step: "sleep", ms: 5 }), /steps\[1\].*unknown step "sleep".*start, wait, progress, usage, hold/],
+    ["an unknown step name", scriptOf({ step: "start" }, { step: "sleep", ms: 5 }), /steps\[1\].*unknown step "sleep".*start, wait, progress, usage, deliver, hold/],
+    ["deliver before the last step", scriptOf({ step: "start" }, DELIVER, { step: "wait", ms: 10 }), /steps\[1\].*"deliver" may only be the last step/],
+    ["deliver then hold", scriptOf({ step: "start" }, DELIVER, { step: "hold" }), /steps\[1\].*"deliver".*last.*mutually exclusive/],
+    ["hold then deliver", scriptOf({ step: "start" }, { step: "hold" }, DELIVER), /steps\[1\].*"hold".*last.*mutually exclusive/],
+    ["two delivers", scriptOf({ step: "start" }, DELIVER, DELIVER), /steps\[1\].*"deliver".*last/],
+    ["deliver as the first step", scriptOf(DELIVER), /steps\[0\].*start/],
+    ["a body of 1 MiB + 1", deliverWith({ bodyMarkdown: "a".repeat(BODY_MARKDOWN_MAX_BYTES + 1) }), /steps\[1\].*"bodyMarkdown".*1048576 bytes/],
+    ["a body of 1 MiB + 1 in two-byte characters", deliverWith({ bodyMarkdown: "é".repeat(BODY_MARKDOWN_MAX_BYTES / 2) + "a" }), /steps\[1\].*"bodyMarkdown"/],
+    ["an empty body", deliverWith({ bodyMarkdown: "" }), /steps\[1\].*"bodyMarkdown"/],
+    ["a blank body", deliverWith({ bodyMarkdown: " \n\u3000" }), /steps\[1\].*"bodyMarkdown".*not blank/],
+    ["a body of only U+0085, which Galley reads as blank", deliverWith({ bodyMarkdown: "\u0085" }), /steps\[1\].*"bodyMarkdown"/],
+    ["a body with a carriage return", deliverWith({ bodyMarkdown: "a\r\nb" }), /steps\[1\].*"bodyMarkdown".*control/],
+    ["a body that is not a string", deliverWith({ bodyMarkdown: ["a"] }), /steps\[1\].*"bodyMarkdown"/],
+    ["deliver without a body", deliverWith({ bodyMarkdown: undefined }), /steps\[1\].*"bodyMarkdown"/],
+    ["a summary over 2000 characters", deliverWith({ summary: "é".repeat(2001) }), /steps\[1\].*"summary".*2000/],
+    ["a blank summary", deliverWith({ summary: "\t" }), /steps\[1\].*"summary"/],
+    ["a summary with an escape character", deliverWith({ summary: "a\u001bb" }), /steps\[1\].*"summary".*control/],
+    ["deliver without a summary", deliverWith({ summary: undefined }), /steps\[1\].*"summary"/],
+    ["an assessment over 10000 characters", deliverWith({ criteriaAssessment: "a".repeat(10_001) }), /steps\[1\].*"criteriaAssessment".*10000/],
+    ["a blank assessment", deliverWith({ criteriaAssessment: "\n" }), /steps\[1\].*"criteriaAssessment"/],
+    ["an assessment with DEL", deliverWith({ criteriaAssessment: "a\u007fb" }), /steps\[1\].*"criteriaAssessment".*control/],
+    ["deliver without an assessment", deliverWith({ criteriaAssessment: undefined }), /steps\[1\].*"criteriaAssessment"/],
+    ["an unknown key on deliver", deliverWith({ pullRequest: "x" }), /steps\[1\].*unknown key "pullRequest"/],
     ["progress without a note", scriptOf({ step: "start" }, { step: "progress" }), /steps\[1\].*"note"/],
     ["an empty note", scriptOf({ step: "start" }, { step: "progress", note: "" }), /steps\[1\].*"note"/],
     ["a blank note", scriptOf({ step: "start" }, { step: "progress", note: " \n\t\u00a0" }), /steps\[1\].*"note".*not blank/],
@@ -119,16 +155,9 @@ describe("parseEngineScript", () => {
     expect(problems.some((problem) => message.test(problem))).toBe(true);
   });
 
-  it("rejects the deliver step and names the slice that adds it", () => {
-    const { script, problems } = parse(scriptOf({ step: "start" }, { step: "deliver" }));
-    expect(script).toBeUndefined();
-    expect(problems).toHaveLength(1);
-    expect(problems[0]).toMatch(/steps\[1\].*"deliver".*M4\.10/);
-    expect(problems[0]).toContain("start, wait, progress, usage, hold");
-  });
-
   it("reports every problem at once, each with its step index", () => {
     const { script, problems } = parse(scriptOf({ step: "wait", ms: 0 }, { step: "deliver" }, { step: "hold" }, { step: "start" }));
+    expect(problems.some((problem) => /steps\[1\].*"bodyMarkdown"/.test(problem))).toBe(true);
     expect(script).toBeUndefined();
     expect(problems.filter((problem) => /steps\[0\]/.test(problem)).length).toBeGreaterThanOrEqual(1);
     expect(problems.some((problem) => /steps\[1\].*deliver/.test(problem))).toBe(true);

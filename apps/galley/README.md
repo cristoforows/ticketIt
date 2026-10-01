@@ -1265,7 +1265,8 @@ one row lock and then read `rounds`, so they cannot form a cycle with
 the claim. A unique violation on the slot index maps to `204`.
 
 A claimed Round starts with an `execution_started` event (M4.8, #134,
-below). Delivery is M4.10. Stranded claims are D5.
+below) and ends with `delivered` (M4.10, #136, below). Stranded claims
+are D5.
 
 `rounds` joins the no-execution-artefact allowlist, which also checks
 that no manual action creates a Round. Tests:
@@ -1321,8 +1322,8 @@ owner-scoped composite key `rounds` itself uses) and two tables:
 - `round_events`: one row per accepted event, `UNIQUE (round_id,
   idempotency_key)`, with `type`, `claim_epoch`, the runner's
   `occurred_at`, Galley's `received_at`, a SHA-256 `payload_hash` and
-  the `result` it answered with as JSONB. `round_events_type_m4` allows
-  `execution_started` only; M4.9 (#135) and M4.10 (#136) replace it.
+  the `result` it answered with as JSONB. `round_events_type_m4` allowed
+  `execution_started` only; M4.9 (#135) and M4.10 (#136) widen it.
 - `round_engine_references`: the engine's execution reference, kept
   apart from the Round id (ADR 0002). The partial unique index
   `round_engine_references_one_current_per_round` allows one
@@ -1383,9 +1384,9 @@ two.
 
 `GET /api/tickets/{id}/rounds` returns `{"rounds": [...]}`, newest
 first by `sequence`, for any of the Owner's Tickets including an
-archived one. `RoundState` on the wire is still `claimed` and
-`running`; a Round in a later state would appear with that state before
-the contract widens.
+archived one. `RoundState` is `claimed`, `running` or `delivered`;
+`Ticket.openRound.state` uses `OpenRoundState` (`claimed`, `running`),
+since a delivered Round is never open.
 
 Tests: `round_events_test.go`, `round_event_hash_test.go`,
 `ticket_rounds_test.go`, and `TestRoundEvents_ResponsesMatchContractAndMethod405`
@@ -1456,6 +1457,59 @@ Tests: `round_activity_usage_test.go`, additions to `round_events_test.go`
 and `TestRoundEvents_ResponsesMatchContractAndMethod405`. Both tables
 join the no-execution-artefact allowlist. Evidence:
 `docs/evidence/m4/135-activity-usage.md`.
+
+## Delivery to In Review (issue #136)
+
+Migration `000016_create_round_deliverables.up.sql` widens
+`round_events_type_m4` with `delivered` and adds `round_deliverables
+(owner_id, round_id, body_markdown, summary, criteria_assessment)`:
+`UNIQUE (round_id)`, a composite foreign key to `rounds (owner_id, id)`,
+`octet_length(body_markdown) BETWEEN 1 AND 1048576`, `char_length`
+bounds of 2000 (`summary`) and 10000 (`criteria_assessment`), and an
+ASCII-whitespace not-blank check on each. Reports stay in PostgreSQL
+until object storage (D7) is selected; they move in M7 (#8).
+
+`delivered` uses the endpoint and ladder above. Additions:
+
+- **Body cap (`413 request_too_large`).** The events endpoint reads at
+  most 8 MiB before decoding, after the credential and Round-id checks.
+  Any JSON spelling of a maximal deliverable fits: `\u`-escaping every
+  byte of a 1 MiB body takes 6 MiB. No other endpoint is capped yet.
+- **Validation (`400`).** `data` is exactly `{bodyMarkdown, summary,
+  criteriaAssessment}`, all strings, each not blank (`unicode.IsSpace`)
+  and with no control character but tab and line feed. `bodyMarkdown`
+  is 1 to 1048576 bytes of UTF-8 after JSON decoding; `summary` 1 to
+  2000 and `criteriaAssessment` 1 to 10000 code points.
+- **State (`409 event_out_of_order`).** Needs a `running` Round.
+- **Apply (`201`)**, in the one transaction (`deliverRound`): insert the
+  deliverable; set the Round `delivered` with `ended_at` from Galley's
+  clock, never before `started_at`; move the Ticket `In Progress` → `In
+  Review`, guarded by `AND status = 'InProgress'` (no match is the `500`
+  invariant failure, logged with the Round id); store the result
+  `{roundId, type, state: delivered, startedAt, endedAt}`, which never
+  echoes the body. The slot frees and the open-Round lock lifts with no
+  further write, because both derive from the Round's open state
+  (`openRoundStatesSQL`, `rounds_one_open_per_owner`).
+
+Afterwards the Ticket is `In Review` with no open Round. `In Review` is
+agent-owned for an Agent-assigned Ticket, so there is no Status change;
+Accept follows the retained completion condition: available for
+`humanAcceptance` (Basic), refused with `reviewed_pr_merge_not_implemented`
+for `reviewedPrMerge` (Coding). Done → Ready queues the Ticket for a new
+Round. Rework from In Review is M4.11 (#137).
+
+`Ticket.delivery` is `{roundId, sequence, agent, deliveredAt}` of the
+Ticket's latest Round when that Round is `delivered`, else `null`.
+`GET /api/tickets/{id}/rounds` adds `deliverable`, set exactly when
+`state` is `delivered`.
+
+Tests: `round_delivery_test.go`, additions to `round_events_test.go`,
+`ticket_rounds_test.go` and `contract_test.go`. Most tests now close a
+Round through the API (`deliverThroughAPI`); `closeRoundDirect` remains
+only where a test first moved the Ticket out of In Progress by SQL,
+which real delivery refuses. `round_deliverables` joins the
+no-execution-artefact allowlist. Evidence:
+`docs/evidence/m4/136-delivery.md`.
 
 ## Error shape
 

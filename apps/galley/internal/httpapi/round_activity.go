@@ -34,9 +34,13 @@ func validateProgressData(raw []byte) (string, string) {
 }
 
 func validActivityNote(note string) bool {
-	return utf8.RuneCountInString(note) <= activityNoteMaxLength &&
-		strings.TrimFunc(note, unicode.IsSpace) != "" &&
-		!strings.ContainsFunc(note, func(r rune) bool { return isControlRune(r) && r != '\t' && r != '\n' })
+	return validMultilineText(note, utf8.RuneCountInString(note), activityNoteMaxLength)
+}
+
+func validMultilineText(value string, length, maxLength int) bool {
+	return length <= maxLength &&
+		strings.TrimFunc(value, unicode.IsSpace) != "" &&
+		!strings.ContainsFunc(value, func(r rune) bool { return isControlRune(r) && r != '\t' && r != '\n' })
 }
 
 func exactObject(raw []byte, keys ...string) (map[string]json.RawMessage, bool) {

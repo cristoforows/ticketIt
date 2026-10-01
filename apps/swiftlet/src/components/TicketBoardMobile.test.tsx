@@ -14,6 +14,7 @@ const ticket = (id: string, status: string, statusChanges: string[] = [], archiv
   assigneeAgent: null,
   requestingAgentWork: false,
   openRound: null,
+  delivery: null,
   goal: "",
   context: "",
   successCriteria: "",

@@ -13,6 +13,7 @@ const ticket = (id: string, status: string, template = "Basic") => ({
   assigneeAgent: null,
   requestingAgentWork: false,
   openRound: null,
+  delivery: null,
   goal: "",
   context: "",
   successCriteria: "",
@@ -376,6 +377,23 @@ describe("TicketBoard refreshing while a Ticket has an open Round", () => {
     vi.stubGlobal("fetch", fetchMock);
     return fetchMock;
   }
+
+  it("moves the slip to In Review with the delivering Agent when the Round delivers during a refresh, unlocked, and stops refetching", async () => {
+    const delivered = { ...running, status: "InReview", openRound: null, delivery: { roundId: round.id, sequence: 1, agent, deliveredAt: "2026-10-01T10:00:09Z" } };
+    const fetchMock = stubLists([list(running, other), list(delivered, other)]);
+    render(<TicketBoard onUnauthenticated={() => {}} />);
+    await flush();
+    expect(within(screen.getByTestId("board-ticket-work")).queryByTestId("board-delivered")).not.toBeInTheDocument();
+
+    await flush(3000);
+    const slip = within(screen.getByTestId("board-status-InReview")).getByTestId("board-ticket-work");
+    expect(within(slip).getByTestId("board-delivered")).toHaveTextContent("Delivered by Builder");
+    expect(within(slip).queryByTestId("board-locked")).not.toBeInTheDocument();
+    expect(slip).toHaveAttribute("draggable", "true");
+
+    await flush(60_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 
   it("refetches every 3 seconds and moves the slip to In Progress with its Agent, locked and without the claimed tag", async () => {
     const fetchMock = stubLists([list(claimed, other), list(running, other)]);

@@ -152,7 +152,7 @@ func TestProgress_AppendsActivityInArrivalOrderAndChangesNoStatus(t *testing.T) 
 	if after := roundRows(t, f.pool); fmt.Sprint(after) != fmt.Sprint(roundBefore) {
 		t.Fatalf("Round rows changed: %+v -> %+v", roundBefore, after)
 	}
-	if got := f.ticket(t, queued.Id); got.Status != InProgress || got.OpenRound == nil || got.OpenRound.State != RoundRunning {
+	if got := f.ticket(t, queued.Id); got.Status != InProgress || got.OpenRound == nil || got.OpenRound.State != OpenRoundRunning {
 		t.Fatalf("Ticket = %s %+v, want In Progress and running", got.Status, got.OpenRound)
 	}
 	round := f.roundOf(t, queued.Id)
@@ -194,7 +194,7 @@ func TestProgress_ReplayAppendsNothingAndReturnsTheOriginalResult(t *testing.T) 
 		t.Fatalf("round_activity = %d rows, want 2", n)
 	}
 
-	deliverRoundDirect(t, f.pool, claim.RoundId)
+	f.deliverThroughAPI(t, claim.RoundId)
 	afterEnd := databaseSnapshot(t, f.pool)
 	if rec := f.reportEvent(t, claim.RoundId, body); rec.Code != http.StatusOK || !bytes.Equal(rec.Body.Bytes(), first.Body.Bytes()) {
 		t.Fatalf("replay after the Round ended: status=%d body=%s", rec.Code, rec.Body.String())
@@ -225,7 +225,7 @@ func TestUsage_ReplayAppendsNothingAndReturnsTheOriginalResult(t *testing.T) {
 	if _, err := f.pool.Exec(context.Background(), `UPDATE rounds SET claim_epoch = 2`); err != nil {
 		t.Fatal(err)
 	}
-	deliverRoundDirect(t, f.pool, claim.RoundId)
+	f.deliverThroughAPI(t, claim.RoundId)
 	afterEnd := databaseSnapshot(t, f.pool)
 	if rec := f.reportEvent(t, claim.RoundId, body); rec.Code != http.StatusOK || !bytes.Equal(rec.Body.Bytes(), first.Body.Bytes()) {
 		t.Fatalf("replay after the epoch moved and the Round ended: status=%d body=%s", rec.Code, rec.Body.String())
@@ -284,7 +284,7 @@ func TestProgressAndUsage_OnAClaimedRoundAreOutOfOrder(t *testing.T) {
 	assertErrorBody(t, f.reportEvent(t, claim.RoundId, usageEvent(t, observationA, 1, usageData(observationA))),
 		http.StatusConflict, eventOutOfOrderCode, "usage_observed cannot be reported while the Round is claimed")
 	assertSnapshotUnchanged(t, f.pool, before, "progress and usage on a claimed Round")
-	if got := f.ticket(t, queued.Id); got.Status != Ready || got.OpenRound == nil || got.OpenRound.State != RoundClaimed {
+	if got := f.ticket(t, queued.Id); got.Status != Ready || got.OpenRound == nil || got.OpenRound.State != OpenRoundClaimed {
 		t.Fatalf("Ticket = %s %+v, want Ready and claimed", got.Status, got.OpenRound)
 	}
 	f.startRound(t, claim, "start")
@@ -295,7 +295,7 @@ func TestProgressAndUsage_OnAClaimedRoundAreOutOfOrder(t *testing.T) {
 func TestProgressAndUsage_OnAnEndedRoundAreRejectedWithNoChange(t *testing.T) {
 	f := newClaimFixture(t)
 	_, claim := f.runningRound(t, "Ended")
-	deliverRoundDirect(t, f.pool, claim.RoundId)
+	f.deliverThroughAPI(t, claim.RoundId)
 	before := databaseSnapshot(t, f.pool)
 	assertErrorBody(t, f.reportEvent(t, claim.RoundId, progressEvent(t, "note", 1, eventOccurredAt, "Late")), http.StatusConflict, roundNotOpenCode, roundNotOpenMessage)
 	assertErrorBody(t, f.reportEvent(t, claim.RoundId, usageEvent(t, observationA, 1, usageData(observationA))), http.StatusConflict, roundNotOpenCode, roundNotOpenMessage)
@@ -396,7 +396,7 @@ func TestUsage_AnObservationIDRecordedForAnotherRoundConflicts(t *testing.T) {
 	f := newClaimFixture(t)
 	_, first := f.runningRound(t, "First")
 	f.mustReport(t, first.RoundId, usageEvent(t, observationA, 1, usageData(observationA)))
-	deliverRoundDirect(t, f.pool, first.RoundId)
+	f.deliverThroughAPI(t, first.RoundId)
 	_, second := f.runningRound(t, "Second")
 	before := databaseSnapshot(t, f.pool)
 	assertErrorBody(t, f.reportEvent(t, second.RoundId, usageEvent(t, observationA, 1, usageData(observationA))), http.StatusConflict, observationIDConflictCode, observationIDConflictMessage)
@@ -695,7 +695,7 @@ func TestListTicketRounds_ActivityAndUsageBelongToTheirRoundAndOwner(t *testing.
 	queued, first := f.runningRound(t, "Twice")
 	f.mustReport(t, first.RoundId, progressEvent(t, "n", 1, eventOccurredAt, "first Round"))
 	f.mustReport(t, first.RoundId, usageEvent(t, observationA, 1, usageData(observationA)))
-	deliverRoundDirect(t, f.pool, first.RoundId)
+	f.deliverThroughAPI(t, first.RoundId)
 	if _, err := f.pool.Exec(context.Background(), `UPDATE tickets SET status = 'Ready'`); err != nil {
 		t.Fatal(err)
 	}

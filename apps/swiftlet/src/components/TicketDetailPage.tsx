@@ -43,6 +43,8 @@ type DetailState =
   | { kind: "not-found" }
   | { kind: "error"; message: string };
 
+const hasRounds = (ticket: Ticket) => ticket.openRound !== null || ticket.delivery !== null;
+
 export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "page", onCommandSucceeded, onArchiveSucceeded }: TicketDetailPageProps) {
   const [state, setState] = useState<DetailState>({ kind: "loading" });
   const [roundRecords, setRoundRecords] = useState<RoundRecords & { ticketId?: string }>({});
@@ -76,7 +78,7 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
         if (sameData(current.ticket, ticket)) return current.refreshError === undefined ? current : { kind: "loaded", ticket: current.ticket };
         return { kind: "loaded", ticket };
       });
-      if (ticket.openRound !== null) await loadRounds();
+      if (hasRounds(ticket)) await loadRounds();
     } catch (error) {
       if (error instanceof UnauthenticatedError) {
         onUnauthenticated();
@@ -103,7 +105,7 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
       .then((ticket) => {
         if (cancelled) return;
         setState({ kind: "loaded", ticket });
-        if (ticket.openRound !== null) void loadRounds(() => !cancelled);
+        if (hasRounds(ticket)) void loadRounds(() => !cancelled);
       })
       .catch((error: unknown) => {
         if (cancelled) {

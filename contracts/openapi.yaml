@@ -1044,13 +1044,16 @@ paths:
         `409 stale_claim_epoch` for a `claimEpoch` other than the
         Round's, `409 round_not_open` for a Round that has ended, and
         `409 event_out_of_order` for a type the Round's state cannot
-        take: `execution_started` needs a claimed Round, `progress` and
-        `usage_observed` a running one. A `usage_observed` whose
-        `observationId` is already recorded for another Round is
-        `409 observation_id_conflict`. A rejection changes nothing. An
-        unknown, malformed or foreign Round id returns the shared 404. A
-        runner that is not Connected is still accepted, and an event is
-        not a heartbeat.
+        take: `execution_started` needs a claimed Round; `progress`,
+        `usage_observed` and `delivered` a running one. A
+        `usage_observed` whose `observationId` is already recorded for
+        another Round is `409 observation_id_conflict`. `delivered`
+        retains the deliverable, ends the Round as `delivered`, frees the
+        Owner's slot and moves the Ticket from In Progress to In Review,
+        never Done. A body over 8 MiB is `413 request_too_large`. A
+        rejection changes nothing. An unknown, malformed or foreign Round
+        id returns the shared 404. A runner that is not Connected is
+        still accepted, and an event is not a heartbeat.
       security:
         - runnerBearer: []
       requestBody:
@@ -1075,8 +1078,8 @@ paths:
         default:
           description: >-
             Error. See `ErrorBody`. Includes `idempotency_key_conflict`,
-            `stale_claim_epoch`, `round_not_open`, `event_out_of_order`
-            and `observation_id_conflict`.
+            `stale_claim_epoch`, `round_not_open`, `event_out_of_order`,
+            `observation_id_conflict` and `request_too_large`.
           content:
             application/json:
               schema:
@@ -1271,6 +1274,7 @@ components:
           assigneeAgent,
           requestingAgentWork,
           openRound,
+          delivery,
           goal,
           context,
           successCriteria,
@@ -1334,6 +1338,13 @@ components:
           oneOf:
             - $ref: "#/components/schemas/TicketOpenRound"
             - type: "null"
+        delivery:
+          description: >-
+            The Ticket's latest Round, when that Round was delivered.
+            Null before any delivery and once a later Round is claimed.
+          oneOf:
+            - $ref: "#/components/schemas/TicketDelivery"
+            - type: "null"
         completionCondition:
           $ref: "#/components/schemas/TicketCompletionCondition"
         goal:
@@ -1392,10 +1403,17 @@ components:
     RoundState:
       type: string
       description: >-
-        The open states. A claimed Round leaves the Ticket Ready; a
-        running one has moved it to In Progress.
+        `claimed` and `running` are open. `delivered` has ended and moved
+        the Ticket to In Review.
+      enum: [claimed, running, delivered]
+      x-enum-varnames: [RoundClaimed, RoundRunning, RoundDelivered]
+    OpenRoundState:
+      type: string
+      description: >-
+        A claimed Round leaves the Ticket Ready; a running one has moved
+        it to In Progress.
       enum: [claimed, running]
-      x-enum-varnames: [RoundClaimed, RoundRunning]
+      x-enum-varnames: [OpenRoundClaimed, OpenRoundRunning]
     TicketOpenRound:
       type: object
       additionalProperties: false
@@ -1404,16 +1422,27 @@ components:
         id: {type: string, format: uuid, x-go-type: string}
         sequence: {type: integer, minimum: 1}
         state:
-          $ref: "#/components/schemas/RoundState"
+          $ref: "#/components/schemas/OpenRoundState"
         agent:
           description: The Agent assigned when the Round was claimed.
           $ref: "#/components/schemas/TicketAssigneeAgent"
         claimedAt: {type: string, format: date-time}
         startedAt: {type: [string, "null"], format: date-time}
+    TicketDelivery:
+      type: object
+      additionalProperties: false
+      required: [roundId, sequence, agent, deliveredAt]
+      properties:
+        roundId: {type: string, format: uuid, x-go-type: string}
+        sequence: {type: integer, minimum: 1}
+        agent:
+          description: The Agent of the delivered Round.
+          $ref: "#/components/schemas/TicketAssigneeAgent"
+        deliveredAt: {type: string, format: date-time}
     TicketRound:
       type: object
       additionalProperties: false
-      required: [id, sequence, state, agent, claimedAt, startedAt, endedAt, activity, usage]
+      required: [id, sequence, state, agent, claimedAt, startedAt, endedAt, activity, usage, deliverable]
       properties:
         id: {type: string, format: uuid, x-go-type: string}
         sequence: {type: integer, minimum: 1}
@@ -1433,6 +1462,19 @@ components:
             $ref: "#/components/schemas/RoundActivityNote"
         usage:
           $ref: "#/components/schemas/RoundUsage"
+        deliverable:
+          description: Set exactly when `state` is `delivered`.
+          oneOf:
+            - $ref: "#/components/schemas/RoundDeliverable"
+            - type: "null"
+    RoundDeliverable:
+      type: object
+      additionalProperties: false
+      required: [bodyMarkdown, summary, criteriaAssessment]
+      properties:
+        bodyMarkdown: {type: string, minLength: 1}
+        summary: {type: string, minLength: 1, maxLength: 2000}
+        criteriaAssessment: {type: string, minLength: 1, maxLength: 10000}
     RoundActivityNote:
       type: object
       additionalProperties: false
@@ -1879,8 +1921,8 @@ components:
     RoundEventType:
       type: string
       description: Grows by slice.
-      enum: [execution_started, progress, usage_observed]
-      x-enum-varnames: [RoundEventExecutionStarted, RoundEventProgress, RoundEventUsageObserved]
+      enum: [execution_started, progress, usage_observed, delivered]
+      x-enum-varnames: [RoundEventExecutionStarted, RoundEventProgress, RoundEventUsageObserved, RoundEventDelivered]
     ExecutionStartedData:
       type: object
       additionalProperties: false
@@ -1937,6 +1979,28 @@ components:
           description: >-
             Not unique and never identity; the join point for later
             enrichment (M9 #10).
+    DeliveredData:
+      type: object
+      additionalProperties: false
+      required: [bodyMarkdown, summary, criteriaAssessment]
+      description: >-
+        Each value is not blank and has no control characters but tab
+        and line feed.
+      properties:
+        bodyMarkdown:
+          type: string
+          minLength: 1
+          description: The result, at most 1 MiB (1048576 bytes) as UTF-8.
+        summary:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: The change summary, counted in Unicode code points.
+        criteriaAssessment:
+          type: string
+          minLength: 1
+          maxLength: 10000
+          description: The Success Criteria assessment, counted in Unicode code points.
     RoundEventRequest:
       type: object
       additionalProperties: false
@@ -1962,11 +2026,12 @@ components:
         data:
           description: >-
             The payload for `type`: `ExecutionStartedData`,
-            `ProgressData` or `UsageObservedData`.
+            `ProgressData`, `UsageObservedData` or `DeliveredData`.
           oneOf:
             - $ref: "#/components/schemas/ExecutionStartedData"
             - $ref: "#/components/schemas/ProgressData"
             - $ref: "#/components/schemas/UsageObservedData"
+            - $ref: "#/components/schemas/DeliveredData"
     RoundEventResult:
       type: object
       additionalProperties: false
@@ -1978,6 +2043,10 @@ components:
         state:
           $ref: "#/components/schemas/RoundState"
         startedAt: {type: string, format: date-time}
+        endedAt:
+          type: string
+          format: date-time
+          description: For `delivered`.
         seq:
           type: integer
           minimum: 1

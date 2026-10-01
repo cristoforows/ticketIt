@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { TicketDetailPage } from "./TicketDetailPage";
 
 type MockResponse = Pick<Response, "ok" | "status" | "statusText" | "json">;
@@ -25,6 +25,7 @@ const TICKET = {
   assigneeAgent: null,
   requestingAgentWork: false,
   openRound: null,
+  delivery: null,
   goal: "",
   context: "",
   successCriteria: "",
@@ -311,6 +312,7 @@ describe("TicketDetailPage", () => {
     });
 
     const flush = (ms = 0) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+    const reportRendererLoaded = () => act(async () => { await import("./ui/MarkdownRenderer"); });
 
     const unknownUsage = { sum: null, complete: false, estimated: false };
     const record = (activity: unknown[] = [], usage: unknown = { observations: 0, complete: false, estimated: false, costUsd: null, inputTokens: unknownUsage, outputTokens: unknownUsage, activeMs: unknownUsage }) => ({
@@ -318,6 +320,7 @@ describe("TicketDetailPage", () => {
       endedAt: null,
       activity,
       usage,
+      deliverable: null,
     });
     const roundsOf = (...records: unknown[]) => () => Promise.resolve(jsonResponse({ rounds: records }));
 
@@ -398,6 +401,78 @@ describe("TicketDetailPage", () => {
       expect(ticketFetches(fetchMock)).toBe(2);
       expect(healthFetches(fetchMock)).toBe(healthBefore);
       expect(vi.getTimerCount()).toBe(0);
+    });
+
+    describe("delivery", () => {
+      const deliverable = { bodyMarkdown: "# Result\n\n- Found the cause\n", summary: "Found the cause.", criteriaAssessment: "A written cause: met." };
+      const delivery = { roundId: round.id, sequence: 1, agent, deliveredAt: "2026-10-01T10:00:09Z" };
+      const delivered = { ...running, status: "InReview", openRound: null, delivery, updatedAt: "2026-10-01T10:00:09Z", allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: true } } };
+      const deliveredRecord = { ...record([{ seq: 1, note: "Reading the Ticket", occurredAt: "2026-10-01T10:00:06Z" }]), state: "delivered", endedAt: "2026-10-01T10:00:09Z", deliverable };
+
+      it("picks up In Review, the delivering Agent and the deliverable on the same tick, then stops refreshing", async () => {
+        const fetchMock = stubRound([answer(running), answer(delivered)], undefined, [roundsOf(record()), roundsOf(deliveredRecord)]);
+        render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+        await flush();
+        expect(screen.getByTestId("ticket-detail-round-started")).toBeInTheDocument();
+        expect(screen.queryByTestId("ticket-detail-delivered-round")).not.toBeInTheDocument();
+
+        await flush(3000);
+        expect(ticketFetches(fetchMock)).toBe(2);
+        expect(roundFetches(fetchMock)).toBe(2);
+        expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("In Review");
+        expect(screen.getByTestId("ticket-detail-delivered")).toHaveTextContent("Delivered by atlas");
+        expect(screen.queryByTestId("ticket-detail-locked")).not.toBeInTheDocument();
+        expect(screen.queryByTestId("ticket-detail-round-started")).not.toBeInTheDocument();
+        const receipt = within(screen.getByTestId("ticket-detail-delivered-round"));
+        expect(receipt.getByTestId("ticket-detail-delivered-agent")).toHaveTextContent("atlas");
+        expect(receipt.getByTestId("ticket-detail-delivered-at")).toHaveTextContent("2026-10-01T10:00:09Z");
+        expect(receipt.getByTestId("ticket-detail-delivered-summary")).toHaveTextContent("Found the cause.");
+        expect(receipt.getByTestId("ticket-detail-delivered-assessment")).toHaveTextContent("A written cause: met.");
+        await reportRendererLoaded();
+        expect(within(receipt.getByTestId("ticket-detail-delivered-body")).getByRole("heading", { level: 1, name: "Result" })).toBeInTheDocument();
+        expect(receipt.getAllByTestId("ticket-detail-delivered-note").map((item) => item.textContent)).toEqual(["2026-10-01T10:00:06ZReading the Ticket"]);
+        expect(screen.getByTestId("ticket-detail-accept-button")).toBeEnabled();
+
+        await flush(120_000);
+        expect(ticketFetches(fetchMock)).toBe(2);
+        expect(roundFetches(fetchMock)).toBe(2);
+        expect(vi.getTimerCount()).toBe(0);
+      });
+
+      it("loads a delivered Ticket's Rounds once on open, without refreshing", async () => {
+        const fetchMock = stubRound([answer(delivered)], undefined, [roundsOf(deliveredRecord)]);
+        render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+        await flush();
+        expect(screen.getByTestId("ticket-detail-delivered-summary")).toHaveTextContent("Found the cause.");
+        await flush(60_000);
+        expect(ticketFetches(fetchMock)).toBe(1);
+        expect(roundFetches(fetchMock)).toBe(1);
+        expect(healthFetches(fetchMock)).toBe(0);
+      });
+
+      it.each([
+        { name: "a delivered Round without its deliverable", round: { ...deliveredRecord, deliverable: null } },
+        { name: "a delivered Round with a partial deliverable", round: { ...deliveredRecord, deliverable: { bodyMarkdown: "b", summary: "s" } } },
+        { name: "an open Round with a deliverable", round: { ...record(), deliverable } },
+        { name: "an unknown Round state", round: { ...deliveredRecord, state: "stopped" } },
+      ])("refuses $name", async ({ round: bad }) => {
+        stubRound([answer(delivered)], undefined, [roundsOf(bad)]);
+        render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+        await flush();
+        expect(screen.getByTestId("ticket-detail-round-records-error")).toHaveTextContent("missing a required field");
+        expect(screen.queryByTestId("ticket-detail-delivered-round")).not.toBeInTheDocument();
+      });
+
+      it.each([
+        { name: "no delivery", delivery: undefined },
+        { name: "a delivery with no Agent", delivery: { ...delivery, agent: null } },
+        { name: "a delivery with no deliveredAt", delivery: { ...delivery, deliveredAt: undefined } },
+      ])("rejects a Ticket response with $name", async ({ delivery: bad }) => {
+        stubRound([answer({ ...delivered, delivery: bad })]);
+        render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+        await flush();
+        expect(screen.getByTestId("ticket-detail-error-message")).toHaveTextContent("missing a required field");
+      });
     });
 
     it("never refetches, or asks about the runner, for a Ticket with no open Round", async () => {

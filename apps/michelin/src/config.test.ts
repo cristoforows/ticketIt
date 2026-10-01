@@ -79,8 +79,9 @@ describe("loadConfig", () => {
     }
   });
 
-  it("rejects a script that uses a step a later slice adds", () => {
-    expect(() => loadConfig({ ...base, MICHELIN_ENGINE_SCRIPT: "s.json" }, () => '{"steps":[{"step":"start"},{"step":"deliver"}]}')).toThrow(/steps\[1\]: "deliver" is not supported yet; M4\.10/);
+  it("rejects a script whose deliver step is not last", () => {
+    const script = JSON.stringify({ steps: [{ step: "start" }, { step: "deliver", bodyMarkdown: "b", summary: "s", criteriaAssessment: "c" }, { step: "hold" }] });
+    expect(() => loadConfig({ ...base, MICHELIN_ENGINE_SCRIPT: "s.json" }, () => script)).toThrow(/steps\[1\]: "deliver" may only be the last step/);
   });
 
   it("rejects an empty MICHELIN_ENGINE_SCRIPT", () => {

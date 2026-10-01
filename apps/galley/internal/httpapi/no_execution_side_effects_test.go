@@ -27,6 +27,7 @@ var knownPublicTables = []string{
 	"owner_identities",
 	"owners",
 	"round_activity",
+	"round_deliverables",
 	"round_engine_references",
 	"round_events",
 	"rounds",
@@ -191,6 +192,10 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 		case "round_activity", "usage_observations":
 			if after != before[table] {
 				t.Errorf("%s row count changed from %d to %d -- a manual action recorded Round activity or usage; only a runner's progress or usage_observed event may", table, before[table], after)
+			}
+		case "round_deliverables":
+			if after != before[table] {
+				t.Errorf("%s row count changed from %d to %d -- a manual action recorded a deliverable; only a runner's delivered event may", table, before[table], after)
 			}
 		default:
 			if after != before[table] {

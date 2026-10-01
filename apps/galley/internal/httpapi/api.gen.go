@@ -90,8 +90,27 @@ func (e DatabaseStatusStatus) Valid() bool {
 	}
 }
 
+// Defines values for OpenRoundState.
+const (
+	OpenRoundClaimed OpenRoundState = "claimed"
+	OpenRoundRunning OpenRoundState = "running"
+)
+
+// Valid indicates whether the value is a known member of the OpenRoundState enum.
+func (e OpenRoundState) Valid() bool {
+	switch e {
+	case OpenRoundClaimed:
+		return true
+	case OpenRoundRunning:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RoundEventType.
 const (
+	RoundEventDelivered        RoundEventType = "delivered"
 	RoundEventExecutionStarted RoundEventType = "execution_started"
 	RoundEventProgress         RoundEventType = "progress"
 	RoundEventUsageObserved    RoundEventType = "usage_observed"
@@ -100,6 +119,8 @@ const (
 // Valid indicates whether the value is a known member of the RoundEventType enum.
 func (e RoundEventType) Valid() bool {
 	switch e {
+	case RoundEventDelivered:
+		return true
 	case RoundEventExecutionStarted:
 		return true
 	case RoundEventProgress:
@@ -113,14 +134,17 @@ func (e RoundEventType) Valid() bool {
 
 // Defines values for RoundState.
 const (
-	RoundClaimed RoundState = "claimed"
-	RoundRunning RoundState = "running"
+	RoundClaimed   RoundState = "claimed"
+	RoundDelivered RoundState = "delivered"
+	RoundRunning   RoundState = "running"
 )
 
 // Valid indicates whether the value is a known member of the RoundState enum.
 func (e RoundState) Valid() bool {
 	switch e {
 	case RoundClaimed:
+		return true
+	case RoundDelivered:
 		return true
 	case RoundRunning:
 		return true
@@ -421,6 +445,18 @@ type DatabaseStatus struct {
 // DatabaseStatusStatus defines model for DatabaseStatus.Status.
 type DatabaseStatusStatus string
 
+// DeliveredData Each value is not blank and has no control characters but tab and line feed.
+type DeliveredData struct {
+	// BodyMarkdown The result, at most 1 MiB (1048576 bytes) as UTF-8.
+	BodyMarkdown string `json:"bodyMarkdown"`
+
+	// CriteriaAssessment The Success Criteria assessment, counted in Unicode code points.
+	CriteriaAssessment string `json:"criteriaAssessment"`
+
+	// Summary The change summary, counted in Unicode code points.
+	Summary string `json:"summary"`
+}
+
 // DevClock defines model for DevClock.
 type DevClock struct {
 	Now time.Time `json:"now"`
@@ -465,6 +501,9 @@ type ExecutionStartedData struct {
 	EngineReference string `json:"engineReference"`
 }
 
+// OpenRoundState A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress.
+type OpenRoundState string
+
 // Owner ticketIt's stable internal Owner identity -- independent of any GitHub identifier (docs/deployment.md, "Ownership and sign-in"). `login` is the linked GitHub identity's most recently observed login, shown for display only: matching a sign-in to this Owner always uses the immutable provider account id, never this field.
 type Owner struct {
 	// Id ticketIt's own Owner id -- not a GitHub identifier.
@@ -508,12 +547,19 @@ type RoundActivityNote struct {
 	Seq int `json:"seq"`
 }
 
+// RoundDeliverable defines model for RoundDeliverable.
+type RoundDeliverable struct {
+	BodyMarkdown       string `json:"bodyMarkdown"`
+	CriteriaAssessment string `json:"criteriaAssessment"`
+	Summary            string `json:"summary"`
+}
+
 // RoundEventRequest defines model for RoundEventRequest.
 type RoundEventRequest struct {
 	// ClaimEpoch The fencing token from the claim.
 	ClaimEpoch int `json:"claimEpoch"`
 
-	// Data The payload for `type`: `ExecutionStartedData`, `ProgressData` or `UsageObservedData`.
+	// Data The payload for `type`: `ExecutionStartedData`, `ProgressData`, `UsageObservedData` or `DeliveredData`.
 	Data RoundEventRequest_Data `json:"data"`
 
 	// IdempotencyKey Taken verbatim; identity is never trimmed.
@@ -526,13 +572,16 @@ type RoundEventRequest struct {
 	Type RoundEventType `json:"type"`
 }
 
-// RoundEventRequest_Data The payload for `type`: `ExecutionStartedData`, `ProgressData` or `UsageObservedData`.
+// RoundEventRequest_Data The payload for `type`: `ExecutionStartedData`, `ProgressData`, `UsageObservedData` or `DeliveredData`.
 type RoundEventRequest_Data struct {
 	union json.RawMessage
 }
 
 // RoundEventResult defines model for RoundEventResult.
 type RoundEventResult struct {
+	// EndedAt For `delivered`.
+	EndedAt *time.Time `json:"endedAt,omitempty"`
+
 	// ObservationId For `usage_observed`, the observation recorded.
 	ObservationId *string `json:"observationId,omitempty"`
 	RoundId       string  `json:"roundId"`
@@ -541,7 +590,7 @@ type RoundEventResult struct {
 	Seq       *int      `json:"seq,omitempty"`
 	StartedAt time.Time `json:"startedAt"`
 
-	// State The open states. A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress.
+	// State `claimed` and `running` are open. `delivered` has ended and moved the Ticket to In Review.
 	State RoundState `json:"state"`
 
 	// Type Grows by slice.
@@ -551,7 +600,7 @@ type RoundEventResult struct {
 // RoundEventType Grows by slice.
 type RoundEventType string
 
-// RoundState The open states. A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress.
+// RoundState `claimed` and `running` are open. `delivered` has ended and moved the Ticket to In Review.
 type RoundState string
 
 // RoundUsage Sums of the known values. Unknown is never counted as zero.
@@ -677,6 +726,9 @@ type Ticket struct {
 	// CreatedAt RFC3339 UTC timestamp of when the Ticket was captured.
 	CreatedAt string `json:"createdAt"`
 
+	// Delivery The Ticket's latest Round, when that Round was delivered. Null before any delivery and once a later Round is claimed.
+	Delivery *TicketDelivery `json:"delivery"`
+
 	// Goal Manual refinement (issue #58, docs/ticket-creation.md, "Manual guidance" -- prompt "What outcome do you want?"). Plain text, never Markdown (M7 owns report rendering). Always present on the wire; "" means never set or cleared -- read access never distinguishes those two, only PATCH's request body does (see UpdateTicketRequest).
 	Goal string `json:"goal"`
 
@@ -746,6 +798,15 @@ type TicketBadge struct {
 // TicketCompletionCondition The condition that completes a Ticket (CONTEXT.md, "Done"): human acceptance, or merging its reviewed pull request. Derived from the Ticket's Template default exactly once, at creation (issue #59, D3) -- there is no request field or operation anywhere in this contract that sets or changes it directly. Assignment, reassignment, and editing any other field never change it.
 type TicketCompletionCondition string
 
+// TicketDelivery defines model for TicketDelivery.
+type TicketDelivery struct {
+	// Agent The Agent of the delivered Round.
+	Agent       TicketAssigneeAgent `json:"agent"`
+	DeliveredAt time.Time           `json:"deliveredAt"`
+	RoundId     string              `json:"roundId"`
+	Sequence    int                 `json:"sequence"`
+}
+
 // TicketList The signed-in Owner's Tickets, newest first (createdAt descending, id descending as the tiebreak).
 type TicketList struct {
 	Tickets []Ticket `json:"tickets"`
@@ -760,8 +821,8 @@ type TicketOpenRound struct {
 	Sequence  int                 `json:"sequence"`
 	StartedAt *time.Time          `json:"startedAt"`
 
-	// State The open states. A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress.
-	State RoundState `json:"state"`
+	// State A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress.
+	State OpenRoundState `json:"state"`
 }
 
 // TicketRound defines model for TicketRound.
@@ -772,12 +833,15 @@ type TicketRound struct {
 	// Agent The Agent assigned when the Round was claimed.
 	Agent     TicketAssigneeAgent `json:"agent"`
 	ClaimedAt time.Time           `json:"claimedAt"`
-	EndedAt   *time.Time          `json:"endedAt"`
-	Id        string              `json:"id"`
-	Sequence  int                 `json:"sequence"`
-	StartedAt *time.Time          `json:"startedAt"`
 
-	// State The open states. A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress.
+	// Deliverable Set exactly when `state` is `delivered`.
+	Deliverable *RoundDeliverable `json:"deliverable"`
+	EndedAt     *time.Time        `json:"endedAt"`
+	Id          string            `json:"id"`
+	Sequence    int               `json:"sequence"`
+	StartedAt   *time.Time        `json:"startedAt"`
+
+	// State `claimed` and `running` are open. `delivered` has ended and moved the Ticket to In Review.
 	State RoundState `json:"state"`
 
 	// Usage Sums of the known values. Unknown is never counted as zero.
@@ -980,6 +1044,32 @@ func (t *RoundEventRequest_Data) FromUsageObservedData(v UsageObservedData) erro
 
 // MergeUsageObservedData performs a merge with any union data inside the RoundEventRequest_Data, using the provided UsageObservedData
 func (t *RoundEventRequest_Data) MergeUsageObservedData(v UsageObservedData) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsDeliveredData returns the union data inside the RoundEventRequest_Data as a DeliveredData
+func (t RoundEventRequest_Data) AsDeliveredData() (DeliveredData, error) {
+	var body DeliveredData
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromDeliveredData overwrites any union data inside the RoundEventRequest_Data as the provided DeliveredData
+func (t *RoundEventRequest_Data) FromDeliveredData(v DeliveredData) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeDeliveredData performs a merge with any union data inside the RoundEventRequest_Data, using the provided DeliveredData
+func (t *RoundEventRequest_Data) MergeDeliveredData(v DeliveredData) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err

@@ -19,6 +19,7 @@ const TICKET: Ticket = {
   assigneeAgent: null,
   requestingAgentWork: false,
   openRound: null,
+  delivery: null,
   goal: "",
   context: "",
   successCriteria: "",

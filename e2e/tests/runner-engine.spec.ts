@@ -46,6 +46,7 @@ test("a real Michelin starts a claimed Round with no browser open, and the slip 
       endedAt: null,
       activity: [],
       usage: NO_USAGE,
+      deliverable: null,
     }]);
     expect(Date.parse(rounds[0]!.startedAt!)).toBeGreaterThanOrEqual(Date.parse(rounds[0]!.claimedAt));
 

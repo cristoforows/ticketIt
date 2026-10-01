@@ -82,8 +82,9 @@ async function fakeGalley(): Promise<string> {
           JSON.stringify({
             roundId: claimBody.roundId,
             type: event.type,
-            state: "running",
+            state: event.type === "delivered" ? "delivered" : "running",
             startedAt: "2026-10-01T12:00:01Z",
+            ...(event.type === "delivered" ? { endedAt: "2026-10-01T12:00:04Z" } : {}),
             ...(event.type === "progress" ? { seq: notes } : {}),
             ...(event.type === "usage_observed" ? { observationId: event.data.observationId } : {}),
           }),
@@ -132,7 +133,7 @@ function run(env: Record<string, string>) {
 }
 
 describe("michelin process", () => {
-  it("checks Galley, registers, heartbeats, claims one Round, runs the default script to its hold, then exits 0 on SIGTERM without logging the token", async () => {
+  it("checks Galley, registers, heartbeats, claims a Round, runs the default script to delivery, claims again, then exits 0 on SIGTERM without logging the token", async () => {
     const galleyUrl = await fakeGalley();
     const michelin = run({
       GALLEY_URL: galleyUrl,
@@ -145,8 +146,10 @@ describe("michelin process", () => {
     await michelin.until("galley status ok");
     await michelin.until("runner heartbeat ok");
     await michelin.until("round claimed");
-    await michelin.until("engine holding");
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await michelin.until("engine delivered");
+    while (runnerPaths.filter((path) => path === "/api/runner/claims").length < 2) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     michelin.child.kill("SIGTERM");
 
     expect(await michelin.exit).toEqual({ code: 0, signal: null });
@@ -158,14 +161,17 @@ describe("michelin process", () => {
     expect(messages.indexOf("runner registered")).toBeLessThan(messages.indexOf("round claimed"));
     expect(messages.indexOf("round claimed")).toBeLessThan(messages.indexOf("execution started reported"));
     expect(runnerPaths[0]).toBe("/api/runner/register");
-    expect(runnerPaths.filter((path) => path === "/api/runner/claims")).toHaveLength(1);
-    expect(eventBodies.map((body) => body["type"])).toEqual(["execution_started", "progress", "progress", "progress", "usage_observed"]);
+    expect(messages.slice(0, messages.indexOf("engine delivered")).filter((message) => message === "round claimed")).toHaveLength(1);
+    expect(eventBodies.slice(0, 6).map((body) => body["type"])).toEqual(["execution_started", "progress", "progress", "progress", "usage_observed", "delivered"]);
+    expect(eventBodies[5]).toMatchObject({ idempotencyKey: `${claimBody.roundId}:7`, claimEpoch: 1, data: { summary: expect.any(String), criteriaAssessment: expect.any(String) } });
     expect(eventBodies[0]).toMatchObject({ type: "execution_started", idempotencyKey: `${claimBody.roundId}:0`, claimEpoch: 1 });
     expect(eventBodies[1]).toMatchObject({ idempotencyKey: `${claimBody.roundId}:1`, data: { note: "Reading the Ticket" } });
     const usage = eventBodies[4] as { idempotencyKey: string; data: { observationId: string } };
     expect(usage.idempotencyKey).toBe(usage.data.observationId);
-    expect(messages.filter((message) => message === "progress reported")).toHaveLength(3);
-    expect(messages.indexOf("usage observation reported")).toBeLessThan(messages.indexOf("engine holding"));
+    expect(messages.slice(0, messages.indexOf("engine delivered")).filter((message) => message === "progress reported")).toHaveLength(3);
+    expect(messages.indexOf("usage observation reported")).toBeLessThan(messages.indexOf("delivery reported"));
+    expect(messages.indexOf("engine delivered")).toBeLessThan(messages.lastIndexOf("round claimed"));
+    expect(messages).not.toContain("engine holding");
     expect(michelin.lines.find((line) => line["msg"] === "round claimed")).toMatchObject({
       roundId: claimBody.roundId,
       sequence: 1,
@@ -230,7 +236,7 @@ describe("michelin process", () => {
     expect(michelin.lines[0]).toMatchObject({ level: "error", msg: "invalid configuration" });
     const problems = michelin.lines[0]?.["problems"] as string[];
     expect(problems.some((problem) => problem.includes("MICHELIN_ENGINE_SCRIPT") && problem.includes("steps[1]"))).toBe(true);
-    expect(problems.some((problem) => problem.includes("steps[2]") && problem.includes("deliver") && problem.includes("M4.10"))).toBe(true);
+    expect(problems.some((problem) => problem.includes("steps[2]") && problem.includes("bodyMarkdown"))).toBe(true);
     expect(JSON.stringify(michelin.lines)).not.toContain(TOKEN.slice(4));
   }, 15_000);
 

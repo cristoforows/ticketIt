@@ -144,7 +144,7 @@ func TestOpenRoundLock_EveryMutationRejectedWhileOpenAndAcceptedOnceClosed(t *te
 				t.Fatalf("rejected %s changed state:\nbefore %+v\nafter  %+v", m.name, before, after)
 			}
 
-			deliverRoundDirect(t, f.pool, f.claim.RoundId)
+			closeRoundDirect(t, f.pool, f.claim.RoundId)
 			if rec := f.validateContract(t, call); rec.Code != http.StatusOK {
 				t.Fatalf("%s after the Round closed: status=%d body=%s", m.name, rec.Code, rec.Body.String())
 			}
@@ -202,7 +202,7 @@ func TestTicketAllowedActions_MatchCommandsWhileARoundIsOpen(t *testing.T) {
 					t.Fatalf("claimed %s, want %s", claim.Ticket.Id, id)
 				}
 				t.Cleanup(func() {
-					deliverRoundDirect(t, f.pool, claim.RoundId)
+					closeRoundDirect(t, f.pool, claim.RoundId)
 					badgeRequest(t, f.handler, f.cookie, http.MethodDelete, "/api/tickets/"+id+"/assignee", "", http.StatusOK)
 				})
 				setTicketStatusDirect(t, f.pool, ownerID, id, from)
@@ -268,7 +268,7 @@ func TestClaimAndUnassign_RaceEitherOrder(t *testing.T) {
 				t.Fatalf("trial %d: claim won but Ticket = %+v, claim = %+v", trial, ticket, claim)
 			}
 			outcomes["claim won"]++
-			deliverRoundDirect(t, f.pool, claim.RoundId)
+			f.deliverThroughAPI(t, claim.RoundId)
 			if rec := f.do(t, unassign); rec.Code != http.StatusOK {
 				t.Fatalf("unassign after the Round closed: status=%d body=%s", rec.Code, rec.Body.String())
 			}

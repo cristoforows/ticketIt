@@ -7,14 +7,14 @@ import type { Logger } from "./logger.ts";
 import { sleep } from "./statusLoop.ts";
 
 interface PendingEvent {
-  step: "start" | "progress" | "usage";
+  step: "start" | "progress" | "usage" | "deliver";
   stepIndex: number;
   event: RoundEventRequest;
   reported: string;
   context: Record<string, unknown>;
 }
 
-export type EngineOutcome = "completed" | "abandoned" | "aborted";
+export type EngineOutcome = "completed" | "delivered" | "abandoned" | "aborted";
 
 export interface EngineDeps {
   sleep: (ms: number, signal: AbortSignal) => Promise<void>;
@@ -101,6 +101,11 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
         pending = { step: "usage", stepIndex, event: envelope("usage_observed", observationId, { observationId, ...figures }), reported: "usage observation reported", context: { observationId } };
         break;
       }
+      case "deliver": {
+        const { step: _step, ...deliverable } = step;
+        pending = { step: "deliver", stepIndex, event: envelope("delivered", `${roundId}:${stepIndex}`, deliverable), reported: "delivery reported", context: {} };
+        break;
+      }
       case "wait":
         await deps.sleep(step.ms, signal);
         break;
@@ -113,6 +118,10 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
       const outcome = await sendEvent(options, deps, pending);
       if (outcome !== "sent") {
         return outcome;
+      }
+      if (pending.step === "deliver") {
+        logger.info("engine delivered", { roundId });
+        return "delivered";
       }
     }
     stepIndex++;
@@ -138,6 +147,7 @@ async function sendEvent(options: EngineOptions, deps: EngineDeps, pending: Pend
         ...context,
         ...pending.context,
         ...(result.seq === undefined ? {} : { seq: result.seq }),
+        ...(result.endedAt === undefined ? {} : { endedAt: result.endedAt }),
         httpStatus: replayed ? 200 : 201,
         replayed,
         durationMs: report.durationMs,

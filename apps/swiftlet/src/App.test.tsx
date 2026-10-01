@@ -50,6 +50,7 @@ const TICKET = {
   assigneeAgent: null,
   requestingAgentWork: false,
   openRound: null,
+  delivery: null,
   goal: "Original goal",
   context: "",
   successCriteria: "",

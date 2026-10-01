@@ -44,10 +44,12 @@ func listRoundsForTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64,
 		return nil, false, err
 	}
 	rows, err := tx.Query(ctx, `SELECT r.id, r.public_id::text, r.sequence, r.state,
-			json_build_object('id', a.public_id, 'name', a.name, 'kind', a.kind), r.claimed_at, r.started_at, r.ended_at
+			json_build_object('id', a.public_id, 'name', a.name, 'kind', a.kind), r.claimed_at, r.started_at, r.ended_at,
+			CASE WHEN d.id IS NOT NULL THEN json_build_object('bodyMarkdown', d.body_markdown, 'summary', d.summary, 'criteriaAssessment', d.criteria_assessment) END
 		FROM rounds r
 		JOIN tickets t ON t.owner_id = r.owner_id AND t.id = r.ticket_id
 		JOIN agents a ON a.owner_id = r.owner_id AND a.id = r.agent_id
+		LEFT JOIN round_deliverables d ON d.owner_id = r.owner_id AND d.round_id = r.id
 		WHERE t.owner_id = $1 AND t.public_id = $2::uuid
 		ORDER BY r.sequence DESC`, ownerID, ticketID)
 	if err != nil {
@@ -59,7 +61,7 @@ func listRoundsForTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64,
 		var id int64
 		var round TicketRound
 		var state string
-		if err := rows.Scan(&id, &round.Id, &round.Sequence, &state, &round.Agent, &round.ClaimedAt, &round.StartedAt, &round.EndedAt); err != nil {
+		if err := rows.Scan(&id, &round.Id, &round.Sequence, &state, &round.Agent, &round.ClaimedAt, &round.StartedAt, &round.EndedAt, &round.Deliverable); err != nil {
 			rows.Close()
 			return nil, false, err
 		}

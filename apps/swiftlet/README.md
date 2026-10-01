@@ -369,12 +369,9 @@ fields, and nothing else in this app reacts to it.
 explicit "Not set." placeholder for whichever are still empty (a
 title-only capture has all four empty). **Edit mode** offers `title`
 plus the four refinement fields as plain `<input>`/`<textarea>`
-elements — **stored and rendered as plain text only; this app never
-parses or renders Markdown anywhere.** Report rendering as Markdown is
-explicitly M7's, per issue #58's own scope statement; if a future
-slice renders these fields as Markdown, that must be stated explicitly
-there and handled safely, not assumed from this slice's plain-text
-choice. Each refinement field's `<textarea>` is paired with its
+elements — **stored and rendered as plain text only.** The only
+Markdown this app renders is a delivered Round's Report (issue #136,
+below); Ticket fields stay plain text. Each refinement field's `<textarea>` is paired with its
 docs/ticket-creation.md guidance prompt, shown verbatim just above it
 (`data-testid="ticket-detail-guidance-goal"` etc.) — issue #58's own
 acceptance criterion requires these to match the source document
@@ -814,6 +811,49 @@ message, cleared by the next good fetch. A `401` hands the Owner to
 sign-in. Tests: `TicketDetailPage.test.tsx` (fake timers) and
 `roundUsage.test.ts`. The estimate tag's contrast is in
 `tokens.test.ts`. Evidence: `docs/evidence/m4/135-activity-usage.md`.
+
+## Delivery and the retained result (issue #136)
+
+When Michelin delivers, Galley moves the Ticket to In Review, ends the
+Round as `delivered` and sets `Ticket.delivery` (the latest Round's
+number, Agent and `deliveredAt`; `null` before any delivery and once a
+later Round is claimed).
+
+- **Tag.** Slip (`board-delivered`) and receipt
+  (`ticket-detail-delivered`) show **Delivered by {Agent}**
+  (`DeliveredTag`, In Review's deep colour on paper) whenever
+  `delivery` is set.
+- **No reload.** The receipt fetches the Round list when the Ticket has
+  an open Round *or* a delivery. On the refresh tick whose Ticket comes
+  back delivered, it fetches the list once more in the same tick, so
+  In Review, the tag and the deliverable appear together; then
+  `openRound` is `null` and the 3 s timer stops. There is no second
+  timer. The board's existing refresh moves the slip to In Review the
+  same way.
+- **Delivered Rounds** (`ticket-detail-delivered-round`, newest first):
+  number, delivering Agent, `endedAt`, Summary, Criteria assessment,
+  the Report (`ticket-detail-delivered-body`), and the Round's activity
+  and usage.
+- **Markdown.** The Report renders with `react-markdown` (pinned
+  exactly) and `skipHtml`, with no plugins. Raw HTML is never rendered
+  and react-markdown's default URL filter blanks `javascript:`,
+  `vbscript:` and `data:` links (`ui/Markdown.test.tsx`). A blanked
+  link renders as its text. Every link opens with `target="_blank"` and
+  `rel="noopener noreferrer nofollow"`. An image is never fetched: it
+  renders as its alt text, plus its source as a link when the filter
+  passes it. `ui/Markdown.tsx` lazy-loads the renderer
+  (`ui/MarkdownRenderer.tsx`), so react-markdown's chunk loads only
+  when a Report is shown, behind a "Loading…" fallback. Typography
+  uses the order-rail tokens through `cn()`.
+- **Parsing.** `parseRound` accepts `delivered` and requires a
+  deliverable exactly when the state is `delivered`. `parseTicket`
+  requires `delivery`. Either mismatch rejects the response.
+- **Accept** is shown or refused from `allowedActions`, as before:
+  available after delivery for a Basic Ticket, refused with Galley's
+  reason for a Coding Ticket.
+
+The delivered tag's contrast is in `tokens.test.ts`. Evidence:
+`docs/evidence/m4/136-delivery.md`.
 
 ## Browser-to-backend suite
 

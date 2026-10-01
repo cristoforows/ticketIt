@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -44,6 +45,7 @@ type roundEvent struct {
 	engineReference string
 	note            string
 	usage           usageObservation
+	deliverable     RoundDeliverable
 }
 
 type lockedRound struct {
@@ -69,6 +71,10 @@ type recordedRoundEvent struct {
 
 var errRoundEventTicketNotReady = errors.New("the Ticket of a claimed Round is not Ready")
 
+func isTicketGuardFailure(err error) bool {
+	return errors.Is(err, errRoundEventTicketNotReady) || errors.Is(err, errDeliveredTicketNotInProgress)
+}
+
 func writeRoundNotFound(w http.ResponseWriter) {
 	writeError(w, http.StatusNotFound, "not_found", roundNotFoundMessage)
 }
@@ -87,6 +93,16 @@ func (s *server) ReportRoundEvent(w http.ResponseWriter, r *http.Request, roundI
 		writeRoundNotFound(w)
 		return
 	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, roundEventBodyMaxBytes+1))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", roundEventShape)
+		return
+	}
+	if len(body) > roundEventBodyMaxBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, requestTooLargeCode, roundEventBodyTooLargeMessage)
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
 	var req RoundEventRequest
 	if !decodeStrictJSON(w, r, &req, roundEventShape) {
 		return
@@ -100,8 +116,8 @@ func (s *server) ReportRoundEvent(w http.ResponseWriter, r *http.Request, roundI
 	defer cancel()
 	recorded, err := recordRoundEvent(ctx, s.pool, runner.ownerID, roundID, event, s.clockNow())
 	switch {
-	case errors.Is(err, errRoundEventTicketNotReady):
-		s.logger.Error("round event refused: the Ticket of a claimed Round is not Ready", "roundId", roundID, "eventType", event.eventType)
+	case isTicketGuardFailure(err):
+		s.logger.Error("round event refused: "+err.Error(), "roundId", roundID, "eventType", event.eventType)
 		writeError(w, http.StatusInternalServerError, "internal_error", roundEventFailedMessage)
 	case err != nil:
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", roundEventFailedMessage)
@@ -118,7 +134,7 @@ func (s *server) ReportRoundEvent(w http.ResponseWriter, r *http.Request, roundI
 
 func validateRoundEvent(req RoundEventRequest) (roundEvent, string) {
 	if !req.Type.Valid() {
-		return roundEvent{}, `"type" must be one of: execution_started, progress, usage_observed`
+		return roundEvent{}, `"type" must be one of: execution_started, progress, usage_observed, delivered`
 	}
 	if !validEventText(req.IdempotencyKey, idempotencyKeyMaxLength) {
 		return roundEvent{}, fmt.Sprintf(`"idempotencyKey" must be 1 to %d characters without control characters`, idempotencyKeyMaxLength)
@@ -146,6 +162,8 @@ func validateRoundEvent(req RoundEventRequest) (roundEvent, string) {
 		if problem == "" && event.usage.id != req.IdempotencyKey {
 			problem = `"idempotencyKey" must equal "data.observationId" for usage_observed`
 		}
+	case RoundEventDelivered:
+		event.deliverable, problem = validateDeliveredData(data)
 	}
 	if problem != "" {
 		return roundEvent{}, problem
@@ -251,6 +269,13 @@ func recordRoundEvent(ctx context.Context, pool *pgxpool.Pool, ownerID int64, ro
 			return recordedRoundEvent{found: true, rejection: &roundEventRejection{http.StatusConflict, observationIDConflictCode, observationIDConflictMessage}}, nil
 		}
 		result.StartedAt, result.ObservationId = round.startedAt.UTC(), &event.usage.id
+	case RoundEventDelivered:
+		endedAt, err := deliverRound(ctx, tx, ownerID, ticketID, round.id, event.deliverable, now)
+		if err != nil {
+			return recordedRoundEvent{}, err
+		}
+		endedAt = endedAt.UTC()
+		result.State, result.StartedAt, result.EndedAt = RoundDelivered, round.startedAt.UTC(), &endedAt
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil {
@@ -279,12 +304,12 @@ func decideRoundEvent(round lockedRound, eventType RoundEventType, claimEpoch in
 	return nil
 }
 
-// Progress and usage are facts about execution, which Galley knows began only once execution_started is recorded.
+// Progress, usage and delivery are facts about execution, which Galley knows began only once execution_started is recorded.
 func roundStateTakes(state RoundState, eventType RoundEventType) bool {
 	switch eventType {
 	case RoundEventExecutionStarted:
 		return state == RoundClaimed
-	case RoundEventProgress, RoundEventUsageObserved:
+	case RoundEventProgress, RoundEventUsageObserved, RoundEventDelivered:
 		return state == RoundRunning
 	}
 	return false

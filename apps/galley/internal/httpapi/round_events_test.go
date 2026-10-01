@@ -51,7 +51,7 @@ func (f *claimFixture) startRound(t *testing.T, claim RunnerClaim, key string) *
 func databaseSnapshot(t *testing.T, pool *pgxpool.Pool) string {
 	t.Helper()
 	var out strings.Builder
-	for _, table := range []string{"tickets", "rounds", "round_events", "round_engine_references", "round_activity", "usage_observations", "runners"} {
+	for _, table := range []string{"tickets", "rounds", "round_events", "round_engine_references", "round_activity", "usage_observations", "round_deliverables", "runners"} {
 		var rows string
 		if err := pool.QueryRow(context.Background(), `SELECT COALESCE(json_agg(row_to_json(x) ORDER BY x.id), '[]')::text FROM `+table+` x`).Scan(&rows); err != nil {
 			t.Fatal(err)
@@ -118,7 +118,7 @@ func TestRoundEvent_ExecutionStartedStartsTheRoundAndMovesTheTicketToInProgress(
 	}
 
 	ticket := f.ticket(t, queued.Id)
-	wantRound := &TicketOpenRound{Id: claim.RoundId, Sequence: 1, State: RoundRunning, Agent: claim.Agent, ClaimedAt: runnerEpoch, StartedAt: &galleyNow}
+	wantRound := &TicketOpenRound{Id: claim.RoundId, Sequence: 1, State: OpenRoundRunning, Agent: claim.Agent, ClaimedAt: runnerEpoch, StartedAt: &galleyNow}
 	if ticket.Status != InProgress || ticket.RequestingAgentWork || ticket.OpenRound == nil || ticket.OpenRound.State != wantRound.State ||
 		ticket.OpenRound.StartedAt == nil || !ticket.OpenRound.StartedAt.Equal(galleyNow) || ticket.OpenRound.Id != wantRound.Id || ticket.OpenRound.Agent != wantRound.Agent {
 		t.Fatalf("Ticket after the event: status=%s requestingAgentWork=%t openRound=%+v, want In Progress, false, %+v", ticket.Status, ticket.RequestingAgentWork, ticket.OpenRound, wantRound)
@@ -127,7 +127,7 @@ func TestRoundEvent_ExecutionStartedStartsTheRoundAndMovesTheTicketToInProgress(
 		t.Fatalf("allowedActions of a running Ticket = %+v, want none and round_open", ticket.AllowedActions)
 	}
 	listed, _, _ := badgeRequest(t, f.handler, f.cookie, http.MethodGet, "/api/tickets", "", http.StatusOK)
-	if got := decodeAs[TicketList](t, listed).Tickets[0]; got.Status != InProgress || got.OpenRound == nil || got.OpenRound.State != RoundRunning {
+	if got := decodeAs[TicketList](t, listed).Tickets[0]; got.Status != InProgress || got.OpenRound == nil || got.OpenRound.State != OpenRoundRunning {
 		t.Fatalf("listed Ticket = %s %+v, want In Progress with a running Round", got.Status, got.OpenRound)
 	}
 
@@ -261,11 +261,11 @@ func TestRoundEvent_ReplayReturnsTheOriginalResultAndChangesNothing(t *testing.T
 	if n := tableRowCount(t, f.pool, "round_engine_references"); n != 1 {
 		t.Fatalf("engine references = %d, want 1", n)
 	}
-	if got := f.ticket(t, queued.Id); got.Status != InProgress || got.OpenRound == nil || got.OpenRound.State != RoundRunning {
+	if got := f.ticket(t, queued.Id); got.Status != InProgress || got.OpenRound == nil || got.OpenRound.State != OpenRoundRunning {
 		t.Fatalf("Ticket after replays = %s %+v", got.Status, got.OpenRound)
 	}
 
-	deliverRoundDirect(t, f.pool, claim.RoundId)
+	f.deliverThroughAPI(t, claim.RoundId)
 	afterEnd := databaseSnapshot(t, f.pool)
 	rec := f.reportEvent(t, claim.RoundId, body)
 	if rec.Code != http.StatusOK || !bytes.Equal(rec.Body.Bytes(), first.Body.Bytes()) {
@@ -308,7 +308,7 @@ func TestRoundEvent_AKeyBelongsToOneRound(t *testing.T) {
 	f := newClaimFixture(t)
 	_, first := f.claimTicket(t, "First")
 	f.startRound(t, first, "shared-key")
-	deliverRoundDirect(t, f.pool, first.RoundId)
+	f.deliverThroughAPI(t, first.RoundId)
 	_, second := f.claimTicket(t, "Second")
 	rec := f.reportEvent(t, second.RoundId, startedEvent("shared-key", 1, eventOccurredAt, eventReference))
 	if rec.Code != http.StatusCreated {
@@ -331,7 +331,7 @@ func TestRoundEvent_StaleClaimEpochIsRejectedWithNoStateChange(t *testing.T) {
 	if n := tableRowCount(t, f.pool, "round_events"); n != 0 {
 		t.Fatalf("round_events rows = %d, want none for a rejected event", n)
 	}
-	if got := f.ticket(t, queued.Id); got.Status != Ready || got.OpenRound == nil || got.OpenRound.State != RoundClaimed {
+	if got := f.ticket(t, queued.Id); got.Status != Ready || got.OpenRound == nil || got.OpenRound.State != OpenRoundClaimed {
 		t.Fatalf("Ticket after stale events = %s %+v, want Ready and claimed", got.Status, got.OpenRound)
 	}
 	rec := f.reportEvent(t, claim.RoundId, startedEvent("k2", 2, eventOccurredAt, eventReference))
@@ -388,7 +388,7 @@ func TestRoundEvent_EndedAndRunningRoundsRejectNewEventsWithNoStateChange(t *tes
 		f := newClaimFixture(t)
 		_, claim := f.claimTicket(t, "Ended")
 		f.startRound(t, claim, "k0")
-		deliverRoundDirect(t, f.pool, claim.RoundId)
+		f.deliverThroughAPI(t, claim.RoundId)
 		before := databaseSnapshot(t, f.pool)
 		rec := f.reportEvent(t, claim.RoundId, startedEvent("k1", 1, eventOccurredAt, eventReference))
 		assertErrorBody(t, rec, http.StatusConflict, roundNotOpenCode, roundNotOpenMessage)
@@ -416,7 +416,7 @@ func TestRoundEvent_DecisionLadderOrder(t *testing.T) {
 		if _, err := f.pool.Exec(context.Background(), `UPDATE rounds SET claim_epoch = 2`); err != nil {
 			t.Fatal(err)
 		}
-		deliverRoundDirect(t, f.pool, claim.RoundId)
+		f.deliverThroughAPI(t, claim.RoundId)
 		rec := f.reportEvent(t, claim.RoundId, startedEvent("k", 1, eventOccurredAt, eventReference))
 		if rec.Code != http.StatusOK || !bytes.Equal(rec.Body.Bytes(), first.Body.Bytes()) {
 			t.Fatalf("replay after the epoch moved and the Round ended: status=%d body=%s, want 200 original", rec.Code, rec.Body.String())
@@ -429,13 +429,13 @@ func TestRoundEvent_DecisionLadderOrder(t *testing.T) {
 		_, claim := f.claimTicket(t, "Ladder")
 		f.startRound(t, claim, "k")
 		assertErrorBody(t, f.reportEvent(t, claim.RoundId, startedEvent("new", 9, eventOccurredAt, eventReference)), http.StatusConflict, staleClaimEpochCode, staleClaimEpochMessage)
-		deliverRoundDirect(t, f.pool, claim.RoundId)
+		f.deliverThroughAPI(t, claim.RoundId)
 		assertErrorBody(t, f.reportEvent(t, claim.RoundId, startedEvent("new", 9, eventOccurredAt, eventReference)), http.StatusConflict, staleClaimEpochCode, staleClaimEpochMessage)
 	})
 	t.Run("a Round that is not open precedes the ordering check", func(t *testing.T) {
 		f := newClaimFixture(t)
 		_, claim := f.claimTicket(t, "Ladder")
-		deliverRoundDirect(t, f.pool, claim.RoundId)
+		f.deliverThroughAPI(t, claim.RoundId)
 		assertErrorBody(t, f.reportEvent(t, claim.RoundId, startedEvent("new", 1, eventOccurredAt, eventReference)), http.StatusConflict, roundNotOpenCode, roundNotOpenMessage)
 	})
 	t.Run("authentication precedes the Round lookup", func(t *testing.T) {
@@ -573,7 +573,7 @@ func TestRoundEvent_StrictDecodeRejectsMalformedRequestsWithNoStateChange(t *tes
 		"engineReference control char": dataWith("controlled:\x07"),
 		"engineReference newline":      dataWith("controlled:\nx"),
 		"an unknown type":              with("type", "usage"),
-		"a delivered type":             with("type", "delivered"),
+		"delivered with started data":  with("type", "delivered"),
 		"a wrongly cased type":         with("type", "EXECUTION_STARTED"),
 		"an empty type":                with("type", ""),
 		"a numeric type":               with("type", 5),
@@ -661,7 +661,7 @@ func TestRoundEvent_ConcurrentIdenticalEventsApplyExactlyOnce(t *testing.T) {
 		if events, references := tableRowCount(t, f.pool, "round_events"), tableRowCount(t, f.pool, "round_engine_references"); events != 1 || references != 1 {
 			t.Fatalf("trial %d: %d events and %d references, want 1 and 1", trial, events, references)
 		}
-		if got := f.ticket(t, queued.Id); got.Status != InProgress || got.OpenRound == nil || got.OpenRound.State != RoundRunning {
+		if got := f.ticket(t, queued.Id); got.Status != InProgress || got.OpenRound == nil || got.OpenRound.State != OpenRoundRunning {
 			t.Fatalf("trial %d: Ticket = %s %+v", trial, got.Status, got.OpenRound)
 		}
 	}
@@ -777,7 +777,7 @@ func TestRoundEvent_RacingTheOwnersCommandsNeitherDeadlocksNorLeavesInconsistent
 			t.Fatalf("trial %d: reorder: status=%d body=%s", trial, reorderRec.Code, reorderRec.Body.String())
 		}
 		got := f.ticket(t, queued.Id)
-		if got.Status != InProgress || got.ArchivedAt != nil || got.Title != "Racing" || got.OpenRound == nil || got.OpenRound.State != RoundRunning || got.OpenRound.Id != claim.RoundId {
+		if got.Status != InProgress || got.ArchivedAt != nil || got.Title != "Racing" || got.OpenRound == nil || got.OpenRound.State != OpenRoundRunning || got.OpenRound.Id != claim.RoundId {
 			t.Fatalf("trial %d: Ticket = %s %+v archived=%v title=%q", trial, got.Status, got.OpenRound, got.ArchivedAt, got.Title)
 		}
 		if events, references, rounds := tableRowCount(t, f.pool, "round_events"), tableRowCount(t, f.pool, "round_engine_references"), len(roundRows(t, f.pool)); events != 1 || references != 1 || rounds != 1 {
@@ -896,7 +896,7 @@ func TestRoundEvent_AFailureAfterTheTicketGuardRollsEverythingBack(t *testing.T)
 	rec := f.reportEvent(t, claim.RoundId, startedEvent("k", 1, eventOccurredAt, eventReference))
 	assertErrorBody(t, rec, http.StatusServiceUnavailable, "database_unavailable", "failed to record the event")
 	assertSnapshotUnchanged(t, f.pool, before, "an event whose last write failed")
-	if got := f.ticket(t, queued.Id); got.Status != Ready || got.OpenRound == nil || got.OpenRound.State != RoundClaimed {
+	if got := f.ticket(t, queued.Id); got.Status != Ready || got.OpenRound == nil || got.OpenRound.State != OpenRoundClaimed {
 		t.Fatalf("Ticket = %s %+v, want Ready and claimed", got.Status, got.OpenRound)
 	}
 }
@@ -951,6 +951,11 @@ func TestDecideRoundEvent(t *testing.T) {
 		"progress on an ended Round":          {lockedRound{state: "delivered", epoch: 3}, RoundEventProgress, 3, roundNotOpenCode},
 		"usage at a stale epoch":              {open(RoundRunning, 3), RoundEventUsageObserved, 2, staleClaimEpochCode},
 		"waiting for input takes no progress": {open("waiting_for_input", 3), RoundEventProgress, 3, eventOutOfOrderCode},
+		"delivery of a running Round":         {open(RoundRunning, 3), RoundEventDelivered, 3, ""},
+		"delivery of a claimed Round":         {open(RoundClaimed, 3), RoundEventDelivered, 3, eventOutOfOrderCode},
+		"delivery while waiting for input":    {open("waiting_for_input", 3), RoundEventDelivered, 3, eventOutOfOrderCode},
+		"delivery at a stale epoch":           {open(RoundRunning, 3), RoundEventDelivered, 4, staleClaimEpochCode},
+		"a second delivery":                   {lockedRound{state: "delivered", epoch: 3}, RoundEventDelivered, 3, roundNotOpenCode},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := decideRoundEvent(tc.round, tc.eventType, tc.epoch)
@@ -978,6 +983,7 @@ func TestRoundEvent_TakesTheOwnersPriorityLockThenTheTicketRowThenTheRoundRow(t 
 		{"execution_started", false, func(*testing.T) string { return startedEvent("k", 1, eventOccurredAt, eventReference) }},
 		{"progress", true, func(t *testing.T) string { return progressEvent(t, "k", 1, eventOccurredAt, "locked") }},
 		{"usage_observed", true, func(t *testing.T) string { return usageEvent(t, observationA, 1, usageData(observationA)) }},
+		{"delivered", true, func(t *testing.T) string { return deliveredEvent(t, "k", 1, standardDeliverable()) }},
 	} {
 		for _, tc := range []step{
 			{"the Owner's priority lock comes first", "priority", "pg_advisory_xact_lock", `SELECT 1 FROM tickets WHERE public_id = $1::uuid FOR UPDATE NOWAIT`},
