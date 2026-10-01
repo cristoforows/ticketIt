@@ -815,6 +815,43 @@ sign-in. Tests: `TicketDetailPage.test.tsx` (fake timers) and
 `roundUsage.test.ts`. The estimate tag's contrast is in
 `tokens.test.ts`. Evidence: `docs/evidence/m4/135-activity-usage.md`.
 
+## Delivery and the retained result (issue #136)
+
+When Michelin delivers, Galley moves the Ticket to In Review, ends the
+Round as `delivered` and sets `Ticket.delivery` (the latest Round's
+number, Agent and `deliveredAt`; `null` before any delivery and once a
+later Round is claimed).
+
+- **Tag.** Slip (`board-delivered`) and receipt
+  (`ticket-detail-delivered`) show **Delivered by {Agent}**
+  (`DeliveredTag`, In Review's deep colour on paper) whenever
+  `delivery` is set.
+- **No reload.** The receipt fetches the Round list when the Ticket has
+  an open Round *or* a delivery. On the refresh tick whose Ticket comes
+  back delivered, it fetches the list once more in the same tick, so
+  In Review, the tag and the deliverable appear together; then
+  `openRound` is `null` and the 3 s timer stops. There is no second
+  timer. The board's existing refresh moves the slip to In Review the
+  same way.
+- **Delivered Rounds** (`ticket-detail-delivered-round`, newest first):
+  number, delivering Agent, `endedAt`, Summary, Criteria assessment,
+  the Report (`ticket-detail-delivered-body`), and the Round's activity
+  and usage.
+- **Markdown.** The Report renders with `react-markdown` (pinned
+  exactly) and `skipHtml`, with no plugins. Raw HTML is never rendered
+  and react-markdown's default URL filter blanks `javascript:`,
+  `vbscript:` and `data:` links (`ui/Markdown.test.tsx`). Typography
+  uses the order-rail tokens through `cn()`.
+- **Parsing.** `parseRound` accepts `delivered` and requires a
+  deliverable exactly when the state is `delivered`. `parseTicket`
+  requires `delivery`. Either mismatch rejects the response.
+- **Accept** is shown or refused from `allowedActions`, as before:
+  available after delivery for a Basic Ticket, refused with Galley's
+  reason for a Coding Ticket.
+
+The delivered tag's contrast is in `tokens.test.ts`. Evidence:
+`docs/evidence/m4/136-delivery.md`.
+
 ## Browser-to-backend suite
 
 The tests above stub `fetch`, so they never exercise the real proxy or

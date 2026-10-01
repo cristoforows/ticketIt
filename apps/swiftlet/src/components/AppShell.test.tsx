@@ -94,6 +94,7 @@ describe("AppShell", () => {
         assigneeAgent: null,
         requestingAgentWork: false,
         openRound: null,
+        delivery: null,
         goal: "",
         context: "",
         successCriteria: "",

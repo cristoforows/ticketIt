@@ -7,7 +7,7 @@ import { refinementGuidance } from "./refinementGuidance";
 import type { HealthView } from "./RunnerHealthPill";
 import { lockedLabel } from "./roundLock";
 import { RoundsSection, type RoundRecords } from "./RoundsSection";
-import { BadgeTag, ClaimedTag, ErrorMessage, FieldHint, FieldLabel, FieldNote, FieldValue, InlineError, LockGlyph, PrimaryButton, QueuedTag, ReceiptLine, Rule, SecondaryButton, Select, StatusTag, statusLabel, TextInput, Textarea, ticketSerial } from "./ui";
+import { BadgeTag, ClaimedTag, DeliveredTag, ErrorMessage, FieldHint, FieldLabel, FieldNote, FieldValue, InlineError, LockGlyph, PrimaryButton, QueuedTag, ReceiptLine, Rule, SecondaryButton, Select, StatusTag, statusLabel, TextInput, Textarea, ticketSerial } from "./ui";
 
 interface TicketDetailProps {
   ticket: Ticket;
@@ -178,6 +178,9 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
             {current.openRound?.state === "claimed" && (
               <ClaimedTag data-testid="ticket-detail-claimed">Claimed by runner</ClaimedTag>
             )}
+            {current.delivery && (
+              <DeliveredTag data-testid="ticket-detail-delivered">Delivered by {current.delivery.agent.name}</DeliveredTag>
+            )}
           </div>
           {archived && (
             <p data-testid="ticket-detail-archived" className="mt-3 border-2 border-status-blocked-deep p-2 text-status-blocked-deep">
@@ -214,10 +217,10 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
             <ReceiptLine label="Created" data-testid="ticket-detail-created-at">{current.createdAt}</ReceiptLine>
             <ReceiptLine label="Updated" data-testid="ticket-detail-updated-at">{current.updatedAt}</ReceiptLine>
           </dl>
-          {current.openRound && (
+          {(current.openRound || current.delivery) && (
             <>
               <Rule />
-              <RoundsSection round={current.openRound} runnerHealth={runnerHealth} records={roundRecords} />
+              <RoundsSection openRound={current.openRound} runnerHealth={runnerHealth} records={roundRecords} />
             </>
           )}
           <Rule />

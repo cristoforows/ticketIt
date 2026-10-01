@@ -84,6 +84,21 @@ function parseOpenRound(value: unknown): Ticket["openRound"] | undefined {
   };
 }
 
+function parseDelivery(value: unknown): Ticket["delivery"] | undefined {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== "object") {
+    return undefined;
+  }
+  const delivery = value as Record<string, unknown>;
+  if (typeof delivery.roundId !== "string" || typeof delivery.sequence !== "number" || !isAgentSummary(delivery.agent) || typeof delivery.deliveredAt !== "string") {
+    return undefined;
+  }
+  const agent = delivery.agent;
+  return { roundId: delivery.roundId, sequence: delivery.sequence, agent: { id: agent.id, name: agent.name, kind: agent.kind }, deliveredAt: delivery.deliveredAt };
+}
+
 function parseTicket(payload: unknown): Ticket {
   if (typeof payload !== "object" || payload === null) {
     throw new Error("Galley's response body was not a JSON object.");
@@ -94,6 +109,7 @@ function parseTicket(payload: unknown): Ticket {
   const reason = accept?.reason as Record<string, unknown> | undefined;
   const agent = record.assigneeAgent;
   const openRound = parseOpenRound(record.openRound);
+  const delivery = parseDelivery(record.delivery);
   const rejections = Array.isArray(actions?.statusChangeRejections)
     ? actions.statusChangeRejections.map((rejection: unknown) => {
       const entry = rejection as Record<string, unknown> | null;
@@ -111,6 +127,7 @@ function parseTicket(payload: unknown): Ticket {
     !(agent === null || isAgentSummary(agent)) ||
     typeof record.requestingAgentWork !== "boolean" ||
     openRound === undefined ||
+    delivery === undefined ||
     typeof record.goal !== "string" ||
     typeof record.context !== "string" ||
     typeof record.successCriteria !== "string" ||
@@ -155,6 +172,7 @@ function parseTicket(payload: unknown): Ticket {
     assigneeAgent: agent === null ? null : { id: agent.id, name: agent.name, kind: agent.kind },
     requestingAgentWork: record.requestingAgentWork,
     openRound,
+    delivery,
     badges: record.badges as Ticket["badges"],
     archivedAt: record.archivedAt,
     goal: record.goal,

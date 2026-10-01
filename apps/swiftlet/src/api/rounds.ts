@@ -7,6 +7,7 @@ export type TicketRound = components["schemas"]["TicketRound"];
 export type RoundActivityNote = components["schemas"]["RoundActivityNote"];
 export type RoundUsage = components["schemas"]["RoundUsage"];
 export type UsageCount = components["schemas"]["UsageCount"];
+export type RoundDeliverable = components["schemas"]["RoundDeliverable"];
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
@@ -34,13 +35,19 @@ function parseUsage(value: unknown): RoundUsage | undefined {
   return { observations: usage.observations, complete: usage.complete, estimated: usage.estimated, costUsd: usage.costUsd, inputTokens, outputTokens, activeMs };
 }
 
+function parseDeliverable(value: unknown): RoundDeliverable | undefined {
+  const deliverable = record(value);
+  if (!deliverable || typeof deliverable.bodyMarkdown !== "string" || typeof deliverable.summary !== "string" || typeof deliverable.criteriaAssessment !== "string") return undefined;
+  return { bodyMarkdown: deliverable.bodyMarkdown, summary: deliverable.summary, criteriaAssessment: deliverable.criteriaAssessment };
+}
+
 function parseRound(value: unknown): TicketRound | undefined {
   const round = record(value);
   if (
     !round ||
     typeof round.id !== "string" ||
     typeof round.sequence !== "number" ||
-    (round.state !== "claimed" && round.state !== "running") ||
+    (round.state !== "claimed" && round.state !== "running" && round.state !== "delivered") ||
     !isAgentSummary(round.agent) ||
     typeof round.claimedAt !== "string" ||
     !isNullableString(round.startedAt) ||
@@ -51,7 +58,8 @@ function parseRound(value: unknown): TicketRound | undefined {
   }
   const activity = round.activity.map(parseNote);
   const usage = parseUsage(round.usage);
-  if (!usage || !activity.every((note) => note !== undefined)) return undefined;
+  const deliverable = round.state === "delivered" ? parseDeliverable(round.deliverable) : round.deliverable === null ? null : undefined;
+  if (!usage || deliverable === undefined || !activity.every((note) => note !== undefined)) return undefined;
   const { id, name, kind } = round.agent;
   return {
     id: round.id,
@@ -63,6 +71,7 @@ function parseRound(value: unknown): TicketRound | undefined {
     endedAt: round.endedAt,
     activity: activity as RoundActivityNote[],
     usage,
+    deliverable,
   };
 }
 
