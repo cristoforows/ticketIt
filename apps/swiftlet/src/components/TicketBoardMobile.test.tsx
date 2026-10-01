@@ -13,6 +13,7 @@ const ticket = (id: string, status: string, statusChanges: string[] = [], archiv
   assigneeType: "",
   assigneeAgent: null,
   requestingAgentWork: false,
+  openRound: null,
   goal: "",
   context: "",
   successCriteria: "",

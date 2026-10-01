@@ -27,7 +27,7 @@ CREATE TABLE rounds (
     CONSTRAINT rounds_timestamps_ordered CHECK (started_at >= claimed_at AND ended_at >= COALESCE(started_at, claimed_at))
 );
 
--- The open states' one SQL definition; openRoundStates in rounds.go is the Go one.
+-- The open states' one SQL definition; openRoundStatesSQL in rounds.go is the Go one.
 -- waiting_for_input is M5's (#6), listed now so adding it needs no new index.
 CREATE UNIQUE INDEX rounds_one_open_per_owner ON rounds (owner_id)
     WHERE state IN ('claimed', 'running', 'waiting_for_input');

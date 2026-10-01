@@ -4,7 +4,7 @@ import { missingInputsOf, type ReadinessInput } from "../api/http";
 import type { Badge, Ticket, TicketAssignee, TicketUpdate } from "../api/tickets";
 import { assigneeLabel } from "./assignee";
 import { refinementGuidance } from "./refinementGuidance";
-import { BadgeTag, ErrorMessage, FieldHint, FieldLabel, FieldNote, FieldValue, InlineError, PrimaryButton, QueuedTag, ReceiptLine, Rule, SecondaryButton, Select, StatusTag, statusLabel, TextInput, Textarea, ticketSerial } from "./ui";
+import { BadgeTag, ClaimedTag, ErrorMessage, FieldHint, FieldLabel, FieldNote, FieldValue, InlineError, PrimaryButton, QueuedTag, ReceiptLine, Rule, SecondaryButton, Select, StatusTag, statusLabel, TextInput, Textarea, ticketSerial } from "./ui";
 
 interface TicketDetailProps {
   ticket: Ticket;
@@ -168,6 +168,9 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
             <StatusTag status={current.status} data-testid="ticket-detail-status" />
             {current.requestingAgentWork && current.assigneeAgent && (
               <QueuedTag data-testid="ticket-detail-queued">Queued for {current.assigneeAgent.name}</QueuedTag>
+            )}
+            {current.openRound?.state === "claimed" && (
+              <ClaimedTag data-testid="ticket-detail-claimed">Claimed by runner</ClaimedTag>
             )}
           </div>
           {archived && (

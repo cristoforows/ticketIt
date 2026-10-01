@@ -38,6 +38,7 @@ const textPairs: Array<[string, string, string]> = [
   ["ink on amber", "ink", "amber"],
   ["amber on ink", "amber", "ink"],
   ["queued tag: status-ready-deep on paper", "status-ready-deep", "paper"],
+  ["claimed tag: ink on paper", "ink", "paper"],
 ];
 
 // Every foreground each HealthPill variant paints (text, dot and border share it) over the surface it sits on.
