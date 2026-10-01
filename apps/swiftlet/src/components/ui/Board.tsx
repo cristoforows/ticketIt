@@ -57,9 +57,9 @@ export function SlipList({ className, ...rest }: ComponentPropsWithRef<"ul">) {
 
 function Spike() {
   return (
-    <svg aria-hidden="true" viewBox="0 0 24 32" className="archive-spike h-8 w-6 shrink-0 origin-bottom fill-current">
-      <path d="M12 0 14 22H10Z" />
-      <rect x="2" y="24" width="20" height="5" rx="1.5" />
+    <svg aria-hidden="true" viewBox="0 0 24 40" className="archive-spike h-10 w-6 shrink-0 origin-bottom fill-current">
+      <path d="M12 0C12.4 8 13.2 19 13.8 31H10.2C10.8 19 11.6 8 12 0Z" />
+      <path d="M2 39C2 33.5 6.5 30 12 30S22 33.5 22 39Z" />
     </svg>
   );
 }
