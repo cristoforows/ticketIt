@@ -54,3 +54,19 @@ export function Rail() {
 export function SlipList({ className, ...rest }: ComponentPropsWithRef<"ul">) {
   return <ul className={cn("-mt-3 flex flex-col gap-4 px-1 group-data-drop-blocked/stage:opacity-40", className)} {...rest} />;
 }
+
+export function ArchiveZone({ armed, over, className, ...rest }: ComponentPropsWithRef<"div"> & { armed: boolean; over: boolean }) {
+  return (
+    <div
+      data-armed={armed ? "true" : undefined}
+      data-over={over ? "true" : undefined}
+      className={cn(
+        "mt-2 grid min-h-20 place-items-center border-2 border-dashed border-dim px-4 py-5 text-center text-label tracking-label text-dim uppercase data-armed:border-paper data-armed:text-paper data-over:border-amber data-over:bg-amber/10 data-over:font-bold data-over:text-amber",
+        className,
+      )}
+      {...rest}
+    >
+      {over ? "▾ Release to archive" : armed ? "Drop here to archive" : "Drag a slip here to archive it"}
+    </div>
+  );
+}

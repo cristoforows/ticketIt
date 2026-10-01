@@ -1,4 +1,4 @@
-export { BoardColumn, BoardColumns, ColumnHeader, DropHint, Rail, SlipList } from "./Board";
+export { ArchiveZone, BoardColumn, BoardColumns, ColumnHeader, DropHint, Rail, SlipList } from "./Board";
 export { buttonClasses, PrimaryButton, SecondaryButton, type ButtonTone } from "./Button";
 export { Caption, capsLinkClasses } from "./Caption";
 export { cn } from "./cn";

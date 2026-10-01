@@ -49,6 +49,14 @@ describe("TicketBoard on phones", () => {
     return fetchStub;
   }
 
+  it("offers no archive drop zone, since slips are not draggable", async () => {
+    stubTickets([ticket("phone", "Backlog")]);
+    render(<TicketBoard onUnauthenticated={() => {}} />);
+    await screen.findByTestId("board-ticket-phone");
+
+    expect(screen.queryByTestId("board-archive-zone")).not.toBeInTheDocument();
+  });
+
   it("offers no edit, move or reorder on a locked slip, with Galley's reason on Edit", async () => {
     const reason = { code: "round_open", message: "this Ticket has an open Round; it can be changed once the Round ends", roundId: "r1" };
     const agent = { id: "a1", name: "Builder", kind: "coding" };

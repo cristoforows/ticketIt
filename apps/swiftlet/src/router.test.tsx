@@ -17,12 +17,20 @@ describe("router", () => {
     window.history.pushState({}, "", "/");
   });
 
-  it("reads the Backlog route from the current path", () => {
-    window.history.pushState({}, "", "/");
+  it("reads the Backlog route from /list", () => {
+    window.history.pushState({}, "", "/list");
 
     render(<RouteProbe />);
 
     expect(screen.getByTestId("route")).toHaveTextContent("backlog");
+  });
+
+  it("opens the Board at the root path", () => {
+    window.history.pushState({}, "", "/");
+
+    render(<RouteProbe />);
+
+    expect(screen.getByTestId("route")).toHaveTextContent("board");
   });
 
   it("reads a Ticket detail route, including its id, from the current path", () => {
@@ -38,7 +46,7 @@ describe("router", () => {
     render(<RouteProbe />);
     expect(screen.getByTestId("route")).toHaveTextContent("board");
 
-    act(() => navigate("/"));
+    act(() => navigate("/list"));
     expect(screen.getByTestId("route")).toHaveTextContent("backlog");
     act(() => {
       window.history.pushState({}, "", "/board");
@@ -55,12 +63,12 @@ describe("router", () => {
     expect(screen.getByTestId("route")).toHaveTextContent("agents");
   });
 
-  it("falls back to the Backlog route for any other path", () => {
+  it("falls back to the Board route for any other path", () => {
     window.history.pushState({}, "", "/something-unknown");
 
     render(<RouteProbe />);
 
-    expect(screen.getByTestId("route")).toHaveTextContent("backlog");
+    expect(screen.getByTestId("route")).toHaveTextContent("board");
   });
 
   it("does not crash on a ticket URL with malformed percent encoding", () => {
@@ -68,11 +76,11 @@ describe("router", () => {
 
     render(<RouteProbe />);
 
-    expect(screen.getByTestId("route")).toHaveTextContent("backlog");
+    expect(screen.getByTestId("route")).toHaveTextContent("board");
   });
 
   it("navigate() updates the URL and re-renders every subscriber, without a full page load", () => {
-    window.history.pushState({}, "", "/");
+    window.history.pushState({}, "", "/list");
     render(<RouteProbe />);
     expect(screen.getByTestId("route")).toHaveTextContent("backlog");
 
@@ -147,16 +155,16 @@ describe("router", () => {
   it("returns a direct detail URL without an origin to the Backlog", () => {
     window.history.pushState(null, "", "/tickets/abc-123?badgeId=first");
 
-    expect(fullPageReturnPath()).toBe("/?badgeId=first");
+    expect(fullPageReturnPath()).toBe("/list?badgeId=first");
   });
 
   it("returns a full-page Archived detail to the Archived list with its Badges", () => {
-    window.history.pushState({}, "", "/?badgeId=first&archived=true");
+    window.history.pushState({}, "", "/list?badgeId=first&archived=true");
     const href = ticketDetailPath("abc-123", "backlog");
     window.history.pushState(null, "", href);
 
     expect(href).toBe("/tickets/abc-123?badgeId=first&archived=true");
-    expect(fullPageReturnPath()).toBe("/?badgeId=first&archived=true");
+    expect(fullPageReturnPath()).toBe("/list?badgeId=first&archived=true");
   });
 
   it("keeps selected Badges across modal navigation and reacts to query changes", () => {

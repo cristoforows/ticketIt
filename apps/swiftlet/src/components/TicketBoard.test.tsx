@@ -240,6 +240,78 @@ describe("TicketBoard", () => {
     expect(screen.getByTestId("board-status-Blocked")).not.toHaveAttribute("data-drop-target", "true");
   });
 
+  describe("archive zone", () => {
+    const listResponse = (tickets: unknown[]) => ({ ok: true, status: 200, json: async () => ({ tickets }) });
+
+    it("arms while a slip is dragged, and archives the dropped slip once Galley confirms", async () => {
+      const archived = { ...ticket("dumped", "Backlog"), archivedAt: "2026-10-02T09:00:00Z" };
+      let resolveArchive!: (response: unknown) => void;
+      const fetchStub = vi.fn()
+        .mockResolvedValueOnce(listResponse([ticket("dumped", "Backlog"), ticket("kept", "Backlog")]))
+        .mockImplementationOnce(() => new Promise((resolve) => { resolveArchive = resolve; }))
+        .mockResolvedValue(listResponse([ticket("kept", "Backlog")]));
+      vi.stubGlobal("fetch", fetchStub);
+      render(<TicketBoard onUnauthenticated={() => {}} />);
+      const card = await screen.findByTestId("board-ticket-dumped");
+      const zone = screen.getByTestId("board-archive-zone");
+      expect(zone).not.toHaveAttribute("data-armed");
+
+      fireEvent.dragStart(card, { dataTransfer: { setData: vi.fn(), effectAllowed: "move" } });
+      expect(zone).toHaveAttribute("data-armed", "true");
+      fireEvent.dragOver(zone, { dataTransfer: {} });
+      expect(zone).toHaveAttribute("data-over", "true");
+      fireEvent.drop(zone, { dataTransfer: {} });
+
+      await vi.waitFor(() => expect(fetchStub).toHaveBeenCalledTimes(2));
+      expect(fetchStub).toHaveBeenLastCalledWith("/api/tickets/dumped/archive", expect.objectContaining({ method: "POST" }));
+      expect(screen.getByTestId("board-ticket-dumped")).toBeInTheDocument();
+      resolveArchive({ ok: true, status: 200, json: async () => archived });
+      await vi.waitFor(() => expect(screen.queryByTestId("board-ticket-dumped")).not.toBeInTheDocument());
+      expect(screen.getByTestId("board-ticket-kept")).toBeInTheDocument();
+      expect(zone).not.toHaveAttribute("data-armed");
+      expect(zone).not.toHaveAttribute("data-over");
+    });
+
+    it("sends nothing for a drop that is not a dragged slip", async () => {
+      stubTickets([ticket("idle", "Backlog")]);
+      render(<TicketBoard onUnauthenticated={() => {}} />);
+      await screen.findByTestId("board-ticket-idle");
+
+      fireEvent.drop(screen.getByTestId("board-archive-zone"), { dataTransfer: {} });
+
+      expect(fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops highlighting when the drag ends elsewhere", async () => {
+      stubTickets([ticket("cancelled", "Backlog")]);
+      render(<TicketBoard onUnauthenticated={() => {}} />);
+      const card = await screen.findByTestId("board-ticket-cancelled");
+      const zone = screen.getByTestId("board-archive-zone");
+
+      fireEvent.dragStart(card, { dataTransfer: { setData: vi.fn(), effectAllowed: "move" } });
+      fireEvent.dragOver(zone, { dataTransfer: {} });
+      fireEvent.dragEnd(card);
+
+      expect(zone).not.toHaveAttribute("data-armed");
+      expect(zone).not.toHaveAttribute("data-over");
+      expect(fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("shows Galley's rejection verbatim and keeps the slip on the board", async () => {
+      vi.stubGlobal("fetch", vi.fn()
+        .mockResolvedValueOnce(listResponse([ticket("stale", "Backlog")]))
+        .mockResolvedValueOnce({ ok: false, status: 409, json: async () => ({ error: { code: "round_open", message: "Galley archive rejection reason" } }) }));
+      render(<TicketBoard onUnauthenticated={() => {}} />);
+      const card = await screen.findByTestId("board-ticket-stale");
+
+      fireEvent.dragStart(card, { dataTransfer: { setData: vi.fn(), effectAllowed: "move" } });
+      fireEvent.drop(screen.getByTestId("board-archive-zone"), { dataTransfer: {} });
+
+      expect(await screen.findByTestId("ticket-board-move-error")).toHaveTextContent("Galley archive rejection reason");
+      expect(screen.getByTestId("board-status-Backlog")).toContainElement(card);
+    });
+  });
+
   it("shows Galley's rejection verbatim without moving the card", async () => {
     const original = { ...ticket("stale", "Backlog"), allowedActions: { statusChangeRejections: [], statusChanges: ["Ready"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } } } };
     vi.stubGlobal("fetch", vi.fn()

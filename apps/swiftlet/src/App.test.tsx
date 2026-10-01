@@ -130,6 +130,7 @@ describe("App", () => {
   });
 
   it("returns to sign-in when Ticket capture returns 401", async () => {
+    window.history.pushState({}, "", "/list");
     stubFetchByPath({
       "/api/session": SIGNED_IN,
       "/api/status": jsonResponse(SAMPLE_STATUS),
@@ -149,6 +150,7 @@ describe("App", () => {
   });
 
   it("returns to sign-in when the post-capture list re-fetch returns 401", async () => {
+    window.history.pushState({}, "", "/list");
     let listRequests = 0;
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
@@ -174,6 +176,7 @@ describe("App", () => {
   });
 
   it("returns to sign-in on a delayed 401 from an older list GET", async () => {
+    window.history.pushState({}, "", "/list");
     let resolveFirst!: (response: MockResponse) => void;
     const firstList = new Promise<MockResponse>((resolve) => { resolveFirst = resolve; });
     let listRequests = 0;
