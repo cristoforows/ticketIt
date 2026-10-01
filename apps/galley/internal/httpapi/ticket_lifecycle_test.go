@@ -109,6 +109,11 @@ func acceptTicketHTTP(t *testing.T, client *http.Client, baseURL, id string) lif
 	return doLifecycleRequest(t, client, http.MethodPost, baseURL+"/api/tickets/"+id+"/accept", nil)
 }
 
+func requestReworkHTTP(t *testing.T, client *http.Client, baseURL, id string) lifecycleResult {
+	t.Helper()
+	return doLifecycleRequest(t, client, http.MethodPost, baseURL+"/api/tickets/"+id+"/rework", nil)
+}
+
 func assignOwnerHTTP(t *testing.T, client *http.Client, baseURL, id string) lifecycleResult {
 	t.Helper()
 	return doLifecycleRequest(t, client, http.MethodPut, baseURL+"/api/tickets/"+id+"/assignee", AssignTicketRequest{Type: AssignTicketRequestTypeOwner})

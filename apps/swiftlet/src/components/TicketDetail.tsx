@@ -14,6 +14,7 @@ interface TicketDetailProps {
   onSave: (update: TicketUpdate) => Promise<Ticket>;
   onChangeStatus: (status: Ticket["status"]) => Promise<Ticket>;
   onAccept: () => Promise<Ticket>;
+  onRework: () => Promise<Ticket>;
   onAssign: (assignee: TicketAssignee) => Promise<Ticket>;
   onUnassign: () => Promise<Ticket>;
   onLoadAgents: () => Promise<Agent[]>;
@@ -60,7 +61,7 @@ function completionConditionLabel(condition: Ticket["completionCondition"]): str
   return condition === "reviewedPrMerge" ? "Reviewed pull request merged" : "Human acceptance";
 }
 
-export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssign, onUnassign, onLoadAgents, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge, onArchive, onRestore, onArchived, editRequested = false, runnerHealth = { kind: "loading" }, roundRecords }: TicketDetailProps) {
+export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onRework, onAssign, onUnassign, onLoadAgents, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge, onArchive, onRestore, onArchived, editRequested = false, runnerHealth = { kind: "loading" }, roundRecords }: TicketDetailProps) {
   const previousTicket = useRef(ticket);
   const [current, setCurrent] = useState(ticket);
   const [mode, setMode] = useState<"view" | "editing">(editRequested && !ticket.archivedAt && !ticket.openRound ? "editing" : "view");
@@ -155,8 +156,15 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
   const readOnly = archived || current.openRound !== null;
   const readOnlyReason = readOnly ? current.allowedActions.accept.reason?.message : undefined;
   const readyRejection = current.allowedActions.statusChangeRejections.find(({ status }) => status === "Ready");
-  const missing = new Set<ReadinessInput>([...(actionError?.missing ?? []), ...(readyRejection?.reason.missing ?? [])]);
-  const missingReasonId = actionError?.missing.length ? "ticket-detail-action-error" : "ticket-detail-status-unavailable-Ready";
+  const reworkRejection = current.allowedActions.rework.reason;
+  const reworkIncomplete = reworkRejection?.code === "agent_readiness_incomplete" ? reworkRejection : undefined;
+  const missingExplanations = [
+    { id: "ticket-detail-action-error", missing: actionError?.missing ?? [] },
+    { id: "ticket-detail-status-unavailable-Ready", missing: readyRejection?.reason.missing ?? [] },
+    { id: "ticket-detail-rework-unavailable", missing: reworkIncomplete?.missing ?? [] },
+  ];
+  const missingReasonId = missingExplanations.find(({ missing }) => missing.length > 0)?.id;
+  const missing = new Set<ReadinessInput>(missingExplanations.flatMap(({ missing }) => missing));
   const missingFor = (input: ReadinessInput) => (missing.has(input) ? missingReasonId : undefined);
   const actionErrorMessage = (control: ActionControl) => actionError?.control === control && (
     <ErrorMessage title="Could not update the ticket.">
@@ -287,6 +295,15 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
                   Accept
                 </PrimaryButton>
               )}
+              {current.allowedActions.rework.available && (
+                <PrimaryButton
+                  data-testid="ticket-detail-rework-button"
+                  onClick={() => runAction(onRework)}
+                  disabled={actionPending || readOnly}
+                >
+                  Request rework
+                </PrimaryButton>
+              )}
               {current.assigneeType !== "" && (
                 <SecondaryButton
                   data-testid="ticket-detail-unassign-button"
@@ -302,6 +319,9 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
             {actionErrorMessage("assignee")}
             {!current.allowedActions.accept.available && (
               <p data-testid="ticket-detail-accept-unavailable" className="m-0 text-muted">{current.allowedActions.accept.reason?.message}</p>
+            )}
+            {reworkIncomplete && (
+              <p id="ticket-detail-rework-unavailable" data-testid="ticket-detail-rework-unavailable" className="m-0 text-muted">{reworkIncomplete.message}</p>
             )}
             {actionErrorMessage("other")}
             <div className="flex flex-wrap gap-2">

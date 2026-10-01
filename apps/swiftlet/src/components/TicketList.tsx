@@ -3,7 +3,7 @@ import { UnauthenticatedError } from "../api/session";
 import { fetchTickets, reorderTicket, type Ticket, type TicketPlacement } from "../api/tickets";
 import { focusReorderButton, ReorderButtons, type ReorderDirection } from "./ReorderButtons";
 import { lockedLabel } from "./roundLock";
-import { sameData, useOpenRoundRefresh } from "./useOpenRoundRefresh";
+import { awaitsExecution, sameData, useExecutionRefresh } from "./useExecutionRefresh";
 import { refocusTicketRowIfFocusLost, TicketModalLink, ticketRowTestId } from "./TicketModalLink";
 import { BadgeList, EmptyMessage, ErrorMessage, LoadingMessage, LockGlyph, LogRow, LogRowMain, LogStatus, Paper, PendingTag, ReceiptTitle, Rule, ticketSerial } from "./ui";
 
@@ -46,7 +46,7 @@ export function TicketList({ onUnauthenticated, refreshKey = 0, focusTicketId, b
       });
   }, [onUnauthenticated, badgeIds.join(","), archived]);
 
-  const refreshOpenRounds = async () => {
+  const refreshExecution = async () => {
     if (pendingId) return;
     const id = ++requestId.current;
     try {
@@ -67,7 +67,7 @@ export function TicketList({ onUnauthenticated, refreshKey = 0, focusTicketId, b
       setState((current) => (current.kind === "loaded" ? { ...current, refreshError: message } : current));
     }
   };
-  useOpenRoundRefresh(state.kind === "loaded" && state.tickets.some((ticket) => ticket.openRound !== null), refreshOpenRounds);
+  useExecutionRefresh(state.kind === "loaded" && state.tickets.some(awaitsExecution), refreshExecution);
 
   useEffect(() => {
     mounted.current = true;

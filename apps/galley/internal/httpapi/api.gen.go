@@ -629,7 +629,7 @@ type RoundUsage struct {
 type RunnerClaim struct {
 	Agent TicketAssigneeAgent `json:"agent"`
 
-	// ClaimEpoch Fencing token; events must carry it with `roundId`.
+	// ClaimEpoch Fencing token; events must carry it with `roundId`. A Ticket's Rounds get increasing epochs.
 	ClaimEpoch int           `json:"claimEpoch"`
 	RoundId    string        `json:"roundId"`
 	Sequence   int           `json:"sequence"`
@@ -758,17 +758,10 @@ type Ticket struct {
 	UpdatedAt string `json:"updatedAt"`
 }
 
-// TicketAcceptAvailability defines model for TicketAcceptAvailability.
-type TicketAcceptAvailability struct {
-	Available bool `json:"available"`
-
-	// Reason Required when unavailable; absent when available. Matches the Accept command's error.
-	Reason *ErrorDetail `json:"reason,omitempty"`
-}
-
 // TicketAllowedActions defines model for TicketAllowedActions.
 type TicketAllowedActions struct {
-	Accept TicketAcceptAvailability `json:"accept"`
+	Accept TicketCommandAvailability `json:"accept"`
+	Rework TicketCommandAvailability `json:"rework"`
 
 	// StatusChangeRejections Targets D3 S2's table permits from the current Status that this Ticket's Agent assignment or missing inputs rule out, each with the status command's error.
 	StatusChangeRejections []TicketStatusChangeRejection `json:"statusChangeRejections"`
@@ -793,6 +786,14 @@ type TicketAssigneeType string
 type TicketBadge struct {
 	Id   string `json:"id"`
 	Name string `json:"name"`
+}
+
+// TicketCommandAvailability defines model for TicketCommandAvailability.
+type TicketCommandAvailability struct {
+	Available bool `json:"available"`
+
+	// Reason Required when unavailable; absent when available. Matches the command's error.
+	Reason *ErrorDetail `json:"reason,omitempty"`
 }
 
 // TicketCompletionCondition The condition that completes a Ticket (CONTEXT.md, "Done"): human acceptance, or merging its reviewed pull request. Derived from the Ticket's Template default exactly once, at creation (issue #59, D3) -- there is no request field or operation anywhere in this contract that sets or changes it directly. Assignment, reassignment, and editing any other field never change it.
@@ -1188,6 +1189,9 @@ type ServerInterface interface {
 	// RestoreTicket Restore an archived Ticket
 	// (POST /api/tickets/{id}/restore)
 	RestoreTicket(w http.ResponseWriter, r *http.Request, id string)
+	// RequestTicketRework Return an In Review Ticket to Ready for another Round
+	// (POST /api/tickets/{id}/rework)
+	RequestTicketRework(w http.ResponseWriter, r *http.Request, id string)
 	// ListTicketRounds List a Ticket's Rounds
 	// (GET /api/tickets/{id}/rounds)
 	ListTicketRounds(w http.ResponseWriter, r *http.Request, id string)
@@ -1892,6 +1896,32 @@ func (siw *ServerInterfaceWrapper) RestoreTicket(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// RequestTicketRework operation middleware
+func (siw *ServerInterfaceWrapper) RequestTicketRework(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RequestTicketRework(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListTicketRounds operation middleware
 func (siw *ServerInterfaceWrapper) ListTicketRounds(w http.ResponseWriter, r *http.Request) {
 
@@ -2075,6 +2105,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/api/tickets/{id}", wrapper.UpdateTicket)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/status", wrapper.ChangeTicketStatus)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/accept", wrapper.AcceptTicket)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/rework", wrapper.RequestTicketRework)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/tickets/{id}/assignee", wrapper.UnassignTicket)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/tickets/{id}/assignee", wrapper.AssignTicket)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/badges", wrapper.ListBadges)

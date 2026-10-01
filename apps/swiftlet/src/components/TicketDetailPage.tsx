@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { UnauthenticatedError } from "../api/session";
 import {
   fetchTicket,
   updateTicket,
   changeTicketStatus,
   acceptTicket,
+  requestTicketRework,
   assignTicket,
   unassignTicket,
   createBadge,
@@ -27,7 +28,7 @@ import type { RoundRecords } from "./RoundsSection";
 import { useRunnerHealth } from "./RunnerHealthPill";
 import { TicketDetail } from "./TicketDetail";
 import { capsLinkClasses, EmptyMessage, ErrorMessage, LoadingMessage, Paper } from "./ui";
-import { sameData, useOpenRoundRefresh } from "./useOpenRoundRefresh";
+import { awaitsExecution, sameData, useExecutionRefresh } from "./useExecutionRefresh";
 
 interface TicketDetailPageProps {
   ticketId: string;
@@ -48,6 +49,7 @@ const hasRounds = (ticket: Ticket) => ticket.openRound !== null || ticket.delive
 export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "page", onCommandSucceeded, onArchiveSucceeded }: TicketDetailPageProps) {
   const [state, setState] = useState<DetailState>({ kind: "loading" });
   const [roundRecords, setRoundRecords] = useState<RoundRecords & { ticketId?: string }>({});
+  const latestTicketRequest = useRef(0);
   const editRequested = useEditRequested();
 
   const loaded = state.kind === "loaded";
@@ -71,15 +73,19 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
   };
 
   const refreshTicket = async () => {
+    const id = ++latestTicketRequest.current;
+    const isCurrent = () => id === latestTicketRequest.current;
     try {
       const ticket = await fetchTicket(ticketId);
+      if (!isCurrent()) return;
       setState((current) => {
         if (current.kind !== "loaded" || current.ticket.id !== ticket.id) return current;
         if (sameData(current.ticket, ticket)) return current.refreshError === undefined ? current : { kind: "loaded", ticket: current.ticket };
         return { kind: "loaded", ticket };
       });
-      if (hasRounds(ticket)) await loadRounds();
+      if (hasRounds(ticket)) await loadRounds(isCurrent);
     } catch (error) {
+      if (!isCurrent()) return;
       if (error instanceof UnauthenticatedError) {
         onUnauthenticated();
         return;
@@ -88,7 +94,7 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
       setState((current) => (current.kind === "loaded" ? { ...current, refreshError: message } : current));
     }
   };
-  useOpenRoundRefresh(hasOpenRound, refreshTicket);
+  useExecutionRefresh(state.kind === "loaded" && awaitsExecution(state.ticket), refreshTicket);
 
   useEffect(() => {
     if (!loaded || !editRequested) return;
@@ -131,6 +137,8 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
   async function runCommand(command: () => Promise<Ticket>): Promise<Ticket> {
     try {
       const ticket = await command();
+      latestTicketRequest.current++;
+      setState((current) => (current.kind === "loaded" && current.ticket.id === ticket.id ? { ...current, ticket } : current));
       onCommandSucceeded?.();
       return ticket;
     } catch (error) {
@@ -149,6 +157,10 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
 
   function accept(): Promise<Ticket> {
     return runCommand(() => acceptTicket(ticketId));
+  }
+
+  function rework(): Promise<Ticket> {
+    return runCommand(() => requestTicketRework(ticketId));
   }
 
   function assign(assignee: TicketAssignee): Promise<Ticket> {
@@ -192,6 +204,7 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
       onSave={saveTicket}
       onChangeStatus={changeStatus}
       onAccept={accept}
+      onRework={rework}
       onAssign={assign}
       onUnassign={unassign}
       onLoadAgents={loadAgents}

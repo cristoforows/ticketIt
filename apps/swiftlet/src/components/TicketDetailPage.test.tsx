@@ -18,7 +18,7 @@ const TICKET = {
   id: TICKET_ID,
   title: "Write the report",
   status: "Backlog",
-  allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } } },
+  allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } },
   template: "Basic",
   completionCondition: "humanAcceptance",
   assigneeType: "",
@@ -92,7 +92,7 @@ describe("TicketDetailPage", () => {
   it("rejects a Ticket missing Galley's allowed actions or an unavailable Accept reason", async () => {
     for (const payload of [
       { ...TICKET, allowedActions: undefined },
-      { ...TICKET, allowedActions: { statusChangeRejections: [], statusChanges: ["Ready"], accept: { available: false } } },
+      { ...TICKET, allowedActions: { statusChangeRejections: [], statusChanges: ["Ready"], accept: { available: false }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } } },
     ]) {
       stubFetch(jsonResponse(payload));
       const { unmount } = render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
@@ -184,6 +184,12 @@ describe("TicketDetailPage", () => {
     { name: "statusChangeRejections that are not a list", change: { allowedActions: { ...TICKET.allowedActions, statusChangeRejections: {} } } },
     { name: "a rejection with no reason", change: { allowedActions: { ...TICKET.allowedActions, statusChangeRejections: [{ status: "Ready" }] } } },
     { name: "a missing input outside the contract", change: { allowedActions: { ...TICKET.allowedActions, statusChangeRejections: [{ status: "Ready", reason: { code: "agent_readiness_incomplete", message: "m", missing: ["title"] } }] } } },
+    ...["accept", "rework"].flatMap((command) => [
+      { name: `${command} available with a reason`, change: { allowedActions: { ...TICKET.allowedActions, [command]: { available: true, reason: { code: "x", message: "m" } } } } },
+      { name: `${command} unavailable without a reason`, change: { allowedActions: { ...TICKET.allowedActions, [command]: { available: false } } } },
+      { name: `${command} with a malformed reason`, change: { allowedActions: { ...TICKET.allowedActions, [command]: { available: false, reason: { code: "x" } } } } },
+      { name: `${command} with a missing input outside the contract`, change: { allowedActions: { ...TICKET.allowedActions, [command]: { available: false, reason: { code: "x", message: "m", missing: ["title"] } } } } },
+    ]),
   ])("rejects a Ticket response with $name", async ({ change }) => {
     stubFetch(jsonResponse({ ...TICKET, ...change }));
     render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
@@ -272,7 +278,7 @@ describe("TicketDetailPage", () => {
 
     it("renders the receipt read-only with the lock copy from Galley's openRound", async () => {
       const reason = { code: "round_open", message: "this Ticket has an open Round; it can be changed once the Round ends", roundId: claimedRound.id };
-      stubFetch(jsonResponse({ ...claimed, openRound: { ...claimedRound, sequence: 2 }, allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason } } }));
+      stubFetch(jsonResponse({ ...claimed, openRound: { ...claimedRound, sequence: 2 }, allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } } }));
       render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
       expect(await screen.findByTestId("ticket-detail-locked")).toHaveTextContent("Locked while atlas works on Round 2");
       for (const name of ["Edit", "Archive", "Add badge", "Unassign", "Assign"]) {
@@ -295,10 +301,10 @@ describe("TicketDetailPage", () => {
     });
   });
 
-  describe("refreshing while the Ticket has an open Round", () => {
+  describe("refreshing while execution may change the Ticket", () => {
     const agent = { id: AGENTS[0].id, name: "atlas", kind: "research" };
     const round = { id: "66666666-6666-4666-8666-666666666666", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null };
-    const lockedActions = { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: round.id } } };
+    const lockedActions = { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: round.id } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } };
     const claimed = { ...TICKET, status: "Ready", assigneeType: "agent", assigneeAgent: agent, openRound: round, allowedActions: lockedActions };
     const running = { ...claimed, status: "InProgress", openRound: { ...round, state: "running", startedAt: "2026-10-01T10:00:05Z" }, updatedAt: "2026-10-01T10:00:05Z" };
     const closed = { ...TICKET, status: "InReview", assigneeType: "agent", assigneeAgent: agent, updatedAt: "2026-10-01T10:05:00Z" };
@@ -322,6 +328,7 @@ describe("TicketDetailPage", () => {
       usage,
       deliverable: null,
     });
+    const claimedRecord = { ...record(), state: "claimed", startedAt: null };
     const roundsOf = (...records: unknown[]) => () => Promise.resolve(jsonResponse({ rounds: records }));
 
     function stubRound(tickets: (() => Promise<MockResponse>)[], health: () => MockResponse = () => jsonResponse(CONNECTED), rounds: (() => Promise<MockResponse>)[] = [roundsOf(record())]) {
@@ -344,11 +351,11 @@ describe("TicketDetailPage", () => {
     const roundFetches = (fetchMock: ReturnType<typeof stubRound>) => fetchMock.mock.calls.filter(([path]) => String(path) === `/api/tickets/${TICKET_ID}/rounds`).length;
 
     it("refetches every 3 seconds and shows what Galley now reports, never returning to the loading state", async () => {
-      const fetchMock = stubRound([answer(claimed), answer(running)]);
+      const fetchMock = stubRound([answer(claimed), answer(running)], undefined, [roundsOf(claimedRecord), roundsOf(record())]);
       render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
       await flush();
       expect(screen.getByTestId("ticket-detail-claimed")).toBeInTheDocument();
-      expect(screen.getByTestId("ticket-detail-round-waiting")).toBeInTheDocument();
+      expect(screen.getByTestId("ticket-detail-round-state")).toHaveTextContent("Claimed, waiting for the runner to start");
       expect(ticketFetches(fetchMock)).toBe(1);
 
       await flush(2999);
@@ -359,7 +366,7 @@ describe("TicketDetailPage", () => {
       expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("In Progress");
       expect(screen.getByTestId("ticket-detail-round-started")).toHaveTextContent("2026-10-01T10:00:05Z");
       expect(screen.queryByTestId("ticket-detail-claimed")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("ticket-detail-round-waiting")).not.toBeInTheDocument();
+      expect(screen.getByTestId("ticket-detail-round-state")).toHaveTextContent("Running");
 
       await flush(3000);
       expect(ticketFetches(fetchMock)).toBe(3);
@@ -368,12 +375,12 @@ describe("TicketDetailPage", () => {
 
     it("keeps showing the previous receipt while a refetch is pending", async () => {
       let release: (response: MockResponse) => void = () => {};
-      stubRound([answer(claimed), () => new Promise<MockResponse>((resolve) => { release = resolve; })]);
+      stubRound([answer(claimed), () => new Promise<MockResponse>((resolve) => { release = resolve; })], undefined, [roundsOf(claimedRecord), roundsOf(record())]);
       render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
       await flush();
       await flush(3000);
       expect(screen.queryByTestId("ticket-detail-loading")).not.toBeInTheDocument();
-      expect(screen.getByTestId("ticket-detail-round-waiting")).toBeInTheDocument();
+      expect(screen.getByTestId("ticket-detail-round-state")).toHaveTextContent("Claimed, waiting for the runner to start");
       release(jsonResponse(running));
       await flush();
       expect(screen.getByTestId("ticket-detail-round-started")).toBeInTheDocument();
@@ -403,10 +410,50 @@ describe("TicketDetailPage", () => {
       expect(vi.getTimerCount()).toBe(0);
     });
 
+    it("refetches a queued Ticket that has no open Round, and stops once it is neither queued nor claimed", async () => {
+      const queued = { ...TICKET, status: "Ready", assigneeType: "agent", assigneeAgent: agent, requestingAgentWork: true };
+      const fetchMock = stubRound([answer(queued), answer(queued), answer({ ...queued, requestingAgentWork: false, status: "Backlog" })]);
+      render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+      await flush();
+      expect(ticketFetches(fetchMock)).toBe(1);
+      await flush(3000);
+      expect(ticketFetches(fetchMock)).toBe(2);
+      await flush(3000);
+      expect(ticketFetches(fetchMock)).toBe(3);
+      expect(screen.queryByTestId("ticket-detail-queued")).not.toBeInTheDocument();
+
+      await flush(120_000);
+      expect(ticketFetches(fetchMock)).toBe(3);
+      expect(healthFetches(fetchMock)).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("keeps a command's Ticket when an earlier refetch resolves after it", async () => {
+      const queued = { ...TICKET, status: "Ready", assigneeType: "agent", assigneeAgent: agent, requestingAgentWork: true, allowedActions: { ...TICKET.allowedActions, statusChanges: ["Backlog"] } };
+      const backlog = { ...TICKET, assigneeType: "agent", assigneeAgent: agent, updatedAt: "2026-10-01T10:00:04Z" };
+      let release: (response: MockResponse) => void = () => {};
+      const fetchMock = stubRound([answer(queued), () => new Promise<MockResponse>((resolve) => { release = resolve; })]);
+      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) =>
+        String(input) === `/api/tickets/${TICKET_ID}/status` ? Promise.resolve(jsonResponse(backlog)) : fetchMock(input)));
+      render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+      await flush();
+      await flush(3000);
+      expect(ticketFetches(fetchMock)).toBe(2);
+
+      fireEvent.click(screen.getByTestId("ticket-detail-status-button-Backlog"));
+      await flush();
+      expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("Backlog");
+
+      release(jsonResponse(queued));
+      await flush();
+      expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("Backlog");
+      expect(screen.queryByTestId("ticket-detail-queued")).not.toBeInTheDocument();
+    });
+
     describe("delivery", () => {
       const deliverable = { bodyMarkdown: "# Result\n\n- Found the cause\n", summary: "Found the cause.", criteriaAssessment: "A written cause: met." };
       const delivery = { roundId: round.id, sequence: 1, agent, deliveredAt: "2026-10-01T10:00:09Z" };
-      const delivered = { ...running, status: "InReview", openRound: null, delivery, updatedAt: "2026-10-01T10:00:09Z", allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: true } } };
+      const delivered = { ...running, status: "InReview", openRound: null, delivery, updatedAt: "2026-10-01T10:00:09Z", allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: true }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } } };
       const deliveredRecord = { ...record([{ seq: 1, note: "Reading the Ticket", occurredAt: "2026-10-01T10:00:06Z" }]), state: "delivered", endedAt: "2026-10-01T10:00:09Z", deliverable };
 
       it("picks up In Review, the delivering Agent and the deliverable on the same tick, then stops refreshing", async () => {
@@ -414,7 +461,7 @@ describe("TicketDetailPage", () => {
         render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
         await flush();
         expect(screen.getByTestId("ticket-detail-round-started")).toBeInTheDocument();
-        expect(screen.queryByTestId("ticket-detail-delivered-round")).not.toBeInTheDocument();
+        expect(screen.getByTestId("ticket-detail-round-state")).toHaveTextContent("Running");
 
         await flush(3000);
         expect(ticketFetches(fetchMock)).toBe(2);
@@ -422,15 +469,15 @@ describe("TicketDetailPage", () => {
         expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("In Review");
         expect(screen.getByTestId("ticket-detail-delivered")).toHaveTextContent("Delivered by atlas");
         expect(screen.queryByTestId("ticket-detail-locked")).not.toBeInTheDocument();
-        expect(screen.queryByTestId("ticket-detail-round-started")).not.toBeInTheDocument();
-        const receipt = within(screen.getByTestId("ticket-detail-delivered-round"));
-        expect(receipt.getByTestId("ticket-detail-delivered-agent")).toHaveTextContent("atlas");
-        expect(receipt.getByTestId("ticket-detail-delivered-at")).toHaveTextContent("2026-10-01T10:00:09Z");
-        expect(receipt.getByTestId("ticket-detail-delivered-summary")).toHaveTextContent("Found the cause.");
-        expect(receipt.getByTestId("ticket-detail-delivered-assessment")).toHaveTextContent("A written cause: met.");
+        const receipt = within(screen.getByTestId("ticket-detail-round"));
+        expect(receipt.getByTestId("ticket-detail-round-state")).toHaveTextContent("Delivered by atlas");
+        expect(receipt.getByTestId("ticket-detail-round-agent")).toHaveTextContent("atlas");
+        expect(receipt.getByTestId("ticket-detail-round-delivered-at")).toHaveTextContent("2026-10-01T10:00:09Z");
+        expect(receipt.getByTestId("ticket-detail-round-summary")).toHaveTextContent("Found the cause.");
+        expect(receipt.getByTestId("ticket-detail-round-assessment")).toHaveTextContent("A written cause: met.");
         await reportRendererLoaded();
-        expect(within(receipt.getByTestId("ticket-detail-delivered-body")).getByRole("heading", { level: 1, name: "Result" })).toBeInTheDocument();
-        expect(receipt.getAllByTestId("ticket-detail-delivered-note").map((item) => item.textContent)).toEqual(["2026-10-01T10:00:06ZReading the Ticket"]);
+        expect(within(receipt.getByTestId("ticket-detail-round-body")).getByRole("heading", { level: 1, name: "Result" })).toBeInTheDocument();
+        expect(receipt.getAllByTestId("ticket-detail-round-note").map((item) => item.textContent)).toEqual(["2026-10-01T10:00:06ZReading the Ticket"]);
         expect(screen.getByTestId("ticket-detail-accept-button")).toBeEnabled();
 
         await flush(120_000);
@@ -443,7 +490,7 @@ describe("TicketDetailPage", () => {
         const fetchMock = stubRound([answer(delivered)], undefined, [roundsOf(deliveredRecord)]);
         render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
         await flush();
-        expect(screen.getByTestId("ticket-detail-delivered-summary")).toHaveTextContent("Found the cause.");
+        expect(screen.getByTestId("ticket-detail-round-summary")).toHaveTextContent("Found the cause.");
         await flush(60_000);
         expect(ticketFetches(fetchMock)).toBe(1);
         expect(roundFetches(fetchMock)).toBe(1);
@@ -460,7 +507,7 @@ describe("TicketDetailPage", () => {
         render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
         await flush();
         expect(screen.getByTestId("ticket-detail-round-records-error")).toHaveTextContent("missing a required field");
-        expect(screen.queryByTestId("ticket-detail-delivered-round")).not.toBeInTheDocument();
+        expect(screen.queryByTestId("ticket-detail-round")).not.toBeInTheDocument();
       });
 
       it.each([
@@ -472,6 +519,63 @@ describe("TicketDetailPage", () => {
         render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
         await flush();
         expect(screen.getByTestId("ticket-detail-error-message")).toHaveTextContent("missing a required field");
+      });
+
+      describe("rework", () => {
+        const reviewable = { ...delivered, allowedActions: { ...delivered.allowedActions, rework: { available: true } } };
+        const queuedAgain = { ...delivered, status: "Ready", requestingAgentWork: true, allowedActions: { statusChanges: [], statusChangeRejections: [], accept: delivered.allowedActions.accept, rework: delivered.allowedActions.rework } };
+        const round2 = { ...round, id: "88888888-8888-4888-8888-888888888888", sequence: 2 };
+        const claimed2 = { ...queuedAgain, requestingAgentWork: false, delivery: null, openRound: round2, allowedActions: lockedActions };
+        const running2 = { ...claimed2, status: "InProgress", openRound: { ...round2, state: "running", startedAt: "2026-10-01T10:10:05Z" } };
+        const deliveredTwo = { ...reviewable, delivery: { ...delivery, roundId: round2.id, sequence: 2, deliveredAt: "2026-10-01T10:10:09Z" } };
+        const record2 = (fields: Record<string, unknown>) => ({ ...record(), ...round2, state: "running", startedAt: "2026-10-01T10:10:05Z", ...fields });
+        const delivered2 = record2({ state: "delivered", endedAt: "2026-10-01T10:10:09Z", deliverable: { ...deliverable, summary: "Second pass." } });
+
+        it("goes from In Review to a second delivered Round, keeping the first listed and collapsed", async () => {
+          const fetchMock = stubRound(
+            [answer(reviewable), answer(queuedAgain), answer(claimed2), answer(running2), answer(deliveredTwo)],
+            undefined,
+            [roundsOf(deliveredRecord), roundsOf(deliveredRecord), roundsOf(record2({ state: "claimed", startedAt: null }), deliveredRecord), roundsOf(record2({}), deliveredRecord), roundsOf(delivered2, deliveredRecord)],
+          );
+          const posts = vi.fn();
+          vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+            if (String(input) !== `/api/tickets/${TICKET_ID}/rework`) return fetchMock(input);
+            posts(init?.method);
+            return Promise.resolve(jsonResponse(queuedAgain));
+          }));
+          render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+          await flush(10_000);
+          expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("In Review");
+
+          fireEvent.click(screen.getByTestId("ticket-detail-rework-button"));
+          await flush();
+          expect(posts).toHaveBeenCalledWith("POST");
+          expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("Ready");
+          expect(screen.getByTestId("ticket-detail-queued")).toHaveTextContent("Queued for atlas");
+          expect(screen.getAllByTestId("ticket-detail-round")).toHaveLength(1);
+
+          await flush(3000);
+          expect(screen.getByTestId("ticket-detail-queued")).toBeInTheDocument();
+          await flush(3000);
+          expect(screen.getByTestId("ticket-detail-claimed")).toBeInTheDocument();
+          expect(screen.getAllByTestId("ticket-detail-round").map((entry) => entry.getAttribute("data-round-id"))).toEqual([round2.id, round.id]);
+          expect(within(screen.getAllByTestId("ticket-detail-round")[0]).getByTestId("ticket-detail-round-state")).toHaveTextContent("Claimed, waiting for the runner to start");
+
+          await flush(3000);
+          expect(within(screen.getAllByTestId("ticket-detail-round")[0]).getByTestId("ticket-detail-round-state")).toHaveTextContent("Running");
+
+          await flush(3000);
+          await reportRendererLoaded();
+          const entries = screen.getAllByTestId("ticket-detail-round");
+          expect(entries.map((entry) => entry.getAttribute("data-round-id"))).toEqual([round2.id, round.id]);
+          expect(entries.map((entry) => (entry.querySelector("details") as HTMLDetailsElement).open)).toEqual([true, false]);
+          expect(within(entries[0]).getByTestId("ticket-detail-round-summary")).toHaveTextContent("Second pass.");
+          expect(within(entries[1]).getByTestId("ticket-detail-round-summary")).toHaveTextContent("Found the cause.");
+          expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("In Review");
+
+          await flush(120_000);
+          expect(vi.getTimerCount()).toBe(0);
+        });
       });
     });
 
@@ -489,23 +593,24 @@ describe("TicketDetailPage", () => {
       const { unmount } = render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
       await flush();
       unmount();
+      await flush();
       expect(vi.getTimerCount()).toBe(0);
       await flush(60_000);
       expect(ticketFetches(fetchMock)).toBe(1);
     });
 
     it("keeps the receipt and says the refresh failed, then clears the note once a refetch succeeds", async () => {
-      stubRound([answer(claimed), answer({ error: { code: "database_unavailable", message: "x" } }, 503), answer(claimed), answer(running)]);
+      stubRound([answer(claimed), answer({ error: { code: "database_unavailable", message: "x" } }, 503), answer(claimed), answer(running)], undefined, [roundsOf(claimedRecord), roundsOf(claimedRecord), roundsOf(record())]);
       render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
       await flush();
       await flush(3000);
       expect(screen.getByTestId("ticket-detail-refresh-error")).toBeInTheDocument();
       expect(screen.getByTestId("ticket-detail-refresh-error-message")).toHaveTextContent("Galley returned an error response: 503");
-      expect(screen.getByTestId("ticket-detail-round-waiting")).toBeInTheDocument();
+      expect(screen.getByTestId("ticket-detail-round-state")).toHaveTextContent("Claimed, waiting for the runner to start");
 
       await flush(3000);
       expect(screen.queryByTestId("ticket-detail-refresh-error")).not.toBeInTheDocument();
-      expect(screen.getByTestId("ticket-detail-round-waiting")).toBeInTheDocument();
+      expect(screen.getByTestId("ticket-detail-round-state")).toHaveTextContent("Claimed, waiting for the runner to start");
 
       await flush(3000);
       expect(screen.getByTestId("ticket-detail-round-started")).toBeInTheDocument();
@@ -579,12 +684,14 @@ describe("TicketDetailPage", () => {
         }
       });
 
-      it("shows the open Round's record, not another Round's", async () => {
+      it("shows each Round's own activity under that Round", async () => {
         const ended = { ...record([note(1, "An earlier Round")]), id: "77777777-7777-4777-8777-777777777777", sequence: 0, endedAt: "2026-10-01T09:00:00Z" };
-        stubRound([answer(running)], undefined, [roundsOf(ended, record([note(1, "This Round")]))]);
+        stubRound([answer(running)], undefined, [roundsOf(record([note(1, "This Round")]), ended)]);
         render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
         await flush();
-        expect(notes()).toEqual(["2026-10-01T10:00:01ZThis Round"]);
+        const [current, earlier] = screen.getAllByTestId("ticket-detail-round");
+        expect(within(current).getAllByTestId("ticket-detail-round-note").map((item) => item.textContent)).toEqual(["2026-10-01T10:00:01ZThis Round"]);
+        expect(within(earlier).getAllByTestId("ticket-detail-round-note").map((item) => item.textContent)).toEqual(["2026-10-01T10:00:01ZAn earlier Round"]);
       });
 
       it("keeps the last activity when a refresh fails, says so, and clears the note once one succeeds", async () => {

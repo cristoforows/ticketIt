@@ -15,6 +15,8 @@ import (
 // Callers match on this code, not on message text.
 const invalidTransitionCode = "invalid_transition"
 
+const reworkNotAvailableCode = "rework_not_available"
+
 // reviewedPrMergeNotImplementedCode stays distinct from
 // invalidTransitionCode so a caller can tell "wrong state" apart from
 // "right state, but this condition cannot complete yet" -- a
@@ -110,6 +112,24 @@ func decideAccept(current TicketStatus, condition TicketCompletionCondition) *tr
 	return nil
 }
 
+func decideRework(state ticketWorkflowState) *transitionRejection {
+	switch {
+	case state.archived:
+		return &transitionRejection{code: reworkNotAvailableCode, message: "Rework is not available on an archived Ticket"}
+	case !state.agentAssigned():
+		return &transitionRejection{code: reworkNotAvailableCode, message: "Rework needs an Agent-assigned Ticket"}
+	case state.status != InReview:
+		return &transitionRejection{
+			code:    reworkNotAvailableCode,
+			message: fmt.Sprintf("Rework needs a Ticket in In Review (current status %s)", state.status),
+		}
+	case state.openRoundID != "":
+		return &transitionRejection{code: reworkNotAvailableCode, message: "Rework is not available while the Ticket has an open Round", roundID: state.openRoundID}
+	}
+	state.status = Ready
+	return decideAgentReadiness(state)
+}
+
 func containsStatus(statuses []TicketStatus, target TicketStatus) bool {
 	for _, s := range statuses {
 		if s == target {
@@ -122,10 +142,13 @@ func containsStatus(statuses []TicketStatus, target TicketStatus) bool {
 var statusTargets = []TicketStatus{Backlog, Ready, InProgress, Blocked, InReview, Done}
 
 func allowedActionsForTicket(state ticketWorkflowState, condition TicketCompletionCondition) TicketAllowedActions {
-	actions := TicketAllowedActions{StatusChanges: []TicketStatus{}, StatusChangeRejections: []TicketStatusChangeRejection{}}
+	actions := TicketAllowedActions{
+		StatusChanges:          []TicketStatus{},
+		StatusChangeRejections: []TicketStatusChangeRejection{},
+		Rework:                 commandAvailability(decideRework(state)),
+	}
 	if rejection := decideTicketMutation(state.ticketLock, false); rejection != nil {
-		detail := rejection.detail()
-		actions.Accept.Reason = &detail
+		actions.Accept = commandAvailability(rejection)
 		return actions
 	}
 	for _, target := range statusTargets {
@@ -137,35 +160,60 @@ func allowedActionsForTicket(state ticketWorkflowState, condition TicketCompleti
 			actions.StatusChangeRejections = append(actions.StatusChangeRejections, TicketStatusChangeRejection{Status: target, Reason: rejection.detail()})
 		}
 	}
-	if rejection := decideAccept(state.status, condition); rejection != nil {
-		detail := rejection.detail()
-		actions.Accept.Reason = &detail
-	} else {
-		actions.Accept.Available = true
-	}
+	actions.Accept = commandAvailability(decideAccept(state.status, condition))
 	return actions
 }
 
-// applyTicketTransition validates and applies a Status transition
-// against a Ticket's PERSISTED current Status. The FOR UPDATE row
-// lock is what stops two concurrent conflicting requests both
-// applying: the second blocks until the first commits, then
-// re-evaluates decide against the already-changed Status rather than
-// the value it started with.
-//
-// decide alone chooses the destination Status; this function only
-// writes what the closure returned. It creates no Round, work
-// request, or queue entry -- see
-// TestManualLifecycleActionsCreateNoExecutionRecords.
-//
-// Every transition takes the Owner's priority lock first, since any of
-// them may enter Ready and move the Ticket to the bottom of the order.
+func commandAvailability(rejection *transitionRejection) TicketCommandAvailability {
+	if rejection == nil {
+		return TicketCommandAvailability{Available: true}
+	}
+	detail := rejection.detail()
+	return TicketCommandAvailability{Reason: &detail}
+}
+
+// applyTicketTransition rejects an archived or open-Round Ticket before
+// decide runs. Rework calls transitionLockedTicket directly to answer
+// those cases with its own code.
 func applyTicketTransition(
 	ctx context.Context,
 	pool *pgxpool.Pool,
 	ownerID int64,
 	publicID string,
 	decide func(state ticketWorkflowState, condition TicketCompletionCondition) (nextStatus TicketStatus, rejection *transitionRejection),
+) (Ticket, bool, *transitionRejection, error) {
+	return transitionLockedTicket(ctx, pool, ownerID, publicID,
+		func(locked Ticket) (TicketStatus, *transitionRejection) {
+			state := workflowStateOf(locked)
+			if rejection := decideTicketMutation(state.ticketLock, false); rejection != nil {
+				return "", rejection
+			}
+			return decide(state, locked.CompletionCondition)
+		},
+	)
+}
+
+type lockedTicketDecision func(locked Ticket) (nextStatus TicketStatus, rejection *transitionRejection)
+
+// transitionLockedTicket validates and applies a Status transition
+// against a Ticket's PERSISTED current Status. The FOR UPDATE row
+// lock is what stops two concurrent conflicting requests both
+// applying: the second blocks until the first commits, then
+// re-evaluates decide against the already-changed Status rather than
+// the value it started with.
+//
+// decide alone chooses the destination Status, including for an
+// archived or open-Round Ticket. It creates no Round, work request, or
+// queue entry -- see TestManualLifecycleActionsCreateNoExecutionRecords.
+//
+// Every transition takes the Owner's priority lock first, since any of
+// them may enter Ready and move the Ticket to the bottom of the order.
+func transitionLockedTicket(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	ownerID int64,
+	publicID string,
+	decide lockedTicketDecision,
 ) (ticket Ticket, found bool, rejection *transitionRejection, err error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -176,16 +224,16 @@ func applyTicketTransition(
 	if err := lockOwnerPriority(ctx, tx, ownerID); err != nil {
 		return Ticket{}, false, nil, fmt.Errorf("failed to take the priority lock: %w", err)
 	}
-	found, rejection, err = lockMutableTicket(ctx, tx, ownerID, publicID)
-	if err != nil || !found || rejection != nil {
-		return Ticket{}, found, rejection, err
+	_, found, err = lockTicketForMutation(ctx, tx, ownerID, publicID)
+	if err != nil || !found {
+		return Ticket{}, false, nil, err
 	}
 	locked, err := readLockedTicket(ctx, tx, ownerID, publicID)
 	if err != nil {
 		return Ticket{}, false, nil, fmt.Errorf("failed to read the ticket's current status: %w", err)
 	}
 
-	nextStatus, rej := decide(workflowStateOf(locked), locked.CompletionCondition)
+	nextStatus, rej := decide(locked)
 	if rej != nil {
 		return Ticket{}, true, rej, nil
 	}
@@ -294,6 +342,43 @@ func (s *server) AcceptTicket(w http.ResponseWriter, r *http.Request, id string)
 	)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to accept the ticket")
+		return
+	}
+	if !found {
+		writeTicketNotFound(w)
+		return
+	}
+	if rejection != nil {
+		writeTransitionRejection(w, rejection)
+		return
+	}
+	writeJSON(w, http.StatusOK, ticket)
+}
+
+func (s *server) RequestTicketRework(w http.ResponseWriter, r *http.Request, id string) {
+	owner, ok := s.requireSession(w, r)
+	if !ok {
+		return
+	}
+	id, ok = canonicalPublicID(id)
+	if !ok {
+		writeTicketNotFound(w)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
+	defer cancel()
+
+	ticket, found, rejection, err := transitionLockedTicket(ctx, s.pool, owner.ID, id,
+		func(locked Ticket) (TicketStatus, *transitionRejection) {
+			if rej := decideRework(workflowStateOf(locked)); rej != nil {
+				return "", rej
+			}
+			return Ready, nil
+		},
+	)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to request rework")
 		return
 	}
 	if !found {

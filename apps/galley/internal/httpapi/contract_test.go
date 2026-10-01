@@ -329,6 +329,50 @@ func TestTicketCommands_ResponseMatchesContract(t *testing.T) {
 	}
 }
 
+func TestRequestTicketRework_ResponsesMatchContractAndMethod405(t *testing.T) {
+	f := newClaimFixture(t)
+	router, err := legacy.NewRouter(loadContract(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate := func(call runnerCall, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(call.method, call.path, strings.NewReader(call.body))
+		if call.cookie != nil {
+			req.AddCookie(call.cookie)
+		}
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("%s %s: status=%d, want %d; body=%s", call.method, call.path, rec.Code, want, rec.Body.String())
+		}
+		validateAgainstContract(t, router, req, rec)
+		return rec
+	}
+	queued, claim := f.runningRound(t, "rework contract")
+	path := "/api/tickets/" + queued.Id + "/rework"
+	rework := runnerCall{method: http.MethodPost, path: path, cookie: f.cookie}
+	ticket := runnerCall{method: http.MethodGet, path: "/api/tickets/" + queued.Id, cookie: f.cookie}
+
+	assertErrorCode(t, validate(rework, http.StatusBadRequest), reworkNotAvailableCode)
+	validate(ticket, http.StatusOK)
+	f.deliver(t, claim)
+	validate(ticket, http.StatusOK)
+	validate(runnerCall{method: http.MethodGet, path: "/api/tickets", cookie: f.cookie}, http.StatusOK)
+	badgeRequest(t, f.handler, f.cookie, http.MethodPatch, "/api/tickets/"+queued.Id, `{"goal":""}`, http.StatusOK)
+	assertErrorCode(t, validate(rework, http.StatusBadRequest), agentReadinessIncompleteCode)
+	badgeRequest(t, f.handler, f.cookie, http.MethodPatch, "/api/tickets/"+queued.Id, `{"goal":"Find the cause"}`, http.StatusOK)
+	if got := decodeTicketBody(t, validate(rework, http.StatusOK)); got.Status != Ready {
+		t.Fatalf("reworked Ticket = %s, want Ready", got.Status)
+	}
+	validate(runnerCall{method: http.MethodPost, path: "/api/tickets/" + uuid.NewString() + "/rework", cookie: f.cookie}, http.StatusNotFound)
+	validate(runnerCall{method: http.MethodPost, path: path}, http.StatusUnauthorized)
+	rec := f.expect(t, runnerCall{method: http.MethodGet, path: path, cookie: f.cookie}, http.StatusMethodNotAllowed)
+	if rec.Header().Get("Allow") != "POST" {
+		t.Fatalf("Allow = %q, want POST", rec.Header().Get("Allow"))
+	}
+}
+
 func TestBadges_ResponsesMatchContractAndMethod405(t *testing.T) {
 	handler, _, cookie := badgeTestHandler(t)
 	doc := loadContract(t)
@@ -526,7 +570,7 @@ func TestReorder_ResponsesMatchContractAndMethod405(t *testing.T) {
 	}
 }
 
-func TestTicketAcceptAvailability_ResponseContractRejectsInvalidCombinations(t *testing.T) {
+func TestTicketCommandAvailability_ResponseContractRejectsInvalidCombinations(t *testing.T) {
 	pool := postgres.NewTestPool(t)
 	router, err := legacy.NewRouter(loadContract(t))
 	if err != nil {
@@ -534,7 +578,7 @@ func TestTicketAcceptAvailability_ResponseContractRejectsInvalidCombinations(t *
 	}
 	handler := NewHandler(config.Config{Environment: config.EnvDevelopment, Version: "dev"}, time.Now(), pool, testLogger(&bytes.Buffer{}))
 	cookie := mintTestSessionCookie(t, pool)
-	create := httptest.NewRequest(http.MethodPost, "/api/tickets", strings.NewReader(`{"title":"accept availability contract"}`))
+	create := httptest.NewRequest(http.MethodPost, "/api/tickets", strings.NewReader(`{"title":"command availability contract"}`))
 	create.Header.Set("Content-Type", "application/json")
 	create.AddCookie(cookie)
 	created := httptest.NewRecorder()
@@ -559,42 +603,46 @@ func TestTicketAcceptAvailability_ResponseContractRejectsInvalidCombinations(t *
 		t.Fatal(err)
 	}
 	actions := body["allowedActions"].(map[string]any)
-	reason := actions["accept"].(map[string]any)["reason"]
 	route, pathParams, err := router.FindRoute(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, tc := range []struct {
-		name    string
-		accept  map[string]any
-		invalid bool
-	}{
-		{"unavailable with reason", map[string]any{"available": false, "reason": reason}, false},
-		{"available without reason", map[string]any{"available": true}, false},
-		{"unavailable without reason", map[string]any{"available": false}, true},
-		{"available with reason", map[string]any{"available": true, "reason": reason}, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			actions["accept"] = tc.accept
-			data, err := json.Marshal(body)
-			if err != nil {
-				t.Fatal(err)
-			}
-			rec.Body.Reset()
-			if _, err := rec.Body.Write(data); err != nil {
-				t.Fatal(err)
-			}
-			input := &openapi3filter.ResponseValidationInput{
-				RequestValidationInput: &openapi3filter.RequestValidationInput{Request: req, PathParams: pathParams, Route: route},
-				Status:                 rec.Code,
-				Header:                 rec.Header(),
-			}
-			input.SetBodyBytes(data)
-			schemaErr := openapi3filter.ValidateResponse(context.Background(), input)
-			if (schemaErr != nil) != tc.invalid {
-				t.Errorf("kin-openapi ValidateResponse(%s) error=%v, want invalid=%t", data, schemaErr, tc.invalid)
-			}
-		})
+	for _, command := range []string{"accept", "rework"} {
+		original := actions[command]
+		reason := original.(map[string]any)["reason"]
+		for _, tc := range []struct {
+			name         string
+			availability map[string]any
+			invalid      bool
+		}{
+			{"unavailable with reason", map[string]any{"available": false, "reason": reason}, false},
+			{"available without reason", map[string]any{"available": true}, false},
+			{"unavailable without reason", map[string]any{"available": false}, true},
+			{"available with reason", map[string]any{"available": true, "reason": reason}, true},
+		} {
+			t.Run(command+"/"+tc.name, func(t *testing.T) {
+				actions[command] = tc.availability
+				data, err := json.Marshal(body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				rec.Body.Reset()
+				if _, err := rec.Body.Write(data); err != nil {
+					t.Fatal(err)
+				}
+				input := &openapi3filter.ResponseValidationInput{
+					RequestValidationInput: &openapi3filter.RequestValidationInput{Request: req, PathParams: pathParams, Route: route},
+					Status:                 rec.Code,
+					Header:                 rec.Header(),
+				}
+				input.SetBodyBytes(data)
+				schemaErr := openapi3filter.ValidateResponse(context.Background(), input)
+				if (schemaErr != nil) != tc.invalid {
+					t.Errorf("kin-openapi ValidateResponse(%s) error=%v, want invalid=%t", data, schemaErr, tc.invalid)
+				}
+			})
+		}
+		actions[command] = original
 	}
 }
 

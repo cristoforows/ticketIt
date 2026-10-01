@@ -310,8 +310,8 @@ func TestClaim_SequenceCountsRoundsPerTicket(t *testing.T) {
 		t.Fatalf("Ticket after its Round ended = %+v, want requesting work again", got)
 	}
 	second := f.mustClaim(t)
-	if second.Ticket.Id != queued.Id || second.Sequence != 2 || second.ClaimEpoch != 1 || second.RoundId == first.RoundId {
-		t.Fatalf("second claim = %+v, want Round 2 of the same Ticket with epoch 1", second)
+	if second.Ticket.Id != queued.Id || second.Sequence != 2 || second.ClaimEpoch != first.ClaimEpoch+1 || second.RoundId == first.RoundId {
+		t.Fatalf("second claim = %+v, want Round 2 of the same Ticket with the next epoch", second)
 	}
 }
 

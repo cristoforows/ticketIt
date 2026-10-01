@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { useLayoutEffect } from "react";
 import { TicketDetail } from "./TicketDetail";
 import type { Agent } from "../api/agents";
+import type { TicketRound } from "../api/rounds";
 import type { Badge, Ticket, TicketAssignee, TicketUpdate } from "../api/tickets";
 import { statusLabel } from "./ui";
 import { GalleyError } from "../api/http";
@@ -12,7 +13,7 @@ const TICKET: Ticket = {
   id: "33333333-3333-4333-8333-333333333333",
   title: "Fix login bug on Safari",
   status: "Backlog",
-  allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } } },
+  allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } },
   template: "Basic",
   completionCondition: "humanAcceptance",
   assigneeType: "",
@@ -52,6 +53,7 @@ function noopActions() {
   return {
     onChangeStatus: vi.fn<(status: Ticket["status"]) => Promise<Ticket>>(),
     onAccept: vi.fn<() => Promise<Ticket>>(),
+    onRework: vi.fn<() => Promise<Ticket>>(),
     onAssign: vi.fn<(assignee: TicketAssignee) => Promise<Ticket>>(),
     onUnassign: vi.fn<() => Promise<Ticket>>(),
     onLoadAgents: vi.fn<() => Promise<Agent[]>>().mockResolvedValue([]),
@@ -177,7 +179,7 @@ describe("archive presentation", () => {
 
   it("keeps archived Tickets readable and disables their mutating controls with Galley's reason", () => {
     const reason = { code: "archived_ticket", message: "archived tickets are read-only" };
-    render(<TicketDetail ticket={{ ...TICKET, archivedAt: "2026-09-29T10:00:00Z", badges: [{ id: BADGE.id, name: BADGE.name }], allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason } } }} onSave={vi.fn()} {...noopActions()} />);
+    render(<TicketDetail ticket={{ ...TICKET, archivedAt: "2026-09-29T10:00:00Z", badges: [{ id: BADGE.id, name: BADGE.name }], allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } } }} onSave={vi.fn()} {...noopActions()} />);
     expect(screen.getByTestId("ticket-detail-archived")).toHaveTextContent(reason.message);
     expect(screen.getByTestId("ticket-detail-badges")).toHaveTextContent(BADGE.name);
     for (const name of ["Edit", "Archive", "Add badge", "Remove Urgent", "Assign"]) {
@@ -202,7 +204,7 @@ describe("archive presentation", () => {
 
   it("shows Ready becoming Backlog after Restore and unlocks editing", async () => {
     const reason = { code: "archived_ticket", message: "archived tickets are read-only" };
-    const archived = { ...TICKET, status: "Ready" as const, archivedAt: "2026-09-29T10:00:00Z", allowedActions: { statusChangeRejections: [], statusChanges: [] as Ticket["status"][], accept: { available: false, reason } } };
+    const archived = { ...TICKET, status: "Ready" as const, archivedAt: "2026-09-29T10:00:00Z", allowedActions: { statusChangeRejections: [], statusChanges: [] as Ticket["status"][], accept: { available: false, reason }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } } };
     const restored: Ticket = { ...TICKET, status: "Backlog", archivedAt: null };
     const onRestore = vi.fn().mockResolvedValue(restored);
     render(<TicketDetail ticket={archived} onSave={vi.fn()} {...noopActions()} onRestore={onRestore} />);
@@ -226,7 +228,7 @@ describe("open-Round lock", () => {
     assigneeAgent: agent,
     badges: [{ id: BADGE.id, name: BADGE.name }],
     openRound: { id: reason.roundId, sequence: 4, state: "running", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: "2026-10-01T10:01:00Z" },
-    allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason } },
+    allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } },
   };
 
   it("shows who holds the lock and keeps every field readable", () => {
@@ -258,7 +260,7 @@ describe("open-Round lock", () => {
 
   it("unlocks once Galley reports no open Round", () => {
     const { rerender } = render(<TicketDetail ticket={locked} onSave={vi.fn()} {...noopActions()} />);
-    rerender(<TicketDetail ticket={{ ...locked, openRound: null, allowedActions: { statusChangeRejections: [], statusChanges: ["Backlog"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } } } }} onSave={vi.fn()} {...noopActions()} />);
+    rerender(<TicketDetail ticket={{ ...locked, openRound: null, allowedActions: { statusChangeRejections: [], statusChanges: ["Backlog"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } } }} onSave={vi.fn()} {...noopActions()} />);
     expect(screen.queryByTestId("ticket-detail-locked")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled();
     expect(screen.getByTestId("ticket-detail-status-button-Backlog")).toBeEnabled();
@@ -734,18 +736,42 @@ describe("the Rounds section", () => {
   const agent = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kind: "research" as const };
   const claimedRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 3, state: "claimed" as const, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null };
   const runningRound = { ...claimedRound, state: "running" as const, startedAt: "2026-10-01T10:01:00Z" };
+  const usage = {
+    observations: 0,
+    complete: true,
+    estimated: false,
+    costUsd: null,
+    inputTokens: { sum: null, complete: true, estimated: false },
+    outputTokens: { sum: null, complete: true, estimated: false },
+    activeMs: { sum: null, complete: true, estimated: false },
+  };
+  const recordOf = (round: NonNullable<Ticket["openRound"]>): TicketRound => ({ ...round, endedAt: null, activity: [], usage, deliverable: null });
+  const deliveredRecord = (sequence: number, id: string): TicketRound => ({
+    id,
+    sequence,
+    state: "delivered",
+    agent,
+    claimedAt: `2026-10-0${sequence}T10:00:00Z`,
+    startedAt: `2026-10-0${sequence}T10:01:00Z`,
+    endedAt: `2026-10-0${sequence}T10:09:00Z`,
+    activity: [],
+    usage,
+    deliverable: { summary: `Summary ${sequence}`, criteriaAssessment: `Assessment ${sequence}`, bodyMarkdown: `Report ${sequence}` },
+  });
   const roundTicket = (openRound: Ticket["openRound"], status: Ticket["status"] = "Ready"): Ticket => ({
     ...REFINED_TICKET,
     status,
     assigneeType: "agent",
     assigneeAgent: agent,
     openRound,
-    allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: claimedRound.id } } },
+    allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: claimedRound.id } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } },
   });
   const health = (state: "connected" | "disconnected" | "not_paired"): HealthView => ({
     kind: "loaded",
     health: { state, checkedAt: "2026-10-01T10:02:00Z", pairedAt: null, registeredAt: null, lastSeenAt: null, michelinVersion: null, hostname: null },
   });
+  const entries = () => screen.getAllByTestId("ticket-detail-round");
+  const entryOpen = (entry: HTMLElement) => (entry.querySelector("details") as HTMLDetailsElement).open;
 
   it("does not appear for a Ticket with no Round", () => {
     render(<TicketDetail ticket={TICKET} onSave={vi.fn()} {...noopActions()} runnerHealth={health("disconnected")} />);
@@ -753,23 +779,34 @@ describe("the Rounds section", () => {
     expect(screen.queryByTestId("ticket-detail-runner-disconnected")).not.toBeInTheDocument();
   });
 
+  it("shows the lock and the claimed tag from the Ticket while the Round records are still loading", () => {
+    render(<TicketDetail ticket={roundTicket(claimedRound)} onSave={vi.fn()} {...noopActions()} />);
+    expect(screen.getByTestId("ticket-detail-locked")).toHaveTextContent("Locked while atlas works on Round 3");
+    expect(screen.getByTestId("ticket-detail-claimed")).toBeInTheDocument();
+    expect(screen.getByTestId("ticket-detail-round-records-loading")).toBeInTheDocument();
+    expect(screen.queryByTestId("ticket-detail-round")).not.toBeInTheDocument();
+  });
+
   it("shows a claimed Round as waiting for the runner, with its number and Agent and no started time", () => {
-    render(<TicketDetail ticket={roundTicket(claimedRound)} onSave={vi.fn()} {...noopActions()} runnerHealth={health("connected")} />);
+    render(<TicketDetail ticket={roundTicket(claimedRound)} onSave={vi.fn()} {...noopActions()} runnerHealth={health("connected")} roundRecords={{ rounds: [recordOf(claimedRound)] }} />);
     const section = within(screen.getByTestId("ticket-detail-rounds"));
     expect(section.getByRole("heading", { name: "Rounds" })).toBeInTheDocument();
-    expect(section.getByTestId("ticket-detail-round-number")).toHaveTextContent("3");
+    expect(section.getByTestId("ticket-detail-round-number")).toHaveTextContent("Round 3");
     expect(section.getByTestId("ticket-detail-round-agent")).toHaveTextContent("atlas");
-    expect(section.getByTestId("ticket-detail-round-waiting")).toHaveTextContent("Claimed, waiting for the runner to start");
+    expect(section.getByTestId("ticket-detail-round-claimed-at")).toHaveTextContent("2026-10-01T10:00:00Z");
+    expect(section.getByTestId("ticket-detail-round-state")).toHaveTextContent("Claimed, waiting for the runner to start");
     expect(section.queryByTestId("ticket-detail-round-started")).not.toBeInTheDocument();
+    expect(section.queryByTestId("ticket-detail-round-records-loading")).not.toBeInTheDocument();
   });
 
   it("shows a running Round with the time Galley reports it started", () => {
-    render(<TicketDetail ticket={roundTicket(runningRound, "InProgress")} onSave={vi.fn()} {...noopActions()} runnerHealth={health("connected")} />);
+    render(<TicketDetail ticket={roundTicket(runningRound, "InProgress")} onSave={vi.fn()} {...noopActions()} runnerHealth={health("connected")} roundRecords={{ rounds: [recordOf(runningRound)] }} />);
     const section = within(screen.getByTestId("ticket-detail-rounds"));
-    expect(section.getByTestId("ticket-detail-round-number")).toHaveTextContent("3");
+    expect(section.getByTestId("ticket-detail-round-number")).toHaveTextContent("Round 3");
     expect(section.getByTestId("ticket-detail-round-agent")).toHaveTextContent("atlas");
+    expect(section.getByTestId("ticket-detail-round-state")).toHaveTextContent("Running");
     expect(section.getByTestId("ticket-detail-round-started")).toHaveTextContent("2026-10-01T10:01:00Z");
-    expect(section.queryByTestId("ticket-detail-round-waiting")).not.toBeInTheDocument();
+    expect(section.queryByTestId("ticket-detail-round-delivered-at")).not.toBeInTheDocument();
     expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("In Progress");
     expect(screen.queryByTestId("ticket-detail-claimed")).not.toBeInTheDocument();
     expect(screen.getByTestId("ticket-detail-locked")).toHaveTextContent("Locked while atlas works on Round 3");
@@ -779,7 +816,7 @@ describe("the Rounds section", () => {
     ["disconnected", "disconnected"],
     ["not paired", "not_paired"],
   ] as const)("overlays Runner disconnected on an open Round when the runner is %s", (_name, state) => {
-    render(<TicketDetail ticket={roundTicket(runningRound, "InProgress")} onSave={vi.fn()} {...noopActions()} runnerHealth={health(state)} />);
+    render(<TicketDetail ticket={roundTicket(runningRound, "InProgress")} onSave={vi.fn()} {...noopActions()} runnerHealth={health(state)} roundRecords={{ rounds: [recordOf(runningRound)] }} />);
     const overlay = within(screen.getByTestId("ticket-detail-rounds")).getByTestId("ticket-detail-runner-disconnected");
     expect(overlay).toHaveTextContent("Runner disconnected");
     expect(overlay).toHaveAttribute("role", "status");
@@ -803,10 +840,154 @@ describe("the Rounds section", () => {
   });
 
   it("follows Galley when the Round moves from claimed to running", () => {
-    const { rerender } = render(<TicketDetail ticket={roundTicket(claimedRound)} onSave={vi.fn()} {...noopActions()} />);
-    expect(screen.getByTestId("ticket-detail-round-waiting")).toBeInTheDocument();
-    rerender(<TicketDetail ticket={roundTicket(runningRound, "InProgress")} onSave={vi.fn()} {...noopActions()} />);
-    expect(screen.queryByTestId("ticket-detail-round-waiting")).not.toBeInTheDocument();
+    const { rerender } = render(<TicketDetail ticket={roundTicket(claimedRound)} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [recordOf(claimedRound)] }} />);
+    expect(screen.getByTestId("ticket-detail-round-state")).toHaveTextContent("Claimed, waiting for the runner to start");
+    rerender(<TicketDetail ticket={roundTicket(runningRound, "InProgress")} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [recordOf(runningRound)] }} />);
+    expect(screen.getByTestId("ticket-detail-round-state")).toHaveTextContent("Running");
     expect(screen.getByTestId("ticket-detail-round-started")).toHaveTextContent("2026-10-01T10:01:00Z");
+  });
+
+  describe("the Round history", () => {
+    const round1 = deliveredRecord(1, "11111111-aaaa-4aaa-8aaa-111111111111");
+    const round2 = deliveredRecord(2, "22222222-aaaa-4aaa-8aaa-222222222222");
+    const delivery = { roundId: round2.id, sequence: 2, agent, deliveredAt: round2.endedAt! };
+    const deliveredTicket: Ticket = { ...roundTicket(null, "InReview"), delivery };
+
+    it("lists every Round in Galley's order with the latest open and the earlier ones closed", () => {
+      render(<TicketDetail ticket={deliveredTicket} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [round2, round1] }} />);
+      expect(entries().map((entry) => entry.getAttribute("data-round-id"))).toEqual([round2.id, round1.id]);
+      expect(entries().map((entry) => within(entry).getByTestId("ticket-detail-round-number").textContent)).toEqual(["Round 2", "Round 1"]);
+      expect(entries().map(entryOpen)).toEqual([true, false]);
+      expect(within(entries()[0]).getByTestId("ticket-detail-round-state")).toHaveTextContent("Delivered by atlas");
+      expect(entries()[0].querySelector("summary")!.textContent).toBe("+−Round 2 · Delivered by atlas");
+      expect(within(entries()[0]).getByTestId("ticket-detail-round-delivered-at")).toHaveTextContent(round2.endedAt!);
+    });
+
+    it("opens an earlier Round from its summary to show its own report, activity and usage", () => {
+      const withNote = { ...round1, activity: [{ seq: 1, note: "Round one note", occurredAt: "2026-10-01T10:02:00Z" }] };
+      render(<TicketDetail ticket={deliveredTicket} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [round2, withNote] }} />);
+      fireEvent.click(within(entries()[1]).getByText("Round 1"));
+      const earlier = within(entries()[1]);
+      expect(entryOpen(entries()[1])).toBe(true);
+      expect(earlier.getByTestId("ticket-detail-round-summary")).toHaveTextContent("Summary 1");
+      expect(earlier.getByTestId("ticket-detail-round-assessment")).toHaveTextContent("Assessment 1");
+      expect(earlier.getByTestId("ticket-detail-round-body")).toBeInTheDocument();
+      expect(earlier.getByTestId("ticket-detail-round-note")).toHaveTextContent("Round one note");
+      expect(earlier.getByRole("heading", { name: "Usage" })).toBeInTheDocument();
+    });
+
+    it("shows a running Round above the delivered one it reworks, labelling its usage as so far", () => {
+      const running = { ...recordOf({ ...runningRound, id: "33333333-aaaa-4aaa-8aaa-333333333333", sequence: 2 }) };
+      render(<TicketDetail ticket={roundTicket({ ...runningRound, id: running.id, sequence: 2 }, "InProgress")} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [running, round1] }} />);
+      expect(entries().map((entry) => entry.getAttribute("data-state"))).toEqual(["running", "delivered"]);
+      expect(within(entries()[0]).getByRole("heading", { name: "Usage so far" })).toBeInTheDocument();
+      expect(within(entries()[1]).getByRole("heading", { name: "Usage" })).toBeInTheDocument();
+    });
+
+    it("collapses the previous latest Round when a newer Round arrives, and keeps the Owner's own toggles", () => {
+      const { rerender } = render(<TicketDetail ticket={deliveredTicket} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [round1] }} />);
+      expect(entryOpen(entries()[0])).toBe(true);
+      const running = recordOf({ ...runningRound, id: "33333333-aaaa-4aaa-8aaa-333333333333", sequence: 2 });
+      rerender(<TicketDetail ticket={deliveredTicket} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [running, round1] }} />);
+      expect(entries().map((entry) => entry.getAttribute("data-round-id"))).toEqual([running.id, round1.id]);
+      expect(entries().map(entryOpen)).toEqual([true, false]);
+      fireEvent.click(within(entries()[1]).getByText("Round 1"));
+      rerender(<TicketDetail ticket={deliveredTicket} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [{ ...running }, round1] }} />);
+      expect(entries().map(entryOpen)).toEqual([true, true]);
+    });
+
+    it("shows the records error beside the last good list", () => {
+      render(<TicketDetail ticket={deliveredTicket} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [round2, round1], error: "503" }} />);
+      expect(screen.getByTestId("ticket-detail-round-records-error")).toHaveTextContent("503");
+      expect(entries()).toHaveLength(2);
+    });
+  });
+});
+
+describe("Request rework", () => {
+  afterEach(cleanup);
+
+  const agent = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kind: "research" as const };
+  const reviewable: Ticket = {
+    ...REFINED_TICKET,
+    status: "InReview",
+    assigneeType: "agent",
+    assigneeAgent: agent,
+    delivery: { roundId: "11111111-aaaa-4aaa-8aaa-111111111111", sequence: 1, agent, deliveredAt: "2026-10-01T10:09:00Z" },
+    allowedActions: { ...TICKET.allowedActions, accept: { available: true }, rework: { available: true } },
+  };
+  const withRework = (rework: Ticket["allowedActions"]["rework"]): Ticket => ({ ...reviewable, allowedActions: { ...reviewable.allowedActions, rework } });
+
+  it("is offered only when Galley says rework is available", () => {
+    const { rerender } = render(<TicketDetail ticket={reviewable} onSave={vi.fn()} {...noopActions()} />);
+    expect(screen.getByTestId("ticket-detail-rework-button")).toHaveTextContent("Request rework");
+
+    rerender(<TicketDetail ticket={withRework({ available: false, reason: { code: "rework_not_available", message: "Only an Agent-assigned Ticket can be reworked" } })} onSave={vi.fn()} {...noopActions()} />);
+    expect(screen.queryByTestId("ticket-detail-rework-button")).not.toBeInTheDocument();
+  });
+
+  it("requests rework and shows the Ready, queued Ticket Galley returned", async () => {
+    const ready: Ticket = { ...reviewable, status: "Ready", requestingAgentWork: true, allowedActions: { ...reviewable.allowedActions, accept: TICKET.allowedActions.accept, rework: TICKET.allowedActions.rework } };
+    const onRework = vi.fn<() => Promise<Ticket>>().mockResolvedValue(ready);
+    render(<TicketDetail ticket={reviewable} onSave={vi.fn()} {...noopActions()} onRework={onRework} />);
+
+    fireEvent.click(screen.getByTestId("ticket-detail-rework-button"));
+
+    expect(await screen.findByTestId("ticket-detail-queued")).toHaveTextContent("Queued for atlas");
+    expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("Ready");
+    expect(onRework).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("ticket-detail-rework-button")).not.toBeInTheDocument();
+  });
+
+  it("shows Galley's rejection verbatim and leaves the Ticket as it was", async () => {
+    const onRework = vi.fn<() => Promise<Ticket>>().mockRejectedValue(new GalleyError({ code: "rework_not_available", message: "A Round is already open" }));
+    render(<TicketDetail ticket={reviewable} onSave={vi.fn()} {...noopActions()} onRework={onRework} />);
+
+    fireEvent.click(screen.getByTestId("ticket-detail-rework-button"));
+
+    expect(await screen.findByTestId("ticket-detail-action-error")).toHaveTextContent("A Round is already open");
+    expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("In Review");
+  });
+
+  it("is disabled while an action is pending", async () => {
+    let finish: (ticket: Ticket) => void = () => {};
+    const onRework = vi.fn(() => new Promise<Ticket>((resolve) => { finish = resolve; }));
+    render(<TicketDetail ticket={reviewable} onSave={vi.fn()} {...noopActions()} onRework={onRework} />);
+
+    fireEvent.click(screen.getByTestId("ticket-detail-rework-button"));
+
+    await waitFor(() => expect(screen.getByTestId("ticket-detail-rework-button")).toBeDisabled());
+    finish(reviewable);
+    await waitFor(() => expect(screen.getByTestId("ticket-detail-rework-button")).toBeEnabled());
+  });
+
+  describe("when an input is missing", () => {
+    const incomplete = { code: "agent_readiness_incomplete", message: "Add a Goal before requesting rework", missing: ["goal" as const] };
+
+    it("shows Galley's reason and points the empty field at it", () => {
+      render(<TicketDetail ticket={{ ...withRework({ available: false, reason: incomplete }), goal: "" }} onSave={vi.fn()} {...noopActions()} />);
+
+      expect(screen.queryByTestId("ticket-detail-rework-button")).not.toBeInTheDocument();
+      expect(screen.getByTestId("ticket-detail-rework-unavailable")).toHaveTextContent("Add a Goal before requesting rework");
+      expect(screen.getByTestId("ticket-detail-field-goal")).toHaveAttribute("aria-describedby", "ticket-detail-missing-goal ticket-detail-rework-unavailable");
+      expect(screen.getByTestId("ticket-detail-field-goal")).toHaveAccessibleDescription("Missing Add a Goal before requesting rework");
+      expect(screen.queryByTestId("ticket-detail-missing-success-criteria")).not.toBeInTheDocument();
+    });
+
+    it("explains the missing inputs with the action error first", async () => {
+      const onAccept = vi.fn<() => Promise<Ticket>>().mockRejectedValue(new GalleyError({ code: "agent_readiness_incomplete", message: "Accept failed", missing: ["goal"] }));
+      render(<TicketDetail ticket={{ ...withRework({ available: false, reason: incomplete }), goal: "" }} onSave={vi.fn()} {...noopActions()} onAccept={onAccept} />);
+
+      fireEvent.click(screen.getByTestId("ticket-detail-accept-button"));
+
+      await screen.findByTestId("ticket-detail-action-error");
+      expect(screen.getByTestId("ticket-detail-field-goal")).toHaveAttribute("aria-describedby", "ticket-detail-missing-goal ticket-detail-action-error");
+    });
+  });
+
+  it("never shows the rework_not_available reason", () => {
+    render(<TicketDetail ticket={withRework({ available: false, reason: { code: "rework_not_available", message: "Only an Agent-assigned Ticket can be reworked" } })} onSave={vi.fn()} {...noopActions()} />);
+    expect(screen.queryByText("Only an Agent-assigned Ticket can be reworked")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("ticket-detail-rework-unavailable")).not.toBeInTheDocument();
   });
 });

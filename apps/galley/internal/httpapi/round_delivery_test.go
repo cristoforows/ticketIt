@@ -37,9 +37,14 @@ func deliveredEvent(t *testing.T, key string, epoch int, data map[string]any) st
 	return jsonText(t, map[string]any{"type": "delivered", "idempotencyKey": key, "claimEpoch": epoch, "occurredAt": eventOccurredAt, "data": data})
 }
 
+func standardDeliveredEvent(t *testing.T, claim RunnerClaim) string {
+	t.Helper()
+	return deliveredEvent(t, claim.RoundId+":9", claim.ClaimEpoch, standardDeliverable())
+}
+
 func (f *claimFixture) deliver(t *testing.T, claim RunnerClaim) *httptest.ResponseRecorder {
 	t.Helper()
-	return f.mustReport(t, claim.RoundId, deliveredEvent(t, claim.RoundId+":9", claim.ClaimEpoch, standardDeliverable()))
+	return f.mustReport(t, claim.RoundId, standardDeliveredEvent(t, claim))
 }
 
 func wantDeliveredResult(roundID string, startedAt, endedAt time.Time) string {
@@ -661,7 +666,7 @@ func TestDelivered_ADoneTicketMovedBackToReadyIsQueuedForANewRound(t *testing.T)
 	f.clock.Set(runnerEpoch.Add(2 * time.Minute))
 	f.register(t, f.token, http.StatusOK)
 	f.startRound(t, second, "start-2")
-	f.mustReport(t, second.RoundId, deliveredEvent(t, "deliver-2", 1, deliverableData("Second result", "Second summary", "Second assessment")))
+	f.mustReport(t, second.RoundId, deliveredEvent(t, "deliver-2", second.ClaimEpoch, deliverableData("Second result", "Second summary", "Second assessment")))
 	got := f.ticket(t, queued.Id)
 	if got.Status != InReview || got.Delivery == nil || got.Delivery.RoundId != second.RoundId || got.Delivery.Sequence != 2 || !got.Delivery.DeliveredAt.Equal(runnerEpoch.Add(2*time.Minute)) {
 		t.Fatalf("Ticket after Round 2 delivered = %s %+v", got.Status, got.Delivery)

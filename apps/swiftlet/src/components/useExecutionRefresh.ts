@@ -1,9 +1,12 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
+import type { Ticket } from "../api/tickets";
 
-export const OPEN_ROUND_REFRESH_MS = 3_000;
+export const EXECUTION_REFRESH_MS = 3_000;
+
+export const awaitsExecution = (ticket: Ticket): boolean => ticket.openRound !== null || ticket.requestingAgentWork;
 
 /** `refresh` reports its own failures; a rejection only ends the call. */
-export function useOpenRoundRefresh(active: boolean, refresh: () => Promise<void>): void {
+export function useExecutionRefresh(active: boolean, refresh: () => Promise<void>): void {
   const latest = useRef(refresh);
   useLayoutEffect(() => {
     latest.current = refresh;
@@ -19,7 +22,7 @@ export function useOpenRoundRefresh(active: boolean, refresh: () => Promise<void
         pending = false;
       };
       latest.current().then(settled, settled);
-    }, OPEN_ROUND_REFRESH_MS);
+    }, EXECUTION_REFRESH_MS);
     return () => window.clearInterval(timer);
   }, [active]);
 }

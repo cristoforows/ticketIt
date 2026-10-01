@@ -84,6 +84,7 @@ func newHandler(cfg config.Config, logger *slog.Logger, srv *server) http.Handle
 	mux.HandleFunc("/api/tickets/{id}", methodNotAllowedHandler("GET", "PATCH"))
 	mux.HandleFunc("/api/tickets/{id}/status", methodNotAllowedHandler("POST"))
 	mux.HandleFunc("/api/tickets/{id}/accept", methodNotAllowedHandler("POST"))
+	mux.HandleFunc("/api/tickets/{id}/rework", methodNotAllowedHandler("POST"))
 	mux.HandleFunc("/api/tickets/{id}/assignee", methodNotAllowedHandler("PUT", "DELETE"))
 	mux.HandleFunc("/api/badges", methodNotAllowedHandler("GET", "POST"))
 	mux.HandleFunc("/api/agents", methodNotAllowedHandler("GET", "POST"))

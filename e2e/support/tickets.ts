@@ -63,6 +63,7 @@ export interface Ticket {
   allowedActions: {
     statusChanges: TicketStatus[];
     accept: { available: boolean; reason?: ErrorDetail };
+    rework: { available: boolean; reason?: ErrorDetail };
     statusChangeRejections: { status: TicketStatus; reason: ErrorDetail }[];
   };
   requestingAgentWork: boolean;
@@ -169,6 +170,11 @@ export async function changeTicketStatusDirect(from: Api, id: string, status: Ti
 /** Same purpose as changeTicketStatusDirect, for Accept. */
 export async function acceptTicketDirect(from: Api, id: string): Promise<TicketCommandResult> {
   return ticketCommand(from, "POST", `/api/tickets/${id}/accept`);
+}
+
+/** Same purpose as changeTicketStatusDirect, for requesting rework. */
+export async function requestReworkDirect(from: Api, id: string): Promise<TicketCommandResult> {
+  return ticketCommand(from, "POST", `/api/tickets/${id}/rework`);
 }
 
 export type TicketAssignee = { type: "owner" } | { type: "agent"; agentId: string };

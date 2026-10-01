@@ -71,10 +71,10 @@ test("a real Michelin starts a claimed Round with no browser open, and the slip 
     await page.goto(`/tickets/${queued.id}`);
     await expect(page.getByTestId("ticket-detail-status")).toHaveText("In Progress");
     const section = page.getByTestId("ticket-detail-rounds");
-    await expect(section.getByTestId("ticket-detail-round-number")).toHaveText("1");
+    await expect(section.getByTestId("ticket-detail-round-number")).toHaveText("Round 1");
     await expect(section.getByTestId("ticket-detail-round-agent")).toHaveText(agent.name);
     await expect(section.getByTestId("ticket-detail-round-started")).toHaveText(started.openRound!.startedAt!);
-    await expect(section.getByTestId("ticket-detail-round-waiting")).toHaveCount(0);
+    await expect(section.getByTestId("ticket-detail-round-state")).toHaveText("Running");
     await expect(page.getByTestId("ticket-detail-claimed")).toHaveCount(0);
     await expect(page.getByTestId("ticket-detail-locked")).toHaveText(`Locked while ${agent.name} works on Round 1`);
     await first.close();

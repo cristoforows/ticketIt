@@ -7,7 +7,7 @@ import { scrollBehavior, useIsPhone } from "./usePhone";
 import { focusReorderButton, type ReorderDirection } from "./ReorderButtons";
 import { focusTicketRow, refocusTicketRowIfFocusLost, ticketRowTestId } from "./TicketModalLink";
 import { TicketSlip } from "./TicketSlip";
-import { sameData, useOpenRoundRefresh } from "./useOpenRoundRefresh";
+import { awaitsExecution, sameData, useExecutionRefresh } from "./useExecutionRefresh";
 
 type BoardState =
   | { kind: "loading" }
@@ -131,7 +131,7 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
     return () => { cancelled = true; };
   }, [onUnauthenticated, refreshKey, moveRefreshKey, badgeIds.join(",")]);
 
-  const refreshOpenRounds = async () => {
+  const refreshExecution = async () => {
     if (commandPending.current) return;
     const id = ++requestId.current;
     try {
@@ -155,7 +155,7 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
       setState((current) => (current.kind === "loaded" ? { ...current, refreshError: message } : current));
     }
   };
-  useOpenRoundRefresh(state.kind === "loaded" && state.tickets.some((ticket) => ticket.openRound !== null), refreshOpenRounds);
+  useExecutionRefresh(state.kind === "loaded" && state.tickets.some(awaitsExecution), refreshExecution);
 
   useEffect(() => {
     if (refreshKey > focusedRefreshKey.current && state.kind === "loaded" && state.refreshKey === refreshKey && focusTicketId) {

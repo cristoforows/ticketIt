@@ -484,6 +484,37 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorBody"
+  /api/tickets/{id}/rework:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid, x-go-type: string}
+    post:
+      operationId: requestTicketRework
+      summary: Return an In Review Ticket to Ready for another Round
+      tags: [tickets]
+      description: >-
+        Returns an Agent-assigned In Review Ticket with no open Round to
+        Ready, at the bottom of the priority order; the next claim
+        creates a new Round. Otherwise `rework_not_available`; a Ticket
+        missing a readiness input gets `agent_readiness_incomplete` with
+        `missing`. Creates no Round itself.
+      responses:
+        "200":
+          description: The Ticket, now Ready.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        default:
+          description: >-
+            Error. See `ErrorBody`. Includes `rework_not_available` and
+            `agent_readiness_incomplete`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
   /api/tickets/{id}/assignee:
     parameters:
       - name: id
@@ -1581,7 +1612,7 @@ components:
     TicketAllowedActions:
       type: object
       additionalProperties: false
-      required: [statusChanges, statusChangeRejections, accept]
+      required: [statusChanges, statusChangeRejections, accept, rework]
       properties:
         statusChanges:
           type: array
@@ -1597,7 +1628,9 @@ components:
           items:
             $ref: "#/components/schemas/TicketStatusChangeRejection"
         accept:
-          $ref: "#/components/schemas/TicketAcceptAvailability"
+          $ref: "#/components/schemas/TicketCommandAvailability"
+        rework:
+          $ref: "#/components/schemas/TicketCommandAvailability"
     TicketStatusChangeRejection:
       type: object
       additionalProperties: false
@@ -1607,7 +1640,7 @@ components:
           $ref: "#/components/schemas/TicketStatus"
         reason:
           $ref: "#/components/schemas/ErrorDetail"
-    TicketAcceptAvailability:
+    TicketCommandAvailability:
       type: object
       additionalProperties: false
       required: [available]
@@ -1626,7 +1659,7 @@ components:
         available:
           type: boolean
         reason:
-          description: Required when unavailable; absent when available. Matches the Accept command's error.
+          description: Required when unavailable; absent when available. Matches the command's error.
           $ref: "#/components/schemas/ErrorDetail"
     CreateTicketRequest:
       type: object
@@ -1901,7 +1934,9 @@ components:
         claimEpoch:
           type: integer
           minimum: 1
-          description: Fencing token; events must carry it with `roundId`.
+          description: >-
+            Fencing token; events must carry it with `roundId`. A Ticket's
+            Rounds get increasing epochs.
         ticket:
           $ref: "#/components/schemas/ClaimedTicket"
         agent:

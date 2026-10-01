@@ -48,7 +48,7 @@ test("a paired runner's claim of the top queued Ticket leaves it Ready, shows Cl
     const round = claimed.openRound!;
     const lockCopy = `Locked while ${round.agent.name} works on Round ${round.sequence}`;
     const reason = claimed.allowedActions.accept.reason!;
-    expect(claimed.allowedActions).toEqual({ statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: { code: "round_open", message: reason.message, roundId: round.id } } });
+    expect(claimed.allowedActions).toEqual({ statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: { code: "round_open", message: reason.message, roundId: round.id } }, rework: { available: false, reason: { code: "rework_not_available", message: expect.any(String) } } });
 
     await page.goto("/board");
     const slip = page.getByTestId(`board-ticket-${queued.id}`);
@@ -73,9 +73,9 @@ test("a paired runner's claim of the top queued Ticket leaves it Ready, shows Cl
     await expect(page.getByTestId("ticket-detail-accept-button")).toHaveCount(0);
     await expect(page.getByTestId("ticket-detail-accept-unavailable")).toHaveText(reason.message);
     const rounds = page.getByTestId("ticket-detail-rounds");
-    await expect(rounds.getByTestId("ticket-detail-round-number")).toHaveText(String(round.sequence));
+    await expect(rounds.getByTestId("ticket-detail-round-number")).toHaveText(`Round ${round.sequence}`);
     await expect(rounds.getByTestId("ticket-detail-round-agent")).toHaveText(round.agent.name);
-    await expect(rounds.getByTestId("ticket-detail-round-waiting")).toHaveText("Claimed, waiting for the runner to start");
+    await expect(rounds.getByTestId("ticket-detail-round-state")).toHaveText("Claimed, waiting for the runner to start");
     await expect(rounds.getByTestId("ticket-detail-round-started")).toHaveCount(0);
 
     await expect(page.getByTestId("ticket-detail-archive-button")).toBeDisabled();
@@ -118,7 +118,7 @@ test("a paired runner's claim of the top queued Ticket leaves it Ready, shows Cl
 
     await page.goto(`/tickets/${queued.id}`);
     await expect(page.getByTestId("ticket-detail-runner-disconnected")).toContainText("Runner disconnected");
-    await expect(page.getByTestId("ticket-detail-round-waiting")).toBeVisible();
+    await expect(page.getByTestId("ticket-detail-round-state")).toHaveText("Claimed, waiting for the runner to start");
     await expect(page.getByTestId("ticket-detail-locked")).toHaveText(lockCopy);
   } finally {
     await runner.dispose();
