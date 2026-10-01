@@ -39,6 +39,7 @@ const textPairs: Array<[string, string, string]> = [
   ["amber on ink", "amber", "ink"],
   ["queued tag: status-ready-deep on paper", "status-ready-deep", "paper"],
   ["claimed tag: ink on paper", "ink", "paper"],
+  ["estimate tag: muted on paper", "muted", "paper"],
   ["lock notice and lock glyph: ink on paper", "ink", "paper"],
 ];
 

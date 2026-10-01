@@ -114,8 +114,13 @@ export type RoundEventOutcome = { result: RoundEventResult; replayed: boolean };
 
 export type RoundEventReport = Timed<Outcome<RoundEventOutcome, RoundEventFailure>>;
 
+export interface RoundEventExpectation {
+  type: RoundEventRequest["type"];
+  observationId?: string;
+}
+
 // The body arrives serialised so every retry of one event sends the same bytes.
-export function reportRoundEvent(request: RunnerRequest, roundId: string, body: string): Promise<RoundEventReport> {
+export function reportRoundEvent(request: RunnerRequest, roundId: string, body: string, expected: RoundEventExpectation): Promise<RoundEventReport> {
   const headers = { accept: "application/json", "content-type": "application/json", authorization: request.credential.authorizationHeader() };
   const path = `api/runner/rounds/${encodeURIComponent(roundId)}/events`;
   return callGalley<RoundEventOutcome, RoundEventFailure>(request, path, { method: "POST", headers, body }, async (response, readJson) => {
@@ -127,21 +132,21 @@ export function reportRoundEvent(request: RunnerRequest, roundId: string, body: 
     if (payload === INVALID_JSON) {
       return { ok: false, failure: { reason: "invalid_body", error: "response is not valid JSON" } };
     }
-    const result = parseRoundEventResult(payload, roundId);
+    const result = parseRoundEventResult(payload, roundId, expected);
     return typeof result === "string" ? { ok: false, failure: { reason: "invalid_body", error: result } } : { ok: true, value: { result, replayed: response.status === 200 } };
   });
 }
 
-function parseRoundEventResult(payload: unknown, roundId: string): RoundEventResult | string {
+function parseRoundEventResult(payload: unknown, roundId: string, expected: RoundEventExpectation): RoundEventResult | string {
   if (!isRecord(payload)) {
     return "body is not a JSON object";
   }
-  const { roundId: reportedRound, type, state, startedAt } = payload;
+  const { roundId: reportedRound, type, state, startedAt, seq, observationId } = payload;
   if (reportedRound !== roundId) {
     return "roundId is not the Round the event was sent for";
   }
-  if (type !== "execution_started") {
-    return "type is not execution_started";
+  if (type !== expected.type) {
+    return `type is not ${expected.type}`;
   }
   if (state !== "claimed" && state !== "running") {
     return "state is not claimed or running";
@@ -149,5 +154,14 @@ function parseRoundEventResult(payload: unknown, roundId: string): RoundEventRes
   if (typeof startedAt !== "string") {
     return "startedAt is not a string";
   }
-  return { roundId: reportedRound, type, state, startedAt };
+  if (type === "progress" && !(Number.isSafeInteger(seq) && (seq as number) >= 1)) {
+    return "seq is not a positive integer";
+  }
+  if (type === "usage_observed" && observationId !== expected.observationId) {
+    return "observationId is not the observation the event was sent for";
+  }
+  const result: RoundEventResult = { roundId: reportedRound, type: expected.type, state, startedAt };
+  if (type === "progress") result.seq = seq as number;
+  if (type === "usage_observed") result.observationId = observationId as string;
+  return result;
 }

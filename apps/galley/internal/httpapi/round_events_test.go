@@ -51,7 +51,7 @@ func (f *claimFixture) startRound(t *testing.T, claim RunnerClaim, key string) *
 func databaseSnapshot(t *testing.T, pool *pgxpool.Pool) string {
 	t.Helper()
 	var out strings.Builder
-	for _, table := range []string{"tickets", "rounds", "round_events", "round_engine_references", "runners"} {
+	for _, table := range []string{"tickets", "rounds", "round_events", "round_engine_references", "round_activity", "usage_observations", "runners"} {
 		var rows string
 		if err := pool.QueryRow(context.Background(), `SELECT COALESCE(json_agg(row_to_json(x) ORDER BY x.id), '[]')::text FROM `+table+` x`).Scan(&rows); err != nil {
 			t.Fatal(err)
@@ -572,7 +572,7 @@ func TestRoundEvent_StrictDecodeRejectsMalformedRequestsWithNoStateChange(t *tes
 		"engineReference too long":     dataWith(strings.Repeat("r", 201)),
 		"engineReference control char": dataWith("controlled:\x07"),
 		"engineReference newline":      dataWith("controlled:\nx"),
-		"an unknown type":              with("type", "progress"),
+		"an unknown type":              with("type", "usage"),
 		"a delivered type":             with("type", "delivered"),
 		"a wrongly cased type":         with("type", "EXECUTION_STARTED"),
 		"an empty type":                with("type", ""),
@@ -944,6 +944,13 @@ func TestDecideRoundEvent(t *testing.T) {
 		"a wrong epoch beats the wrong state": {open(RoundRunning, 3), RoundEventExecutionStarted, 2, staleClaimEpochCode},
 		"an ended Round":                      {lockedRound{state: "delivered", epoch: 3}, RoundEventExecutionStarted, 3, roundNotOpenCode},
 		"a running Round":                     {open(RoundRunning, 3), RoundEventExecutionStarted, 3, eventOutOfOrderCode},
+		"progress on a running Round":         {open(RoundRunning, 3), RoundEventProgress, 3, ""},
+		"usage on a running Round":            {open(RoundRunning, 3), RoundEventUsageObserved, 3, ""},
+		"progress on a claimed Round":         {open(RoundClaimed, 3), RoundEventProgress, 3, eventOutOfOrderCode},
+		"usage on a claimed Round":            {open(RoundClaimed, 3), RoundEventUsageObserved, 3, eventOutOfOrderCode},
+		"progress on an ended Round":          {lockedRound{state: "delivered", epoch: 3}, RoundEventProgress, 3, roundNotOpenCode},
+		"usage at a stale epoch":              {open(RoundRunning, 3), RoundEventUsageObserved, 2, staleClaimEpochCode},
+		"waiting for input takes no progress": {open("waiting_for_input", 3), RoundEventProgress, 3, eventOutOfOrderCode},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := decideRoundEvent(tc.round, tc.eventType, tc.epoch)
@@ -962,50 +969,65 @@ func TestRoundEvent_TakesTheOwnersPriorityLockThenTheTicketRowThenTheRoundRow(t 
 		name, holds, blockedOn string
 		lockedAfterwards       string
 	}
-	for _, tc := range []step{
-		{"the Owner's priority lock comes first", "priority", "pg_advisory_xact_lock", `SELECT 1 FROM tickets WHERE public_id = $1::uuid FOR UPDATE NOWAIT`},
-		{"the Ticket row comes before the Round row", "ticket", "FOR UPDATE", `SELECT 1 FROM rounds r JOIN tickets t ON t.id = r.ticket_id WHERE t.public_id = $1::uuid FOR UPDATE OF r NOWAIT`},
+	type eventCase struct {
+		name    string
+		running bool
+		body    func(t *testing.T) string
+	}
+	for _, event := range []eventCase{
+		{"execution_started", false, func(*testing.T) string { return startedEvent("k", 1, eventOccurredAt, eventReference) }},
+		{"progress", true, func(t *testing.T) string { return progressEvent(t, "k", 1, eventOccurredAt, "locked") }},
+		{"usage_observed", true, func(t *testing.T) string { return usageEvent(t, observationA, 1, usageData(observationA)) }},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f := newClaimFixture(t)
-			queued, claim := f.claimTicket(t, "Lock order")
-			ctx := context.Background()
-			holder, err := f.pool.Begin(ctx)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() { _ = holder.Rollback(ctx) }()
-			switch tc.holds {
-			case "priority":
-				if err := lockOwnerPriority(ctx, holder, resolveTestOwner(t, f.pool)); err != nil {
+		for _, tc := range []step{
+			{"the Owner's priority lock comes first", "priority", "pg_advisory_xact_lock", `SELECT 1 FROM tickets WHERE public_id = $1::uuid FOR UPDATE NOWAIT`},
+			{"the Ticket row comes before the Round row", "ticket", "FOR UPDATE", `SELECT 1 FROM rounds r JOIN tickets t ON t.id = r.ticket_id WHERE t.public_id = $1::uuid FOR UPDATE OF r NOWAIT`},
+		} {
+			t.Run(event.name+": "+tc.name, func(t *testing.T) {
+				f := newClaimFixture(t)
+				queued, claim := f.claimTicket(t, "Lock order")
+				if event.running {
+					f.startRound(t, claim, "start")
+				}
+				ctx := context.Background()
+				holder, err := f.pool.Begin(ctx)
+				if err != nil {
 					t.Fatal(err)
 				}
-			case "ticket":
-				if _, err := holder.Exec(ctx, `SELECT 1 FROM tickets WHERE public_id = $1::uuid FOR UPDATE`, queued.Id); err != nil {
+				defer func() { _ = holder.Rollback(ctx) }()
+				switch tc.holds {
+				case "priority":
+					if err := lockOwnerPriority(ctx, holder, resolveTestOwner(t, f.pool)); err != nil {
+						t.Fatal(err)
+					}
+				case "ticket":
+					if _, err := holder.Exec(ctx, `SELECT 1 FROM tickets WHERE public_id = $1::uuid FOR UPDATE`, queued.Id); err != nil {
+						t.Fatal(err)
+					}
+				}
+				result := make(chan *httptest.ResponseRecorder, 1)
+				body := event.body(t)
+				go func() {
+					result <- f.reportEvent(t, claim.RoundId, body)
+				}()
+				waitForLockWaiter(t, f.pool, tc.blockedOn)
+
+				probe, err := f.pool.Begin(ctx)
+				if err != nil {
 					t.Fatal(err)
 				}
-			}
-			result := make(chan *httptest.ResponseRecorder, 1)
-			go func() {
-				result <- f.reportEvent(t, claim.RoundId, startedEvent("k", 1, eventOccurredAt, eventReference))
-			}()
-			waitForLockWaiter(t, f.pool, tc.blockedOn)
+				if _, err := probe.Exec(ctx, tc.lockedAfterwards, queued.Id); err != nil {
+					t.Fatalf("the event, still waiting, already holds the lock that must come after: %v", err)
+				}
+				_ = probe.Rollback(ctx)
 
-			probe, err := f.pool.Begin(ctx)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := probe.Exec(ctx, tc.lockedAfterwards, queued.Id); err != nil {
-				t.Fatalf("the event, still waiting, already holds the lock that must come after: %v", err)
-			}
-			_ = probe.Rollback(ctx)
-
-			if err := holder.Commit(ctx); err != nil {
-				t.Fatal(err)
-			}
-			if rec := <-result; rec.Code != http.StatusCreated {
-				t.Fatalf("status=%d body=%s, want 201 once the lock is released", rec.Code, rec.Body.String())
-			}
-		})
+				if err := holder.Commit(ctx); err != nil {
+					t.Fatal(err)
+				}
+				if rec := <-result; rec.Code != http.StatusCreated {
+					t.Fatalf("status=%d body=%s, want 201 once the lock is released", rec.Code, rec.Body.String())
+				}
+			})
+		}
 	}
 }

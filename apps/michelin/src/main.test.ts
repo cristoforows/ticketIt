@@ -74,9 +74,20 @@ async function fakeGalley(): Promise<string> {
       let body = "";
       req.on("data", (chunk: Buffer) => (body += chunk.toString()));
       req.on("end", () => {
-        eventBodies.push(JSON.parse(body) as Record<string, unknown>);
+        const event = JSON.parse(body) as { type: string; data: { observationId?: string } };
+        eventBodies.push(event as unknown as Record<string, unknown>);
+        const notes = eventBodies.filter((recorded) => recorded["type"] === "progress").length;
         res.statusCode = 201;
-        res.end(JSON.stringify({ roundId: claimBody.roundId, type: "execution_started", state: "running", startedAt: "2026-10-01T12:00:01Z" }));
+        res.end(
+          JSON.stringify({
+            roundId: claimBody.roundId,
+            type: event.type,
+            state: "running",
+            startedAt: "2026-10-01T12:00:01Z",
+            ...(event.type === "progress" ? { seq: notes } : {}),
+            ...(event.type === "usage_observed" ? { observationId: event.data.observationId } : {}),
+          }),
+        );
       });
       return;
     }
@@ -121,7 +132,7 @@ function run(env: Record<string, string>) {
 }
 
 describe("michelin process", () => {
-  it("checks Galley, registers, heartbeats, claims and starts one Round, holds it, then exits 0 on SIGTERM without logging the token", async () => {
+  it("checks Galley, registers, heartbeats, claims one Round, runs the default script to its hold, then exits 0 on SIGTERM without logging the token", async () => {
     const galleyUrl = await fakeGalley();
     const michelin = run({
       GALLEY_URL: galleyUrl,
@@ -148,8 +159,13 @@ describe("michelin process", () => {
     expect(messages.indexOf("round claimed")).toBeLessThan(messages.indexOf("execution started reported"));
     expect(runnerPaths[0]).toBe("/api/runner/register");
     expect(runnerPaths.filter((path) => path === "/api/runner/claims")).toHaveLength(1);
-    expect(eventBodies).toHaveLength(1);
+    expect(eventBodies.map((body) => body["type"])).toEqual(["execution_started", "progress", "progress", "progress", "usage_observed"]);
     expect(eventBodies[0]).toMatchObject({ type: "execution_started", idempotencyKey: `${claimBody.roundId}:0`, claimEpoch: 1 });
+    expect(eventBodies[1]).toMatchObject({ idempotencyKey: `${claimBody.roundId}:1`, data: { note: "Reading the Ticket" } });
+    const usage = eventBodies[4] as { idempotencyKey: string; data: { observationId: string } };
+    expect(usage.idempotencyKey).toBe(usage.data.observationId);
+    expect(messages.filter((message) => message === "progress reported")).toHaveLength(3);
+    expect(messages.indexOf("usage observation reported")).toBeLessThan(messages.indexOf("engine holding"));
     expect(michelin.lines.find((line) => line["msg"] === "round claimed")).toMatchObject({
       roundId: claimBody.roundId,
       sequence: 1,

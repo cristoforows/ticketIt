@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startClaimLoop } from "./claimLoop.ts";
 import { resolveRunnerCredential } from "./credentials.ts";
-import { DEFAULT_ENGINE_SCRIPT, type EngineScript } from "./engineScript.ts";
+import type { EngineScript } from "./engineScript.ts";
 import type { FetchFn } from "./galley/client.ts";
 import { startHeartbeatLoop } from "./heartbeatLoop.ts";
 import { createLogger } from "./logger.ts";
 
 const GALLEY = new URL("http://galley.test:8080/");
 const TOKEN = `tir_${"e".repeat(43)}`;
+const START_HOLD: EngineScript = { steps: [{ step: "start" }, { step: "hold" }] };
 const IDENTITY = { michelinVersion: "0.1.0", hostname: "runner-host" };
 
 const CLAIM = {
@@ -38,7 +39,7 @@ function credential() {
   return resolved;
 }
 
-function setup(fetchFn: FetchFn, registered = true, engineScript: EngineScript = DEFAULT_ENGINE_SCRIPT, engineDeps?: Parameters<typeof startClaimLoop>[0]["engineDeps"]) {
+function setup(fetchFn: FetchFn, registered = true, engineScript: EngineScript = START_HOLD, engineDeps?: Parameters<typeof startClaimLoop>[0]["engineDeps"]) {
   const lines: string[] = [];
   const logger = createLogger((line) => lines.push(line));
   const registration = { registered };
@@ -203,7 +204,7 @@ describe("claim loop", () => {
 
   it("survives an unexpected engine error, logs it, and resumes polling", async () => {
     const fetchFn = routed({ claims: [claimed, noWork], events: [created] });
-    const { loop, records } = setup(fetchFn, true, DEFAULT_ENGINE_SCRIPT, {
+    const { loop, records } = setup(fetchFn, true, START_HOLD, {
       newReference: () => {
         throw new Error("engine broke");
       },
@@ -218,7 +219,7 @@ describe("claim loop", () => {
 
   it.each([
     ["waiting", { steps: [{ step: "start" }, { step: "wait", ms: 60_000 }] } satisfies EngineScript],
-    ["holding", DEFAULT_ENGINE_SCRIPT],
+    ["holding", START_HOLD],
   ])("stops promptly on shutdown while the Round's script is %s", async (_name, script) => {
     const fetchFn = routed({ claims: [claimed], events: [created] });
     const { loop } = setup(fetchFn, true, script);
@@ -293,7 +294,7 @@ describe("claim loop beside the heartbeat loop", () => {
     const common = { galleyUrl: GALLEY, fetch: fetchFn, logger, credential: credential(), registration, requestTimeoutMs: 300 };
     const loops = [
       startHeartbeatLoop({ ...common, intervalMs: 1000, identity: IDENTITY }),
-      startClaimLoop({ ...common, intervalMs: 500, engineScript: DEFAULT_ENGINE_SCRIPT }),
+      startClaimLoop({ ...common, intervalMs: 500, engineScript: START_HOLD }),
     ];
     const paths = () => fetchFn.mock.calls.map(([input]) => new URL(String(input)).pathname);
     const stop = () => Promise.all(loops.map((loop) => loop.stop()));

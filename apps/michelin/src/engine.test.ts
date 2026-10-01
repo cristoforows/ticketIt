@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { retryDelayMs, runControlledEngine, type EngineOutcome } from "./engine.ts";
-import type { EngineStep } from "./engineScript.ts";
+import { DEFAULT_ENGINE_SCRIPT, type EngineStep } from "./engineScript.ts";
 import { resolveRunnerCredential } from "./credentials.ts";
 import type { FetchFn } from "./galley/client.ts";
 import type { RunnerClaim } from "./galley/runner.ts";
@@ -54,6 +54,7 @@ interface Harness {
   records: () => Record<string, unknown>[];
   sleeps: number[];
   references: string[];
+  observationIds: string[];
   clockReads: number;
   run: Promise<EngineOutcome>;
 }
@@ -63,7 +64,8 @@ function start(steps: EngineStep[], fetchFn: FetchFn, options: { instantSleep?: 
   const lines: string[] = [];
   const sleeps: number[] = [];
   const references: string[] = [];
-  const harness = { controller, lines, sleeps, references, clockReads: 0 } as Harness;
+  const observationIds: string[] = [];
+  const harness = { controller, lines, sleeps, references, observationIds, clockReads: 0 } as Harness;
   let tick = 0;
   harness.records = () => lines.map((line) => JSON.parse(line) as Record<string, unknown>);
   harness.run = runControlledEngine({
@@ -84,6 +86,11 @@ function start(steps: EngineStep[], fetchFn: FetchFn, options: { instantSleep?: 
         const reference = `controlled:test-${references.length + 1}`;
         references.push(reference);
         return reference;
+      },
+      newObservationId: () => {
+        const id = `0000000${observationIds.length + 1}-aaaa-4aaa-8aaa-aaaaaaaaaaaa`;
+        observationIds.push(id);
+        return id;
       },
       ...(options.instantSleep
         ? {
@@ -337,5 +344,160 @@ describe("the script", () => {
     expect(await harness.run).toBe("completed");
     expect(harness.sleeps).toEqual([5, 7]);
     expect(harness.records().map((record) => record["msg"])).toEqual(["execution started reported", "engine script finished"]);
+  });
+});
+
+const NOTE = (note: string): EngineStep => ({ step: "progress", note });
+const USAGE: EngineStep = {
+  step: "usage",
+  provider: "controlled",
+  model: "scripted",
+  inputTokens: 1200,
+  outputTokens: null,
+  costUsd: "0.004500",
+  activeMs: 2000,
+  basis: "estimated",
+  providerGenerationId: null,
+};
+
+type SentEvent = { type: string; idempotencyKey: string; claimEpoch: number; occurredAt: string; data: Record<string, unknown> };
+
+function answering(...failures: (() => Response)[]) {
+  let notes = 0;
+  let calls = 0;
+  return vi.fn<FetchFn>(async (_input, init) => {
+    // With instant sleeps an endless retry would never yield; a refusal ends the Round so the test fails instead.
+    if (++calls > 50) return json({ error: { code: "invalid_request", message: "runaway retries" } }, 400);
+    const failure = failures.shift();
+    if (failure) return failure();
+    const event = JSON.parse(String(init?.body)) as SentEvent;
+    return json(
+      {
+        roundId: ROUND_ID,
+        type: event.type,
+        state: "running",
+        startedAt: "2026-10-01T12:00:00Z",
+        ...(event.type === "progress" ? { seq: ++notes } : {}),
+        ...(event.type === "usage_observed" ? { observationId: event.data["observationId"] } : {}),
+      },
+      201,
+    );
+  });
+}
+
+const sent = (fetchFn: ReturnType<typeof answering>) => fetchFn.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as SentEvent);
+
+describe("progress and usage steps", () => {
+  it("reports a progress note keyed by Round and step index, and logs its seq", async () => {
+    const fetchFn = answering();
+    const harness = start([START, wait(5), NOTE("Reading the Ticket"), NOTE("Done reading")], fetchFn, { instantSleep: true });
+    expect(await harness.run).toBe("completed");
+
+    expect(sent(fetchFn).slice(1)).toEqual([
+      { type: "progress", idempotencyKey: `${ROUND_ID}:2`, claimEpoch: 3, occurredAt: "2026-10-01T12:00:01.123Z", data: { note: "Reading the Ticket" } },
+      { type: "progress", idempotencyKey: `${ROUND_ID}:3`, claimEpoch: 3, occurredAt: "2026-10-01T12:00:02.123Z", data: { note: "Done reading" } },
+    ]);
+    expect(harness.records().filter((record) => record["msg"] === "progress reported")).toEqual([
+      expect.objectContaining({ roundId: ROUND_ID, step: "progress", stepIndex: 2, attempt: 1, seq: 1, httpStatus: 201 }),
+      expect.objectContaining({ stepIndex: 3, seq: 2 }),
+    ]);
+  });
+
+  it("reports a usage observation whose idempotency key is its observationId, carrying the cost as a string and unknowns as null", async () => {
+    const fetchFn = answering();
+    const harness = start([START, USAGE], fetchFn, { instantSleep: true });
+    expect(await harness.run).toBe("completed");
+
+    const [observationId] = harness.observationIds;
+    expect(sent(fetchFn)[1]).toEqual({
+      type: "usage_observed",
+      idempotencyKey: observationId,
+      claimEpoch: 3,
+      occurredAt: "2026-10-01T12:00:01.123Z",
+      data: { observationId, provider: "controlled", model: "scripted", inputTokens: 1200, outputTokens: null, costUsd: "0.004500", activeMs: 2000, basis: "estimated", providerGenerationId: null },
+    });
+    expect(harness.records().find((record) => record["msg"] === "usage observation reported")).toMatchObject({ step: "usage", stepIndex: 1, observationId });
+  });
+
+  it("generates one observationId per usage step and resends it, in the identical body, on every retry", async () => {
+    const fetchFn = answering(created, refused, error(503, "database_unavailable"), () => new Response("<html>", { status: 201 }));
+    const harness = start([START, USAGE, USAGE], fetchFn, { instantSleep: true });
+    expect(await harness.run).toBe("completed");
+
+    const bodies = fetchFn.mock.calls.map(([, init]) => String(init?.body));
+    expect(bodies).toHaveLength(6);
+    expect(new Set(bodies.slice(1, 5)).size).toBe(1);
+    expect(harness.observationIds).toHaveLength(2);
+    expect(sent(fetchFn).slice(1).map((event) => event.idempotencyKey)).toEqual([...Array(4).fill(harness.observationIds[0]), harness.observationIds[1]]);
+    expect(harness.sleeps).toEqual([1000, 2000, 4000]);
+  });
+
+  it("retries a progress note with the identical body and key", async () => {
+    const fetchFn = answering(created, refused, refused);
+    const harness = start([START, NOTE("n")], fetchFn, { instantSleep: true });
+    expect(await harness.run).toBe("completed");
+    const bodies = fetchFn.mock.calls.map(([, init]) => String(init?.body));
+    expect(bodies).toHaveLength(4);
+    expect(new Set(bodies.slice(1)).size).toBe(1);
+    expect(harness.clockReads).toBe(2);
+  });
+
+  it.each([
+    ["a progress result without a seq", NOTE("n"), { type: "progress" }],
+    ["a progress result with seq 0", NOTE("n"), { type: "progress", seq: 0 }],
+    ["a result naming another event type", NOTE("n"), { type: "execution_started" }],
+    ["a usage result for another observation", USAGE, { type: "usage_observed", observationId: "00000009-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }],
+    ["a usage result without an observationId", USAGE, { type: "usage_observed" }],
+  ])("retries %s as an invalid body", async (_name, step, wrong) => {
+    const fetchFn = answering(created, () => json({ roundId: ROUND_ID, state: "running", startedAt: "2026-10-01T12:00:00Z", ...wrong }, 201));
+    const harness = start([START, step], fetchFn, { instantSleep: true });
+    expect(await harness.run).toBe("completed");
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+    expect(harness.records().find((record) => record["level"] === "warn")).toMatchObject({ reason: "invalid_body", stepIndex: 1 });
+  });
+
+  it.each([
+    [409, "observation_id_conflict"],
+    [409, "event_out_of_order"],
+    [400, "invalid_request"],
+  ])("abandons the Round when Galley refuses a usage observation with %i %s", async (status, code) => {
+    const fetchFn = answering(created, error(status, code));
+    const harness = start([START, USAGE, NOTE("after"), HOLD], fetchFn, { instantSleep: true });
+    expect(await harness.run).toBe("abandoned");
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(harness.records().at(-1)).toMatchObject({ level: "error", step: "usage", stepIndex: 1, errorCode: code });
+  });
+});
+
+describe("the default script", () => {
+  it("starts, notes progress a second apart on the injected clock, observes usage once, then holds", async () => {
+    const fetchFn = answering();
+    const harness = start([...DEFAULT_ENGINE_SCRIPT.steps], fetchFn);
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sent(fetchFn).map((event) => event.type)).toEqual(["execution_started", "progress"]);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(sent(fetchFn)).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sent(fetchFn)).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    const events = sent(fetchFn);
+    expect(events.map((event) => event.type)).toEqual(["execution_started", "progress", "progress", "progress", "usage_observed"]);
+    expect(events.map((event) => event.idempotencyKey)).toEqual([`${ROUND_ID}:0`, `${ROUND_ID}:1`, `${ROUND_ID}:3`, `${ROUND_ID}:5`, harness.observationIds[0]]);
+    expect(events.slice(1, 4).map((event) => event.data["note"])).toEqual(["Reading the Ticket", "Working towards the goal", "Writing up the result"]);
+    expect(harness.records().map((record) => record["msg"])).toEqual([
+      "execution started reported",
+      "progress reported",
+      "progress reported",
+      "progress reported",
+      "usage observation reported",
+      "engine holding",
+    ]);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetchFn).toHaveBeenCalledTimes(5);
+    harness.controller.abort();
+    expect(await harness.run).toBe("aborted");
   });
 });

@@ -27,6 +27,8 @@ const (
 	roundNotOpenCode              = "round_not_open"
 	roundNotOpenMessage           = "this Round is no longer open"
 	eventOutOfOrderCode           = "event_out_of_order"
+	observationIDConflictCode     = "observation_id_conflict"
+	observationIDConflictMessage  = "this observationId is already recorded for another Round"
 	roundNotFoundMessage          = "no round with that identifier"
 	roundEventFailedMessage       = "failed to record the event"
 )
@@ -40,13 +42,16 @@ type roundEvent struct {
 	occurredAt      time.Time
 	payloadHash     []byte
 	engineReference string
+	note            string
+	usage           usageObservation
 }
 
 type lockedRound struct {
-	id    int64
-	state string
-	epoch int
-	open  bool
+	id        int64
+	state     string
+	epoch     int
+	open      bool
+	startedAt *time.Time
 }
 
 type roundEventRejection struct {
@@ -113,7 +118,7 @@ func (s *server) ReportRoundEvent(w http.ResponseWriter, r *http.Request, roundI
 
 func validateRoundEvent(req RoundEventRequest) (roundEvent, string) {
 	if !req.Type.Valid() {
-		return roundEvent{}, `"type" must be one of: execution_started`
+		return roundEvent{}, `"type" must be one of: execution_started, progress, usage_observed`
 	}
 	if !validEventText(req.IdempotencyKey, idempotencyKeyMaxLength) {
 		return roundEvent{}, fmt.Sprintf(`"idempotencyKey" must be 1 to %d characters without control characters`, idempotencyKeyMaxLength)
@@ -130,13 +135,20 @@ func validateRoundEvent(req RoundEventRequest) (roundEvent, string) {
 		return roundEvent{}, `"data" must be a JSON object`
 	}
 	event := roundEvent{eventType: req.Type, idempotencyKey: req.IdempotencyKey, claimEpoch: req.ClaimEpoch, occurredAt: occurredAt}
+	var problem string
 	switch req.Type {
 	case RoundEventExecutionStarted:
-		reference, problem := validateExecutionStartedData(data)
-		if problem != "" {
-			return roundEvent{}, problem
+		event.engineReference, problem = validateExecutionStartedData(data)
+	case RoundEventProgress:
+		event.note, problem = validateProgressData(data)
+	case RoundEventUsageObserved:
+		event.usage, problem = validateUsageObservedData(data)
+		if problem == "" && event.usage.id != req.IdempotencyKey {
+			problem = `"idempotencyKey" must equal "data.observationId" for usage_observed`
 		}
-		event.engineReference = reference
+	}
+	if problem != "" {
+		return roundEvent{}, problem
 	}
 	event.payloadHash, err = roundEventPayloadHash(req.Type, req.ClaimEpoch, occurredAt, data)
 	if err != nil {
@@ -151,16 +163,12 @@ func validEventText(value string, maxLength int) bool {
 
 func validateExecutionStartedData(raw []byte) (string, string) {
 	const shape = `"data" must be an object with exactly "engineReference"`
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil || len(fields) != 1 {
-		return "", shape
-	}
-	value, ok := fields["engineReference"]
+	fields, ok := exactObject(raw, "engineReference")
 	if !ok {
 		return "", shape
 	}
 	var reference string
-	if err := json.Unmarshal(value, &reference); err != nil {
+	if err := json.Unmarshal(fields["engineReference"], &reference); err != nil {
 		return "", shape
 	}
 	if !validEventText(reference, engineReferenceMaxLength) {
@@ -195,8 +203,8 @@ func recordRoundEvent(ctx context.Context, pool *pgxpool.Pool, ownerID int64, ro
 		return recordedRoundEvent{}, err
 	}
 	var round lockedRound
-	err = tx.QueryRow(ctx, `SELECT id, state, claim_epoch, state IN `+openRoundStatesSQL+` FROM rounds
-		WHERE owner_id = $1 AND public_id = $2::uuid FOR UPDATE`, ownerID, roundID).Scan(&round.id, &round.state, &round.epoch, &round.open)
+	err = tx.QueryRow(ctx, `SELECT id, state, claim_epoch, state IN `+openRoundStatesSQL+`, started_at FROM rounds
+		WHERE owner_id = $1 AND public_id = $2::uuid FOR UPDATE`, ownerID, roundID).Scan(&round.id, &round.state, &round.epoch, &round.open, &round.startedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return recordedRoundEvent{}, nil
 	}
@@ -220,23 +228,30 @@ func recordRoundEvent(ctx context.Context, pool *pgxpool.Pool, ownerID int64, ro
 		return recordedRoundEvent{found: true, rejection: rejection}, nil
 	}
 
-	var startedAt time.Time
-	if err := tx.QueryRow(ctx, `UPDATE rounds SET state = $3, started_at = GREATEST($4::timestamptz, claimed_at)
-		WHERE id = $1 AND owner_id = $2 RETURNING started_at`, round.id, ownerID, string(RoundRunning), now).Scan(&startedAt); err != nil {
-		return recordedRoundEvent{}, err
+	result := RoundEventResult{RoundId: roundID, Type: event.eventType, State: RoundRunning}
+	switch event.eventType {
+	case RoundEventExecutionStarted:
+		startedAt, err := startRound(ctx, tx, ownerID, ticketID, round.id, event.engineReference, now)
+		if err != nil {
+			return recordedRoundEvent{}, err
+		}
+		result.StartedAt = startedAt.UTC()
+	case RoundEventProgress:
+		seq, err := appendActivity(ctx, tx, ownerID, round.id, event.note, event.occurredAt)
+		if err != nil {
+			return recordedRoundEvent{}, err
+		}
+		result.StartedAt, result.Seq = round.startedAt.UTC(), &seq
+	case RoundEventUsageObserved:
+		recorded, err := insertUsageObservation(ctx, tx, ownerID, round.id, event.usage, event.occurredAt)
+		if err != nil {
+			return recordedRoundEvent{}, err
+		}
+		if !recorded {
+			return recordedRoundEvent{found: true, rejection: &roundEventRejection{http.StatusConflict, observationIDConflictCode, observationIDConflictMessage}}, nil
+		}
+		result.StartedAt, result.ObservationId = round.startedAt.UTC(), &event.usage.id
 	}
-	if err := attachEngineReference(ctx, tx, ownerID, round.id, event.engineReference, now); err != nil {
-		return recordedRoundEvent{}, err
-	}
-	tag, err := tx.Exec(ctx, `UPDATE tickets SET status = $3, updated_at = now()
-		WHERE owner_id = $1 AND public_id = $2::uuid AND status = $4`, ownerID, ticketID, string(InProgress), string(Ready))
-	if err != nil {
-		return recordedRoundEvent{}, err
-	}
-	if tag.RowsAffected() != 1 {
-		return recordedRoundEvent{}, errRoundEventTicketNotReady
-	}
-	result := RoundEventResult{RoundId: roundID, Type: event.eventType, State: RoundRunning, StartedAt: startedAt.UTC()}
 	encoded, err := json.Marshal(result)
 	if err != nil {
 		return recordedRoundEvent{}, err
@@ -264,12 +279,35 @@ func decideRoundEvent(round lockedRound, eventType RoundEventType, claimEpoch in
 	return nil
 }
 
+// Progress and usage are facts about execution, which Galley knows began only once execution_started is recorded.
 func roundStateTakes(state RoundState, eventType RoundEventType) bool {
 	switch eventType {
 	case RoundEventExecutionStarted:
 		return state == RoundClaimed
+	case RoundEventProgress, RoundEventUsageObserved:
+		return state == RoundRunning
 	}
 	return false
+}
+
+func startRound(ctx context.Context, tx pgx.Tx, ownerID int64, ticketID string, roundID int64, engineReference string, now time.Time) (time.Time, error) {
+	var startedAt time.Time
+	if err := tx.QueryRow(ctx, `UPDATE rounds SET state = $3, started_at = GREATEST($4::timestamptz, claimed_at)
+		WHERE id = $1 AND owner_id = $2 RETURNING started_at`, roundID, ownerID, string(RoundRunning), now).Scan(&startedAt); err != nil {
+		return time.Time{}, err
+	}
+	if err := attachEngineReference(ctx, tx, ownerID, roundID, engineReference, now); err != nil {
+		return time.Time{}, err
+	}
+	tag, err := tx.Exec(ctx, `UPDATE tickets SET status = $3, updated_at = now()
+		WHERE owner_id = $1 AND public_id = $2::uuid AND status = $4`, ownerID, ticketID, string(InProgress), string(Ready))
+	if err != nil {
+		return time.Time{}, err
+	}
+	if tag.RowsAffected() != 1 {
+		return time.Time{}, errRoundEventTicketNotReady
+	}
+	return startedAt, nil
 }
 
 // A new reference retires the current one rather than replacing it (ADR 0002).

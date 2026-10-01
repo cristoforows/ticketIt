@@ -12,7 +12,19 @@ export interface RunningMichelin {
   output: () => string;
 }
 
-export type EngineScriptStep = { step: "start" } | { step: "wait"; ms: number } | { step: "hold" };
+export interface UsageScriptStep {
+  step: "usage";
+  provider: string;
+  model: string;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  costUsd: string | null;
+  activeMs: number | null;
+  basis: "reported" | "estimated";
+  providerGenerationId: string | null;
+}
+
+export type EngineScriptStep = { step: "start" } | { step: "wait"; ms: number } | { step: "progress"; note: string } | UsageScriptStep | { step: "hold" };
 
 function writeEngineScript(steps: EngineScriptStep[]): string {
   const file = path.join(mkdtempSync(path.join(tmpdir(), "michelin-e2e-")), "script.json");

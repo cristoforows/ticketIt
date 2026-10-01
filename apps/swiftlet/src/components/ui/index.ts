@@ -17,4 +17,4 @@ export { Slip, SlipPaper, SlipToggle } from "./SlipCard";
 export { shortDate, slipTilt } from "./slip";
 export { StageLabel, StageStep } from "./Stage";
 export { statuses, statusLabel, statusTone, type TicketStatus } from "./status";
-export { BadgeList, BadgeTag, ClaimedTag, HealthPill, PendingTag, QueuedTag, StatusTag, type HealthPillState } from "./Tags";
+export { BadgeList, BadgeTag, ClaimedTag, EstimateTag, HealthPill, PendingTag, QueuedTag, StatusTag, type HealthPillState } from "./Tags";

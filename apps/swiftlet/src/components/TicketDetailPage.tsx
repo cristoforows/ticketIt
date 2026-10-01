@@ -20,8 +20,10 @@ import {
   type TicketUpdate,
 } from "../api/tickets";
 import { fetchAgents, type Agent } from "../api/agents";
+import { fetchTicketRounds } from "../api/rounds";
 import { collectionQuery, fullPageReturnPath, navigate, useEditRequested } from "../router";
 import { Link } from "./Link";
+import type { RoundRecords } from "./RoundsSection";
 import { useRunnerHealth } from "./RunnerHealthPill";
 import { TicketDetail } from "./TicketDetail";
 import { capsLinkClasses, EmptyMessage, ErrorMessage, LoadingMessage, Paper } from "./ui";
@@ -43,11 +45,28 @@ type DetailState =
 
 export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "page", onCommandSucceeded, onArchiveSucceeded }: TicketDetailPageProps) {
   const [state, setState] = useState<DetailState>({ kind: "loading" });
+  const [roundRecords, setRoundRecords] = useState<RoundRecords & { ticketId?: string }>({});
   const editRequested = useEditRequested();
 
   const loaded = state.kind === "loaded";
   const hasOpenRound = state.kind === "loaded" && state.ticket.openRound !== null;
   const { view: runnerHealth } = useRunnerHealth(onUnauthenticated, hasOpenRound);
+
+  const loadRounds = async (isCurrent: () => boolean = () => true) => {
+    try {
+      const rounds = await fetchTicketRounds(ticketId);
+      if (!isCurrent()) return;
+      setRoundRecords((current) => (current.ticketId === ticketId && current.error === undefined && sameData(current.rounds, rounds) ? current : { ticketId, rounds }));
+    } catch (error) {
+      if (!isCurrent()) return;
+      if (error instanceof UnauthenticatedError) {
+        onUnauthenticated();
+        return;
+      }
+      const message = error instanceof Error ? error.message : "Unknown error loading activity and usage.";
+      setRoundRecords((current) => ({ ticketId, rounds: current.ticketId === ticketId ? current.rounds : undefined, error: message }));
+    }
+  };
 
   const refreshTicket = async () => {
     try {
@@ -57,6 +76,7 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
         if (sameData(current.ticket, ticket)) return current.refreshError === undefined ? current : { kind: "loaded", ticket: current.ticket };
         return { kind: "loaded", ticket };
       });
+      if (ticket.openRound !== null) await loadRounds();
     } catch (error) {
       if (error instanceof UnauthenticatedError) {
         onUnauthenticated();
@@ -81,9 +101,9 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
 
     fetchTicket(ticketId)
       .then((ticket) => {
-        if (!cancelled) {
-          setState({ kind: "loaded", ticket });
-        }
+        if (cancelled) return;
+        setState({ kind: "loaded", ticket });
+        if (ticket.openRound !== null) void loadRounds(() => !cancelled);
       })
       .catch((error: unknown) => {
         if (cancelled) {
@@ -181,6 +201,7 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
       onRestore={() => runCommand(() => restoreTicket(ticketId))}
       editRequested={editRequested}
       runnerHealth={runnerHealth}
+      roundRecords={roundRecords.ticketId === ticketId ? roundRecords : undefined}
       onArchived={() => (onArchiveSucceeded ? onArchiveSucceeded() : navigate(fullPageReturnPath()))}
     />
   );

@@ -1,5 +1,5 @@
 import type { components } from "./generated/schema";
-import { authenticatedFetch, errorMessage } from "./http";
+import { authenticatedFetch, errorMessage, isNullableString } from "./http";
 
 export type RunnerHealth = components["schemas"]["RunnerHealth"];
 export type RunnerHealthState = components["schemas"]["RunnerHealthState"];
@@ -15,7 +15,6 @@ const TOKEN_SHAPE = /^tir_[A-Za-z0-9_-]{43}$/;
 
 const isTimestamp = (value: unknown): value is string => typeof value === "string" && !Number.isNaN(Date.parse(value));
 const isNullableTimestamp = (value: unknown) => value === null || isTimestamp(value);
-const isNullableString = (value: unknown) => value === null || typeof value === "string";
 
 export function isRunnerHealth(value: unknown): value is RunnerHealth {
   if (typeof value !== "object" || value === null) return false;

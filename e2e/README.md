@@ -327,11 +327,25 @@ Michelin (exit code 0) and passing the health window through
 disconnected** while the Ticket stays In Progress with the same Round.
 It leaves the Owner's slot taken.
 
+`tests/runner-activity.spec.ts` (issue #135) drives a real Michelin
+whose script reports a progress note, waits 10 s, reports an estimated
+usage observation, waits 10 s, reports a second observation with an
+unknown cost, then reports a second note and holds. Data is created
+through the API, as in `runner-engine.spec.ts`. Once Galley's live Round
+list holds the first note, a browser opens the receipt. The receipt must
+first show the note and every usage figure as **Unknown** (never `$0`),
+then "$0.0045 est.", then "≥ $0.0045 (incomplete) est." with both notes
+in order, all from the receipt's own 3 s refresh. The final figures must
+equal Galley's live summary and survive a reload. Michelin's log must
+show two distinct `observationId`s and not the credential.
+
 Because a Round cannot end before M4.10 (#136) and an Owner has one open
 Round at a time, `run.sh` resets and migrates the database and restarts
-Galley between `runner-claims.spec.ts` and `runner-engine.spec.ts`, the
-way it prepares the database at the start of the run. Any later spec that
-needs the slot free must run before them, or get a phase of its own.
+Galley, the way it prepares the database at the start of the run,
+between `runner-claims.spec.ts` and `runner-engine.spec.ts`, and again
+before `runner-activity.spec.ts`. No spec depends on another's data.
+Any later spec that needs the slot free must run before them, or get a
+phase of its own.
 
 `tests/ticket-priority-order.spec.ts` reorders three Ready Tickets by
 dragging onto the upper and lower halves of board slips, then with Move

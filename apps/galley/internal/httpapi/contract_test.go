@@ -917,8 +917,37 @@ func TestRoundEvents_ResponsesMatchContractAndMethod405(t *testing.T) {
 	validate(runnerCall{method: http.MethodPost, path: path, body: startedEvent("k", 1, eventOccurredAt, eventReference)}, http.StatusUnauthorized)
 	validate(runnerCall{method: http.MethodPost, path: path, body: startedEvent("k", 1, eventOccurredAt, eventReference), cookie: f.cookie}, http.StatusUnauthorized)
 	validate(runnerCall{method: http.MethodPost, path: "/api/runner/rounds/" + uuid.NewString() + "/events", body: startedEvent("k", 1, eventOccurredAt, eventReference), token: f.token}, http.StatusNotFound)
+	progress := func(key, note string) runnerCall {
+		return runnerCall{method: http.MethodPost, path: path, body: progressEvent(t, key, 1, eventOccurredAt, note), token: f.token}
+	}
+	usage := func(id string, changes map[string]any) runnerCall {
+		return runnerCall{method: http.MethodPost, path: path, body: usageEvent(t, id, 1, usageWith(id, changes)), token: f.token}
+	}
+	validate(progress("p1", "Reading the Ticket"), http.StatusCreated)
+	validate(progress("p1", "Reading the Ticket"), http.StatusOK)
+	validate(progress("p1", "Changed"), http.StatusConflict)
+	validate(progress("p2", " "), http.StatusBadRequest)
+	validate(usage(observationA, map[string]any{"costUsd": nil, "basis": "estimated"}), http.StatusCreated)
+	validate(usage(observationA, map[string]any{"costUsd": nil, "basis": "estimated"}), http.StatusOK)
+	validate(usage(observationA, nil), http.StatusConflict)
+	validate(runnerCall{method: http.MethodPost, path: path, body: usageEvent(t, "k9", 1, usageData(observationB)), token: f.token}, http.StatusBadRequest)
+	validate(usage(observationB, map[string]any{"providerGenerationId": "gen-1"}), http.StatusCreated)
+	for i := range 51 {
+		validate(progress(fmt.Sprintf("n%d", i), fmt.Sprintf("note %d", i)), http.StatusCreated)
+	}
+	listed := validate(rounds, http.StatusOK)
+	if got := decodeRounds(t, listed); len(got[0].Activity) != 50 || got[0].Usage.Observations != 2 || got[0].Usage.Complete || got[0].Usage.CostUsd == nil {
+		t.Fatalf("the validated list = %+v, want a full activity window and a partial usage summary", got[0])
+	}
 	deliverRoundDirect(t, f.pool, claim.RoundId)
 	validate(event("k4", 1, eventReference), http.StatusConflict)
+	validate(progress("p3", "late"), http.StatusConflict)
+
+	_, next := f.claimTicket(t, "contract, second Round")
+	nextPath := "/api/runner/rounds/" + next.RoundId + "/events"
+	validate(runnerCall{method: http.MethodPost, path: nextPath, body: progressEvent(t, "early", 1, eventOccurredAt, "too early"), token: f.token}, http.StatusConflict)
+	f.startRound(t, next, "start")
+	validate(runnerCall{method: http.MethodPost, path: nextPath, body: usageEvent(t, observationA, 1, usageData(observationA)), token: f.token}, http.StatusConflict)
 
 	validate(runnerCall{method: http.MethodGet, path: "/api/tickets/" + uuid.NewString() + "/rounds", cookie: f.cookie}, http.StatusNotFound)
 	validate(runnerCall{method: http.MethodGet, path: "/api/tickets/" + queued.Id + "/rounds"}, http.StatusUnauthorized)

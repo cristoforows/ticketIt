@@ -1393,6 +1393,70 @@ in `contract_test.go`. `round_events` and `round_engine_references`
 join the no-execution-artefact allowlist, which checks that no manual
 action creates either. Evidence: `docs/evidence/m4/134-controlled-engine.md`.
 
+## Round activity and usage observations (issue #135)
+
+Migration `000015_create_round_activity_and_usage_observations.up.sql`
+widens `round_events_type_m4` to `execution_started`, `progress` and
+`usage_observed`, and adds two append-only tables. Both are Owner-scoped
+through a composite foreign key to `rounds (owner_id, id)`.
+
+- `round_activity (round_id, seq, note, occurred_at)`: `UNIQUE (round_id,
+  seq)`, `seq >= 1`, `char_length(note) BETWEEN 1 AND 2000`, not blank.
+- `usage_observations`: `id` is the runner's `observationId` UUID. It
+  holds `provider`, `model`, the nullable `input_tokens`, `output_tokens`,
+  `cost_usd NUMERIC(12,6)` and `active_ms` (`null` is unknown), `basis`
+  (`reported` or `estimated`), a nullable, non-unique
+  `provider_generation_id`, and `occurred_at`. Rows are never merged or
+  updated; enrichment is M9 (#10).
+
+Both events use the endpoint and ladder above. Additions:
+
+- **Validation (`400`).**
+  - `progress` `data` is exactly `{note}`. The note is 1 to 2000 Unicode
+    code points, not blank, with no control character but tab and line
+    feed.
+  - `usage_observed` `data` has exactly nine keys, `null` for an unknown
+    figure:
+    - `observationId`: a non-nil lowercase canonical UUID;
+    - `provider` and `model`: 1 to 200 characters;
+    - `inputTokens`, `outputTokens` and `activeMs`: integers from 0 to
+      2^53−1;
+    - `costUsd`: a decimal string from `"0"` to `"999999.999999"` with at
+      most 6 places, never a JSON number;
+    - `basis` and `providerGenerationId`.
+  - For `usage_observed`, `idempotencyKey` must equal
+    `data.observationId`.
+- **State (`409 event_out_of_order`).** Both need a `running` Round. A
+  claimed Round rejects them and stores nothing, so the same key is
+  accepted once `execution_started` is recorded.
+- **Apply (`201`).**
+  - A note gets the next `seq`. It is `max + 1` inside the transaction
+    while the Round's Ticket row lock is held, so `seq` is gap-free per
+    Round. The result carries it.
+  - An observation is inserted with `ON CONFLICT (id) DO NOTHING`. An id
+    already recorded for another Round is `409
+    observation_id_conflict`; this Round's own replay is answered at the
+    lookup step first.
+  - Neither changes the Ticket or the Round.
+
+`GET /api/tickets/{id}/rounds` adds, per Round:
+
+- `activity`: the latest 50 notes, oldest first.
+- `usage`: `observations`, plus `costUsd`, the text of
+  `sum(cost_usd)` at scale 6, or `null` when no cost is known. Then:
+  - `complete`: at least one observation and every cost known;
+  - `estimated`: a known cost is estimated;
+  - `inputTokens`, `outputTokens` and `activeMs`: `{sum, complete,
+    estimated}` with the same meanings.
+
+The Rounds, notes and sums are read in one `REPEATABLE READ` read-only
+transaction.
+
+Tests: `round_activity_usage_test.go`, additions to `round_events_test.go`
+and `TestRoundEvents_ResponsesMatchContractAndMethod405`. Both tables
+join the no-execution-artefact allowlist. Evidence:
+`docs/evidence/m4/135-activity-usage.md`.
+
 ## Error shape
 
 `ErrorBody`/`ErrorDetail` are generated from
@@ -1675,6 +1739,8 @@ apps/galley/
         ├── round_events.go # issue #134: event ingestion, the decision ladder, engine references
         ├── round_event_hash.go  # issue #134: canonical JSON and the payload hash
         ├── ticket_rounds.go     # issue #134: GET /api/tickets/{id}/rounds
+        ├── round_activity.go    # issue #135: progress notes, seq, the 50-note window
+        ├── usage_observations.go  # issue #135: usage observations and the Round summary
         ├── devclock.go     # issue #130: development-only clock advance for the browser suite
         └── no_execution_side_effects_test.go   # issue #60: the no-Round/queue/work-request guardrail
 ```

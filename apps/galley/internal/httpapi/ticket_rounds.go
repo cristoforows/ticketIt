@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -31,12 +32,18 @@ func (s *server) ListTicketRounds(w http.ResponseWriter, r *http.Request, id str
 	writeJSON(w, http.StatusOK, TicketRoundList{Rounds: rounds})
 }
 
+// One read-only snapshot, so a Round's activity and usage agree with each other and with the Round.
 func listRoundsForTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64, ticketID string) ([]TicketRound, bool, error) {
-	var exists bool
-	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM tickets WHERE owner_id = $1 AND public_id = $2::uuid)`, ownerID, ticketID).Scan(&exists); err != nil || !exists {
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
 		return nil, false, err
 	}
-	rows, err := pool.Query(ctx, `SELECT r.public_id::text, r.sequence, r.state,
+	defer func() { _ = tx.Rollback(ctx) }()
+	var exists bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM tickets WHERE owner_id = $1 AND public_id = $2::uuid)`, ownerID, ticketID).Scan(&exists); err != nil || !exists {
+		return nil, false, err
+	}
+	rows, err := tx.Query(ctx, `SELECT r.id, r.public_id::text, r.sequence, r.state,
 			json_build_object('id', a.public_id, 'name', a.name, 'kind', a.kind), r.claimed_at, r.started_at, r.ended_at
 		FROM rounds r
 		JOIN tickets t ON t.owner_id = r.owner_id AND t.id = r.ticket_id
@@ -46,12 +53,14 @@ func listRoundsForTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64,
 	if err != nil {
 		return nil, false, err
 	}
-	defer rows.Close()
 	rounds := []TicketRound{}
+	var ids []int64
 	for rows.Next() {
+		var id int64
 		var round TicketRound
 		var state string
-		if err := rows.Scan(&round.Id, &round.Sequence, &state, &round.Agent, &round.ClaimedAt, &round.StartedAt, &round.EndedAt); err != nil {
+		if err := rows.Scan(&id, &round.Id, &round.Sequence, &state, &round.Agent, &round.ClaimedAt, &round.StartedAt, &round.EndedAt); err != nil {
+			rows.Close()
 			return nil, false, err
 		}
 		round.State = RoundState(state)
@@ -59,6 +68,26 @@ func listRoundsForTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64,
 		round.StartedAt = utcOrNil(round.StartedAt)
 		round.EndedAt = utcOrNil(round.EndedAt)
 		rounds = append(rounds, round)
+		ids = append(ids, id)
 	}
-	return rounds, true, rows.Err()
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	activity, err := latestActivity(ctx, tx, ownerID, ids)
+	if err != nil {
+		return nil, false, err
+	}
+	usage, err := roundUsageSummaries(ctx, tx, ownerID, ids)
+	if err != nil {
+		return nil, false, err
+	}
+	for i, id := range ids {
+		rounds[i].Activity = activity[id]
+		if rounds[i].Activity == nil {
+			rounds[i].Activity = []RoundActivityNote{}
+		}
+		rounds[i].Usage = usage[id]
+	}
+	return rounds, true, nil
 }
