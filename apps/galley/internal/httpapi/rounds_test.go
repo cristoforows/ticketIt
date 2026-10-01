@@ -127,6 +127,11 @@ func deliverRoundDirect(t *testing.T, pool *pgxpool.Pool, roundID string) {
 
 func waitForLockWaiter(t *testing.T, pool *pgxpool.Pool, query string) {
 	t.Helper()
+	waitForLockWaiters(t, pool, query, 1)
+}
+
+func waitForLockWaiters(t *testing.T, pool *pgxpool.Pool, query string, n int) {
+	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		var waiting int
@@ -134,12 +139,12 @@ func waitForLockWaiter(t *testing.T, pool *pgxpool.Pool, query string) {
 			WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%' || $1 || '%'`, query).Scan(&waiting); err != nil {
 			t.Fatal(err)
 		}
-		if waiting > 0 {
+		if waiting >= n {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("no query like %q blocked on a lock within 5 s", query)
+	t.Fatalf("fewer than %d queries like %q blocked on a lock within 5 s", n, query)
 }
 
 type ticketRowFacts struct {

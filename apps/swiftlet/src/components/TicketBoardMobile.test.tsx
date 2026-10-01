@@ -48,6 +48,25 @@ describe("TicketBoard on phones", () => {
     return fetchStub;
   }
 
+  it("offers no edit, move or reorder on a locked slip, with Galley's reason on Edit", async () => {
+    const reason = { code: "round_open", message: "this Ticket has an open Round; it can be changed once the Round ends", roundId: "r1" };
+    const agent = { id: "a1", name: "Builder", kind: "coding" };
+    const openRound = { id: "r1", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null };
+    stubTickets([
+      { ...ticket("locked", "Backlog"), assigneeType: "agent", assigneeAgent: agent, openRound, allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason } } },
+      ticket("next", "Backlog", ["Ready"]),
+    ]);
+    render(<TicketBoard onUnauthenticated={() => {}} />);
+    fireEvent.click(within(await screen.findByTestId("board-ticket-locked")).getByTestId("board-slip-toggle"));
+
+    const actions = screen.getByTestId("board-slip-actions");
+    expect(within(actions).getByTestId("board-slip-view")).toBeEnabled();
+    expect(within(actions).getByTestId("board-slip-edit")).toBeDisabled();
+    expect(within(actions).getByTestId("board-slip-edit")).toHaveAttribute("title", reason.message);
+    expect(within(actions).getByTestId("board-slip-move")).toBeDisabled();
+    expect(within(actions).queryByTestId("board-slip-reorder-up")).not.toBeInTheDocument();
+  });
+
   describe("stage switcher", () => {
     it("steps with Previous and Next, disabling each at its end", async () => {
       stubTickets([ticket("a", "Backlog"), ticket("b", "Ready")]);

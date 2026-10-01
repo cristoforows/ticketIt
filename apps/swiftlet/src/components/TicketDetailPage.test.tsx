@@ -254,19 +254,29 @@ describe("TicketDetailPage", () => {
       expect(screen.queryByTestId("ticket-detail-queued")).not.toBeInTheDocument();
     });
 
-    it("shows Galley's round_open rejection on the archive control and stays on the receipt", async () => {
-      const rejection = "this Ticket has an open Round; it can be archived once the Round ends";
+    it("shows Galley's round_open rejection when a claim lands after the receipt loaded", async () => {
+      const rejection = "this Ticket has an open Round; it can be changed once the Round ends";
       vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
       stubGalley(vi.fn()
-        .mockResolvedValueOnce(jsonResponse(claimed))
-        .mockResolvedValueOnce(jsonResponse({ error: { code: "round_open", message: rejection } }, 400)));
+        .mockResolvedValueOnce(jsonResponse({ ...claimed, openRound: null }))
+        .mockResolvedValueOnce(jsonResponse({ error: { code: "round_open", message: rejection, roundId: claimedRound.id } }, 400)));
       render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
-      await screen.findByTestId("ticket-detail-claimed");
+      await screen.findByTestId("ticket-detail-title");
 
       fireEvent.click(screen.getByRole("button", { name: "Archive" }));
 
       expect(await screen.findByTestId("ticket-detail-action-error")).toHaveTextContent(rejection);
-      expect(screen.getByTestId("ticket-detail-claimed")).toBeInTheDocument();
+      expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("Ready");
+    });
+
+    it("renders the receipt read-only with the lock copy from Galley's openRound", async () => {
+      const reason = { code: "round_open", message: "this Ticket has an open Round; it can be changed once the Round ends", roundId: claimedRound.id };
+      stubFetch(jsonResponse({ ...claimed, openRound: { ...claimedRound, sequence: 2 }, allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason } } }));
+      render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+      expect(await screen.findByTestId("ticket-detail-locked")).toHaveTextContent("Locked while atlas works on Round 2");
+      for (const name of ["Edit", "Archive", "Add badge", "Unassign", "Assign"]) {
+        expect(screen.getByRole("button", { name })).toBeDisabled();
+      }
     });
 
     it.each([

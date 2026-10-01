@@ -707,9 +707,40 @@ for** outline, and the two never show together, because Galley reports
 `requestingAgentWork` false while a Round is open. The Ticket stays in
 its Status column. Swiftlet computes nothing: `parseTicket` requires
 `openRound`, either `null` or a Round with a known state, and rejects
-anything else. **Archive** on a Ticket with an open Round shows Galley's
-`round_open` message in the action error, and the receipt stays open.
-`e2e/tests/runner-claims.spec.ts` covers this against a real Michelin.
+anything else. A command Galley refuses because a claim landed after the
+receipt loaded shows Galley's `round_open` message in the action error,
+and the receipt stays open. `e2e/tests/runner-claims.spec.ts` covers
+this against a real Michelin.
+
+## Locked while a Round is open (issue #133)
+
+Swiftlet renders the lock from Galley's state and decides nothing.
+While `openRound` is set:
+
+- **Receipt.** `ticket-detail-locked` reads "Locked while <Agent> works
+  on Round <n>", from `openRound.agent.name` and `openRound.sequence`
+  (`lockedLabel` in `components/roundLock.ts`). It is an ink outline
+  with ink text on paper, like `ClaimedTag`. Edit, Archive, Unassign,
+  the Assignee picker, Add badge and each badge's Remove are disabled,
+  titled with Galley's reason (`allowedActions.accept.reason.message`),
+  the same path archived Tickets use. Status buttons and Accept follow
+  `allowedActions`, which Galley returns empty. `?edit` opens in view
+  mode.
+- **Slip and Backlog row.** `LockGlyph` (`components/ui/Glyphs.tsx`,
+  the shared glyph set's first SVG, drawn in `currentColor`) sits beside
+  the serial. Its accessible name is the same lock copy (`board-locked`,
+  `ticket-locked`). The slip is not draggable. In its actions, Edit
+  and Move stage are disabled and reorder is hidden. The Backlog row has
+  no reorder buttons. Another Ticket may still be dropped beside it, because Galley
+  allows that.
+- **Coexisting with Claimed by runner.** The glyph marks the lock for
+  either open state, claimed or running. `ClaimedTag` keeps naming the
+  Round's state and still shows only while `claimed`. The glyph goes in
+  the serial line, so a claimed slip has one tag, not two.
+
+`tokens.test.ts` "lock notice and lock glyph: ink on paper" pins the
+contrast (14.91:1). Nothing animates. The greyed active card,
+animation and View/Stop controls are M5 (#6).
 
 ## Browser-to-backend suite
 

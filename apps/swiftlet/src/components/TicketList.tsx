@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { UnauthenticatedError } from "../api/session";
 import { fetchTickets, reorderTicket, type Ticket, type TicketPlacement } from "../api/tickets";
 import { focusReorderButton, ReorderButtons, type ReorderDirection } from "./ReorderButtons";
+import { lockedLabel } from "./roundLock";
 import { refocusTicketRowIfFocusLost, TicketModalLink, ticketRowTestId } from "./TicketModalLink";
-import { BadgeList, EmptyMessage, ErrorMessage, LoadingMessage, LogRow, LogRowMain, LogStatus, Paper, PendingTag, ReceiptTitle, Rule, ticketSerial } from "./ui";
+import { BadgeList, EmptyMessage, ErrorMessage, LoadingMessage, LockGlyph, LogRow, LogRowMain, LogStatus, Paper, PendingTag, ReceiptTitle, Rule, ticketSerial } from "./ui";
 
 type ListState =
   | { kind: "loading" }
@@ -110,13 +111,14 @@ export function TicketList({ onUnauthenticated, refreshKey = 0, focusTicketId, b
               <LogRow key={ticket.id} data-testid={ticketRowTestId("backlog", ticket.id)} aria-busy={pendingId === ticket.id}>
                 <LogRowMain>
                   <span className="shrink-0 text-muted">{ticketSerial(ticket.id)}</span>
+                  {ticket.openRound && <LockGlyph data-testid="ticket-locked" label={lockedLabel(ticket.openRound)} className="self-center text-ink" />}
                   <TicketModalLink ticketId={ticket.id} view="backlog" variant="log" data-testid="ticket-title" title={ticket.title}>
                     {ticket.title}
                   </TicketModalLink>
                 </LogRowMain>
                 <BadgeList as="span" data-testid="ticket-badges" badges={ticket.badges} />
                 <LogStatus data-testid="ticket-status" status={ticket.status} />
-                {!archived && (
+                {!archived && !ticket.openRound && (
                   <ReorderButtons
                     ticket={ticket}
                     tickets={state.tickets}

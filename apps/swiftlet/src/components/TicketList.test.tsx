@@ -139,6 +139,19 @@ describe("TicketList", () => {
     expect(screen.queryByTestId("ticket-reorder-up")).not.toBeInTheDocument();
   });
 
+  it("marks a locked Ticket with a named lock glyph and offers no reorder for it", async () => {
+    const agent = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kind: "research" };
+    const locked = { ...TICKET_A, assigneeType: "agent", assigneeAgent: agent, openRound: { id: "77777777-7777-4777-8777-777777777777", sequence: 2, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null } };
+    stubFetch({ "GET /api/tickets": jsonResponse({ tickets: [locked, TICKET_B] }) });
+    render(<TicketList onUnauthenticated={() => {}} />);
+    const lockedRow = within(await screen.findByTestId(`ticket-item-${locked.id}`));
+    expect(lockedRow.getByRole("img", { name: "Locked while atlas works on Round 2" })).toBe(lockedRow.getByTestId("ticket-locked"));
+    expect(lockedRow.queryByTestId("ticket-reorder-up")).not.toBeInTheDocument();
+    const openRow = within(screen.getByTestId(`ticket-item-${TICKET_B.id}`));
+    expect(openRow.queryByTestId("ticket-locked")).not.toBeInTheDocument();
+    expect(openRow.getByTestId("ticket-reorder-up")).toBeInTheDocument();
+  });
+
   describe("reordering", () => {
     const ready = (id: string, title: string) => ({ ...TICKET_B, id, title, status: "Ready" });
     const R1 = ready("33333333-3333-4333-8333-333333333333", "Ready first");

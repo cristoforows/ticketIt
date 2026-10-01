@@ -4,7 +4,8 @@ import { missingInputsOf, type ReadinessInput } from "../api/http";
 import type { Badge, Ticket, TicketAssignee, TicketUpdate } from "../api/tickets";
 import { assigneeLabel } from "./assignee";
 import { refinementGuidance } from "./refinementGuidance";
-import { BadgeTag, ClaimedTag, ErrorMessage, FieldHint, FieldLabel, FieldNote, FieldValue, InlineError, PrimaryButton, QueuedTag, ReceiptLine, Rule, SecondaryButton, Select, StatusTag, statusLabel, TextInput, Textarea, ticketSerial } from "./ui";
+import { lockedLabel } from "./roundLock";
+import { BadgeTag, ClaimedTag, ErrorMessage, FieldHint, FieldLabel, FieldNote, FieldValue, InlineError, LockGlyph, PrimaryButton, QueuedTag, ReceiptLine, Rule, SecondaryButton, Select, StatusTag, statusLabel, TextInput, Textarea, ticketSerial } from "./ui";
 
 interface TicketDetailProps {
   ticket: Ticket;
@@ -58,7 +59,7 @@ function completionConditionLabel(condition: Ticket["completionCondition"]): str
 export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssign, onUnassign, onLoadAgents, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge, onArchive, onRestore, onArchived, editRequested = false }: TicketDetailProps) {
   const previousTicket = useRef(ticket);
   const [current, setCurrent] = useState(ticket);
-  const [mode, setMode] = useState<"view" | "editing">(editRequested && !ticket.archivedAt ? "editing" : "view");
+  const [mode, setMode] = useState<"view" | "editing">(editRequested && !ticket.archivedAt && !ticket.openRound ? "editing" : "view");
   const [fields, setFields] = useState<EditableFields>(() => fieldsFrom(ticket));
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<Rejection | null>(null);
@@ -147,7 +148,8 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
   }
 
   const archived = !!current.archivedAt;
-  const archivedReason = archived ? current.allowedActions.accept.reason?.message : undefined;
+  const readOnly = archived || current.openRound !== null;
+  const readOnlyReason = readOnly ? current.allowedActions.accept.reason?.message : undefined;
   const readyRejection = current.allowedActions.statusChangeRejections.find(({ status }) => status === "Ready");
   const missing = new Set<ReadinessInput>([...(actionError?.missing ?? []), ...(readyRejection?.reason.missing ?? [])]);
   const missingReasonId = actionError?.missing.length ? "ticket-detail-action-error" : "ticket-detail-status-unavailable-Ready";
@@ -175,7 +177,13 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
           </div>
           {archived && (
             <p data-testid="ticket-detail-archived" className="mt-3 border-2 border-status-blocked-deep p-2 text-status-blocked-deep">
-              <span className="font-bold tracking-label uppercase">Archived</span> {current.archivedAt}. {archivedReason}
+              <span className="font-bold tracking-label uppercase">Archived</span> {current.archivedAt}. {readOnlyReason}
+            </p>
+          )}
+          {current.openRound && (
+            <p data-testid="ticket-detail-locked" className="mt-3 flex items-center gap-2 border-2 border-ink p-2 font-bold text-ink">
+              <LockGlyph />
+              {lockedLabel(current.openRound)}
             </p>
           )}
           <Rule />
@@ -212,12 +220,12 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
                 {current.badges.map((badge) => (
                   <li key={badge.id} className="mt-0 flex items-center gap-1 border-t-0 pt-0">
                     <BadgeTag>{badge.name}</BadgeTag>
-                    <SecondaryButton size="sm" disabled={actionPending || archived} title={archivedReason} onClick={() => runAction(() => onDetachBadge(badge.id))} aria-label={`Remove ${badge.name}`}>Remove</SecondaryButton>
+                    <SecondaryButton size="sm" disabled={actionPending || readOnly} title={readOnlyReason} onClick={() => runAction(() => onDetachBadge(badge.id))} aria-label={`Remove ${badge.name}`}>Remove</SecondaryButton>
                   </li>
                 ))}
               </ul>
             )}
-            <BadgePicker ticket={current} disabled={archived} reason={archivedReason} onAttached={setCurrent} onLoad={onLoadBadges} onCreate={onCreateBadge} onAttach={onAttachBadge} />
+            <BadgePicker ticket={current} disabled={readOnly} reason={readOnlyReason} onAttached={setCurrent} onLoad={onLoadBadges} onCreate={onCreateBadge} onAttach={onAttachBadge} />
           </section>
           {current.template === "Coding" && (
             <>
@@ -242,7 +250,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
                       key={target}
                       data-testid={`ticket-detail-status-button-${target}`}
                       onClick={() => runAction(() => onChangeStatus(target), "status")}
-                      disabled={actionPending || archived}
+                      disabled={actionPending || readOnly}
                     >
                       {statusLabel(target)}
                     </PrimaryButton>
@@ -261,7 +269,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
                 <PrimaryButton
                   data-testid="ticket-detail-accept-button"
                   onClick={() => runAction(onAccept)}
-                  disabled={actionPending || archived}
+                  disabled={actionPending || readOnly}
                 >
                   Accept
                 </PrimaryButton>
@@ -270,24 +278,24 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onAssig
                 <SecondaryButton
                   data-testid="ticket-detail-unassign-button"
                   onClick={() => runAction(onUnassign)}
-                  disabled={actionPending || archived}
-                  title={archivedReason}
+                  disabled={actionPending || readOnly}
+                  title={readOnlyReason}
                 >
                   Unassign
                 </SecondaryButton>
               )}
             </div>
-            <AssigneePicker ticket={current} disabled={actionPending || archived} reason={archivedReason} onLoad={onLoadAgents} onAssign={(assignee) => runAction(() => onAssign(assignee), "assignee")} />
+            <AssigneePicker ticket={current} disabled={actionPending || readOnly} reason={readOnlyReason} onLoad={onLoadAgents} onAssign={(assignee) => runAction(() => onAssign(assignee), "assignee")} />
             {actionErrorMessage("assignee")}
             {!current.allowedActions.accept.available && (
               <p data-testid="ticket-detail-accept-unavailable" className="m-0 text-muted">{current.allowedActions.accept.reason?.message}</p>
             )}
             {actionErrorMessage("other")}
             <div className="flex flex-wrap gap-2">
-              <SecondaryButton data-testid="ticket-detail-edit-button" onClick={startEditing} disabled={archived} title={archivedReason}>
+              <SecondaryButton data-testid="ticket-detail-edit-button" onClick={startEditing} disabled={readOnly} title={readOnlyReason}>
                 Edit
               </SecondaryButton>
-              <SecondaryButton data-testid="ticket-detail-archive-button" onClick={() => void handleArchive()} disabled={actionPending || archived} title={archivedReason}>Archive</SecondaryButton>
+              <SecondaryButton data-testid="ticket-detail-archive-button" onClick={() => void handleArchive()} disabled={actionPending || readOnly} title={readOnlyReason}>Archive</SecondaryButton>
               {archived && <PrimaryButton data-testid="ticket-detail-restore-button" onClick={() => runAction(onRestore)} disabled={actionPending}>Restore</PrimaryButton>}
             </div>
           </section>

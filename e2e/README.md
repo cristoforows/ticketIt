@@ -291,11 +291,18 @@ the top of the Ready order, pairs through the Agents page
 (`support/runner.ts`, shared with `runner.spec.ts`), and starts a real
 Michelin polling claims every 500 ms. Galley's live Ticket must gain a
 claimed `openRound` while staying Ready with `requestingAgentWork`
-false, and the slip and receipt must show **Claimed by runner**. Archive
-from the receipt must show the live `round_open` message verbatim.
-After Michelin stops and the clock passes the health window, the Round
-is unchanged. It leaves the Owner's slot taken, so `run.sh` runs it
-after every spec that needs the slot free, and checks its exit code.
+false, and the slip and receipt must show **Claimed by runner**. The
+receipt's Archive is disabled, and a direct archive is refused with
+`round_open` naming the Round. The lock (issue #133) is asserted on the
+same claim: the slip carries the lock glyph named "Locked while <Agent>
+works on Round <n>" and is not draggable, and the receipt shows that
+copy with every mutating control disabled and titled with Galley's live
+reason. Direct field, Assignee, Badge, Status, Accept, reorder and
+archive commands are each refused with `round_open` and the Round's id,
+and the Ticket is unchanged afterwards. After Michelin stops and the clock passes
+the health window, the Round is unchanged. It leaves the Owner's slot
+taken, so `run.sh` runs it after every spec that needs the slot free,
+and checks its exit code.
 
 `tests/ticket-priority-order.spec.ts` reorders three Ready Tickets by
 dragging onto the upper and lower halves of board slips, then with Move

@@ -225,7 +225,7 @@ func (s *server) UpdateTicket(w http.ResponseWriter, r *http.Request, id string)
 		repository:      refinement.repository,
 	})
 	if err != nil {
-		writeMutationError(w, err, "failed to update the ticket")
+		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to update the ticket")
 		return
 	}
 	if !found {
@@ -582,9 +582,9 @@ func updateTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64
 		return Ticket{}, false, nil, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
-	found, err := lockTicketForMutation(ctx, tx, ownerID, publicID, false)
-	if err != nil || !found {
-		return Ticket{}, found, nil, err
+	found, rejection, err := lockMutableTicket(ctx, tx, ownerID, publicID)
+	if err != nil || !found || rejection != nil {
+		return Ticket{}, found, rejection, err
 	}
 	locked, err := readLockedTicket(ctx, tx, ownerID, publicID)
 	if err != nil {

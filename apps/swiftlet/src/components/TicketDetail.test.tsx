@@ -212,6 +212,57 @@ describe("archive presentation", () => {
   });
 });
 
+describe("open-Round lock", () => {
+  afterEach(() => { cleanup(); });
+
+  const agent = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kind: "research" as const };
+  const reason = { code: "round_open", message: "this Ticket has an open Round; it can be changed once the Round ends", roundId: "66666666-6666-4666-8666-666666666666" };
+  const locked: Ticket = {
+    ...REFINED_TICKET,
+    status: "Ready",
+    assigneeType: "agent",
+    assigneeAgent: agent,
+    badges: [{ id: BADGE.id, name: BADGE.name }],
+    openRound: { id: reason.roundId, sequence: 4, state: "running", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: "2026-10-01T10:01:00Z" },
+    allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason } },
+  };
+
+  it("shows who holds the lock and keeps every field readable", () => {
+    render(<TicketDetail ticket={locked} onSave={vi.fn()} {...noopActions()} />);
+    expect(screen.getByTestId("ticket-detail-locked")).toHaveTextContent("Locked while atlas works on Round 4");
+    expect(screen.getByTestId("ticket-detail-field-goal")).toHaveTextContent(REFINED_TICKET.goal);
+    expect(screen.getByTestId("ticket-detail-badges")).toHaveTextContent(BADGE.name);
+    expect(screen.queryByTestId("ticket-detail-archived")).not.toBeInTheDocument();
+  });
+
+  it("disables every mutating control with Galley's reason and offers no status move or Accept", () => {
+    render(<TicketDetail ticket={locked} onSave={vi.fn()} {...noopActions()} />);
+    for (const name of ["Edit", "Archive", "Add badge", "Remove Urgent", "Unassign", "Assign"]) {
+      expect(screen.getByRole("button", { name })).toBeDisabled();
+      expect(screen.getByRole("button", { name })).toHaveAttribute("title", reason.message);
+    }
+    expect(screen.getByLabelText("Assign to")).toBeDisabled();
+    expect(screen.queryByTestId("ticket-detail-status-actions")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("ticket-detail-accept-button")).not.toBeInTheDocument();
+    expect(screen.getByTestId("ticket-detail-accept-unavailable")).toHaveTextContent(reason.message);
+    expect(screen.queryByTestId("ticket-detail-restore-button")).not.toBeInTheDocument();
+  });
+
+  it("opens in view mode even when editing was requested", () => {
+    render(<TicketDetail ticket={locked} onSave={vi.fn()} {...noopActions()} editRequested />);
+    expect(screen.queryByTestId("ticket-detail-edit-form")).not.toBeInTheDocument();
+    expect(screen.getByTestId("ticket-detail-locked")).toBeInTheDocument();
+  });
+
+  it("unlocks once Galley reports no open Round", () => {
+    const { rerender } = render(<TicketDetail ticket={locked} onSave={vi.fn()} {...noopActions()} />);
+    rerender(<TicketDetail ticket={{ ...locked, openRound: null, allowedActions: { statusChangeRejections: [], statusChanges: ["Backlog"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } } } }} onSave={vi.fn()} {...noopActions()} />);
+    expect(screen.queryByTestId("ticket-detail-locked")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled();
+    expect(screen.getByTestId("ticket-detail-status-button-Backlog")).toBeEnabled();
+  });
+});
+
 describe("TicketDetail", () => {
   afterEach(() => {
     cleanup();

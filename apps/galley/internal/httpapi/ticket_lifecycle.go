@@ -36,6 +36,7 @@ type transitionRejection struct {
 	code    string
 	message string
 	missing []AgentReadinessInput
+	roundID string
 }
 
 func (r *transitionRejection) detail() ErrorDetail {
@@ -43,6 +44,10 @@ func (r *transitionRejection) detail() ErrorDetail {
 	if len(r.missing) > 0 {
 		missing := r.missing
 		detail.Missing = &missing
+	}
+	if r.roundID != "" {
+		roundID := r.roundID
+		detail.RoundId = &roundID
 	}
 	return detail
 }
@@ -118,8 +123,9 @@ var statusTargets = []TicketStatus{Backlog, Ready, InProgress, Blocked, InReview
 
 func allowedActionsForTicket(state ticketWorkflowState, condition TicketCompletionCondition) TicketAllowedActions {
 	actions := TicketAllowedActions{StatusChanges: []TicketStatus{}, StatusChangeRejections: []TicketStatusChangeRejection{}}
-	if state.archived {
-		actions.Accept.Reason = &ErrorDetail{Code: archivedTicketCode, Message: archivedTicketMessage}
+	if rejection := decideTicketMutation(state.ticketLock, false); rejection != nil {
+		detail := rejection.detail()
+		actions.Accept.Reason = &detail
 		return actions
 	}
 	for _, target := range statusTargets {
@@ -170,12 +176,9 @@ func applyTicketTransition(
 	if err := lockOwnerPriority(ctx, tx, ownerID); err != nil {
 		return Ticket{}, false, nil, fmt.Errorf("failed to take the priority lock: %w", err)
 	}
-	found, err = lockTicketForMutation(ctx, tx, ownerID, publicID, false)
-	if errors.Is(err, errArchivedTicket) {
-		return Ticket{}, true, &transitionRejection{code: archivedTicketCode, message: archivedTicketMessage}, nil
-	}
-	if err != nil || !found {
-		return Ticket{}, found, nil, err
+	found, rejection, err = lockMutableTicket(ctx, tx, ownerID, publicID)
+	if err != nil || !found || rejection != nil {
+		return Ticket{}, found, rejection, err
 	}
 	locked, err := readLockedTicket(ctx, tx, ownerID, publicID)
 	if err != nil {
@@ -309,17 +312,16 @@ type ticketAssignee struct {
 	agentID string
 }
 
-// D3 places no Template precondition on assignment, and no Round
-// exists yet to lock the field.
+// D3 places no Template precondition on assignment.
 func setTicketAssigneeForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, publicID string, assignee ticketAssignee) (Ticket, bool, *transitionRejection, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return Ticket{}, false, nil, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
-	found, err := lockTicketForMutation(ctx, tx, ownerID, publicID, false)
-	if err != nil || !found {
-		return Ticket{}, found, nil, err
+	found, rejection, err := lockMutableTicket(ctx, tx, ownerID, publicID)
+	if err != nil || !found || rejection != nil {
+		return Ticket{}, found, rejection, err
 	}
 	var agentRowID *int64
 	var agentKind AgentKind
@@ -412,7 +414,7 @@ func (s *server) AssignTicket(w http.ResponseWriter, r *http.Request, id string)
 
 	ticket, found, rejection, err := setTicketAssigneeForOwner(ctx, s.pool, owner.ID, id, assignee)
 	if err != nil {
-		writeMutationError(w, err, "failed to assign the ticket")
+		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to assign the ticket")
 		return
 	}
 	if !found {
@@ -440,13 +442,17 @@ func (s *server) UnassignTicket(w http.ResponseWriter, r *http.Request, id strin
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
 
-	ticket, found, _, err := setTicketAssigneeForOwner(ctx, s.pool, owner.ID, id, ticketAssignee{})
+	ticket, found, rejection, err := setTicketAssigneeForOwner(ctx, s.pool, owner.ID, id, ticketAssignee{})
 	if err != nil {
-		writeMutationError(w, err, "failed to unassign the ticket")
+		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to unassign the ticket")
 		return
 	}
 	if !found {
 		writeTicketNotFound(w)
+		return
+	}
+	if rejection != nil {
+		writeTransitionRejection(w, rejection)
 		return
 	}
 	writeJSON(w, http.StatusOK, ticket)

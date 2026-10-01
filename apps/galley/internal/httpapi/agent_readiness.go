@@ -16,22 +16,23 @@ const agentOwnedTransitionCode = "agent_owned_transition"
 var agentOwnedTargets = map[TicketStatus]string{InProgress: "In Progress", InReview: "In Review", Blocked: "Blocked"}
 
 type ticketWorkflowState struct {
-	status   TicketStatus
-	archived bool
+	ticketLock
+	status TicketStatus
 	// Empty unless the Ticket is Agent-assigned.
 	agentKind                         AgentKind
 	goal, successCriteria, repository string
-	openRound                         bool
 }
 
 func workflowStateOf(ticket Ticket) ticketWorkflowState {
 	state := ticketWorkflowState{
+		ticketLock:      ticketLock{archived: ticket.ArchivedAt != nil},
 		status:          ticket.Status,
-		archived:        ticket.ArchivedAt != nil,
 		goal:            ticket.Goal,
 		successCriteria: ticket.SuccessCriteria,
 		repository:      ticket.Repository,
-		openRound:       ticket.OpenRound != nil,
+	}
+	if ticket.OpenRound != nil {
+		state.openRoundID = ticket.OpenRound.Id
 	}
 	if ticket.AssigneeAgent != nil {
 		state.agentKind = ticket.AssigneeAgent.Kind
@@ -95,7 +96,7 @@ func decideAgentReadiness(s ticketWorkflowState) *transitionRejection {
 // Agent work, and the claim's eligibility rule. An open Round has
 // consumed the request.
 func decideAgentWorkRequest(s ticketWorkflowState) bool {
-	return !s.archived && s.status == Ready && s.agentAssigned() && len(missingAgentInputs(s)) == 0 && !s.openRound
+	return !s.archived && s.status == Ready && s.agentAssigned() && len(missingAgentInputs(s)) == 0 && s.openRoundID == ""
 }
 
 func decideAssignment(s ticketWorkflowState, agentKind AgentKind) *transitionRejection {

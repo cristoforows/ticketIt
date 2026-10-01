@@ -123,13 +123,17 @@ func (s *server) AttachTicketBadge(w http.ResponseWriter, r *http.Request, id, b
 		return
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
-	found, err := lockTicketForMutation(ctx, tx, owner.ID, id, false)
+	found, rejection, err := lockMutableTicket(ctx, tx, owner.ID, id)
 	if err != nil {
-		writeMutationError(w, err, "failed to attach the badge")
+		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to attach the badge")
 		return
 	}
 	if !found {
 		writeBadgeNotFound(w)
+		return
+	}
+	if rejection != nil {
+		writeTransitionRejection(w, rejection)
 		return
 	}
 	found, err = attachBadgeForOwner(ctx, tx, owner.ID, id, badgeId)
@@ -196,13 +200,17 @@ func (s *server) DetachTicketBadge(w http.ResponseWriter, r *http.Request, id, b
 		return
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
-	found, err := lockTicketForMutation(ctx, tx, owner.ID, id, false)
+	found, rejection, err := lockMutableTicket(ctx, tx, owner.ID, id)
 	if err != nil {
-		writeMutationError(w, err, "failed to detach the badge")
+		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to detach the badge")
 		return
 	}
 	if !found {
 		writeBadgeNotFound(w)
+		return
+	}
+	if rejection != nil {
+		writeTransitionRejection(w, rejection)
 		return
 	}
 	var ticketRowID, badgeRowID int64
