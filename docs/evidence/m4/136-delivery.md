@@ -120,10 +120,16 @@ and both `schema.d.ts`):
 **Swiftlet**
 
 - **`react-markdown` 10.1.0**, pinned exactly.
-- **`components/ui/Markdown.tsx`:**
+- **`components/ui/Markdown.tsx`** is the container: order-rail
+  typography through `cn()`, plus a `Suspense` fallback ("Loading…")
+  around a `React.lazy` import of the renderer.
+- **`components/ui/MarkdownRenderer.tsx`** is the renderer:
   - `skipHtml`, no plugins, and react-markdown's default URL filter;
-  - order-rail typography through `cn()`;
-  - an image whose source the filter blanked is not rendered.
+  - every link has `target="_blank"` and `rel="noopener noreferrer
+    nofollow"`, and a link whose URL the filter blanked renders as its
+    text;
+  - an image is never rendered as `<img>`: it shows its alt text (or
+    "Image"), plus its source as a link when the filter passes it.
 - **`DeliveredTag`:** a `delivered` variant of the shared tag, in the
   In Review deep colour. It reads "Delivered by <Agent>" on the slip
   (`board-delivered`) and the receipt (`ticket-detail-delivered`).
@@ -337,8 +343,29 @@ Tests:
   - `javascript:`, `vbscript:` and `data:` links are neutralised,
     including upper-case, entity-encoded and reference-style ones.
 
-  An image whose URL was neutralised is not rendered. An empty `src`
-  would make the browser request the page again.
+  Three choices go beyond those defaults.
+  - **Images are never fetched.** Report Markdown is runner output, and
+    later slices will put model output there. An
+    `![](https://tracker/x.png)` would make the Owner's browser fetch a
+    third-party URL on opening the receipt. That leaks the Owner's IP
+    and the fact that they opened the Report. So an image renders as its
+    alt text, plus its source as a plain link if the URL filter passes
+    it.
+  - **Links open apart from Swiftlet.** `target="_blank"` keeps a click
+    from navigating Swiftlet away. `rel="noopener noreferrer nofollow"`
+    gives the opened page no `window.opener` and no `Referer`. A link
+    the filter blanked renders as its text, since an empty `href` would
+    point back at Swiftlet.
+  - **The renderer loads lazily.** react-markdown and its unified,
+    remark and micromark dependencies are a separate chunk, fetched
+    only when a deliverable is shown. Before the split, the main chunk
+    was 503.11 kB (151.67 kB gzipped), over Vite's 500 kB warning.
+    After it, the main chunk is 387.94 kB (116.95 kB gzipped) and the
+    renderer chunk 116.65 kB (35.45 kB gzipped), with no warning. The
+    main chunk contains no micromark, mdast, hast-util or unified code.
+    Tests await the lazy component: `Markdown.test.tsx` waits for the
+    fallback to go, and the page test awaits the renderer module inside
+    `act` under fake timers.
 
 ### Earlier limitations this slice closes
 
@@ -398,13 +425,16 @@ cd ../../e2e && env -u FORCE_COLOR E2E_DATABASE_URL='postgres://localhost:5432/t
   - `OK: ../apps/swiftlet/src/api/generated/schema.d.ts matches openapi.yaml (no drift).`
   - `OK: ../apps/michelin/src/api/generated/schema.d.ts matches openapi.yaml (no drift).`
 - Michelin: typecheck clean; 235 tests passed (was 194).
-- Swiftlet: 22 files, 395 tests passed (was 373). `npm run build`
-  succeeded with Vite's warning that the main chunk, 503.11 kB, is over
-  500 kB (see limitations).
+- Swiftlet: 22 files, 397 tests passed (was 373), stable across three
+  consecutive runs. `npm run build` succeeded with no chunk-size
+  warning. The chunks were:
+  - `index` 387.94 kB (116.95 kB gzipped);
+  - `MarkdownRenderer` 116.65 kB (35.45 kB gzipped);
+  - CSS 37.87 kB.
 - Browser suite: `SUITE PASSED`. 36 specs exited 0, and 86 tests passed
-  (was 35 and 83). `runner-delivery.spec.ts` passed in 21.6 s:
-  - Basic: 7.7 s.
-  - Coding: 3.2 s.
+  (was 35 and 83). `runner-delivery.spec.ts` passed in 22.7 s:
+  - Basic: 8.5 s.
+  - Coding: 3.5 s.
   - Sequencing: 10.3 s.
 
 **New Galley tests** (`round_delivery_test.go`, plus additions to
@@ -442,11 +472,16 @@ Michelin process through Swiftlet → Galley → Michelin on PostgreSQL.
   3. The Report's `<script>` is absent and its `javascript:` link is
      neutralised. The marker survives, so it is the same document, and
      the script never ran.
-  4. The API shows the Ticket In Review, `allowedActions.statusChanges:
+  4. The Report's `https:` link has `target="_blank"` and `rel="noopener
+     noreferrer nofollow"`. Its image is not an `<img>`: the alt text
+     and the source show as a link. The page never requests the
+     image's host, checked through Playwright's request log for the
+     whole test, including after the reload.
+  5. The API shows the Ticket In Review, `allowedActions.statusChanges:
      []` and Accept available. The Round is delivered with the
      deliverable byte for byte, and `endedAt` equals
      `delivery.deliveredAt`.
-  5. Accept → Done, which survives a reload with the Report still
+  6. Accept → Done, which survives a reload with the Report still
      shown.
 - **Coding.** The default script delivers.
   - The Ticket stops at In Review.
@@ -480,7 +515,10 @@ Michelin and Swiftlet: the whole Vitest suite).
 | M3 | Michelin allows `deliver` before the last step | 5 failed: four ordering tests and "reports every problem at once" |
 | S1 | Swiftlet fetches Rounds only for an open Round | 6 failed: the same-tick delivery test, the delivered-load test and four parse-refusal page tests |
 | S2 | Remove `skipHtml` | "never renders raw HTML, inline or as a block" |
-| S3 | Disable the URL filter (`urlTransform={(url) => url}`) | 7 failed: every neutralising case |
+| S3 | Disable the URL filter (`urlTransform={(url) => url}`) | 7 failed: the six unsafe-link cases and "shows an image with an unsafe source as its alt text alone" |
+| S4 | Render a safe image as `<img>` | 2 failed: "never fetches an image…", "opens every link in a new browsing context…" |
+| S5 | Drop `target` and `rel` from links | "opens every link in a new browsing context with no opener, Referer or endorsement" |
+| S6 | Import the renderer statically | "shows a fallback until the renderer loads…" failed, and `npm run build` warned again (main chunk 503.62 kB) |
 
 ## Implementation limitations and follow-ups
 
@@ -501,16 +539,6 @@ Michelin and Swiftlet: the whole Vitest suite).
   unbounded bodies. They take small JSON and need an Owner session or a
   runner credential. A general cap is not owned by any milestone yet;
   the gate report should assign it.
-- **The Swiftlet bundle is over Vite's 500 kB warning** (503.11 kB,
-  151.67 kB gzipped), mostly from react-markdown and its parser. The
-  build still succeeds. Code-splitting the receipt has no owning
-  milestone yet; the gate report should assign it.
-- **A Report may load remote images.** react-markdown's default allows
-  `https:` image sources, so opening a Report can fetch a URL that the
-  runner chose. In M4 the runner is the Owner's own scripted engine.
-  Whether to proxy or block remote images has no owning milestone yet;
-  it matters once real Agents write Reports, and the gate report should
-  assign it.
 - **Times on the receipt are raw RFC 3339**, as in M4.8 and M4.9. Local
   formatting is M5's visual work.
 - **A replay never returns the deliverable.** It returns the stored

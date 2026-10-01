@@ -837,9 +837,13 @@ later Round is claimed).
 - **Markdown.** The Report renders with `react-markdown` (pinned
   exactly) and `skipHtml`, with no plugins. Raw HTML is never rendered
   and react-markdown's default URL filter blanks `javascript:`,
-  `vbscript:` and `data:` links (`ui/Markdown.test.tsx`). An image
-  whose source the filter blanked is not rendered, since an empty `src`
-  re-requests the page. Remote `https:` images still load. Typography
+  `vbscript:` and `data:` links (`ui/Markdown.test.tsx`). A blanked
+  link renders as its text. Every link opens with `target="_blank"` and
+  `rel="noopener noreferrer nofollow"`. An image is never fetched: it
+  renders as its alt text, plus its source as a link when the filter
+  passes it. `ui/Markdown.tsx` lazy-loads the renderer
+  (`ui/MarkdownRenderer.tsx`), so react-markdown's chunk loads only
+  when a Report is shown, behind a "Loading…" fallback. Typography
   uses the order-rail tokens through `cn()`.
 - **Parsing.** `parseRound` accepts `delivered` and requires a
   deliverable exactly when the state is `delivered`. `parseTicket`

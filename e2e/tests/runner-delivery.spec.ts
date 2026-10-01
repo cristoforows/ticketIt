@@ -18,7 +18,7 @@ import {
 
 const DELIVER: EngineScriptStep = {
   step: "deliver",
-  bodyMarkdown: "# Findings\n\nThe cache was **stale**.\n\n- Reproduced it\n- Wrote it up\n\n<script>window.pwned = true</script>\n\n[unsafe](javascript:window.pwned=true)\n",
+  bodyMarkdown: "# Findings\n\nThe cache was **stale**.\n\n- Reproduced it\n- Wrote it up\n\n<script>window.pwned = true</script>\n\n[unsafe](javascript:window.pwned=true)\n\n[docs](https://example.com/docs)\n\n![tracking pixel](https://tracker.invalid/pixel.png)\n",
   summary: "The cache was stale.",
   criteriaAssessment: "A written cause: met.",
 };
@@ -65,6 +65,8 @@ test("a Basic Ticket goes Ready, claimed, running, delivered to In Review on the
     await expect.poll(async () => (await ticket(api, queued.id)).openRound?.state, { timeout: 15_000 }).toBe("running");
 
     const page = await context.newPage();
+    const trackerRequests: string[] = [];
+    page.on("request", (sent) => { if (sent.url().includes("tracker.invalid")) trackerRequests.push(sent.url()); });
     await signIn(page, request, "owner");
     await page.goto(`/tickets/${queued.id}`);
     await expect(page.getByTestId("ticket-detail-status")).toHaveText("In Progress");
@@ -84,6 +86,11 @@ test("a Basic Ticket goes Ready, claimed, running, delivered to In Review on the
     await expect(body.locator("li")).toHaveText(["Reproduced it", "Wrote it up"]);
     await expect(body.locator("script")).toHaveCount(0);
     expect(await body.getByText("unsafe").getAttribute("href") ?? "").not.toMatch(/javascript:/i);
+    await expect(body.getByRole("link", { name: "docs" })).toHaveAttribute("rel", "noopener noreferrer nofollow");
+    await expect(body.getByRole("link", { name: "docs" })).toHaveAttribute("target", "_blank");
+    await expect(body.locator("img")).toHaveCount(0);
+    await expect(body.getByText("tracking pixel")).toBeVisible();
+    await expect(body.getByRole("link", { name: "https://tracker.invalid/pixel.png" })).toHaveAttribute("rel", "noopener noreferrer nofollow");
     await expect(delivered.getByTestId("ticket-detail-delivered-note")).toHaveCount(1);
     expect(await page.evaluate(() => (window as { sameDocument?: boolean; pwned?: boolean }).sameDocument === true && (window as { pwned?: boolean }).pwned === undefined)).toBe(true);
 
@@ -100,6 +107,8 @@ test("a Basic Ticket goes Ready, claimed, running, delivered to In Review on the
     await page.reload();
     await expect(page.getByTestId("ticket-detail-status")).toHaveText("Done");
     await expect(page.getByTestId("ticket-detail-delivered-summary")).toHaveText("The cache was stale.");
+    await expect(page.getByTestId("ticket-detail-delivered-body").getByRole("heading", { level: 1, name: "Findings" })).toBeVisible();
+    expect(trackerRequests).toEqual([]);
   } finally {
     await stop(michelin);
     await context.close();

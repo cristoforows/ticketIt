@@ -312,6 +312,7 @@ describe("TicketDetailPage", () => {
     });
 
     const flush = (ms = 0) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+    const reportRendererLoaded = () => act(async () => { await import("./ui/MarkdownRenderer"); });
 
     const unknownUsage = { sum: null, complete: false, estimated: false };
     const record = (activity: unknown[] = [], usage: unknown = { observations: 0, complete: false, estimated: false, costUsd: null, inputTokens: unknownUsage, outputTokens: unknownUsage, activeMs: unknownUsage }) => ({
@@ -427,6 +428,7 @@ describe("TicketDetailPage", () => {
         expect(receipt.getByTestId("ticket-detail-delivered-at")).toHaveTextContent("2026-10-01T10:00:09Z");
         expect(receipt.getByTestId("ticket-detail-delivered-summary")).toHaveTextContent("Found the cause.");
         expect(receipt.getByTestId("ticket-detail-delivered-assessment")).toHaveTextContent("A written cause: met.");
+        await reportRendererLoaded();
         expect(within(receipt.getByTestId("ticket-detail-delivered-body")).getByRole("heading", { level: 1, name: "Result" })).toBeInTheDocument();
         expect(receipt.getAllByTestId("ticket-detail-delivered-note").map((item) => item.textContent)).toEqual(["2026-10-01T10:00:06ZReading the Ticket"]);
         expect(screen.getByTestId("ticket-detail-accept-button")).toBeEnabled();
