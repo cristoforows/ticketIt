@@ -70,6 +70,10 @@ async function fakeGalley(): Promise<string> {
       res.end(JSON.stringify(claimBody));
       return;
     }
+    if (req.url === `/api/runner/rounds/${claimBody.roundId}/commands`) {
+      res.end(JSON.stringify({ commands: [] }));
+      return;
+    }
     if (req.url === `/api/runner/rounds/${claimBody.roundId}/events`) {
       let body = "";
       req.on("data", (chunk: Buffer) => (body += chunk.toString()));
@@ -140,6 +144,7 @@ describe("michelin process", () => {
       MICHELIN_STATUS_INTERVAL_MS: "60000",
       MICHELIN_HEARTBEAT_INTERVAL_MS: "50",
       MICHELIN_CLAIM_INTERVAL_MS: "20",
+      MICHELIN_COMMAND_INTERVAL_MS: "200",
       MICHELIN_RUNNER_TOKEN: TOKEN,
     });
 
@@ -179,7 +184,9 @@ describe("michelin process", () => {
       ticketId: claimBody.ticket.id,
       ticketTitle: claimBody.ticket.title,
     });
-    expect(michelin.lines[0]).toMatchObject({ heartbeatIntervalMs: 50, claimIntervalMs: 20, michelinVersion: "0.1.0" });
+    expect(michelin.lines[0]).toMatchObject({ heartbeatIntervalMs: 50, claimIntervalMs: 20, commandIntervalMs: 200, michelinVersion: "0.1.0" });
+    expect(runnerPaths).toContain(`/api/runner/rounds/${claimBody.roundId}/commands`);
+    expect(messages).not.toContain("round commands poll failed");
     expect(authorizations.every((header) => header === `Bearer ${TOKEN}`)).toBe(true);
     expect(JSON.stringify(michelin.lines)).not.toContain(TOKEN.slice(4));
   }, 15_000);

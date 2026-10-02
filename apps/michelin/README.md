@@ -12,7 +12,9 @@ it with a scripted, controlled engine
 reports activity notes and usage observations
 ([#135](https://github.com/cristoforows/ticketIt/issues/135)) and
 delivers a result
-([#136](https://github.com/cristoforows/ticketIt/issues/136)): no model,
+([#136](https://github.com/cristoforows/ticketIt/issues/136)), and
+pulls the Round's commands so the Owner can Stop it
+([#159](https://github.com/cristoforows/ticketIt/issues/159)): no model,
 provider or network call beyond Galley. Every connection is outbound;
 Michelin opens no listening socket. See
 [ADR 0001](../../docs/adr/0001-single-authority-galley.md): Michelin
@@ -46,6 +48,7 @@ when it exists.
 | `MICHELIN_RUNNER_TOKEN` | none (required) | The runner credential from **Pair runner**: `tir_` and 43 base64url characters. |
 | `MICHELIN_HEARTBEAT_INTERVAL_MS` | `10000` | Wait between the end of one register/heartbeat request and the start of the next. Positive integer. |
 | `MICHELIN_CLAIM_INTERVAL_MS` | `5000` | Wait before each claim poll. Positive integer. |
+| `MICHELIN_COMMAND_INTERVAL_MS` | `1000` | Wait before each poll of the held Round's commands. Positive integer. |
 | `MICHELIN_STATUS_INTERVAL_MS` | `10000` | Wait between the end of one status check and the start of the next. Positive integer. |
 | `MICHELIN_ENGINE_SCRIPT` | the built-in default script | Path of a JSON file holding the controlled engine's script (see "Controlled engine"). |
 
@@ -79,7 +82,7 @@ credential immediately; Michelin then logs `runner credential rejected`.
 
 ## Behaviour
 
-Three loops run side by side:
+Three loops run side by side, and a fourth while a Round is held:
 
 - **Status:** `GET /api/status` at start, then again
   `MICHELIN_STATUS_INTERVAL_MS` after each check finishes. It reports
@@ -99,6 +102,17 @@ Three loops run side by side:
   while a Round runs, and polls again once the script ends or the Round
   is abandoned locally. A claim is not a heartbeat, and a failed claim
   never stops the runner loop.
+- **Commands:** while a claimed Round runs, every
+  `MICHELIN_COMMAND_INTERVAL_MS`,
+  `GET /api/runner/rounds/{roundId}/commands`. Galley lists the Round's
+  unacknowledged commands. A failed poll is logged and the next one
+  runs on schedule; the loop ends with the Round. Each command id is
+  handled once:
+  - `stop` with the claim's `claimEpoch` stops the engine at its next
+    step boundary (see "Stop" below).
+  - `stop` with another `claimEpoch` is acknowledged `ignored`; the
+    engine keeps running.
+  - Any other type is logged once and left unacknowledged.
 
 Requests in one loop never overlap. The status and runner loops keep
 running while a Round runs, so the runner stays Connected. Each request
@@ -162,6 +176,17 @@ exits. If Michelin restarts, it does not resume a Round it no longer
 holds; a Round left `claimed` or `running` is recovered by
 reconciliation, which is M5 (#6).
 
+**Stop.** A Stop for the claim's epoch ends a `wait` or a `hold` at
+once. An event already in flight, its retries and backoff included, is
+allowed to finish; the engine then sends nothing further and logs
+`engine stopped`. Once the engine has stopped,
+`POST /api/runner/rounds/{roundId}/commands/{commandId}/ack` with
+`{"outcome": "applied"}` is sent with the same retry as an event. A
+Round whose in-flight delivery lands, or whose event is refused, ends as
+delivered or abandoned, and its Stop is not acknowledged. Michelin
+sends no further event for a stopped Round; Galley ends the Round in
+M5.2. Claim polling resumes once the acknowledgement is answered.
+
 Stopping Michelin aborts a wait, a hold, a backoff and an in-flight
 request at once.
 
@@ -189,6 +214,14 @@ context fields. The credential is never logged.
 | `round event failed; retrying` | `warn` | `roundId`, `step`, `attempt`, `reason`, `httpStatus`, `errorCode`, `retryInMs`. |
 | `round event refused; round abandoned locally` | `error` | `roundId`, `step`, `attempt`, `httpStatus`, Galley's `errorCode`. |
 | `engine holding`, `engine script finished` | `info` | The script reached `hold`, or its last step. |
+| `stop requested` | `info` | A `stop` for the claim's epoch arrived: `roundId`, `commandId`, `type`, `commandEpoch`, `claimEpoch`. |
+| `engine stopped` | `info` | The engine halted at `stepIndex` for a Stop. |
+| `command for another claim epoch ignored` | `warn` | As `stop requested`; the command is acknowledged `ignored`. |
+| `unknown command left unacknowledged` | `warn` | As `stop requested`, for a type this Michelin does not know. |
+| `round commands poll failed` | `error` | `roundId`, `reason`, `httpStatus`, `errorCode`; polling continues. |
+| `command acknowledged` | `info` | `roundId`, `commandId`, `type`, `outcome`, `attempt`, Galley's `acknowledgedAt`. |
+| `command acknowledgement failed; retrying` | `warn` | As above, plus `reason`, `httpStatus`, `errorCode`, `retryInMs`. |
+| `command acknowledgement refused` | `error` | A final answer such as `409 command_already_acknowledged`; not retried. |
 | `engine failed unexpectedly` | `error` | A bug in the engine; polling resumes. |
 
 A rejected credential does not stop Michelin: it keeps retrying
@@ -229,9 +262,10 @@ src/
 ├── statusLoop.ts     # status interval loop and shutdown
 ├── heartbeatLoop.ts  # register, then heartbeat; owns the shared registration flag
 ├── claimLoop.ts      # claim poll while registered; runs each claimed Round's script
-├── engine.ts         # the controlled engine: script steps, event retry, abandonment
+├── commandLoop.ts    # the held Round's command poll and acknowledgements
+├── engine.ts         # the controlled engine: script steps, event retry, abandonment, Stop
 ├── engineScript.ts   # the script format, its parser and the built-in default
 ├── galley/client.ts  # request helper and GET /api/status
-├── galley/runner.ts  # register, heartbeat, claim and Round event requests
+├── galley/runner.ts  # register, heartbeat, claim, Round event and command requests
 └── api/generated/schema.d.ts
 ```

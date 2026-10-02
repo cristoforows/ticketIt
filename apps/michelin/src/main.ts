@@ -17,6 +17,7 @@ try {
     statusIntervalMs: config.statusIntervalMs,
     heartbeatIntervalMs: config.heartbeatIntervalMs,
     claimIntervalMs: config.claimIntervalMs,
+    commandIntervalMs: config.commandIntervalMs,
     engineSteps: config.engineScript.steps.map(({ step }) => step),
     node: process.version,
     ...identity,
@@ -37,6 +38,7 @@ try {
     startClaimLoop({
       galleyUrl: config.galleyUrl,
       intervalMs: config.claimIntervalMs,
+      commandIntervalMs: config.commandIntervalMs,
       fetch,
       logger,
       credential: config.runnerCredential,

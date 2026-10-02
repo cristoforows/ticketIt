@@ -18,7 +18,7 @@ const TICKET = {
   id: TICKET_ID,
   title: "Write the report",
   status: "Backlog",
-  allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } },
+  allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } } },
   template: "Basic",
   completionCondition: "humanAcceptance",
   assigneeType: "",
@@ -92,7 +92,7 @@ describe("TicketDetailPage", () => {
   it("rejects a Ticket missing Galley's allowed actions or an unavailable Accept reason", async () => {
     for (const payload of [
       { ...TICKET, allowedActions: undefined },
-      { ...TICKET, allowedActions: { statusChangeRejections: [], statusChanges: ["Ready"], accept: { available: false }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } } },
+      { ...TICKET, allowedActions: { statusChangeRejections: [], statusChanges: ["Ready"], accept: { available: false }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } } } },
     ]) {
       stubFetch(jsonResponse(payload));
       const { unmount } = render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
@@ -250,7 +250,7 @@ describe("TicketDetailPage", () => {
 
   describe("an open Round", () => {
     const agent = { id: AGENTS[0].id, name: "atlas", kind: "research" };
-    const claimedRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null };
+    const claimedRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null };
     const claimed = { ...TICKET, status: "Ready", assigneeType: "agent", assigneeAgent: agent, successCriteria: "done", openRound: claimedRound };
 
     it("shows Claimed by runner from Galley's openRound", async () => {
@@ -278,7 +278,7 @@ describe("TicketDetailPage", () => {
 
     it("renders the receipt read-only with the lock copy from Galley's openRound", async () => {
       const reason = { code: "round_open", message: "this Ticket has an open Round; it can be changed once the Round ends", roundId: claimedRound.id };
-      stubFetch(jsonResponse({ ...claimed, openRound: { ...claimedRound, sequence: 2 }, allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } } }));
+      stubFetch(jsonResponse({ ...claimed, openRound: { ...claimedRound, sequence: 2 }, allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } } } }));
       render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
       expect(await screen.findByTestId("ticket-detail-locked")).toHaveTextContent("Locked while atlas works on Round 2");
       for (const name of ["Edit", "Archive", "Add badge", "Unassign", "Assign"]) {
@@ -303,8 +303,8 @@ describe("TicketDetailPage", () => {
 
   describe("refreshing while execution may change the Ticket", () => {
     const agent = { id: AGENTS[0].id, name: "atlas", kind: "research" };
-    const round = { id: "66666666-6666-4666-8666-666666666666", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null };
-    const lockedActions = { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: round.id } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } };
+    const round = { id: "66666666-6666-4666-8666-666666666666", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null };
+    const lockedActions = { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: round.id } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } } };
     const claimed = { ...TICKET, status: "Ready", assigneeType: "agent", assigneeAgent: agent, openRound: round, allowedActions: lockedActions };
     const running = { ...claimed, status: "InProgress", openRound: { ...round, state: "running", startedAt: "2026-10-01T10:00:05Z" }, updatedAt: "2026-10-01T10:00:05Z" };
     const closed = { ...TICKET, status: "InReview", assigneeType: "agent", assigneeAgent: agent, updatedAt: "2026-10-01T10:05:00Z" };
@@ -428,6 +428,33 @@ describe("TicketDetailPage", () => {
       expect(vi.getTimerCount()).toBe(0);
     });
 
+    it("requests Stop through POST /api/tickets/:id/stop, shows Stopping, and keeps refreshing the still-open Round", async () => {
+      const stoppable = { ...running, allowedActions: { ...lockedActions, stop: { available: true } } };
+      const stopping = { ...running, openRound: { ...running.openRound, stopRequestedAt: "2026-10-01T10:00:07Z" }, allowedActions: { ...lockedActions, stop: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } } } };
+      const fetchMock = stubRound([answer(stoppable), answer(stopping)]);
+      const posts = vi.fn();
+      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input) !== `/api/tickets/${TICKET_ID}/stop`) return fetchMock(input);
+        posts(init?.method, init?.body);
+        return Promise.resolve(jsonResponse(stopping));
+      }));
+      render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+      await flush();
+      expect(screen.queryByTestId("ticket-detail-stopping")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId("ticket-detail-stop-button"));
+      await flush();
+      expect(posts).toHaveBeenCalledExactlyOnceWith("POST", undefined);
+      expect(screen.getByTestId("ticket-detail-stopping")).toHaveTextContent("Stopping…");
+      expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("In Progress");
+      expect(screen.queryByTestId("ticket-detail-stop-button")).not.toBeInTheDocument();
+
+      const before = ticketFetches(fetchMock);
+      await flush(3000);
+      expect(ticketFetches(fetchMock)).toBe(before + 1);
+      expect(screen.getByTestId("ticket-detail-stopping")).toBeInTheDocument();
+    });
+
     it("keeps a command's Ticket when an earlier refetch resolves after it", async () => {
       const queued = { ...TICKET, status: "Ready", assigneeType: "agent", assigneeAgent: agent, requestingAgentWork: true, allowedActions: { ...TICKET.allowedActions, statusChanges: ["Backlog"] } };
       const backlog = { ...TICKET, assigneeType: "agent", assigneeAgent: agent, updatedAt: "2026-10-01T10:00:04Z" };
@@ -453,7 +480,7 @@ describe("TicketDetailPage", () => {
     describe("delivery", () => {
       const deliverable = { bodyMarkdown: "# Result\n\n- Found the cause\n", summary: "Found the cause.", criteriaAssessment: "A written cause: met." };
       const delivery = { roundId: round.id, sequence: 1, agent, deliveredAt: "2026-10-01T10:00:09Z" };
-      const delivered = { ...running, status: "InReview", openRound: null, delivery, updatedAt: "2026-10-01T10:00:09Z", allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: true }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } } };
+      const delivered = { ...running, status: "InReview", openRound: null, delivery, updatedAt: "2026-10-01T10:00:09Z", allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: true }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } } } };
       const deliveredRecord = { ...record([{ seq: 1, note: "Reading the Ticket", occurredAt: "2026-10-01T10:00:06Z" }]), state: "delivered", endedAt: "2026-10-01T10:00:09Z", deliverable };
 
       it("picks up In Review, the delivering Agent and the deliverable on the same tick, then stops refreshing", async () => {
@@ -523,7 +550,7 @@ describe("TicketDetailPage", () => {
 
       describe("rework", () => {
         const reviewable = { ...delivered, allowedActions: { ...delivered.allowedActions, rework: { available: true } } };
-        const queuedAgain = { ...delivered, status: "Ready", requestingAgentWork: true, allowedActions: { statusChanges: [], statusChangeRejections: [], accept: delivered.allowedActions.accept, rework: delivered.allowedActions.rework } };
+        const queuedAgain = { ...delivered, status: "Ready", requestingAgentWork: true, allowedActions: { statusChanges: [], statusChangeRejections: [], accept: delivered.allowedActions.accept, rework: delivered.allowedActions.rework, stop: delivered.allowedActions.stop } };
         const round2 = { ...round, id: "88888888-8888-4888-8888-888888888888", sequence: 2 };
         const claimed2 = { ...queuedAgain, requestingAgentWork: false, delivery: null, openRound: round2, allowedActions: lockedActions };
         const running2 = { ...claimed2, status: "InProgress", openRound: { ...round2, state: "running", startedAt: "2026-10-01T10:10:05Z" } };

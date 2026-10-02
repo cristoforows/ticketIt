@@ -69,7 +69,8 @@ function parseOpenRound(value: unknown): Ticket["openRound"] | undefined {
     !isAgentSummary(round.agent) ||
     typeof round.claimedAt !== "string" ||
     (round.state === "running") !== (typeof round.startedAt === "string") ||
-    !(round.startedAt === null || typeof round.startedAt === "string")
+    !(round.startedAt === null || typeof round.startedAt === "string") ||
+    !(round.stopRequestedAt === null || typeof round.stopRequestedAt === "string")
   ) {
     return undefined;
   }
@@ -81,6 +82,7 @@ function parseOpenRound(value: unknown): Ticket["openRound"] | undefined {
     agent: { id: agent.id, name: agent.name, kind: agent.kind },
     claimedAt: round.claimedAt,
     startedAt: round.startedAt,
+    stopRequestedAt: round.stopRequestedAt,
   };
 }
 
@@ -119,6 +121,7 @@ function parseTicket(payload: unknown): Ticket {
   const actions = record.allowedActions as Record<string, unknown> | undefined;
   const accept = parseCommandAvailability(actions?.accept);
   const rework = parseCommandAvailability(actions?.rework);
+  const stop = parseCommandAvailability(actions?.stop);
   const agent = record.assigneeAgent;
   const openRound = parseOpenRound(record.openRound);
   const delivery = parseDelivery(record.delivery);
@@ -159,7 +162,8 @@ function parseTicket(payload: unknown): Ticket {
     !rejections ||
     !rejections.every((rejection) => rejection !== undefined) ||
     !accept ||
-    !rework
+    !rework ||
+    !stop
   ) {
     throw new Error("Galley's Ticket response was missing a required field.");
   }
@@ -172,6 +176,7 @@ function parseTicket(payload: unknown): Ticket {
       statusChangeRejections: rejections as Ticket["allowedActions"]["statusChangeRejections"],
       accept,
       rework,
+      stop,
     },
     template: record.template as Ticket["template"],
     completionCondition: record.completionCondition as Ticket["completionCondition"],
@@ -357,6 +362,10 @@ export async function acceptTicket(id: string): Promise<Ticket> {
 
 export async function requestTicketRework(id: string): Promise<Ticket> {
   return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(id)}/rework`, { method: "POST" });
+}
+
+export async function requestTicketStop(id: string): Promise<Ticket> {
+  return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(id)}/stop`, { method: "POST" });
 }
 
 /** An Agent id Galley cannot find for this Owner shares the Ticket's 404, so its message is shown rather than "not found". */

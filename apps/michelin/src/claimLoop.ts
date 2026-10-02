@@ -1,8 +1,9 @@
+import { acknowledgeCommand, startCommandLoop } from "./commandLoop.ts";
 import type { RunnerCredential } from "./credentials.ts";
 import { runControlledEngine, type EngineDeps } from "./engine.ts";
 import type { EngineScript } from "./engineScript.ts";
 import type { FetchFn } from "./galley/client.ts";
-import { claimWork, type ClaimResult, type RunnerClaim } from "./galley/runner.ts";
+import { claimWork, type ClaimResult, type PulledCommand, type RunnerClaim } from "./galley/runner.ts";
 import type { Registration } from "./heartbeatLoop.ts";
 import type { Logger } from "./logger.ts";
 import { sleep } from "./statusLoop.ts";
@@ -10,6 +11,7 @@ import { sleep } from "./statusLoop.ts";
 export interface ClaimLoopOptions {
   galleyUrl: URL;
   intervalMs: number;
+  commandIntervalMs: number;
   fetch: FetchFn;
   logger: Logger;
   credential: RunnerCredential;
@@ -65,20 +67,44 @@ async function run(options: ClaimLoopOptions, signal: AbortSignal): Promise<void
 }
 
 async function runRound(options: ClaimLoopOptions, claim: RunnerClaim, signal: AbortSignal): Promise<void> {
+  const { galleyUrl, fetch, logger, credential, requestTimeoutMs } = options;
+  const stop = new AbortController();
+  let stopCommand: PulledCommand | undefined;
+  const commands = startCommandLoop({
+    galleyUrl,
+    intervalMs: options.commandIntervalMs,
+    fetch,
+    logger,
+    credential,
+    claim,
+    signal,
+    requestTimeoutMs,
+    onStop: (command) => {
+      stopCommand ??= command;
+      stop.abort();
+    },
+  });
   try {
-    await runControlledEngine({
-      galleyUrl: options.galleyUrl,
-      fetch: options.fetch,
-      logger: options.logger,
-      credential: options.credential,
+    const outcome = await runControlledEngine({
+      galleyUrl,
+      fetch,
+      logger,
+      credential,
       claim,
       script: options.engineScript,
       signal,
-      requestTimeoutMs: options.requestTimeoutMs,
+      stop: stop.signal,
+      requestTimeoutMs,
       deps: options.engineDeps,
     });
+    await commands.stop();
+    if (outcome === "stopped" && stopCommand !== undefined) {
+      await acknowledgeCommand({ fetch, galleyUrl, signal, timeoutMs: requestTimeoutMs, credential }, logger, claim.roundId, stopCommand, "applied");
+    }
   } catch (error) {
-    options.logger.error("engine failed unexpectedly", { roundId: claim.roundId, error: error instanceof Error ? error.message : String(error) });
+    logger.error("engine failed unexpectedly", { roundId: claim.roundId, error: error instanceof Error ? error.message : String(error) });
+  } finally {
+    await commands.stop();
   }
 }
 

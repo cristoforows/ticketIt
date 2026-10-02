@@ -14,7 +14,7 @@ interface PendingEvent {
   context: Record<string, unknown>;
 }
 
-export type EngineOutcome = "completed" | "delivered" | "abandoned" | "aborted";
+export type EngineOutcome = "completed" | "delivered" | "abandoned" | "aborted" | "stopped";
 
 export interface EngineDeps {
   sleep: (ms: number, signal: AbortSignal) => Promise<void>;
@@ -31,6 +31,7 @@ export interface EngineOptions {
   claim: RunnerClaim;
   script: EngineScript;
   signal: AbortSignal;
+  stop: AbortSignal;
   requestTimeoutMs?: number;
   deps?: Partial<EngineDeps>;
 }
@@ -43,7 +44,7 @@ export function retryDelayMs(attempt: number): number {
 }
 
 // A refusal is final, and nothing is closed or unlocked on the strength of it: recovery is M5 (#6).
-function isRetryable(failure: RoundEventFailure): boolean {
+export function isRetryable(failure: RoundEventFailure): boolean {
   switch (failure.reason) {
     case "unreachable":
     case "timeout":
@@ -57,7 +58,7 @@ function isRetryable(failure: RoundEventFailure): boolean {
 }
 
 export async function runControlledEngine(options: EngineOptions): Promise<EngineOutcome> {
-  const { logger, signal, claim } = options;
+  const { logger, signal, stop, claim } = options;
   const deps: EngineDeps = {
     sleep,
     now: () => new Date(),
@@ -73,10 +74,18 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
     occurredAt: deps.now().toISOString(),
     data,
   });
+  const halt = AbortSignal.any([signal, stop]);
+  const stopped = (): EngineOutcome => {
+    logger.info("engine stopped", { roundId, stepIndex });
+    return "stopped";
+  };
   let stepIndex = 0;
   for (const step of options.script.steps) {
     if (signal.aborted) {
       return "aborted";
+    }
+    if (stop.aborted) {
+      return stopped();
     }
     let pending: PendingEvent | undefined;
     switch (step.step) {
@@ -107,12 +116,12 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
         break;
       }
       case "wait":
-        await deps.sleep(step.ms, signal);
+        await deps.sleep(step.ms, halt);
         break;
       case "hold":
         logger.info("engine holding", { roundId });
-        await untilAborted(signal);
-        return "aborted";
+        await untilAborted(halt);
+        return signal.aborted ? "aborted" : stopped();
     }
     if (pending !== undefined) {
       const outcome = await sendEvent(options, deps, pending);
@@ -128,6 +137,9 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
   }
   if (signal.aborted) {
     return "aborted";
+  }
+  if (stop.aborted) {
+    return stopped();
   }
   logger.info("engine script finished", { roundId });
   return "completed";

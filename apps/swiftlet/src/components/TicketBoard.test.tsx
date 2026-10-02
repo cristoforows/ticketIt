@@ -7,7 +7,7 @@ const ticket = (id: string, status: string, template = "Basic") => ({
   title: `Ticket ${id}`,
   status,
   template,
-  allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } },
+  allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } } },
   completionCondition: "humanAcceptance",
   assigneeType: "",
   assigneeAgent: null,
@@ -112,7 +112,7 @@ describe("TicketBoard", () => {
 
   it("shows Claimed by runner only on slips whose open Round Galley reports as claimed", async () => {
     const agent = { id: "a1", name: "Builder", kind: "coding" };
-    const round = { id: "r1", sequence: 1, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null };
+    const round = { id: "r1", sequence: 1, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null };
     stubTickets([
       { ...ticket("claimed", "Ready"), assigneeType: "agent", assigneeAgent: agent, openRound: { ...round, state: "claimed" } },
       { ...ticket("running", "Ready"), assigneeType: "agent", assigneeAgent: agent, openRound: { ...round, state: "running", startedAt: "2026-10-01T10:01:00Z" } },
@@ -130,7 +130,7 @@ describe("TicketBoard", () => {
 
   it("marks a Ticket with an open Round, claimed or running, with a named lock glyph and keeps it from being dragged", async () => {
     const agent = { id: "a1", name: "Builder", kind: "coding" };
-    const round = { id: "r1", sequence: 3, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null };
+    const round = { id: "r1", sequence: 3, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null };
     stubTickets([
       { ...ticket("claimed", "Ready"), assigneeType: "agent", assigneeAgent: agent, openRound: { ...round, state: "claimed" } },
       { ...ticket("running", "Ready"), assigneeType: "agent", assigneeAgent: agent, openRound: { ...round, state: "running", startedAt: "2026-10-01T10:01:00Z" } },
@@ -203,7 +203,7 @@ describe("TicketBoard", () => {
   });
 
   it("highlights only advertised drag targets and sends no disallowed or Done command", async () => {
-    stubTickets([{ ...ticket("moving", "Backlog"), allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked", "Done"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } } }]);
+    stubTickets([{ ...ticket("moving", "Backlog"), allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked", "Done"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } } } }]);
     render(<TicketBoard onUnauthenticated={() => {}} />);
     const card = await screen.findByTestId("board-ticket-moving");
     expect(within(card).queryByTestId("move-to-trigger")).not.toBeInTheDocument();
@@ -218,7 +218,7 @@ describe("TicketBoard", () => {
   });
 
   it("waits for Galley's response before moving and uses returned actions", async () => {
-    const original = { ...ticket("moving", "Backlog"), allowedActions: { statusChangeRejections: [], statusChanges: ["Ready"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } } };
+    const original = { ...ticket("moving", "Backlog"), allowedActions: { statusChangeRejections: [], statusChanges: ["Ready"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } } } };
     const changed = { ...original, status: "Ready", allowedActions: { ...original.allowedActions, statusChanges: ["Backlog", "InProgress"] } };
     let resolveCommand!: (response: unknown) => void;
     const fetchStub = vi.fn().mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ tickets: [original] }) })
@@ -300,7 +300,7 @@ describe("TicketBoard", () => {
   });
 
   it("shows Galley's rejection verbatim without moving the card", async () => {
-    const original = { ...ticket("stale", "Backlog"), allowedActions: { statusChangeRejections: [], statusChanges: ["Ready"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } } };
+    const original = { ...ticket("stale", "Backlog"), allowedActions: { statusChangeRejections: [], statusChanges: ["Ready"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } } } };
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ tickets: [original] }) })
       .mockResolvedValueOnce({ ok: false, status: 400, json: async () => ({ error: { code: "invalid_transition", message: "Galley stale move reason" } }) }));
@@ -314,7 +314,7 @@ describe("TicketBoard", () => {
   });
 
   it("keeps focus on a moved card after the follow-up read, not on the Ticket whose modal closed earlier", async () => {
-    const actions = { statusChangeRejections: [], statusChanges: ["Ready"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } };
+    const actions = { statusChangeRejections: [], statusChanges: ["Ready"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } } };
     const closed = { ...ticket("closed", "Backlog"), allowedActions: actions };
     const moving = { ...ticket("moving", "Backlog"), allowedActions: actions };
     const changed = { ...moving, status: "Ready", allowedActions: { ...actions, statusChanges: ["Backlog"] } };
@@ -332,7 +332,7 @@ describe("TicketBoard", () => {
     expect(within(screen.getByTestId("board-ticket-moving")).getByRole("link")).toHaveFocus();
   });
   describe("reordering within a stage", () => {
-    const readyActions = { statusChangeRejections: [], statusChanges: ["Backlog", "InProgress"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } };
+    const readyActions = { statusChangeRejections: [], statusChanges: ["Backlog", "InProgress"], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } } };
     const ready = (id: string) => ({ ...ticket(id, "Ready"), allowedActions: readyActions });
 
     function slipAt(id: string, top: number) {
@@ -407,7 +407,7 @@ describe("TicketBoard", () => {
 
 describe("TicketBoard refreshing while a Ticket awaits execution", () => {
   const agent = { id: "a1", name: "Builder", kind: "coding" };
-  const round = { id: "r1", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null };
+  const round = { id: "r1", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null };
   const claimed = { ...ticket("work", "Ready"), assigneeType: "agent", assigneeAgent: agent, openRound: round };
   const running = { ...claimed, status: "InProgress", openRound: { ...round, state: "running", startedAt: "2026-10-01T10:00:05Z" } };
   const settled = { ...claimed, openRound: null };
@@ -473,6 +473,21 @@ describe("TicketBoard refreshing while a Ticket awaits execution", () => {
     expect(within(slip).queryByTestId("board-claimed")).not.toBeInTheDocument();
     expect(slip).toHaveAttribute("draggable", "false");
     expect(within(screen.getByTestId("board-status-Ready")).queryByTestId("board-ticket-work")).not.toBeInTheDocument();
+  });
+
+  it("shows Stopping on the locked slip once Galley reports the Stop request, still in its Status column", async () => {
+    const stopping = { ...running, openRound: { ...running.openRound, stopRequestedAt: "2026-10-01T10:00:07Z" } };
+    stubLists([list(running, other), list(stopping, other)]);
+    render(<TicketBoard onUnauthenticated={() => {}} />);
+    await flush();
+    expect(within(screen.getByTestId("board-ticket-work")).queryByTestId("board-stopping")).not.toBeInTheDocument();
+
+    await flush(3000);
+    const slip = within(screen.getByTestId("board-status-InProgress")).getByTestId("board-ticket-work");
+    expect(within(slip).getByTestId("board-stopping")).toHaveTextContent("Stopping…");
+    expect(within(slip).getByTestId("board-locked")).toBeInTheDocument();
+    expect(slip).toHaveAttribute("draggable", "false");
+    expect(within(screen.getByTestId("board-ticket-other")).queryByTestId("board-stopping")).not.toBeInTheDocument();
   });
 
   it("keeps the board on screen while a refetch is pending and never overlaps refetches", async () => {

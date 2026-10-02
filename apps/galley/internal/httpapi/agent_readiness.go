@@ -33,6 +33,7 @@ func workflowStateOf(ticket Ticket) ticketWorkflowState {
 	}
 	if ticket.OpenRound != nil {
 		state.openRoundID = ticket.OpenRound.Id
+		state.stopRequested = ticket.OpenRound.StopRequestedAt != nil
 	}
 	if ticket.AssigneeAgent != nil {
 		state.agentKind = ticket.AssigneeAgent.Kind

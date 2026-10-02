@@ -11,6 +11,7 @@ const tag = cva("inline-block rounded-tag text-label uppercase", {
       pending: "bg-ink px-2 py-0.5 font-bold tracking-label text-amber",
       queued: "border border-status-ready-deep bg-paper px-2 py-px font-bold tracking-label text-status-ready-deep",
       claimed: "border border-ink bg-paper px-2 py-px font-bold tracking-label text-ink",
+      stopping: "border border-status-blocked-deep bg-paper px-2 py-px font-bold tracking-label text-status-blocked-deep",
       delivered: "border border-status-in-review-deep bg-paper px-2 py-px font-bold tracking-label text-status-in-review-deep",
       estimate: "border border-muted bg-paper px-1.5 py-px font-bold tracking-label text-muted normal-case",
     },
@@ -40,6 +41,10 @@ export function QueuedTag({ className, ...rest }: ComponentPropsWithRef<"span">)
 
 export function ClaimedTag({ className, ...rest }: ComponentPropsWithRef<"span">) {
   return <span className={cn(tag({ kind: "claimed" }), className)} {...rest} />;
+}
+
+export function StoppingTag({ className, ...rest }: ComponentPropsWithRef<"span">) {
+  return <span className={cn(tag({ kind: "stopping" }), className)} {...rest} />;
 }
 
 export function DeliveredTag({ className, ...rest }: ComponentPropsWithRef<"span">) {

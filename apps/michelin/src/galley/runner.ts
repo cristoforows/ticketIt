@@ -126,8 +126,7 @@ export function reportRoundEvent(request: RunnerRequest, roundId: string, body: 
   return callGalley<RoundEventOutcome, RoundEventFailure>(request, path, { method: "POST", headers, body }, async (response, readJson) => {
     const payload = await readJson();
     if (response.status !== 200 && response.status !== 201) {
-      const errorCode = isRecord(payload) && isRecord(payload["error"]) && typeof payload["error"]["code"] === "string" ? payload["error"]["code"] : undefined;
-      return { ok: false, failure: { reason: "http_status", httpStatus: response.status, errorCode } };
+      return { ok: false, failure: { reason: "http_status", httpStatus: response.status, errorCode: errorCodeOf(payload) } };
     }
     if (payload === INVALID_JSON) {
       return { ok: false, failure: { reason: "invalid_body", error: "response is not valid JSON" } };
@@ -174,4 +173,72 @@ function parseRoundEventResult(payload: unknown, roundId: string, expected: Roun
   if (type === "usage_observed") result.observationId = observationId as string;
   if (type === "delivered") result.endedAt = endedAt as string;
   return result;
+}
+
+export type RunnerCommandAckOutcome = components["schemas"]["RunnerCommandAckOutcome"];
+export type RoundCommandAcknowledgement = components["schemas"]["RoundCommandAcknowledgement"];
+
+// `type` stays a string: a newer Galley may send a type this Michelin does not know.
+export type PulledCommand = Omit<components["schemas"]["RunnerCommand"], "type"> & { type: string };
+
+export type RoundCommandFailure = RoundEventFailure;
+
+export type RoundCommandsResult = Timed<Outcome<PulledCommand[], RoundCommandFailure>>;
+
+export type RoundCommandAckResult = Timed<Outcome<RoundCommandAcknowledgement, RoundCommandFailure>>;
+
+function errorCodeOf(payload: unknown): string | undefined {
+  return isRecord(payload) && isRecord(payload["error"]) && typeof payload["error"]["code"] === "string" ? payload["error"]["code"] : undefined;
+}
+
+export function pullRoundCommands(request: RunnerRequest, roundId: string): Promise<RoundCommandsResult> {
+  const headers = { accept: "application/json", authorization: request.credential.authorizationHeader() };
+  const path = `api/runner/rounds/${encodeURIComponent(roundId)}/commands`;
+  return callGalley<PulledCommand[], RoundCommandFailure>(request, path, { method: "GET", headers }, async (response, readJson) => {
+    const payload = await readJson();
+    if (response.status !== 200) {
+      return { ok: false, failure: { reason: "http_status", httpStatus: response.status, errorCode: errorCodeOf(payload) } };
+    }
+    if (payload === INVALID_JSON) {
+      return { ok: false, failure: { reason: "invalid_body", error: "response is not valid JSON" } };
+    }
+    const commands = parseCommands(payload);
+    return typeof commands === "string" ? { ok: false, failure: { reason: "invalid_body", error: commands } } : { ok: true, value: commands };
+  });
+}
+
+function parseCommands(payload: unknown): PulledCommand[] | string {
+  if (!isRecord(payload) || !Array.isArray(payload["commands"])) {
+    return "commands is not an array";
+  }
+  const commands: PulledCommand[] = [];
+  for (const command of payload["commands"] as unknown[]) {
+    if (!isRecord(command)) {
+      return "a command is not a JSON object";
+    }
+    const { id, type, claimEpoch, issuedAt } = command;
+    if (typeof id !== "string" || typeof type !== "string" || typeof issuedAt !== "string" || !Number.isSafeInteger(claimEpoch)) {
+      return "a command lacks id, type, claimEpoch or issuedAt";
+    }
+    commands.push({ id, type, claimEpoch: claimEpoch as number, issuedAt });
+  }
+  return commands;
+}
+
+export function acknowledgeRoundCommand(request: RunnerRequest, roundId: string, commandId: string, outcome: RunnerCommandAckOutcome): Promise<RoundCommandAckResult> {
+  const headers = { accept: "application/json", "content-type": "application/json", authorization: request.credential.authorizationHeader() };
+  const path = `api/runner/rounds/${encodeURIComponent(roundId)}/commands/${encodeURIComponent(commandId)}/ack`;
+  return callGalley<RoundCommandAcknowledgement, RoundCommandFailure>(request, path, { method: "POST", headers, body: JSON.stringify({ outcome }) }, async (response, readJson) => {
+    const payload = await readJson();
+    if (response.status !== 200) {
+      return { ok: false, failure: { reason: "http_status", httpStatus: response.status, errorCode: errorCodeOf(payload) } };
+    }
+    if (payload === INVALID_JSON) {
+      return { ok: false, failure: { reason: "invalid_body", error: "response is not valid JSON" } };
+    }
+    if (!isRecord(payload) || payload["id"] !== commandId || payload["outcome"] !== outcome || typeof payload["acknowledgedAt"] !== "string") {
+      return { ok: false, failure: { reason: "invalid_body", error: "body is not the acknowledgement of this command and outcome" } };
+    }
+    return { ok: true, value: { id: commandId, outcome, acknowledgedAt: payload["acknowledgedAt"] } };
+  });
 }

@@ -27,6 +27,7 @@ var knownPublicTables = []string{
 	"owner_identities",
 	"owners",
 	"round_activity",
+	"round_commands",
 	"round_deliverables",
 	"round_engine_references",
 	"round_events",
@@ -110,6 +111,9 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 	assign(toAgent)
 	if resp := changeStatus(t, client, baseURL, created.Id, Ready); resp.status != http.StatusOK || !resp.ticket.RequestingAgentWork {
 		t.Fatalf("change status to Ready with an Agent: status = %d, requestingAgentWork = %t; error=%+v", resp.status, resp.ticket.RequestingAgentWork, resp.errBody)
+	}
+	if resp := doLifecycleRequest(t, client, http.MethodPost, baseURL+"/api/tickets/"+created.Id+"/stop", nil); resp.status != http.StatusBadRequest || resp.errBody.Error.Code != stopNotAvailableCode {
+		t.Fatalf("stop without an open Round: status = %d, want 400 %s; error=%+v", resp.status, stopNotAvailableCode, resp.errBody)
 	}
 	assign(toOwner)
 	for _, to := range []TicketStatus{InProgress, Blocked, InProgress, InReview} {
@@ -206,6 +210,10 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 		case "round_deliverables":
 			if after != before[table] {
 				t.Errorf("%s row count changed from %d to %d -- a manual action recorded a deliverable; only a runner's delivered event may", table, before[table], after)
+			}
+		case "round_commands":
+			if after != before[table] {
+				t.Errorf("%s row count changed from %d to %d -- a manual lifecycle action recorded a Round command; only a Stop request on an open Round may", table, before[table], after)
 			}
 		default:
 			if after != before[table] {

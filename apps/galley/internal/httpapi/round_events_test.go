@@ -51,7 +51,7 @@ func (f *claimFixture) startRound(t *testing.T, claim RunnerClaim, key string) *
 func databaseSnapshot(t *testing.T, pool *pgxpool.Pool) string {
 	t.Helper()
 	var out strings.Builder
-	for _, table := range []string{"tickets", "rounds", "round_events", "round_engine_references", "round_activity", "usage_observations", "round_deliverables", "runners"} {
+	for _, table := range []string{"tickets", "rounds", "round_events", "round_engine_references", "round_activity", "usage_observations", "round_deliverables", "round_commands", "runners"} {
 		var rows string
 		if err := pool.QueryRow(context.Background(), `SELECT COALESCE(json_agg(row_to_json(x) ORDER BY x.id), '[]')::text FROM `+table+` x`).Scan(&rows); err != nil {
 			t.Fatal(err)

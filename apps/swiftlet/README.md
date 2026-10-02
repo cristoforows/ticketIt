@@ -896,6 +896,30 @@ Tests: `TicketDetail.test.tsx` (button, rejection, missing inputs, Round
 history) and `TicketDetailPage.test.tsx` (In Review to a second
 delivered Round, fake timers).
 
+## Stop request (issue #159)
+
+`allowedActions.stop` and `openRound.stopRequestedAt` are Galley's
+answers; Swiftlet renders them and decides nothing.
+
+- **Stop** (`ticket-detail-stop-button`) sits beside Request rework in
+  the receipt's Workflow section, only when `stop.available`, and calls
+  `POST /api/tickets/{id}/stop` (`requestTicketStop`) through the same
+  action path: no confirmation, no optimistic update, Galley's
+  rejection shown verbatim. It is the one action the open-Round lock
+  does not disable. There is no Stop control on the slip.
+- **Stopping…** shows once `stopRequestedAt` is set, as a
+  `StoppingTag` (the `tag` cva's `stopping` variant: a Blocked-deep
+  outline and text on paper, `tokens.test.ts` "stopping tag") on the
+  receipt (`ticket-detail-stopping`) and on the slip (`board-stopping`),
+  next to **Claimed by runner**. Stopping is not a Status: the Ticket
+  stays in its Status column, locked, and the receipt keeps refreshing
+  while the Round is open. `parseTicket` requires `stopRequestedAt`
+  (`null` or a string) on an open Round and `allowedActions.stop`.
+
+Tests: `TicketDetail.test.tsx` ("Stop"), `TicketDetailPage.test.tsx`
+(the POST and refresh), `TicketBoard.test.tsx` (the slip tag) and
+`api/tickets.test.ts` (parsing).
+
 ## Browser-to-backend suite
 
 The tests above stub `fetch`, so they never exercise the real proxy or
