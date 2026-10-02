@@ -455,10 +455,11 @@ log "running tests/runner-claims.spec.ts (a runner claims a queued Ticket direct
   npx playwright test tests/runner-claims.spec.ts) || RUNNER_CLAIMS_EXIT=$?
 
 # tests/runner-engine.spec.ts (issue #134) runs a real michelin that claims,
-# starts and holds a Round. runner-claims.spec.ts claims directly, with no
-# engine to deliver, so its Round stays open, and an Owner has one open Round
-# at a time: the database is reset and migrated and Galley restarted first, as
-# at the start of the run.
+# starts and holds a Round, so the Owner's slot must be free.
+# runner-claims.spec.ts claims directly with the runner credential and no
+# michelin, so nothing that has ceased work can confirm a Stop of its Round
+# (#160): it is reset rather than stopped. The database is reset and migrated
+# and Galley restarted, as at the start of the run.
 log "resetting '$DB_NAME' and restarting galley: runner-claims.spec.ts leaves the Owner's one open Round"
 kill "$GALLEY_PID" 2>/dev/null || true
 wait "$GALLEY_PID" 2>/dev/null || true
@@ -473,8 +474,10 @@ log "running tests/runner-engine.spec.ts (a real michelin starts a Round with no
   E2E_GITHUBFAKE_BASE_URL="$GITHUBFAKE_URL" \
   npx playwright test tests/runner-engine.spec.ts) || RUNNER_ENGINE_EXIT=$?
 
-# tests/runner-activity.spec.ts (issue #135) needs the Owner's slot free too,
-# and runner-engine.spec.ts leaves its Round open: reset again.
+# tests/runner-activity.spec.ts (issue #135) needs the Owner's slot free too.
+# runner-engine.spec.ts kills its michelin on purpose to show the Round stays
+# open after the runner is lost, so no michelin holds the Round to confirm a
+# Stop (#160): reset again.
 log "resetting '$DB_NAME' and restarting galley: runner-engine.spec.ts leaves the Owner's one open Round"
 kill "$GALLEY_PID" 2>/dev/null || true
 wait "$GALLEY_PID" 2>/dev/null || true
@@ -489,18 +492,10 @@ log "running tests/runner-activity.spec.ts (a real michelin's activity and usage
   E2E_GITHUBFAKE_BASE_URL="$GITHUBFAKE_URL" \
   npx playwright test tests/runner-activity.spec.ts) || RUNNER_ACTIVITY_EXIT=$?
 
-# tests/runner-delivery.spec.ts (issue #136) needs the Owner's slot free, and
-# runner-activity.spec.ts holds its Round open on purpose: reset again.
-log "resetting '$DB_NAME' and restarting galley: runner-activity.spec.ts leaves the Owner's one open Round"
-kill "$GALLEY_PID" 2>/dev/null || true
-wait "$GALLEY_PID" 2>/dev/null || true
-GALLEY_PID=""
-psql "$E2E_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' >/dev/null
-(cd "$GALLEY_DIR" && DATABASE_URL="$E2E_DATABASE_URL" go run ./cmd/migrate)
-start_galley
-
+# tests/runner-delivery.spec.ts (issue #136) needs the Owner's slot free:
+# runner-activity.spec.ts frees it by stopping its Round through Galley (#160).
 RUNNER_DELIVERY_EXIT=0
-log "running tests/runner-delivery.spec.ts (a real michelin delivers; Accept, Coding refusal and the next claim) against the reset galley"
+log "running tests/runner-delivery.spec.ts (a real michelin delivers; Accept, Coding refusal and the next claim) against the same galley"
 (cd "$SCRIPT_DIR" && E2E_BASE_URL="$SWIFTLET_BASE_URL" GALLEY_BASE_URL="$GALLEY_BASE_URL" \
   E2E_GITHUBFAKE_BASE_URL="$GITHUBFAKE_URL" \
   npx playwright test tests/runner-delivery.spec.ts) || RUNNER_DELIVERY_EXIT=$?
@@ -513,23 +508,13 @@ log "running tests/runner-rework.spec.ts (a real michelin delivers two Rounds ac
   E2E_GITHUBFAKE_BASE_URL="$GITHUBFAKE_URL" \
   npx playwright test tests/runner-rework.spec.ts) || RUNNER_REWORK_EXIT=$?
 
-# tests/runner-stop-request.spec.ts (issue #159) needs the Owner's slot free.
-# runner-rework.spec.ts frees it, but a failure there could leave a Round open,
-# and a stopped Round stays open until M5.2 ends it: reset first, as for the
-# other open-Round specs.
-log "resetting '$DB_NAME' and restarting galley: runner-stop-request.spec.ts needs the Owner's slot free"
-kill "$GALLEY_PID" 2>/dev/null || true
-wait "$GALLEY_PID" 2>/dev/null || true
-GALLEY_PID=""
-psql "$E2E_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' >/dev/null
-(cd "$GALLEY_DIR" && DATABASE_URL="$E2E_DATABASE_URL" go run ./cmd/migrate)
-start_galley
-
-RUNNER_STOP_REQUEST_EXIT=0
-log "running tests/runner-stop-request.spec.ts (the Owner's Stop reaches a real michelin holding a Round) against the reset galley"
+# tests/runner-stop.spec.ts (issues #159, #160) needs the Owner's slot free:
+# runner-rework.spec.ts leaves every Round delivered and no Ticket in Ready.
+RUNNER_STOP_EXIT=0
+log "running tests/runner-stop.spec.ts (the Owner's Stop ends a real michelin's Round as Stopped, then Round 2) against the same galley"
 (cd "$SCRIPT_DIR" && E2E_BASE_URL="$SWIFTLET_BASE_URL" GALLEY_BASE_URL="$GALLEY_BASE_URL" \
   E2E_GITHUBFAKE_BASE_URL="$GITHUBFAKE_URL" \
-  npx playwright test tests/runner-stop-request.spec.ts) || RUNNER_STOP_REQUEST_EXIT=$?
+  npx playwright test tests/runner-stop.spec.ts) || RUNNER_STOP_EXIT=$?
 
 # --- 10c. Run StatusView's own error-state spec (issue #80) ---
 # Needs Galley up for the real session check; the spec itself fails
@@ -586,7 +571,7 @@ log "runner-engine.spec.ts exit code: $RUNNER_ENGINE_EXIT"
 log "runner-activity.spec.ts exit code: $RUNNER_ACTIVITY_EXIT"
 log "runner-delivery.spec.ts exit code: $RUNNER_DELIVERY_EXIT"
 log "runner-rework.spec.ts exit code: $RUNNER_REWORK_EXIT"
-log "runner-stop-request.spec.ts exit code: $RUNNER_STOP_REQUEST_EXIT"
+log "runner-stop.spec.ts exit code: $RUNNER_STOP_EXIT"
 log "status-failure.spec.ts exit code: $STATUS_FAILURE_EXIT"
 log "backend-failure.spec.ts exit code: $FAILURE_EXIT"
 
@@ -594,7 +579,7 @@ if [ "$STATUS_EXIT" -ne 0 ] || [ "$AUTH_EXIT" -ne 0 ] || [ "$RESTART_BEFORE_EXIT
   || [ "$LIFECYCLE_BEFORE_EXIT" -ne 0 ] || [ "$BADGES_BEFORE_EXIT" -ne 0 ] || [ "$RESTORE_BEFORE_EXIT" -ne 0 ] || [ "$TICKET_BEFORE_EXIT" -ne 0 ] || [ "$REFINEMENT_BEFORE_EXIT" -ne 0 ] \
   || [ "$RESTART_AFTER_EXIT" -ne 0 ] || [ "$BADGES_AFTER_EXIT" -ne 0 ] || [ "$RESTORE_AFTER_EXIT" -ne 0 ] || [ "$TICKET_AFTER_EXIT" -ne 0 ] || [ "$REFINEMENT_AFTER_EXIT" -ne 0 ] \
   || [ "$LIFECYCLE_AFTER_EXIT" -ne 0 ] || [ "$TICKET_DETAIL_EXIT" -ne 0 ] || [ "$REFINEMENT_EXIT" -ne 0 ] \
-  || [ "$TEMPLATES_EXIT" -ne 0 ] || [ "$LIFECYCLE_EXIT" -ne 0 ] || [ "$ALLOWED_ACTIONS_EXIT" -ne 0 ] || [ "$BOARD_EXIT" -ne 0 ] || [ "$BOARD_MOVES_EXIT" -ne 0 ] || [ "$BOARD_MOBILE_EXIT" -ne 0 ] || [ "$PRIORITY_ORDER_EXIT" -ne 0 ] || [ "$MODAL_EXIT" -ne 0 ] || [ "$BADGE_FILTER_EXIT" -ne 0 ] || [ "$ARCHIVE_EXIT" -ne 0 ] || [ "$CAPTURE_EXIT" -ne 0 ] || [ "$AGENTS_EXIT" -ne 0 ] || [ "$RUNNER_EXIT" -ne 0 ] || [ "$RUNNER_CLAIMS_EXIT" -ne 0 ] || [ "$RUNNER_ENGINE_EXIT" -ne 0 ] || [ "$RUNNER_ACTIVITY_EXIT" -ne 0 ] || [ "$RUNNER_DELIVERY_EXIT" -ne 0 ] || [ "$RUNNER_REWORK_EXIT" -ne 0 ] || [ "$RUNNER_STOP_REQUEST_EXIT" -ne 0 ] || [ "$AGENT_READINESS_EXIT" -ne 0 ] || [ "$STATUS_FAILURE_EXIT" -ne 0 ] \
+  || [ "$TEMPLATES_EXIT" -ne 0 ] || [ "$LIFECYCLE_EXIT" -ne 0 ] || [ "$ALLOWED_ACTIONS_EXIT" -ne 0 ] || [ "$BOARD_EXIT" -ne 0 ] || [ "$BOARD_MOVES_EXIT" -ne 0 ] || [ "$BOARD_MOBILE_EXIT" -ne 0 ] || [ "$PRIORITY_ORDER_EXIT" -ne 0 ] || [ "$MODAL_EXIT" -ne 0 ] || [ "$BADGE_FILTER_EXIT" -ne 0 ] || [ "$ARCHIVE_EXIT" -ne 0 ] || [ "$CAPTURE_EXIT" -ne 0 ] || [ "$AGENTS_EXIT" -ne 0 ] || [ "$RUNNER_EXIT" -ne 0 ] || [ "$RUNNER_CLAIMS_EXIT" -ne 0 ] || [ "$RUNNER_ENGINE_EXIT" -ne 0 ] || [ "$RUNNER_ACTIVITY_EXIT" -ne 0 ] || [ "$RUNNER_DELIVERY_EXIT" -ne 0 ] || [ "$RUNNER_REWORK_EXIT" -ne 0 ] || [ "$RUNNER_STOP_EXIT" -ne 0 ] || [ "$AGENT_READINESS_EXIT" -ne 0 ] || [ "$STATUS_FAILURE_EXIT" -ne 0 ] \
   || [ "$FAILURE_EXIT" -ne 0 ]; then
   log "SUITE FAILED"
   exit 1

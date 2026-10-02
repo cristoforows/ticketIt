@@ -1384,9 +1384,9 @@ two.
 
 `GET /api/tickets/{id}/rounds` returns `{"rounds": [...]}`, newest
 first by `sequence`, for any of the Owner's Tickets including an
-archived one. `RoundState` is `claimed`, `running` or `delivered`;
-`Ticket.openRound.state` uses `OpenRoundState` (`claimed`, `running`),
-since a delivered Round is never open.
+archived one. `RoundState` is `claimed`, `running`, `delivered` or
+`stopped` (#160); `Ticket.openRound.state` uses `OpenRoundState`
+(`claimed`, `running`), since an ended Round is never open.
 
 Tests: `round_events_test.go`, `round_event_hash_test.go`,
 `ticket_rounds_test.go`, and `TestRoundEvents_ResponsesMatchContractAndMethod405`
@@ -1586,13 +1586,62 @@ The runner pulls commands with its bearer credential:
 
 Galley does not reject an ack by epoch: Michelin compares the command's
 `claimEpoch` with its own claim and acknowledges a mismatch `ignored`.
-Ending a stopped Round (`stop_confirmed`) is M5.2.
+Ending a stopped Round (`stop_confirmed`) is below.
 
 Tests: `round_commands_test.go` (decision table, Stop on claimed and
 running Rounds, concurrent and lock-adjacent duplicates, the listing,
 ack replay and conflict, concurrent acks, a stale-epoch Stop), the
 "while Stopping" cases in `ticket_open_round_lock_test.go`, and
 `contract_test.go`. Evidence: `docs/evidence/m5/159-stop-request.md`.
+
+## Confirmed Stop and the Stopped Badge (issue #160)
+
+Migration `000018_stop_rounds.up.sql` replaces `rounds_state_m4` with
+`rounds_state_m5` (adding `stopped`), lets a `stopped` Round have no
+`started_at` (a claimed Round can be stopped) but requires `ended_at`,
+adds `rounds.outcome_note` (set exactly when `stopped`, 1 to 2000
+characters), replaces `round_events_type_m4` with `round_events_type_m5`
+(adding `stop_confirmed`), and adds `badges.system_key` (only
+`stopped`, at most one per Owner, `badges_owner_system_key_unique`).
+
+`stop_confirmed` uses the event endpoint and ladder above with
+`data: {"evidence": "..."}` (1 to 2000 characters, the progress note's
+text rules). The ladder takes it on a `claimed` or `running` Round, and
+after the state check rejects it with `409 stop_not_requested` unless
+the Round has a `stop` command; an unacknowledged Stop is enough. The
+Round lock query reads that as an `EXISTS` in the same `FOR UPDATE`.
+In the event's transaction (`stopRound`, `round_endings.go`):
+
+- the Round becomes `stopped` with the evidence as `outcome_note` and
+  `ended_at = GREATEST(now, COALESCE(started_at, claimed_at))`, which
+  frees the slot and lifts the open-Round lock;
+- the Ticket moves to Backlog from Ready or In Progress, keeping its
+  priority position; any other Status is a broken invariant, rolled
+  back, logged and answered `500`;
+- `ensureStoppedBadge` finds the Owner's `system_key = 'stopped'` Badge,
+  else adopts the Owner's Badge named "stopped" in any case, else
+  creates "Stopped", and the Badge is attached (`ON CONFLICT DO NOTHING`).
+
+The result is `{roundId, type, state: stopped, startedAt, endedAt}`;
+`startedAt` is `null` for a Round stopped while claimed, the one case
+`RoundEventResult.startedAt` is null. `TicketRound.outcomeNote` carries
+the evidence for a `stopped` Round and is `null` otherwise.
+
+Stopped is terminal: every later event is `409 round_not_open`, Stop is
+`stop_not_available`, the command list is empty, and only an explicit
+Ready queues a new Round (new id, `sequence + 1`, `claimEpoch + 1`). No
+other signal (disconnect, time, an unacknowledged or acknowledged
+command) ends a Round as stopped. The Stopped Badge is an ordinary
+Badge: listed, filterable, attachable and detachable through the Badge
+endpoints, and detaching it never changes the Round.
+
+Tests: `round_endings_test.go` (outcome, ladder rejections, replay,
+concurrency, the three `ensureStoppedBadge` branches and racing Badge
+creation, rollback, terminal regression, constraints),
+`TestDecideRoundEvent`, the lock-order test in `round_events_test.go`,
+`TestStopConfirmed_ResponsesMatchContract` in `contract_test.go`, and the
+Badge assertions in `no_execution_side_effects_test.go`. Evidence:
+`docs/evidence/m5/160-confirmed-stop.md`.
 
 ## Error shape
 
@@ -1879,6 +1928,7 @@ apps/galley/
         ├── round_activity.go    # issue #135: progress notes, seq, the 50-note window
         ├── usage_observations.go  # issue #135: usage observations and the Round summary
         ├── round_commands.go      # issue #159: Stop request, the runner's command list and acks
+        ├── round_endings.go       # issue #160: stop_confirmed, the Stopped Round and the Stopped Badge
         ├── devclock.go     # issue #130: development-only clock advance for the browser suite
         └── no_execution_side_effects_test.go   # issue #60: the no-Round/queue/work-request guardrail
 ```

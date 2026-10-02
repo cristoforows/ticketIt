@@ -28,6 +28,8 @@ const (
 	roundNotOpenCode              = "round_not_open"
 	roundNotOpenMessage           = "this Round is no longer open"
 	eventOutOfOrderCode           = "event_out_of_order"
+	stopNotRequestedCode          = "stop_not_requested"
+	stopNotRequestedMessage       = "stop_confirmed needs the Owner's Stop request for this Round"
 	observationIDConflictCode     = "observation_id_conflict"
 	observationIDConflictMessage  = "this observationId is already recorded for another Round"
 	roundNotFoundMessage          = "no round with that identifier"
@@ -46,14 +48,16 @@ type roundEvent struct {
 	note            string
 	usage           usageObservation
 	deliverable     RoundDeliverable
+	evidence        string
 }
 
 type lockedRound struct {
-	id        int64
-	state     string
-	epoch     int
-	open      bool
-	startedAt *time.Time
+	id            int64
+	state         string
+	epoch         int
+	open          bool
+	startedAt     *time.Time
+	stopRequested bool
 }
 
 type roundEventRejection struct {
@@ -72,7 +76,7 @@ type recordedRoundEvent struct {
 var errRoundEventTicketNotReady = errors.New("the Ticket of a claimed Round is not Ready")
 
 func isTicketGuardFailure(err error) bool {
-	return errors.Is(err, errRoundEventTicketNotReady) || errors.Is(err, errDeliveredTicketNotInProgress)
+	return errors.Is(err, errRoundEventTicketNotReady) || errors.Is(err, errDeliveredTicketNotInProgress) || errors.Is(err, errStoppedTicketNotActive)
 }
 
 func writeRoundNotFound(w http.ResponseWriter) {
@@ -134,7 +138,7 @@ func (s *server) ReportRoundEvent(w http.ResponseWriter, r *http.Request, roundI
 
 func validateRoundEvent(req RoundEventRequest) (roundEvent, string) {
 	if !req.Type.Valid() {
-		return roundEvent{}, `"type" must be one of: execution_started, progress, usage_observed, delivered`
+		return roundEvent{}, `"type" must be one of: execution_started, progress, usage_observed, delivered, stop_confirmed`
 	}
 	if !validEventText(req.IdempotencyKey, idempotencyKeyMaxLength) {
 		return roundEvent{}, fmt.Sprintf(`"idempotencyKey" must be 1 to %d characters without control characters`, idempotencyKeyMaxLength)
@@ -164,6 +168,8 @@ func validateRoundEvent(req RoundEventRequest) (roundEvent, string) {
 		}
 	case RoundEventDelivered:
 		event.deliverable, problem = validateDeliveredData(data)
+	case RoundEventStopConfirmed:
+		event.evidence, problem = validateStopConfirmedData(data)
 	}
 	if problem != "" {
 		return roundEvent{}, problem
@@ -221,8 +227,10 @@ func recordRoundEvent(ctx context.Context, pool *pgxpool.Pool, ownerID int64, ro
 		return recordedRoundEvent{}, err
 	}
 	var round lockedRound
-	err = tx.QueryRow(ctx, `SELECT id, state, claim_epoch, state IN `+openRoundStatesSQL+`, started_at FROM rounds
-		WHERE owner_id = $1 AND public_id = $2::uuid FOR UPDATE`, ownerID, roundID).Scan(&round.id, &round.state, &round.epoch, &round.open, &round.startedAt)
+	err = tx.QueryRow(ctx, `SELECT r.id, r.state, r.claim_epoch, r.state IN `+openRoundStatesSQL+`, r.started_at,
+			EXISTS (SELECT 1 FROM round_commands c WHERE c.owner_id = r.owner_id AND c.round_id = r.id AND c.type = $3)
+		FROM rounds r WHERE r.owner_id = $1 AND r.public_id = $2::uuid FOR UPDATE OF r`, ownerID, roundID, string(RunnerCommandStop)).
+		Scan(&round.id, &round.state, &round.epoch, &round.open, &round.startedAt, &round.stopRequested)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return recordedRoundEvent{}, nil
 	}
@@ -253,13 +261,13 @@ func recordRoundEvent(ctx context.Context, pool *pgxpool.Pool, ownerID int64, ro
 		if err != nil {
 			return recordedRoundEvent{}, err
 		}
-		result.StartedAt = startedAt.UTC()
+		result.StartedAt = utcOrNil(&startedAt)
 	case RoundEventProgress:
 		seq, err := appendActivity(ctx, tx, ownerID, round.id, event.note, event.occurredAt)
 		if err != nil {
 			return recordedRoundEvent{}, err
 		}
-		result.StartedAt, result.Seq = round.startedAt.UTC(), &seq
+		result.StartedAt, result.Seq = utcOrNil(round.startedAt), &seq
 	case RoundEventUsageObserved:
 		recorded, err := insertUsageObservation(ctx, tx, ownerID, round.id, event.usage, event.occurredAt)
 		if err != nil {
@@ -268,14 +276,21 @@ func recordRoundEvent(ctx context.Context, pool *pgxpool.Pool, ownerID int64, ro
 		if !recorded {
 			return recordedRoundEvent{found: true, rejection: &roundEventRejection{http.StatusConflict, observationIDConflictCode, observationIDConflictMessage}}, nil
 		}
-		result.StartedAt, result.ObservationId = round.startedAt.UTC(), &event.usage.id
+		result.StartedAt, result.ObservationId = utcOrNil(round.startedAt), &event.usage.id
 	case RoundEventDelivered:
 		endedAt, err := deliverRound(ctx, tx, ownerID, ticketID, round.id, event.deliverable, now)
 		if err != nil {
 			return recordedRoundEvent{}, err
 		}
 		endedAt = endedAt.UTC()
-		result.State, result.StartedAt, result.EndedAt = RoundDelivered, round.startedAt.UTC(), &endedAt
+		result.State, result.StartedAt, result.EndedAt = RoundDelivered, utcOrNil(round.startedAt), &endedAt
+	case RoundEventStopConfirmed:
+		endedAt, err := stopRound(ctx, tx, ownerID, ticketID, round.id, event.evidence, now)
+		if err != nil {
+			return recordedRoundEvent{}, err
+		}
+		endedAt = endedAt.UTC()
+		result.State, result.StartedAt, result.EndedAt = RoundStopped, utcOrNil(round.startedAt), &endedAt
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil {
@@ -300,6 +315,8 @@ func decideRoundEvent(round lockedRound, eventType RoundEventType, claimEpoch in
 		return &roundEventRejection{http.StatusConflict, roundNotOpenCode, roundNotOpenMessage}
 	case !roundStateTakes(RoundState(round.state), eventType):
 		return &roundEventRejection{http.StatusConflict, eventOutOfOrderCode, eventOutOfOrderMessage(eventType, RoundState(round.state))}
+	case eventType == RoundEventStopConfirmed && !round.stopRequested:
+		return &roundEventRejection{http.StatusConflict, stopNotRequestedCode, stopNotRequestedMessage}
 	}
 	return nil
 }
@@ -311,6 +328,8 @@ func roundStateTakes(state RoundState, eventType RoundEventType) bool {
 		return state == RoundClaimed
 	case RoundEventProgress, RoundEventUsageObserved, RoundEventDelivered:
 		return state == RoundRunning
+	case RoundEventStopConfirmed:
+		return state == RoundClaimed || state == RoundRunning
 	}
 	return false
 }

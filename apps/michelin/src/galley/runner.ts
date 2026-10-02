@@ -147,19 +147,20 @@ function parseRoundEventResult(payload: unknown, roundId: string, expected: Roun
   if (type !== expected.type) {
     return `type is not ${expected.type}`;
   }
-  if (type === "delivered" && state !== "delivered") {
-    return "state is not delivered";
+  const endState = type === "delivered" ? "delivered" : type === "stop_confirmed" ? "stopped" : undefined;
+  if (endState !== undefined && state !== endState) {
+    return `state is not ${endState}`;
   }
-  if (type !== "delivered" && state !== "claimed" && state !== "running") {
+  if (endState === undefined && state !== "claimed" && state !== "running") {
     return "state is not claimed or running";
   }
-  if (state !== "claimed" && state !== "running" && state !== "delivered") {
+  if (state !== "claimed" && state !== "running" && state !== "delivered" && state !== "stopped") {
     return "state is not a Round state";
   }
-  if (typeof startedAt !== "string") {
+  if (typeof startedAt !== "string" && !(type === "stop_confirmed" && startedAt === null)) {
     return "startedAt is not a string";
   }
-  if (type === "delivered" && typeof endedAt !== "string") {
+  if (endState !== undefined && typeof endedAt !== "string") {
     return "endedAt is not a string";
   }
   if (type === "progress" && !(Number.isSafeInteger(seq) && (seq as number) >= 1)) {
@@ -171,7 +172,7 @@ function parseRoundEventResult(payload: unknown, roundId: string, expected: Roun
   const result: RoundEventResult = { roundId: reportedRound, type: expected.type, state, startedAt };
   if (type === "progress") result.seq = seq as number;
   if (type === "usage_observed") result.observationId = observationId as string;
-  if (type === "delivered") result.endedAt = endedAt as string;
+  if (endState !== undefined) result.endedAt = endedAt as string;
   return result;
 }
 

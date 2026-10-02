@@ -1,8 +1,9 @@
+import type { ReactNode } from "react";
 import type { RoundDeliverable, TicketRound } from "../api/rounds";
 import type { Ticket } from "../api/tickets";
 import type { HealthView } from "./RunnerHealthPill";
 import { activeTime, costFigure, countFigure, type UsageFigure } from "./roundUsage";
-import { Disclosure, EstimateTag, FieldLabel, FieldNote, InlineError, Markdown, ReceiptLine } from "./ui";
+import { Disclosure, EstimateTag, FieldLabel, FieldNote, InlineError, Markdown, ReceiptLine, StoppedTag } from "./ui";
 
 /** `rounds` is the last list Galley returned; `error` is the latest refresh's failure. */
 export interface RoundRecords {
@@ -38,9 +39,17 @@ export function RoundsSection({ openRound, runnerHealth, records = {} }: { openR
   );
 }
 
-function outcomeOf(round: TicketRound): string {
-  if (round.state === "delivered") return `Delivered by ${round.agent.name}`;
-  return round.state === "running" ? "Running" : "Claimed, waiting for the runner to start";
+function outcomeOf(round: TicketRound): ReactNode {
+  switch (round.state) {
+    case "delivered":
+      return `Delivered by ${round.agent.name}`;
+    case "stopped":
+      return <StoppedTag data-testid="ticket-detail-round-stopped">Stopped</StoppedTag>;
+    case "running":
+      return "Running";
+    case "claimed":
+      return "Claimed, waiting for the runner to start";
+  }
 }
 
 function RoundEntry({ round, defaultOpen }: { round: TicketRound; defaultOpen: boolean }) {
@@ -61,9 +70,16 @@ function RoundEntry({ round, defaultOpen }: { round: TicketRound; defaultOpen: b
           <ReceiptLine label="Claimed at" data-testid="ticket-detail-round-claimed-at">{round.claimedAt}</ReceiptLine>
           {round.startedAt !== null && <ReceiptLine label="Started at" data-testid="ticket-detail-round-started">{round.startedAt}</ReceiptLine>}
           {round.state === "delivered" && <ReceiptLine label="Delivered at" data-testid="ticket-detail-round-delivered-at">{round.endedAt}</ReceiptLine>}
+          {round.state === "stopped" && <ReceiptLine label="Stopped at" data-testid="ticket-detail-round-stopped-at">{round.endedAt}</ReceiptLine>}
         </dl>
+        {round.outcomeNote !== null && (
+          <section aria-label="Outcome" className="mt-3">
+            <FieldLabel as="h4">Outcome</FieldLabel>
+            <p data-testid="ticket-detail-round-outcome-note" className="my-1 break-words whitespace-pre-wrap">{round.outcomeNote}</p>
+          </section>
+        )}
         {round.deliverable && <Deliverable deliverable={round.deliverable} />}
-        <RoundRecordDetails round={round} usageLabel={round.state === "delivered" ? "Usage" : "Usage so far"} />
+        <RoundRecordDetails round={round} usageLabel={round.state === "delivered" || round.state === "stopped" ? "Usage" : "Usage so far"} />
       </Disclosure>
     </li>
   );

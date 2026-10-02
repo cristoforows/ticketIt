@@ -347,65 +347,152 @@ describe("a Stop request", () => {
     const promise = new Promise<Response>((done) => (resolve = done));
     return { promise, resolve };
   };
+  const COMMAND_ID = "55555555-5555-4555-8555-555555555555";
+  const stopConfirmed = (evidence: string) => ({
+    type: "stop_confirmed",
+    idempotencyKey: `${ROUND_ID}:stop`,
+    claimEpoch: CLAIM.claimEpoch,
+    occurredAt: expect.stringMatching(/^2026-10-01T12:00:\d\d\.123Z$/),
+    data: { evidence },
+  });
+  const stoppedResult = { roundId: ROUND_ID, type: "stop_confirmed", state: "stopped", startedAt: "2026-10-01T12:00:00Z", endedAt: "2026-10-01T12:00:09Z" };
 
   it.each([
-    ["a wait", [START, wait(60_000), NOTE("after"), HOLD], 2],
-    ["a hold", [START, HOLD], 1],
-  ])("ends %s at once, reports nothing further and returns stopped", async (_name, steps, haltedAt) => {
+    ["a wait", [START, wait(60_000), NOTE("after"), HOLD], 2, "Stopped before step 3 of 4"],
+    ["a hold", [START, HOLD], 1, "Stopped before step 2 of 2"],
+  ])("ends %s at once, confirms the Stop with its evidence and returns stopped", async (_name, steps, haltedAt, where) => {
     const fetchFn = answering();
     const harness = start(steps, fetchFn);
     await vi.advanceTimersByTimeAsync(10);
-    harness.stopper.abort();
+    harness.stopper.abort(COMMAND_ID);
     expect(await harness.run).toBe("stopped");
     expect(vi.getTimerCount()).toBe(0);
-    expect(sent(fetchFn).map((event) => event.type)).toEqual(["execution_started"]);
-    expect(harness.records().map((record) => record["msg"]).filter((msg) => msg !== "engine holding")).toEqual(["execution started reported", "engine stopped"]);
-    expect(harness.records().at(-1)).toMatchObject({ roundId: ROUND_ID, stepIndex: haltedAt });
+    expect(sent(fetchFn).map((event) => event.type)).toEqual(["execution_started", "stop_confirmed"]);
+    expect(sent(fetchFn)[1]).toEqual(stopConfirmed(`${where} on Stop command ${COMMAND_ID}`));
+    expect(harness.records().map((record) => record["msg"]).filter((msg) => msg !== "engine holding")).toEqual(["execution started reported", "engine stopped", "stop confirmation reported"]);
+    expect(harness.records().find((record) => record["msg"] === "engine stopped")).toMatchObject({ roundId: ROUND_ID, stepIndex: haltedAt, commandId: COMMAND_ID });
+    expect(harness.records().at(-1)).toMatchObject({ roundId: ROUND_ID, step: "stop", httpStatus: 201, endedAt: "2026-10-01T12:00:09Z" });
   });
 
-  it("lets an in-flight event finish, then halts at the next step boundary", async () => {
+  it("confirms a Stop that lands during the last step's wait as stopped after the last step", async () => {
+    const fetchFn = answering();
+    const harness = start([START, wait(60_000)], fetchFn);
+    await vi.advanceTimersByTimeAsync(10);
+    harness.stopper.abort(COMMAND_ID);
+    expect(await harness.run).toBe("stopped");
+    expect(sent(fetchFn)[1]).toEqual(stopConfirmed(`Stopped after step 2 of 2 on Stop command ${COMMAND_ID}`));
+  });
+
+  it("lets an in-flight event finish, then halts at the next step boundary and confirms", async () => {
     const pending = deferred();
-    const fetchFn = vi.fn<FetchFn>(() => pending.promise);
+    let calls = 0;
+    const fetchFn = vi.fn<FetchFn>(() => (++calls === 1 ? pending.promise : Promise.resolve(json(stoppedResult, 201))));
     const harness = start([START, NOTE("never sent"), HOLD], fetchFn);
     await vi.advanceTimersByTimeAsync(10);
-    harness.stopper.abort();
+    harness.stopper.abort(COMMAND_ID);
     await vi.advanceTimersByTimeAsync(10);
     expect(harness.records()).toEqual([]);
     pending.resolve(created());
     expect(await harness.run).toBe("stopped");
-    expect(fetchFn).toHaveBeenCalledTimes(1);
-    expect(harness.records().map((record) => record["msg"])).toEqual(["execution started reported", "engine stopped"]);
+    expect(fetchFn.mock.calls.map(([, init]) => (JSON.parse(String(init?.body)) as SentEvent).type)).toEqual(["execution_started", "stop_confirmed"]);
+    expect(harness.records().map((record) => record["msg"])).toEqual(["execution started reported", "engine stopped", "stop confirmation reported"]);
   });
 
   it("keeps retrying an in-flight event through its backoff before halting", async () => {
     const fetchFn = answering(refused);
     const harness = start([START, NOTE("never sent"), HOLD], fetchFn);
     await vi.advanceTimersByTimeAsync(10);
-    harness.stopper.abort();
+    harness.stopper.abort(COMMAND_ID);
     await vi.advanceTimersByTimeAsync(1000);
     expect(await harness.run).toBe("stopped");
-    expect(sent(fetchFn).map((event) => event.type)).toEqual(["execution_started", "execution_started"]);
-    expect(harness.records().map((record) => record["msg"])).toEqual(["round event failed; retrying", "execution started reported", "engine stopped"]);
+    expect(sent(fetchFn).map((event) => event.type)).toEqual(["execution_started", "execution_started", "stop_confirmed"]);
+    expect(harness.records().map((record) => record["msg"])).toEqual(["round event failed; retrying", "execution started reported", "engine stopped", "stop confirmation reported"]);
   });
 
-  it("returns delivered when the delivery in flight lands", async () => {
+  it("retries the confirmation through 5xx and network failures with the same bytes", async () => {
+    const fetchFn = answering(created, error(503, "database_unavailable"), refused, () => new Response("<html>", { status: 201 }));
+    const harness = start([START, HOLD], fetchFn);
+    await vi.advanceTimersByTimeAsync(10);
+    harness.stopper.abort(COMMAND_ID);
+    await vi.advanceTimersByTimeAsync(1_000 + 2_000 + 4_000);
+    expect(await harness.run).toBe("stopped");
+    const bodies = fetchFn.mock.calls.slice(1).map(([, init]) => String(init?.body));
+    expect(bodies).toHaveLength(4);
+    expect(new Set(bodies).size).toBe(1);
+    expect(harness.records().filter((record) => record["msg"] === "round event failed; retrying").map((record) => record["retryInMs"])).toEqual([1000, 2000, 4000]);
+  });
+
+  it("accepts a replayed confirmation and a Round stopped before it started", async () => {
+    const fetchFn = vi.fn<FetchFn>(async () => json({ ...stoppedResult, startedAt: null }, 200));
+    const harness = start([wait(60_000), START], fetchFn);
+    await vi.advanceTimersByTimeAsync(10);
+    harness.stopper.abort(COMMAND_ID);
+    expect(await harness.run).toBe("stopped");
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(harness.records().at(-1)).toMatchObject({ msg: "stop confirmation reported", httpStatus: 200, replayed: true });
+  });
+
+  it.each([
+    ["a wrong state", { state: "running" }, "state is not stopped"],
+    ["no endedAt", { endedAt: undefined }, "endedAt is not a string"],
+    ["another Round", { roundId: "66666666-6666-4666-8666-666666666666" }, "roundId is not the Round the event was sent for"],
+  ])("retries a confirmation answered with %s", async (_name, wrong, why) => {
+    const fetchFn = answering(created, () => json({ ...stoppedResult, ...wrong }, 201));
+    const harness = start([START, HOLD], fetchFn);
+    await vi.advanceTimersByTimeAsync(10);
+    harness.stopper.abort(COMMAND_ID);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await harness.run).toBe("stopped");
+    expect(harness.records().find((record) => record["msg"] === "round event failed; retrying")).toMatchObject({ step: "stop", reason: "invalid_body", error: why });
+  });
+
+  it.each([
+    [409, "round_not_open"],
+    [409, "stop_not_requested"],
+    [409, "stale_claim_epoch"],
+    [400, "invalid_request"],
+  ])("abandons the Round locally when Galley refuses the confirmation with %i %s", async (status, code) => {
+    const fetchFn = answering(created, error(status, code));
+    const harness = start([START, HOLD], fetchFn);
+    await vi.advanceTimersByTimeAsync(10);
+    harness.stopper.abort(COMMAND_ID);
+    expect(await harness.run).toBe("abandoned");
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(harness.records().at(-1)).toMatchObject({ level: "error", msg: "round event refused; round abandoned locally", step: "stop", httpStatus: status, errorCode: code });
+  });
+
+  it("answers shutdown during the confirmation's backoff with aborted", async () => {
+    const fetchFn = answering(created, refused);
+    const harness = start([START, HOLD], fetchFn);
+    await vi.advanceTimersByTimeAsync(10);
+    harness.stopper.abort(COMMAND_ID);
+    await vi.advanceTimersByTimeAsync(10);
+    harness.controller.abort();
+    expect(await harness.run).toBe("aborted");
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns delivered when the delivery in flight lands, and confirms nothing", async () => {
     const pending = deferred();
     let calls = 0;
     const fetchFn = vi.fn<FetchFn>(() => (++calls === 1 ? Promise.resolve(created()) : pending.promise));
     const harness = start([START, DELIVER], fetchFn);
     await vi.advanceTimersByTimeAsync(10);
-    harness.stopper.abort();
+    harness.stopper.abort(COMMAND_ID);
     pending.resolve(json({ roundId: ROUND_ID, type: "delivered", state: "delivered", startedAt: "2026-10-01T12:00:00Z", endedAt: "2026-10-01T12:00:09Z" }, 201));
     expect(await harness.run).toBe("delivered");
+    expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 
-  it("still answers shutdown with aborted", async () => {
-    const harness = start([START, HOLD], answering());
+  it("still answers shutdown with aborted and confirms nothing", async () => {
+    const fetchFn = answering();
+    const harness = start([START, HOLD], fetchFn);
     await vi.advanceTimersByTimeAsync(10);
     harness.controller.abort();
-    harness.stopper.abort();
+    harness.stopper.abort(COMMAND_ID);
     expect(await harness.run).toBe("aborted");
     expect(harness.records().map((record) => record["msg"])).not.toContain("engine stopped");
+    expect(sent(fetchFn).map((event) => event.type)).toEqual(["execution_started"]);
   });
 });
 
@@ -446,9 +533,9 @@ function answering(...failures: (() => Response)[]) {
       {
         roundId: ROUND_ID,
         type: event.type,
-        state: event.type === "delivered" ? "delivered" : "running",
+        state: event.type === "delivered" ? "delivered" : event.type === "stop_confirmed" ? "stopped" : "running",
         startedAt: "2026-10-01T12:00:00Z",
-        ...(event.type === "delivered" ? { endedAt: "2026-10-01T12:00:09Z" } : {}),
+        ...(event.type === "delivered" || event.type === "stop_confirmed" ? { endedAt: "2026-10-01T12:00:09Z" } : {}),
         ...(event.type === "progress" ? { seq: ++notes } : {}),
         ...(event.type === "usage_observed" ? { observationId: event.data["observationId"] } : {}),
       },

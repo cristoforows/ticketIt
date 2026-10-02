@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -51,13 +52,18 @@ func (f *claimFixture) startRound(t *testing.T, claim RunnerClaim, key string) *
 func databaseSnapshot(t *testing.T, pool *pgxpool.Pool) string {
 	t.Helper()
 	var out strings.Builder
-	for _, table := range []string{"tickets", "rounds", "round_events", "round_engine_references", "round_activity", "usage_observations", "round_deliverables", "round_commands", "runners"} {
+	for _, table := range []string{"tickets", "rounds", "round_events", "round_engine_references", "round_activity", "usage_observations", "round_deliverables", "round_commands", "runners", "badges"} {
 		var rows string
 		if err := pool.QueryRow(context.Background(), `SELECT COALESCE(json_agg(row_to_json(x) ORDER BY x.id), '[]')::text FROM `+table+` x`).Scan(&rows); err != nil {
 			t.Fatal(err)
 		}
 		fmt.Fprintf(&out, "%s=%s\n", table, rows)
 	}
+	var links string
+	if err := pool.QueryRow(context.Background(), `SELECT COALESCE(json_agg(row_to_json(x) ORDER BY x.ticket_id, x.badge_id), '[]')::text FROM ticket_badges x`).Scan(&links); err != nil {
+		t.Fatal(err)
+	}
+	fmt.Fprintf(&out, "ticket_badges=%s\n", links)
 	return out.String()
 }
 
@@ -197,7 +203,7 @@ func TestRoundEvent_ExecutionStartedStartsTheRoundAndMovesTheTicketToInProgress(
 	if err := json.Unmarshal([]byte(result), &stored); err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &sent); err != nil || stored != sent {
+	if err := json.Unmarshal(rec.Body.Bytes(), &sent); err != nil || !reflect.DeepEqual(stored, sent) {
 		t.Fatalf("stored result %+v, sent %+v (%v)", stored, sent, err)
 	}
 	if n := tableRowCount(t, f.pool, "round_events"); n != 1 {
@@ -931,6 +937,9 @@ func TestDecideRoundEvent(t *testing.T) {
 	open := func(state RoundState, epoch int) lockedRound {
 		return lockedRound{state: string(state), epoch: epoch, open: true}
 	}
+	stopping := func(state RoundState, epoch int) lockedRound {
+		return lockedRound{state: string(state), epoch: epoch, open: true, stopRequested: true}
+	}
 	for name, tc := range map[string]struct {
 		round     lockedRound
 		eventType RoundEventType
@@ -956,6 +965,15 @@ func TestDecideRoundEvent(t *testing.T) {
 		"delivery while waiting for input":    {open("waiting_for_input", 3), RoundEventDelivered, 3, eventOutOfOrderCode},
 		"delivery at a stale epoch":           {open(RoundRunning, 3), RoundEventDelivered, 4, staleClaimEpochCode},
 		"a second delivery":                   {lockedRound{state: "delivered", epoch: 3}, RoundEventDelivered, 3, roundNotOpenCode},
+		"a stop confirmation, claimed":        {stopping(RoundClaimed, 3), RoundEventStopConfirmed, 3, ""},
+		"a stop confirmation, running":        {stopping(RoundRunning, 3), RoundEventStopConfirmed, 3, ""},
+		"a stop confirmation without a Stop":  {open(RoundRunning, 3), RoundEventStopConfirmed, 3, stopNotRequestedCode},
+		"a stale epoch beats a missing Stop":  {open(RoundRunning, 3), RoundEventStopConfirmed, 2, staleClaimEpochCode},
+		"an ended Round beats a missing Stop": {lockedRound{state: "delivered", epoch: 3}, RoundEventStopConfirmed, 3, roundNotOpenCode},
+		"a stop confirmation, stopped":        {lockedRound{state: "stopped", epoch: 3, stopRequested: true}, RoundEventStopConfirmed, 3, roundNotOpenCode},
+		"a stop confirmation, stale epoch":    {stopping(RoundRunning, 3), RoundEventStopConfirmed, 4, staleClaimEpochCode},
+		"waiting for input takes no stop":     {stopping("waiting_for_input", 3), RoundEventStopConfirmed, 3, eventOutOfOrderCode},
+		"progress on a stopped Round":         {lockedRound{state: "stopped", epoch: 3, stopRequested: true}, RoundEventProgress, 3, roundNotOpenCode},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := decideRoundEvent(tc.round, tc.eventType, tc.epoch)
@@ -977,13 +995,15 @@ func TestRoundEvent_TakesTheOwnersPriorityLockThenTheTicketRowThenTheRoundRow(t 
 	type eventCase struct {
 		name    string
 		running bool
+		stopped bool
 		body    func(t *testing.T) string
 	}
 	for _, event := range []eventCase{
-		{"execution_started", false, func(*testing.T) string { return startedEvent("k", 1, eventOccurredAt, eventReference) }},
-		{"progress", true, func(t *testing.T) string { return progressEvent(t, "k", 1, eventOccurredAt, "locked") }},
-		{"usage_observed", true, func(t *testing.T) string { return usageEvent(t, observationA, 1, usageData(observationA)) }},
-		{"delivered", true, func(t *testing.T) string { return deliveredEvent(t, "k", 1, standardDeliverable()) }},
+		{"execution_started", false, false, func(*testing.T) string { return startedEvent("k", 1, eventOccurredAt, eventReference) }},
+		{"progress", true, false, func(t *testing.T) string { return progressEvent(t, "k", 1, eventOccurredAt, "locked") }},
+		{"usage_observed", true, false, func(t *testing.T) string { return usageEvent(t, observationA, 1, usageData(observationA)) }},
+		{"delivered", true, false, func(t *testing.T) string { return deliveredEvent(t, "k", 1, standardDeliverable()) }},
+		{"stop_confirmed", true, true, func(t *testing.T) string { return stopConfirmedEvent(t, "k", 1, stopEvidence) }},
 	} {
 		for _, tc := range []step{
 			{"the Owner's priority lock comes first", "priority", "pg_advisory_xact_lock", `SELECT 1 FROM tickets WHERE public_id = $1::uuid FOR UPDATE NOWAIT`},
@@ -994,6 +1014,9 @@ func TestRoundEvent_TakesTheOwnersPriorityLockThenTheTicketRowThenTheRoundRow(t 
 				queued, claim := f.claimTicket(t, "Lock order")
 				if event.running {
 					f.startRound(t, claim, "start")
+				}
+				if event.stopped {
+					f.mustStop(t, queued.Id)
 				}
 				ctx := context.Background()
 				holder, err := f.pool.Begin(ctx)

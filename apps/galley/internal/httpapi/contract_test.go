@@ -1100,3 +1100,57 @@ func TestRoundEvents_ResponsesMatchContractAndMethod405(t *testing.T) {
 	}
 	f.expect(t, runnerCall{method: http.MethodPut, path: "/api/tickets/" + queued.Id + "/rounds", cookie: f.cookie}, http.StatusMethodNotAllowed)
 }
+
+func TestStopConfirmed_ResponsesMatchContract(t *testing.T) {
+	f := newClaimFixture(t)
+	router, err := legacy.NewRouter(loadContract(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate := func(call runnerCall, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(call.method, call.path, strings.NewReader(call.body))
+		if call.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if call.token != "" {
+			req.Header.Set("Authorization", "Bearer "+call.token)
+		}
+		if call.cookie != nil {
+			req.AddCookie(call.cookie)
+		}
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("%s %s: status=%d, want %d; body=%s", call.method, call.path, rec.Code, want, rec.Body.String())
+		}
+		validateAgainstContract(t, router, req, rec)
+		return rec
+	}
+	for _, running := range []bool{false, true} {
+		queued, claim := f.claimTicket(t, fmt.Sprintf("contract, running=%t", running))
+		if running {
+			f.startRound(t, claim, "start")
+		}
+		path := "/api/runner/rounds/" + claim.RoundId + "/events"
+		confirm := func(key, evidence string) runnerCall {
+			return runnerCall{method: http.MethodPost, path: path, body: stopConfirmedEvent(t, key, claim.ClaimEpoch, evidence), token: f.token}
+		}
+		validate(confirm("s1", stopEvidence), http.StatusConflict)
+		f.mustStop(t, queued.Id)
+		validate(confirm("s1", " "), http.StatusBadRequest)
+		validate(confirm("s1", stopEvidence), http.StatusCreated)
+		validate(confirm("s1", stopEvidence), http.StatusOK)
+		validate(confirm("s1", "other"), http.StatusConflict)
+		validate(confirm("s2", stopEvidence), http.StatusConflict)
+		if got := decodeRounds(t, validate(runnerCall{method: http.MethodGet, path: "/api/tickets/" + queued.Id + "/rounds", cookie: f.cookie}, http.StatusOK)); got[0].State != RoundStopped || got[0].OutcomeNote == nil {
+			t.Fatalf("the validated list = %+v, want a stopped Round with its outcomeNote", got[0])
+		}
+		if got := decodeTicketBody(t, validate(runnerCall{method: http.MethodGet, path: "/api/tickets/" + queued.Id, cookie: f.cookie}, http.StatusOK)); got.Status != Backlog || len(got.Badges) != 1 {
+			t.Fatalf("the validated Ticket = %+v, want Backlog with the Stopped Badge", got)
+		}
+		validate(runnerCall{method: http.MethodGet, path: "/api/tickets", cookie: f.cookie}, http.StatusOK)
+		validate(runnerCall{method: http.MethodGet, path: "/api/badges", cookie: f.cookie}, http.StatusOK)
+		f.heartbeat(t, f.token, http.StatusOK)
+	}
+}

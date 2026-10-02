@@ -113,6 +113,7 @@ const (
 	RoundEventDelivered        RoundEventType = "delivered"
 	RoundEventExecutionStarted RoundEventType = "execution_started"
 	RoundEventProgress         RoundEventType = "progress"
+	RoundEventStopConfirmed    RoundEventType = "stop_confirmed"
 	RoundEventUsageObserved    RoundEventType = "usage_observed"
 )
 
@@ -124,6 +125,8 @@ func (e RoundEventType) Valid() bool {
 	case RoundEventExecutionStarted:
 		return true
 	case RoundEventProgress:
+		return true
+	case RoundEventStopConfirmed:
 		return true
 	case RoundEventUsageObserved:
 		return true
@@ -137,6 +140,7 @@ const (
 	RoundClaimed   RoundState = "claimed"
 	RoundDelivered RoundState = "delivered"
 	RoundRunning   RoundState = "running"
+	RoundStopped   RoundState = "stopped"
 )
 
 // Valid indicates whether the value is a known member of the RoundState enum.
@@ -147,6 +151,8 @@ func (e RoundState) Valid() bool {
 	case RoundDelivered:
 		return true
 	case RoundRunning:
+		return true
+	case RoundStopped:
 		return true
 	default:
 		return false
@@ -604,7 +610,7 @@ type RoundEventRequest struct {
 	// ClaimEpoch The fencing token from the claim.
 	ClaimEpoch int `json:"claimEpoch"`
 
-	// Data The payload for `type`: `ExecutionStartedData`, `ProgressData`, `UsageObservedData` or `DeliveredData`.
+	// Data The payload for `type`: `ExecutionStartedData`, `ProgressData`, `UsageObservedData`, `DeliveredData` or `StopConfirmedData`.
 	Data RoundEventRequest_Data `json:"data"`
 
 	// IdempotencyKey Taken verbatim; identity is never trimmed.
@@ -617,14 +623,14 @@ type RoundEventRequest struct {
 	Type RoundEventType `json:"type"`
 }
 
-// RoundEventRequest_Data The payload for `type`: `ExecutionStartedData`, `ProgressData`, `UsageObservedData` or `DeliveredData`.
+// RoundEventRequest_Data The payload for `type`: `ExecutionStartedData`, `ProgressData`, `UsageObservedData`, `DeliveredData` or `StopConfirmedData`.
 type RoundEventRequest_Data struct {
 	union json.RawMessage
 }
 
 // RoundEventResult defines model for RoundEventResult.
 type RoundEventResult struct {
-	// EndedAt For `delivered`.
+	// EndedAt For `delivered` and `stop_confirmed`.
 	EndedAt *time.Time `json:"endedAt,omitempty"`
 
 	// ObservationId For `usage_observed`, the observation recorded.
@@ -632,10 +638,12 @@ type RoundEventResult struct {
 	RoundId       string  `json:"roundId"`
 
 	// Seq For `progress`, the note's place in the Round's activity.
-	Seq       *int      `json:"seq,omitempty"`
-	StartedAt time.Time `json:"startedAt"`
+	Seq *int `json:"seq,omitempty"`
 
-	// State `claimed` and `running` are open. `delivered` has ended and moved the Ticket to In Review.
+	// StartedAt Null only for a Round stopped before it started.
+	StartedAt *time.Time `json:"startedAt"`
+
+	// State `claimed` and `running` are open. `delivered` has ended and moved the Ticket to In Review. `stopped` has ended and moved the Ticket to Backlog.
 	State RoundState `json:"state"`
 
 	// Type Grows by slice.
@@ -645,7 +653,7 @@ type RoundEventResult struct {
 // RoundEventType Grows by slice.
 type RoundEventType string
 
-// RoundState `claimed` and `running` are open. `delivered` has ended and moved the Ticket to In Review.
+// RoundState `claimed` and `running` are open. `delivered` has ended and moved the Ticket to In Review. `stopped` has ended and moved the Ticket to Backlog.
 type RoundState string
 
 // RoundUsage Sums of the known values. Unknown is never counted as zero.
@@ -766,6 +774,12 @@ type StatusResponseEnvironment string
 
 // StatusResponseStatus defines model for StatusResponse.Status.
 type StatusResponseStatus string
+
+// StopConfirmedData defines model for StopConfirmedData.
+type StopConfirmedData struct {
+	// Evidence What was halted, kept as the Round's `outcomeNote`. Counted in Unicode code points. Not blank; no control characters but tab and line feed.
+	Evidence string `json:"evidence"`
+}
 
 // Ticket ticketIt's first domain record (issue #56): a title captured in Backlog. No work-type/category column -- see docs/ticket-creation.md, "Flexible ticket structure". Owned by exactly one Owner, enforced by Galley (docs/adr/0001-single-authority-galley.md). Addressed by an opaque, non-sequential public identifier (issue #57) -- see `id` below.
 type Ticket struct {
@@ -914,10 +928,13 @@ type TicketRound struct {
 	Deliverable *RoundDeliverable `json:"deliverable"`
 	EndedAt     *time.Time        `json:"endedAt"`
 	Id          string            `json:"id"`
-	Sequence    int               `json:"sequence"`
-	StartedAt   *time.Time        `json:"startedAt"`
 
-	// State `claimed` and `running` are open. `delivered` has ended and moved the Ticket to In Review.
+	// OutcomeNote Set exactly when `state` is `stopped`.
+	OutcomeNote *string    `json:"outcomeNote"`
+	Sequence    int        `json:"sequence"`
+	StartedAt   *time.Time `json:"startedAt"`
+
+	// State `claimed` and `running` are open. `delivered` has ended and moved the Ticket to In Review. `stopped` has ended and moved the Ticket to Backlog.
 	State RoundState `json:"state"`
 
 	// Usage Sums of the known values. Unknown is never counted as zero.
@@ -1149,6 +1166,32 @@ func (t *RoundEventRequest_Data) FromDeliveredData(v DeliveredData) error {
 
 // MergeDeliveredData performs a merge with any union data inside the RoundEventRequest_Data, using the provided DeliveredData
 func (t *RoundEventRequest_Data) MergeDeliveredData(v DeliveredData) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsStopConfirmedData returns the union data inside the RoundEventRequest_Data as a StopConfirmedData
+func (t RoundEventRequest_Data) AsStopConfirmedData() (StopConfirmedData, error) {
+	var body StopConfirmedData
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromStopConfirmedData overwrites any union data inside the RoundEventRequest_Data as the provided StopConfirmedData
+func (t *RoundEventRequest_Data) FromStopConfirmedData(v StopConfirmedData) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeStopConfirmedData performs a merge with any union data inside the RoundEventRequest_Data, using the provided StopConfirmedData
+func (t *RoundEventRequest_Data) MergeStopConfirmedData(v StopConfirmedData) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err

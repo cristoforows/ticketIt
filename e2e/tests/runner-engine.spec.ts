@@ -44,6 +44,7 @@ test("a real Michelin starts a claimed Round with no browser open, and the slip 
       claimedAt: started.openRound!.claimedAt,
       startedAt: started.openRound!.startedAt,
       endedAt: null,
+      outcomeNote: null,
       activity: [],
       usage: NO_USAGE,
       deliverable: null,

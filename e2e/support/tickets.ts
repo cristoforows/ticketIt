@@ -1,4 +1,4 @@
-import type { APIRequestContext, Page } from "@playwright/test";
+import { expect, type APIRequestContext, type Page } from "@playwright/test";
 
 /** A signed-in page, or a signed-in API context for a spec that must not open a browser. */
 export type Api = Page | APIRequestContext;
@@ -22,11 +22,13 @@ export interface ErrorDetail {
 export interface Round {
   id: string;
   sequence: number;
-  state: "claimed" | "running" | "delivered";
+  state: "claimed" | "running" | "delivered" | "stopped";
   agent: { id: string; name: string; kind: AgentKind };
   claimedAt: string;
   startedAt: string | null;
   endedAt: string | null;
+  /** Michelin's evidence, set exactly when `state` is `stopped` (issue #160). */
+  outcomeNote: string | null;
   activity: { seq: number; note: string; occurredAt: string }[];
   usage: RoundUsage;
   /** Set exactly when `state` is `delivered` (issue #136). */
@@ -183,6 +185,19 @@ export async function requestReworkDirect(from: Api, id: string): Promise<Ticket
 /** Same purpose as changeTicketStatusDirect, for requesting Stop. */
 export async function requestStopDirect(from: Api, id: string): Promise<TicketCommandResult> {
   return ticketCommand(from, "POST", `/api/tickets/${id}/stop`);
+}
+
+/** Frees the Owner's slot by stopping the Round a live Michelin holds, and waits for Galley to record the confirmed Stop. */
+export async function stopRoundThroughGalley(from: Api, id: string, timeout = 15_000): Promise<Ticket> {
+  const requested = await requestStopDirect(from, id);
+  expect(requested.status).toBe(200);
+  let stopped: Ticket | undefined;
+  await expect.poll(async () => {
+    const response = await apiOf(from).get(`/api/tickets/${id}`);
+    stopped = await response.json() as Ticket;
+    return stopped.openRound;
+  }, { timeout }).toBeNull();
+  return stopped!;
 }
 
 export type TicketAssignee = { type: "owner" } | { type: "agent"; agentId: string };

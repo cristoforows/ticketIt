@@ -305,7 +305,12 @@ disabled and titled with Galley's live reason. Direct field, Assignee,
 Badge, Status, Accept, reorder and archive commands are each refused with
 `round_open` and the Round's id, and the Ticket is unchanged afterwards.
 After the clock passes the health window, the Round is unchanged and the
-receipt shows **Runner disconnected**. It leaves the Owner's slot taken,
+receipt shows **Runner disconnected**. The receipt's Stop then shows
+**Stopping…** on the receipt after a reload and on the Ready slip, with
+the Round still claimed and Stop `stop_already_requested`. No Michelin
+polls the Round's commands, so nothing confirms the Stop. This is the
+suite's one lasting Stopping observation, since `runner-stop.spec.ts`
+confirms its Stops within a command poll (issue #160). It leaves the Owner's slot taken,
 so `run.sh` runs it after every spec that needs the slot free, and
 checks its exit code.
 
@@ -337,15 +342,21 @@ first show the note and every usage figure as **Unknown** (never `$0`),
 then "$0.0045 est.", then "≥ $0.0045 (incomplete) est." with both notes
 in order, all from the receipt's own 3 s refresh. The final figures must
 equal Galley's live summary and survive a reload. Michelin's log must
-show two distinct `observationId`s and not the credential.
+show two distinct `observationId`s and not the credential. The spec then
+frees the Owner's slot with `stopRoundThroughGalley`
+(`support/tickets.ts`): a Stop through Galley's API, then waiting for
+`openRound` to be `null`. The stopped Round must keep the same activity
+and usage, with `outcomeNote` from Michelin.
 
-Because a Round cannot end before M4.10 (#136) and an Owner has one open
-Round at a time, `run.sh` resets and migrates the database and restarts
-Galley, the way it prepares the database at the start of the run,
-between `runner-claims.spec.ts` and `runner-engine.spec.ts`, and again
-before `runner-activity.spec.ts`. No spec depends on another's data.
-Any later spec that needs the slot free must run before them, or get a
-phase of its own.
+An Owner has one open Round at a time. A Round held by a live Michelin
+is ended with a Stop, never by resetting the database (#160). `run.sh`
+keeps two resets, each where no live Michelin holds the Round, so
+nothing could confirm a Stop: between `runner-claims.spec.ts` (claimed
+directly with the runner credential, no Michelin) and
+`runner-engine.spec.ts`, and between `runner-engine.spec.ts` (whose
+Michelin is killed on purpose to show the Round stays open) and
+`runner-activity.spec.ts`. Each reset migrates the database and restarts
+Galley, as at the start of the run. No spec depends on another's data.
 
 `tests/runner-rework.spec.ts` (issue #137) drives two real Michelin
 processes with different scripts. The first delivers Round 1 and is
@@ -357,18 +368,23 @@ Galley's Round list must keep Round 1 unchanged, and nothing may requeue
 the Ticket. Delivered Rounds hold no slot, so the spec needs no reset
 after `runner-delivery.spec.ts`.
 
-`tests/runner-stop-request.spec.ts` (issue #159) drives a real Michelin
-holding a Round (`start`, `hold`), with data created through the API.
-The receipt's Stop must return `200` and show **Stopping…** while the
-Ticket stays In Progress and locked. Michelin's log must show the engine
-stopped before exactly one `command acknowledged` with outcome
-`applied`. Through Galley's API: the Round's command list is empty,
-replaying that acknowledgement returns the stored values, the other
-outcome is `409 command_already_acknowledged`, a repeated Stop returns
-the same `stopRequestedAt`, a claim gets `204`, and an edit is refused
-with `round_open`. The board slip shows **Stopping…** in the In Progress
-column. The Round stays open until M5.2, so `run.sh` resets the
-database and restarts Galley before this spec.
+`tests/runner-stop.spec.ts` (issues #159, #160) drives a real Michelin
+whose script reports a note and a usage observation, then holds. Data is
+created through the API. The receipt's Stop must return `200` with
+`stopRequestedAt` set. Michelin's log must show `engine stopped`, then
+`stop confirmation reported`, then exactly one `command acknowledged`
+with outcome `applied`. Galley's Ticket must then be in Backlog with no
+open Round and the Stopped Badge, and Stop must be `stop_not_available`.
+The Round must be `stopped` with Michelin's evidence as `outcomeNote`
+and its activity and usage kept. The open receipt shows the Stopped tag,
+the outcome note, the note and the usage without a reload, and again
+after one. A late event is `409 round_not_open`, the command list is
+empty, the acknowledgement replays, and the board slip in Backlog shows
+the Badge. Removing the Badge on the receipt leaves the Round unchanged.
+Ready on the receipt leads the same Michelin to claim Round 2 (a new id,
+sequence 2, claim epoch 2), and a second Stop reattaches the same Badge.
+`run.sh` runs it after `runner-rework.spec.ts` with no reset, since
+delivered Rounds hold no slot.
 
 `tests/ticket-priority-order.spec.ts` reorders three Ready Tickets by
 dragging onto the upper and lower halves of board slips, then with Move

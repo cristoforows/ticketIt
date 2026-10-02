@@ -81,7 +81,7 @@ async function runRound(options: ClaimLoopOptions, claim: RunnerClaim, signal: A
     requestTimeoutMs,
     onStop: (command) => {
       stopCommand ??= command;
-      stop.abort();
+      stop.abort(stopCommand.id);
     },
   });
   try {

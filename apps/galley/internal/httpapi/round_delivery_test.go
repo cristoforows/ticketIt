@@ -481,8 +481,8 @@ func TestRoundDeliverables_TheDatabaseEnforcesItsInvariants(t *testing.T) {
 	}
 	assertViolates(t, insert("b", "s", "c"), "round_deliverables_round_unique")
 	_, err = f.pool.Exec(context.Background(), `INSERT INTO round_events (owner_id, round_id, idempotency_key, type, claim_epoch, occurred_at, received_at, payload_hash, result)
-		VALUES ($1, $2, 'k', 'stopped', 1, now(), now(), decode(repeat('00', 32), 'hex'), '{}')`, ownerID, roundID)
-	assertViolates(t, err, "round_events_type_m4")
+		VALUES ($1, $2, 'k', 'failed', 1, now(), now(), decode(repeat('00', 32), 'hex'), '{}')`, ownerID, roundID)
+	assertViolates(t, err, "round_events_type_m5")
 }
 
 func TestDelivered_AcceptFollowsTheRetainedCompletionCondition(t *testing.T) {

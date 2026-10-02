@@ -41,10 +41,13 @@ const AGENTS = [{ id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kin
 
 const onUnauthenticated = () => {};
 
-/** The receipt loads Agents alongside the Ticket; answering that here keeps each test's mock sequence about the Ticket. */
+/** The receipt loads Agents and the Round list alongside the Ticket; answering those here keeps each test's mock sequence about the Ticket. */
 function stubGalley(fetchMock: (input: RequestInfo | URL, init?: RequestInit) => Promise<MockResponse>) {
-  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
-    String(input) === "/api/agents" ? Promise.resolve(jsonResponse({ agents: AGENTS })) : fetchMock(input, init)));
+  vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) === "/api/agents") return Promise.resolve(jsonResponse({ agents: AGENTS }));
+    if (String(input).endsWith("/rounds")) return Promise.resolve(jsonResponse({ rounds: [] }));
+    return fetchMock(input, init);
+  }));
 }
 
 function stubFetch(response: MockResponse) {
@@ -324,6 +327,7 @@ describe("TicketDetailPage", () => {
     const record = (activity: unknown[] = [], usage: unknown = { observations: 0, complete: false, estimated: false, costUsd: null, inputTokens: unknownUsage, outputTokens: unknownUsage, activeMs: unknownUsage }) => ({
       ...running.openRound,
       endedAt: null,
+      outcomeNote: null,
       activity,
       usage,
       deliverable: null,
@@ -395,7 +399,7 @@ describe("TicketDetailPage", () => {
     });
 
     it("stops refetching once the Round has closed, and stops asking about the runner", async () => {
-      const fetchMock = stubRound([answer(running), answer(closed)]);
+      const fetchMock = stubRound([answer(running), answer(closed)], undefined, [roundsOf(record()), roundsOf()]);
       render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
       await flush();
       await flush(3000);
@@ -607,7 +611,7 @@ describe("TicketDetailPage", () => {
     });
 
     it("never refetches, or asks about the runner, for a Ticket with no open Round", async () => {
-      const fetchMock = stubRound([answer(TICKET)]);
+      const fetchMock = stubRound([answer(TICKET)], undefined, [roundsOf()]);
       render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
       await flush(120_000);
       expect(ticketFetches(fetchMock)).toBe(1);
@@ -759,19 +763,36 @@ describe("TicketDetailPage", () => {
         expect(onSignedOut).toHaveBeenCalled();
       });
 
-      it("stops fetching the Round list once the Round closes, and never fetches it without an open Round", async () => {
-        const fetchMock = stubRound([answer(running), answer(closed)]);
+      it("fetches the Round list on open and on the refresh that sees the Round stop, then never again", async () => {
+        const stoppedTicket = { ...running, status: "Backlog", openRound: null, badges: [{ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", name: "Stopped" }], updatedAt: "2026-10-01T10:05:00Z", allowedActions: TICKET.allowedActions };
+        const stoppedRecord = { ...record([note(1, "Reading the Ticket")]), state: "stopped", endedAt: "2026-10-01T10:05:00Z", outcomeNote: "Stopped before step 2 of 2 on Stop command x" };
+        const fetchMock = stubRound([answer(running), answer(stoppedTicket)], undefined, [roundsOf(record([note(1, "Reading the Ticket")])), roundsOf(stoppedRecord)]);
         render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
         await flush();
-        await flush(3000);
-        await flush(60_000);
         expect(roundFetches(fetchMock)).toBe(1);
+        await flush(3000);
+        expect(roundFetches(fetchMock)).toBe(2);
+        expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("Backlog");
+        expect(screen.getByTestId("ticket-detail-round-stopped")).toHaveTextContent("Stopped");
+        expect(screen.getByTestId("ticket-detail-round-outcome-note")).toHaveTextContent(stoppedRecord.outcomeNote);
+        expect(screen.getByTestId("ticket-detail-round-note")).toHaveTextContent("Reading the Ticket");
+        expect(screen.queryByTestId("ticket-detail-stopping")).not.toBeInTheDocument();
+        await flush(60_000);
+        expect(roundFetches(fetchMock)).toBe(2);
 
         cleanup();
-        const idle = stubRound([answer(TICKET)]);
+        const reopened = stubRound([answer(stoppedTicket)], undefined, [roundsOf(stoppedRecord)]);
         render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
         await flush(60_000);
-        expect(roundFetches(idle)).toBe(0);
+        expect(roundFetches(reopened)).toBe(1);
+        expect(screen.getByTestId("ticket-detail-round-stopped")).toBeInTheDocument();
+
+        cleanup();
+        const idle = stubRound([answer(TICKET)], undefined, [roundsOf()]);
+        render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+        await flush(60_000);
+        expect(roundFetches(idle)).toBe(1);
+        expect(screen.queryByTestId("ticket-detail-rounds")).not.toBeInTheDocument();
       });
     });
 

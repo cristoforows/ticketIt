@@ -746,7 +746,7 @@ describe("the Rounds section", () => {
     outputTokens: { sum: null, complete: true, estimated: false },
     activeMs: { sum: null, complete: true, estimated: false },
   };
-  const recordOf = (round: NonNullable<Ticket["openRound"]>): TicketRound => ({ ...round, endedAt: null, activity: [], usage, deliverable: null });
+  const recordOf = (round: NonNullable<Ticket["openRound"]>): TicketRound => ({ ...round, endedAt: null, outcomeNote: null, activity: [], usage, deliverable: null });
   const deliveredRecord = (sequence: number, id: string): TicketRound => ({
     id,
     sequence,
@@ -755,6 +755,7 @@ describe("the Rounds section", () => {
     claimedAt: `2026-10-0${sequence}T10:00:00Z`,
     startedAt: `2026-10-0${sequence}T10:01:00Z`,
     endedAt: `2026-10-0${sequence}T10:09:00Z`,
+    outcomeNote: null,
     activity: [],
     usage,
     deliverable: { summary: `Summary ${sequence}`, criteriaAssessment: `Assessment ${sequence}`, bodyMarkdown: `Report ${sequence}` },
@@ -895,6 +896,49 @@ describe("the Rounds section", () => {
       fireEvent.click(within(entries()[1]).getByText("Round 1"));
       rerender(<TicketDetail ticket={deliveredTicket} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [{ ...running }, round1] }} />);
       expect(entries().map(entryOpen)).toEqual([true, true]);
+    });
+
+    it("shows a stopped Round with the Stopped tag, its outcome note, activity and usage, and the Ticket's Stopped Badge", () => {
+      const stopped: TicketRound = {
+        ...recordOf(runningRound),
+        state: "stopped",
+        endedAt: "2026-10-01T10:05:00Z",
+        outcomeNote: "Stopped before step 2 of 2 on Stop command 55555555-5555-4555-8555-555555555555",
+        activity: [{ seq: 1, note: "Reading the Ticket", occurredAt: "2026-10-01T10:02:00Z" }],
+        usage: { ...usage, observations: 1, inputTokens: { sum: 1200, complete: true, estimated: false } },
+      };
+      const stoppedTicket: Ticket = { ...roundTicket(null, "Backlog"), badges: [{ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", name: "Stopped" }] };
+      render(<TicketDetail ticket={stoppedTicket} onSave={vi.fn()} {...noopActions()} runnerHealth={health("disconnected")} roundRecords={{ rounds: [stopped, round1] }} />);
+
+      const entry = within(entries()[0]);
+      expect(entries()[0]).toHaveAttribute("data-state", "stopped");
+      expect(entry.getByTestId("ticket-detail-round-state")).toHaveTextContent("Stopped");
+      expect(entry.getByTestId("ticket-detail-round-stopped")).toHaveTextContent("Stopped");
+      expect(entries()[0].querySelector("summary")!.textContent).toBe("+−Round 3 · Stopped");
+      expect(entry.getByTestId("ticket-detail-round-outcome-note")).toHaveTextContent(stopped.outcomeNote!);
+      expect(entry.getByTestId("ticket-detail-round-stopped-at")).toHaveTextContent("2026-10-01T10:05:00Z");
+      expect(entry.getByTestId("ticket-detail-round-started")).toHaveTextContent("2026-10-01T10:01:00Z");
+      expect(entry.getAllByTestId("ticket-detail-round-note").map((note) => note.textContent)).toEqual(["2026-10-01T10:02:00ZReading the Ticket"]);
+      expect(entry.getByRole("heading", { name: "Usage" })).toBeInTheDocument();
+      expect(entry.getByTestId("ticket-detail-round-usage-input-tokens")).toHaveTextContent("1,200");
+      expect(entry.queryByTestId("ticket-detail-round-summary")).not.toBeInTheDocument();
+      expect(entry.queryByTestId("ticket-detail-round-delivered-at")).not.toBeInTheDocument();
+      expect(within(entries()[1]).queryByTestId("ticket-detail-round-outcome-note")).not.toBeInTheDocument();
+      expect(within(entries()[1]).queryByTestId("ticket-detail-round-stopped")).not.toBeInTheDocument();
+
+      expect(within(screen.getByTestId("ticket-detail-badges")).getByText("Stopped")).toBeInTheDocument();
+      expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("Backlog");
+      expect(screen.queryByTestId("ticket-detail-stopping")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("ticket-detail-locked")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("ticket-detail-runner-disconnected")).not.toBeInTheDocument();
+    });
+
+    it("shows a Round stopped while claimed without a started time", () => {
+      const stopped: TicketRound = { ...recordOf(claimedRound), state: "stopped", endedAt: "2026-10-01T10:00:30Z", outcomeNote: "Stopped before step 1 of 2 on Stop command x" };
+      render(<TicketDetail ticket={roundTicket(null, "Backlog")} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [stopped] }} />);
+      expect(screen.getByTestId("ticket-detail-round-stopped")).toBeInTheDocument();
+      expect(screen.queryByTestId("ticket-detail-round-started")).not.toBeInTheDocument();
+      expect(screen.getByTestId("ticket-detail-round-activity-empty")).toBeInTheDocument();
     });
 
     it("shows the records error beside the last good list", () => {
