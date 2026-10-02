@@ -373,6 +373,83 @@ func TestRequestTicketRework_ResponsesMatchContractAndMethod405(t *testing.T) {
 	}
 }
 
+func TestStopAndRoundCommands_ResponsesMatchContractAndMethod405(t *testing.T) {
+	f := newClaimFixture(t)
+	router, err := legacy.NewRouter(loadContract(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate := func(call runnerCall, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(call.method, call.path, strings.NewReader(call.body))
+		if call.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if call.token != "" {
+			req.Header.Set("Authorization", "Bearer "+call.token)
+		}
+		if call.cookie != nil {
+			req.AddCookie(call.cookie)
+		}
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("%s %s: status=%d, want %d; body=%s", call.method, call.path, rec.Code, want, rec.Body.String())
+		}
+		validateAgainstContract(t, router, req, rec)
+		return rec
+	}
+	waiting := f.queue(t, "stop contract")
+	stop := func(id string) runnerCall {
+		return runnerCall{method: http.MethodPost, path: "/api/tickets/" + id + "/stop", cookie: f.cookie}
+	}
+	assertErrorCode(t, validate(stop(waiting.Id), http.StatusBadRequest), stopNotAvailableCode)
+	claim := f.mustClaim(t)
+	commandsPath := "/api/runner/rounds/" + claim.RoundId + "/commands"
+	commands := runnerCall{method: http.MethodGet, path: commandsPath, token: f.token}
+	ticket := runnerCall{method: http.MethodGet, path: "/api/tickets/" + waiting.Id, cookie: f.cookie}
+
+	validate(commands, http.StatusOK)
+	validate(ticket, http.StatusOK)
+	if got := decodeTicketBody(t, validate(stop(waiting.Id), http.StatusOK)); got.OpenRound == nil || got.OpenRound.StopRequestedAt == nil {
+		t.Fatalf("stopped Ticket = %+v, want stopRequestedAt set", got.OpenRound)
+	}
+	validate(stop(waiting.Id), http.StatusOK)
+	validate(ticket, http.StatusOK)
+	validate(runnerCall{method: http.MethodGet, path: "/api/tickets", cookie: f.cookie}, http.StatusOK)
+	var list RunnerCommandList
+	if err := json.Unmarshal(validate(commands, http.StatusOK).Body.Bytes(), &list); err != nil || len(list.Commands) != 1 {
+		t.Fatalf("commands = %+v (%v), want the Stop", list, err)
+	}
+	ackPath := commandsPath + "/" + list.Commands[0].Id + "/ack"
+	ack := func(outcome string) runnerCall {
+		return runnerCall{method: http.MethodPost, path: ackPath, body: `{"outcome":"` + outcome + `"}`, token: f.token}
+	}
+	validate(runnerCall{method: http.MethodPost, path: ackPath, body: `{"outcome":"done"}`, token: f.token}, http.StatusBadRequest)
+	validate(ack("applied"), http.StatusOK)
+	validate(ack("applied"), http.StatusOK)
+	assertErrorCode(t, validate(ack("ignored"), http.StatusConflict), commandAlreadyAcknowledgedCode)
+	validate(commands, http.StatusOK)
+
+	validate(stop(uuid.NewString()), http.StatusNotFound)
+	validate(runnerCall{method: http.MethodPost, path: "/api/tickets/" + waiting.Id + "/stop"}, http.StatusUnauthorized)
+	validate(runnerCall{method: http.MethodGet, path: "/api/runner/rounds/" + uuid.NewString() + "/commands", token: f.token}, http.StatusNotFound)
+	validate(runnerCall{method: http.MethodGet, path: commandsPath, cookie: f.cookie}, http.StatusUnauthorized)
+	validate(runnerCall{method: http.MethodPost, path: commandsPath + "/" + uuid.NewString() + "/ack", body: `{"outcome":"applied"}`, token: f.token}, http.StatusNotFound)
+	validate(runnerCall{method: http.MethodPost, path: ackPath, body: `{"outcome":"applied"}`}, http.StatusUnauthorized)
+
+	for _, tc := range []struct{ method, path, allow string }{
+		{http.MethodGet, "/api/tickets/" + waiting.Id + "/stop", "POST"},
+		{http.MethodPost, commandsPath, "GET"},
+		{http.MethodGet, ackPath, "POST"},
+	} {
+		rec := f.expect(t, runnerCall{method: tc.method, path: tc.path, cookie: f.cookie, token: f.token}, http.StatusMethodNotAllowed)
+		if rec.Header().Get("Allow") != tc.allow {
+			t.Fatalf("%s %s: Allow = %q, want %s", tc.method, tc.path, rec.Header().Get("Allow"), tc.allow)
+		}
+	}
+}
+
 func TestBadges_ResponsesMatchContractAndMethod405(t *testing.T) {
 	handler, _, cookie := badgeTestHandler(t)
 	doc := loadContract(t)
@@ -607,7 +684,7 @@ func TestTicketCommandAvailability_ResponseContractRejectsInvalidCombinations(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, command := range []string{"accept", "rework"} {
+	for _, command := range []string{"accept", "rework", "stop"} {
 		original := actions[command]
 		reason := original.(map[string]any)["reason"]
 		for _, tc := range []struct {

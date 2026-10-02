@@ -515,6 +515,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorBody"
+  /api/tickets/{id}/stop:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid, x-go-type: string}
+    post:
+      operationId: requestTicketStop
+      summary: Request Stop of the Ticket's open Round
+      tags: [tickets]
+      description: >-
+        Records one Stop command for the open Round and its claim epoch,
+        for the runner to pull; `openRound.stopRequestedAt` is then set.
+        A repeat returns the Ticket unchanged. Does not end the Round or
+        change its state or the Ticket's Status. Without an open Round,
+        `stop_not_available`.
+      responses:
+        "200":
+          description: The Ticket, with Stop requested.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        default:
+          description: Error. See `ErrorBody`. Includes `stop_not_available`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
   /api/tickets/{id}/assignee:
     parameters:
       - name: id
@@ -1115,6 +1144,78 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorBody"
+  /api/runner/rounds/{roundId}/commands:
+    parameters:
+      - name: roundId
+        in: path
+        required: true
+        schema: {type: string, format: uuid, x-go-type: string}
+    get:
+      operationId: listRoundCommands
+      summary: Pull a Round's unacknowledged commands
+      tags: [runner-api]
+      description: >-
+        The Round's unacknowledged commands, oldest `issuedAt` first; none
+        once the Round has ended. A command stays listed until it is
+        acknowledged. An unknown, malformed or foreign Round id returns
+        the shared 404.
+      security:
+        - runnerBearer: []
+      responses:
+        "200":
+          description: The Round's unacknowledged commands.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunnerCommandList"
+        default:
+          description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+  /api/runner/rounds/{roundId}/commands/{commandId}/ack:
+    parameters:
+      - name: roundId
+        in: path
+        required: true
+        schema: {type: string, format: uuid, x-go-type: string}
+      - name: commandId
+        in: path
+        required: true
+        schema: {type: string, format: uuid, x-go-type: string}
+    post:
+      operationId: acknowledgeRoundCommand
+      summary: Acknowledge a pulled command
+      tags: [runner-api]
+      description: >-
+        Records the runner's outcome and Galley's time once. A repeat with
+        the same outcome returns the stored acknowledgement; another
+        outcome is `409 command_already_acknowledged` and changes
+        nothing. Not checked against the claim epoch, and never changes
+        the Round or the Ticket. A Round or command id that is unknown,
+        malformed, foreign or not that Round's returns the shared 404.
+      security:
+        - runnerBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AcknowledgeRoundCommandRequest"
+      responses:
+        "200":
+          description: The recorded acknowledgement.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoundCommandAcknowledgement"
+        default:
+          description: Error. See `ErrorBody`. Includes `command_already_acknowledged`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
   /api/dev/clock/advance:
     post:
       operationId: advanceDevClock
@@ -1448,7 +1549,7 @@ components:
     TicketOpenRound:
       type: object
       additionalProperties: false
-      required: [id, sequence, state, agent, claimedAt, startedAt]
+      required: [id, sequence, state, agent, claimedAt, startedAt, stopRequestedAt]
       properties:
         id: {type: string, format: uuid, x-go-type: string}
         sequence: {type: integer, minimum: 1}
@@ -1459,6 +1560,10 @@ components:
           $ref: "#/components/schemas/TicketAssigneeAgent"
         claimedAt: {type: string, format: date-time}
         startedAt: {type: [string, "null"], format: date-time}
+        stopRequestedAt:
+          type: [string, "null"]
+          format: date-time
+          description: When the Owner requested Stop; the Ticket shows Stopping. Not a Status.
     TicketDelivery:
       type: object
       additionalProperties: false
@@ -1612,7 +1717,7 @@ components:
     TicketAllowedActions:
       type: object
       additionalProperties: false
-      required: [statusChanges, statusChangeRejections, accept, rework]
+      required: [statusChanges, statusChangeRejections, accept, rework, stop]
       properties:
         statusChanges:
           type: array
@@ -1630,6 +1735,9 @@ components:
         accept:
           $ref: "#/components/schemas/TicketCommandAvailability"
         rework:
+          $ref: "#/components/schemas/TicketCommandAvailability"
+        stop:
+          description: Unavailable with `stop_already_requested` once Stop is requested.
           $ref: "#/components/schemas/TicketCommandAvailability"
     TicketStatusChangeRejection:
       type: object
@@ -2091,6 +2199,59 @@ components:
           format: uuid
           x-go-type: string
           description: For `usage_observed`, the observation recorded.
+    RunnerCommandType:
+      type: string
+      description: Grows by slice.
+      enum: [stop]
+      x-enum-varnames: [RunnerCommandStop]
+    RunnerCommand:
+      type: object
+      additionalProperties: false
+      required: [id, type, claimEpoch, issuedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          x-go-type: string
+          description: The command's idempotency key.
+        type:
+          $ref: "#/components/schemas/RunnerCommandType"
+        claimEpoch:
+          type: integer
+          minimum: 1
+          description: >-
+            The claim epoch the command targets. A runner holding another
+            epoch acknowledges it `ignored` and does not act on it.
+        issuedAt: {type: string, format: date-time}
+    RunnerCommandList:
+      type: object
+      additionalProperties: false
+      required: [commands]
+      properties:
+        commands:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunnerCommand"
+    RunnerCommandAckOutcome:
+      type: string
+      enum: [applied, ignored]
+      x-enum-varnames: [RunnerCommandApplied, RunnerCommandIgnored]
+    AcknowledgeRoundCommandRequest:
+      type: object
+      additionalProperties: false
+      required: [outcome]
+      properties:
+        outcome:
+          $ref: "#/components/schemas/RunnerCommandAckOutcome"
+    RoundCommandAcknowledgement:
+      type: object
+      additionalProperties: false
+      required: [id, acknowledgedAt, outcome]
+      properties:
+        id: {type: string, format: uuid, x-go-type: string}
+        acknowledgedAt: {type: string, format: date-time}
+        outcome:
+          $ref: "#/components/schemas/RunnerCommandAckOutcome"
     AdvanceDevClockRequest:
       type: object
       additionalProperties: false

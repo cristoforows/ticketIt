@@ -223,6 +223,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tickets/{id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Stop of the Ticket's open Round
+         * @description Records one Stop command for the open Round and its claim epoch, for the runner to pull; `openRound.stopRequestedAt` is then set. A repeat returns the Ticket unchanged. Does not end the Round or change its state or the Ticket's Status. Without an open Round, `stop_not_available`.
+         */
+        post: operations["requestTicketStop"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tickets/{id}/assignee": {
         parameters: {
             query?: never;
@@ -586,6 +608,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runner/rounds/{roundId}/commands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roundId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Pull a Round's unacknowledged commands
+         * @description The Round's unacknowledged commands, oldest `issuedAt` first; none once the Round has ended. A command stays listed until it is acknowledged. An unknown, malformed or foreign Round id returns the shared 404.
+         */
+        get: operations["listRoundCommands"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runner/rounds/{roundId}/commands/{commandId}/ack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roundId: string;
+                commandId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Acknowledge a pulled command
+         * @description Records the runner's outcome and Galley's time once. A repeat with the same outcome returns the stored acknowledgement; another outcome is `409 command_already_acknowledged` and changes nothing. Not checked against the claim epoch, and never changes the Round or the Ticket. A Round or command id that is unknown, malformed, foreign or not that Round's returns the shared 404.
+         */
+        post: operations["acknowledgeRoundCommand"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/dev/clock/advance": {
         parameters: {
             query?: never;
@@ -751,6 +818,11 @@ export interface components {
             claimedAt: string;
             /** Format: date-time */
             startedAt: string | null;
+            /**
+             * Format: date-time
+             * @description When the Owner requested Stop; the Ticket shows Stopping. Not a Status.
+             */
+            stopRequestedAt: string | null;
         };
         TicketDelivery: {
             /** Format: uuid */
@@ -847,6 +919,8 @@ export interface components {
             statusChangeRejections: components["schemas"]["TicketStatusChangeRejection"][];
             accept: components["schemas"]["TicketCommandAvailability"];
             rework: components["schemas"]["TicketCommandAvailability"];
+            /** @description Unavailable with `stop_already_requested` once Stop is requested. */
+            stop: components["schemas"]["TicketCommandAvailability"];
         };
         TicketStatusChangeRejection: {
             status: components["schemas"]["TicketStatus"];
@@ -1068,6 +1142,38 @@ export interface components {
              * @description For `usage_observed`, the observation recorded.
              */
             observationId?: string;
+        };
+        /**
+         * @description Grows by slice.
+         * @enum {string}
+         */
+        RunnerCommandType: "stop";
+        RunnerCommand: {
+            /**
+             * Format: uuid
+             * @description The command's idempotency key.
+             */
+            id: string;
+            type: components["schemas"]["RunnerCommandType"];
+            /** @description The claim epoch the command targets. A runner holding another epoch acknowledges it `ignored` and does not act on it. */
+            claimEpoch: number;
+            /** Format: date-time */
+            issuedAt: string;
+        };
+        RunnerCommandList: {
+            commands: components["schemas"]["RunnerCommand"][];
+        };
+        /** @enum {string} */
+        RunnerCommandAckOutcome: "applied" | "ignored";
+        AcknowledgeRoundCommandRequest: {
+            outcome: components["schemas"]["RunnerCommandAckOutcome"];
+        };
+        RoundCommandAcknowledgement: {
+            /** Format: uuid */
+            id: string;
+            /** Format: date-time */
+            acknowledgedAt: string;
+            outcome: components["schemas"]["RunnerCommandAckOutcome"];
         };
         AdvanceDevClockRequest: {
             seconds: number;
@@ -1474,6 +1580,37 @@ export interface operations {
                 };
             };
             /** @description Error. See `ErrorBody`. Includes `rework_not_available` and `agent_readiness_incomplete`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    requestTicketStop: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Ticket, with Stop requested. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ticket"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. Includes `stop_not_available`. */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -2174,6 +2311,73 @@ export interface operations {
                 };
             };
             /** @description Error. See `ErrorBody`. Includes `idempotency_key_conflict`, `stale_claim_epoch`, `round_not_open`, `event_out_of_order`, `observation_id_conflict` and `request_too_large`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    listRoundCommands: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roundId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Round's unacknowledged commands. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerCommandList"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    acknowledgeRoundCommand: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roundId: string;
+                commandId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcknowledgeRoundCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description The recorded acknowledgement. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoundCommandAcknowledgement"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. Includes `command_already_acknowledged`. */
             default: {
                 headers: {
                     [name: string]: unknown;

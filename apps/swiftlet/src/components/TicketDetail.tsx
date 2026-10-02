@@ -7,7 +7,7 @@ import { refinementGuidance } from "./refinementGuidance";
 import type { HealthView } from "./RunnerHealthPill";
 import { lockedLabel } from "./roundLock";
 import { RoundsSection, type RoundRecords } from "./RoundsSection";
-import { BadgeTag, ClaimedTag, DeliveredTag, ErrorMessage, FieldHint, FieldLabel, FieldNote, FieldValue, InlineError, LockGlyph, PrimaryButton, QueuedTag, ReceiptLine, Rule, SecondaryButton, Select, StatusTag, statusLabel, TextInput, Textarea, ticketSerial } from "./ui";
+import { BadgeTag, ClaimedTag, DeliveredTag, ErrorMessage, FieldHint, FieldLabel, FieldNote, FieldValue, InlineError, LockGlyph, PrimaryButton, QueuedTag, ReceiptLine, Rule, SecondaryButton, Select, StatusTag, statusLabel, StoppingTag, TextInput, Textarea, ticketSerial } from "./ui";
 
 interface TicketDetailProps {
   ticket: Ticket;
@@ -15,6 +15,7 @@ interface TicketDetailProps {
   onChangeStatus: (status: Ticket["status"]) => Promise<Ticket>;
   onAccept: () => Promise<Ticket>;
   onRework: () => Promise<Ticket>;
+  onStop: () => Promise<Ticket>;
   onAssign: (assignee: TicketAssignee) => Promise<Ticket>;
   onUnassign: () => Promise<Ticket>;
   onLoadAgents: () => Promise<Agent[]>;
@@ -61,7 +62,7 @@ function completionConditionLabel(condition: Ticket["completionCondition"]): str
   return condition === "reviewedPrMerge" ? "Reviewed pull request merged" : "Human acceptance";
 }
 
-export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onRework, onAssign, onUnassign, onLoadAgents, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge, onArchive, onRestore, onArchived, editRequested = false, runnerHealth = { kind: "loading" }, roundRecords }: TicketDetailProps) {
+export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onRework, onStop, onAssign, onUnassign, onLoadAgents, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge, onArchive, onRestore, onArchived, editRequested = false, runnerHealth = { kind: "loading" }, roundRecords }: TicketDetailProps) {
   const previousTicket = useRef(ticket);
   const [current, setCurrent] = useState(ticket);
   const [mode, setMode] = useState<"view" | "editing">(editRequested && !ticket.archivedAt && !ticket.openRound ? "editing" : "view");
@@ -186,6 +187,9 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onRewor
             {current.openRound?.state === "claimed" && (
               <ClaimedTag data-testid="ticket-detail-claimed">Claimed by runner</ClaimedTag>
             )}
+            {current.openRound?.stopRequestedAt && (
+              <StoppingTag data-testid="ticket-detail-stopping">Stopping…</StoppingTag>
+            )}
             {current.delivery && (
               <DeliveredTag data-testid="ticket-detail-delivered">Delivered by {current.delivery.agent.name}</DeliveredTag>
             )}
@@ -302,6 +306,15 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onRewor
                   disabled={actionPending || readOnly}
                 >
                   Request rework
+                </PrimaryButton>
+              )}
+              {current.allowedActions.stop.available && (
+                <PrimaryButton
+                  data-testid="ticket-detail-stop-button"
+                  onClick={() => runAction(onStop)}
+                  disabled={actionPending}
+                >
+                  Stop
                 </PrimaryButton>
               )}
               {current.assigneeType !== "" && (

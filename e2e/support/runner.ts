@@ -103,6 +103,13 @@ export interface RunnerClaim {
   agent: { id: string; name: string; kind: string };
 }
 
+export interface RunnerCommand {
+  id: string;
+  type: string;
+  claimEpoch: number;
+  issuedAt: string;
+}
+
 /**
  * The runner's own calls, made directly with the credential. `runner` must be a
  * context with no Owner session cookie: Galley refuses a cookie beside a bearer.
@@ -118,6 +125,18 @@ export function runnerCalls(runner: APIRequestContext, token: string) {
       const response = await runner.post("/api/runner/claims", { headers });
       expect(response.status()).toBe(201);
       return response.json();
+    },
+    async claimStatus(): Promise<number> {
+      return (await runner.post("/api/runner/claims", { headers })).status();
+    },
+    async commands(roundId: string): Promise<RunnerCommand[]> {
+      const response = await runner.get(`/api/runner/rounds/${roundId}/commands`, { headers });
+      expect(response.status()).toBe(200);
+      return (await response.json() as { commands: RunnerCommand[] }).commands;
+    },
+    async ack(roundId: string, commandId: string, outcome: "applied" | "ignored"): Promise<{ status: number; body: unknown }> {
+      const response = await runner.post(`/api/runner/rounds/${roundId}/commands/${commandId}/ack`, { headers, data: { outcome } });
+      return { status: response.status(), body: await response.json() };
     },
   };
 }

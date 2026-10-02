@@ -43,12 +43,14 @@ function setup(fetchFn: FetchFn, registered = true, engineScript: EngineScript =
   const lines: string[] = [];
   const logger = createLogger((line) => lines.push(line));
   const registration = { registered };
-  const loop = startClaimLoop({ galleyUrl: GALLEY, intervalMs: 1000, fetch: fetchFn, logger, credential: credential(), registration, requestTimeoutMs: 300, engineScript, engineDeps });
+  const loop = startClaimLoop({ galleyUrl: GALLEY, intervalMs: 1000, commandIntervalMs: 1000, fetch: fetchFn, logger, credential: credential(), registration, requestTimeoutMs: 300, engineScript, engineDeps });
   const records = () => lines.map((line) => JSON.parse(line) as Record<string, unknown>);
   return { loop, lines, records, registration };
 }
 
 const eventPath = `/api/runner/rounds/${CLAIM.roundId}/events`;
+const commandsPath = `/api/runner/rounds/${CLAIM.roundId}/commands`;
+const noCommands = () => json({ commands: [] });
 const eventResult = () => json({ roundId: CLAIM.roundId, type: "execution_started", state: "running", startedAt: "2026-10-01T12:00:00Z" }, 201);
 const created = eventResult;
 
@@ -56,6 +58,7 @@ function routed(routes: { claims: (() => Response)[]; events: (() => Response)[]
   const { claims, events } = routes;
   return vi.fn<FetchFn>(async (input) => {
     const path = new URL(String(input)).pathname;
+    if (path === commandsPath) return noCommands();
     const queue = path === "/api/runner/claims" ? claims : path === eventPath ? events : undefined;
     if (!queue) throw new Error(`unexpected ${String(input)}`);
     const next = queue.length > 1 ? queue.shift() : queue[0];
@@ -330,7 +333,7 @@ describe("claim loop beside the heartbeat loop", () => {
     const common = { galleyUrl: GALLEY, fetch: fetchFn, logger, credential: credential(), registration, requestTimeoutMs: 300 };
     const loops = [
       startHeartbeatLoop({ ...common, intervalMs: 1000, identity: IDENTITY }),
-      startClaimLoop({ ...common, intervalMs: 500, engineScript: START_HOLD }),
+      startClaimLoop({ ...common, intervalMs: 500, commandIntervalMs: 1000, engineScript: START_HOLD }),
     ];
     const paths = () => fetchFn.mock.calls.map(([input]) => new URL(String(input)).pathname);
     const stop = () => Promise.all(loops.map((loop) => loop.stop()));
@@ -361,6 +364,7 @@ describe("claim loop beside the heartbeat loop", () => {
       "/api/runner/heartbeat": () => json({ lastSeenAt: "t" }),
       "/api/runner/claims": claimed,
       [eventPath]: created,
+      [commandsPath]: noCommands,
     });
 
     await vi.advanceTimersByTimeAsync(5500);

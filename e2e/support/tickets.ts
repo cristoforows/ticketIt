@@ -64,6 +64,7 @@ export interface Ticket {
     statusChanges: TicketStatus[];
     accept: { available: boolean; reason?: ErrorDetail };
     rework: { available: boolean; reason?: ErrorDetail };
+    stop: { available: boolean; reason?: ErrorDetail };
     statusChangeRejections: { status: TicketStatus; reason: ErrorDetail }[];
   };
   requestingAgentWork: boolean;
@@ -75,6 +76,8 @@ export interface Ticket {
     agent: { id: string; name: string; kind: AgentKind };
     claimedAt: string;
     startedAt: string | null;
+    /** Set once the Owner requests Stop (issue #159); not a Status. */
+    stopRequestedAt: string | null;
   } | null;
   /** The latest Round, when it was delivered (issue #136). */
   delivery: {
@@ -175,6 +178,11 @@ export async function acceptTicketDirect(from: Api, id: string): Promise<TicketC
 /** Same purpose as changeTicketStatusDirect, for requesting rework. */
 export async function requestReworkDirect(from: Api, id: string): Promise<TicketCommandResult> {
   return ticketCommand(from, "POST", `/api/tickets/${id}/rework`);
+}
+
+/** Same purpose as changeTicketStatusDirect, for requesting Stop. */
+export async function requestStopDirect(from: Api, id: string): Promise<TicketCommandResult> {
+  return ticketCommand(from, "POST", `/api/tickets/${id}/stop`);
 }
 
 export type TicketAssignee = { type: "owner" } | { type: "agent"; agentId: string };

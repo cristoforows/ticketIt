@@ -16,8 +16,9 @@ const notArchivedCode = "not_archived"
 const notArchivedMessage = "ticket is not archived"
 
 type ticketLock struct {
-	archived    bool
-	openRoundID string
+	archived      bool
+	openRoundID   string
+	stopRequested bool
 }
 
 // The open Round is read in a second statement so it sees a Round
@@ -31,9 +32,10 @@ func lockTicketForMutation(ctx context.Context, tx pgx.Tx, ownerID int64, id str
 	if err != nil {
 		return ticketLock{}, false, err
 	}
-	err = tx.QueryRow(ctx, `SELECT COALESCE((SELECT r.public_id::text FROM rounds r JOIN tickets t ON t.owner_id = r.owner_id AND t.id = r.ticket_id
-		WHERE t.owner_id = $1 AND t.public_id = $2::uuid AND r.state IN `+openRoundStatesSQL+`), '')`, ownerID, id).Scan(&lock.openRoundID)
-	if err != nil {
+	err = tx.QueryRow(ctx, `SELECT r.public_id::text, EXISTS (SELECT 1 FROM round_commands c WHERE c.owner_id = r.owner_id AND c.round_id = r.id AND c.type = 'stop')
+		FROM rounds r JOIN tickets t ON t.owner_id = r.owner_id AND t.id = r.ticket_id
+		WHERE t.owner_id = $1 AND t.public_id = $2::uuid AND r.state IN `+openRoundStatesSQL, ownerID, id).Scan(&lock.openRoundID, &lock.stopRequested)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return ticketLock{}, false, err
 	}
 	return lock, true, nil

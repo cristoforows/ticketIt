@@ -153,6 +153,39 @@ func (e RoundState) Valid() bool {
 	}
 }
 
+// Defines values for RunnerCommandAckOutcome.
+const (
+	RunnerCommandApplied RunnerCommandAckOutcome = "applied"
+	RunnerCommandIgnored RunnerCommandAckOutcome = "ignored"
+)
+
+// Valid indicates whether the value is a known member of the RunnerCommandAckOutcome enum.
+func (e RunnerCommandAckOutcome) Valid() bool {
+	switch e {
+	case RunnerCommandApplied:
+		return true
+	case RunnerCommandIgnored:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RunnerCommandType.
+const (
+	RunnerCommandStop RunnerCommandType = "stop"
+)
+
+// Valid indicates whether the value is a known member of the RunnerCommandType enum.
+func (e RunnerCommandType) Valid() bool {
+	switch e {
+	case RunnerCommandStop:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RunnerHealthState.
 const (
 	RunnerConnected    RunnerHealthState = "connected"
@@ -325,6 +358,11 @@ func (e UsageObservedDataBasis) Valid() bool {
 	default:
 		return false
 	}
+}
+
+// AcknowledgeRoundCommandRequest defines model for AcknowledgeRoundCommandRequest.
+type AcknowledgeRoundCommandRequest struct {
+	Outcome RunnerCommandAckOutcome `json:"outcome"`
 }
 
 // AdvanceDevClockRequest defines model for AdvanceDevClockRequest.
@@ -547,6 +585,13 @@ type RoundActivityNote struct {
 	Seq int `json:"seq"`
 }
 
+// RoundCommandAcknowledgement defines model for RoundCommandAcknowledgement.
+type RoundCommandAcknowledgement struct {
+	AcknowledgedAt time.Time               `json:"acknowledgedAt"`
+	Id             string                  `json:"id"`
+	Outcome        RunnerCommandAckOutcome `json:"outcome"`
+}
+
 // RoundDeliverable defines model for RoundDeliverable.
 type RoundDeliverable struct {
 	BodyMarkdown       string `json:"bodyMarkdown"`
@@ -635,6 +680,30 @@ type RunnerClaim struct {
 	Sequence   int           `json:"sequence"`
 	Ticket     ClaimedTicket `json:"ticket"`
 }
+
+// RunnerCommand defines model for RunnerCommand.
+type RunnerCommand struct {
+	// ClaimEpoch The claim epoch the command targets. A runner holding another epoch acknowledges it `ignored` and does not act on it.
+	ClaimEpoch int `json:"claimEpoch"`
+
+	// Id The command's idempotency key.
+	Id       string    `json:"id"`
+	IssuedAt time.Time `json:"issuedAt"`
+
+	// Type Grows by slice.
+	Type RunnerCommandType `json:"type"`
+}
+
+// RunnerCommandAckOutcome defines model for RunnerCommandAckOutcome.
+type RunnerCommandAckOutcome string
+
+// RunnerCommandList defines model for RunnerCommandList.
+type RunnerCommandList struct {
+	Commands []RunnerCommand `json:"commands"`
+}
+
+// RunnerCommandType Grows by slice.
+type RunnerCommandType string
 
 // RunnerHealth defines model for RunnerHealth.
 type RunnerHealth struct {
@@ -768,6 +837,9 @@ type TicketAllowedActions struct {
 
 	// StatusChanges Targets accepted by a plain status command from this Ticket's current Status.
 	StatusChanges []TicketStatus `json:"statusChanges"`
+
+	// Stop Unavailable with `stop_already_requested` once Stop is requested.
+	Stop TicketCommandAvailability `json:"stop"`
 }
 
 // TicketAssigneeAgent defines model for TicketAssigneeAgent.
@@ -824,6 +896,9 @@ type TicketOpenRound struct {
 
 	// State A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress.
 	State OpenRoundState `json:"state"`
+
+	// StopRequestedAt When the Owner requested Stop; the Ticket shows Stopping. Not a Status.
+	StopRequestedAt *time.Time `json:"stopRequestedAt"`
 }
 
 // TicketRound defines model for TicketRound.
@@ -958,6 +1033,9 @@ type CreateDiagnosticNoteJSONRequestBody = CreateDiagnosticNoteRequest
 
 // RegisterRunnerJSONRequestBody defines body for RegisterRunner for application/json ContentType.
 type RegisterRunnerJSONRequestBody = RegisterRunnerRequest
+
+// AcknowledgeRoundCommandJSONRequestBody defines body for AcknowledgeRoundCommand for application/json ContentType.
+type AcknowledgeRoundCommandJSONRequestBody = AcknowledgeRoundCommandRequest
 
 // ReportRoundEventJSONRequestBody defines body for ReportRoundEvent for application/json ContentType.
 type ReportRoundEventJSONRequestBody = RoundEventRequest
@@ -1141,6 +1219,12 @@ type ServerInterface interface {
 	// RegisterRunner Register a runner
 	// (POST /api/runner/register)
 	RegisterRunner(w http.ResponseWriter, r *http.Request)
+	// ListRoundCommands Pull a Round's unacknowledged commands
+	// (GET /api/runner/rounds/{roundId}/commands)
+	ListRoundCommands(w http.ResponseWriter, r *http.Request, roundId string)
+	// AcknowledgeRoundCommand Acknowledge a pulled command
+	// (POST /api/runner/rounds/{roundId}/commands/{commandId}/ack)
+	AcknowledgeRoundCommand(w http.ResponseWriter, r *http.Request, roundId string, commandId string)
 	// ReportRoundEvent Report an execution event for a Round
 	// (POST /api/runner/rounds/{roundId}/events)
 	ReportRoundEvent(w http.ResponseWriter, r *http.Request, roundId string)
@@ -1198,6 +1282,9 @@ type ServerInterface interface {
 	// ChangeTicketStatus Change a Ticket's Status
 	// (POST /api/tickets/{id}/status)
 	ChangeTicketStatus(w http.ResponseWriter, r *http.Request, id string)
+	// RequestTicketStop Request Stop of the Ticket's open Round
+	// (POST /api/tickets/{id}/stop)
+	RequestTicketStop(w http.ResponseWriter, r *http.Request, id string)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -1481,6 +1568,67 @@ func (siw *ServerInterfaceWrapper) RegisterRunner(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RegisterRunner(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListRoundCommands operation middleware
+func (siw *ServerInterfaceWrapper) ListRoundCommands(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "roundId" -------------
+	var roundId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "roundId", r.PathValue("roundId"), &roundId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "roundId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListRoundCommands(w, r, roundId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AcknowledgeRoundCommand operation middleware
+func (siw *ServerInterfaceWrapper) AcknowledgeRoundCommand(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "roundId" -------------
+	var roundId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "roundId", r.PathValue("roundId"), &roundId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "roundId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "commandId" -------------
+	var commandId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "commandId", r.PathValue("commandId"), &commandId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "commandId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AcknowledgeRoundCommand(w, r, roundId, commandId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1974,6 +2122,32 @@ func (siw *ServerInterfaceWrapper) ChangeTicketStatus(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// RequestTicketStop operation middleware
+func (siw *ServerInterfaceWrapper) RequestTicketStop(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RequestTicketStop(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -2106,6 +2280,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/status", wrapper.ChangeTicketStatus)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/accept", wrapper.AcceptTicket)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/rework", wrapper.RequestTicketRework)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/stop", wrapper.RequestTicketStop)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/tickets/{id}/assignee", wrapper.UnassignTicket)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/tickets/{id}/assignee", wrapper.AssignTicket)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/badges", wrapper.ListBadges)
@@ -2128,6 +2303,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner/heartbeat", wrapper.RunnerHeartbeat)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner/claims", wrapper.ClaimWork)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner/rounds/{roundId}/events", wrapper.ReportRoundEvent)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/runner/rounds/{roundId}/commands", wrapper.ListRoundCommands)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner/rounds/{roundId}/commands/{commandId}/ack", wrapper.AcknowledgeRoundCommand)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/dev/clock/advance", wrapper.AdvanceDevClock)
 
 	return m

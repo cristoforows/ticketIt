@@ -6,6 +6,7 @@ import {
   changeTicketStatus,
   acceptTicket,
   requestTicketRework,
+  requestTicketStop,
   assignTicket,
   unassignTicket,
   createBadge,
@@ -163,6 +164,10 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
     return runCommand(() => requestTicketRework(ticketId));
   }
 
+  function stop(): Promise<Ticket> {
+    return runCommand(() => requestTicketStop(ticketId));
+  }
+
   function assign(assignee: TicketAssignee): Promise<Ticket> {
     return runCommand(() => assignTicket(ticketId, assignee));
   }
@@ -205,6 +210,7 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
       onChangeStatus={changeStatus}
       onAccept={accept}
       onRework={rework}
+      onStop={stop}
       onAssign={assign}
       onUnassign={unassign}
       onLoadAgents={loadAgents}

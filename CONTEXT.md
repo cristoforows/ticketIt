@@ -116,6 +116,10 @@ _Avoid_: Interrupted, finished when the round is still open for continuation.
 The outcome of a **Round** whose work stopped unexpectedly before delivery. Available progress and usage remain part of its history; returning execution capacity does not automatically start another round.
 _Avoid_: Failed when only an unexpected interruption, rather than a work failure, is known.
 
+**Stopping**:
+The condition of an open **Round** after the owner has requested Stop and before its execution is confirmed to have ended. It is not a **Status**: the **Ticket** keeps its Status and stays locked until the round ends as **Stopped**.
+_Avoid_: Stopped while the round is still open.
+
 **Stopped**:
 The outcome of a **Round** whose execution has ended following the owner's explicit stop request. Its **Ticket** returns to **Backlog** with a Stopped **Badge**, while the round's history, usage, and available partial results remain preserved.
 _Avoid_: Interrupted when the round ended through an intentional stop request.

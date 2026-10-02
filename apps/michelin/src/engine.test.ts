@@ -50,6 +50,7 @@ function sequence(...responses: (() => Response | Promise<Response>)[]) {
 
 interface Harness {
   controller: AbortController;
+  stopper: AbortController;
   lines: string[];
   records: () => Record<string, unknown>[];
   sleeps: number[];
@@ -61,11 +62,12 @@ interface Harness {
 
 function start(steps: EngineStep[], fetchFn: FetchFn, options: { instantSleep?: boolean; claim?: RunnerClaim } = {}): Harness {
   const controller = new AbortController();
+  const stopper = new AbortController();
   const lines: string[] = [];
   const sleeps: number[] = [];
   const references: string[] = [];
   const observationIds: string[] = [];
-  const harness = { controller, lines, sleeps, references, observationIds, clockReads: 0 } as Harness;
+  const harness = { controller, stopper, lines, sleeps, references, observationIds, clockReads: 0 } as Harness;
   let tick = 0;
   harness.records = () => lines.map((line) => JSON.parse(line) as Record<string, unknown>);
   harness.run = runControlledEngine({
@@ -76,6 +78,7 @@ function start(steps: EngineStep[], fetchFn: FetchFn, options: { instantSleep?: 
     claim: options.claim ?? CLAIM,
     script: { steps },
     signal: controller.signal,
+    stop: stopper.signal,
     requestTimeoutMs: 300,
     deps: {
       now: () => {
@@ -147,7 +150,7 @@ describe("the controlled engine's start step", () => {
     const fetchFn = sequence(created);
     const controller = new AbortController();
     const run = runControlledEngine({
-      galleyUrl: GALLEY, fetch: fetchFn, logger: createLogger(() => {}), credential: credential(), claim: CLAIM, script: { steps: [START] }, signal: controller.signal,
+      galleyUrl: GALLEY, fetch: fetchFn, logger: createLogger(() => {}), credential: credential(), claim: CLAIM, script: { steps: [START] }, signal: controller.signal, stop: new AbortController().signal,
     });
     expect(await run).toBe("completed");
     const body = JSON.parse(String(fetchFn.mock.calls[0]?.[1]?.body)) as { data: { engineReference: string }; occurredAt: string };
@@ -332,9 +335,77 @@ describe("stopping", () => {
     const fetchFn = sequence(created);
     const controller = new AbortController();
     controller.abort();
-    const run = runControlledEngine({ galleyUrl: GALLEY, fetch: fetchFn, logger: createLogger(() => {}), credential: credential(), claim: CLAIM, script: { steps: [START, HOLD] }, signal: controller.signal });
+    const run = runControlledEngine({ galleyUrl: GALLEY, fetch: fetchFn, logger: createLogger(() => {}), credential: credential(), claim: CLAIM, script: { steps: [START, HOLD] }, signal: controller.signal, stop: new AbortController().signal });
     expect(await run).toBe("aborted");
     expect(fetchFn).not.toHaveBeenCalled();
+  });
+});
+
+describe("a Stop request", () => {
+  const deferred = () => {
+    let resolve!: (response: Response) => void;
+    const promise = new Promise<Response>((done) => (resolve = done));
+    return { promise, resolve };
+  };
+
+  it.each([
+    ["a wait", [START, wait(60_000), NOTE("after"), HOLD], 2],
+    ["a hold", [START, HOLD], 1],
+  ])("ends %s at once, reports nothing further and returns stopped", async (_name, steps, haltedAt) => {
+    const fetchFn = answering();
+    const harness = start(steps, fetchFn);
+    await vi.advanceTimersByTimeAsync(10);
+    harness.stopper.abort();
+    expect(await harness.run).toBe("stopped");
+    expect(vi.getTimerCount()).toBe(0);
+    expect(sent(fetchFn).map((event) => event.type)).toEqual(["execution_started"]);
+    expect(harness.records().map((record) => record["msg"]).filter((msg) => msg !== "engine holding")).toEqual(["execution started reported", "engine stopped"]);
+    expect(harness.records().at(-1)).toMatchObject({ roundId: ROUND_ID, stepIndex: haltedAt });
+  });
+
+  it("lets an in-flight event finish, then halts at the next step boundary", async () => {
+    const pending = deferred();
+    const fetchFn = vi.fn<FetchFn>(() => pending.promise);
+    const harness = start([START, NOTE("never sent"), HOLD], fetchFn);
+    await vi.advanceTimersByTimeAsync(10);
+    harness.stopper.abort();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(harness.records()).toEqual([]);
+    pending.resolve(created());
+    expect(await harness.run).toBe("stopped");
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(harness.records().map((record) => record["msg"])).toEqual(["execution started reported", "engine stopped"]);
+  });
+
+  it("keeps retrying an in-flight event through its backoff before halting", async () => {
+    const fetchFn = answering(refused);
+    const harness = start([START, NOTE("never sent"), HOLD], fetchFn);
+    await vi.advanceTimersByTimeAsync(10);
+    harness.stopper.abort();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await harness.run).toBe("stopped");
+    expect(sent(fetchFn).map((event) => event.type)).toEqual(["execution_started", "execution_started"]);
+    expect(harness.records().map((record) => record["msg"])).toEqual(["round event failed; retrying", "execution started reported", "engine stopped"]);
+  });
+
+  it("returns delivered when the delivery in flight lands", async () => {
+    const pending = deferred();
+    let calls = 0;
+    const fetchFn = vi.fn<FetchFn>(() => (++calls === 1 ? Promise.resolve(created()) : pending.promise));
+    const harness = start([START, DELIVER], fetchFn);
+    await vi.advanceTimersByTimeAsync(10);
+    harness.stopper.abort();
+    pending.resolve(json({ roundId: ROUND_ID, type: "delivered", state: "delivered", startedAt: "2026-10-01T12:00:00Z", endedAt: "2026-10-01T12:00:09Z" }, 201));
+    expect(await harness.run).toBe("delivered");
+  });
+
+  it("still answers shutdown with aborted", async () => {
+    const harness = start([START, HOLD], answering());
+    await vi.advanceTimersByTimeAsync(10);
+    harness.controller.abort();
+    harness.stopper.abort();
+    expect(await harness.run).toBe("aborted");
+    expect(harness.records().map((record) => record["msg"])).not.toContain("engine stopped");
   });
 });
 

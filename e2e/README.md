@@ -357,6 +357,19 @@ Galley's Round list must keep Round 1 unchanged, and nothing may requeue
 the Ticket. Delivered Rounds hold no slot, so the spec needs no reset
 after `runner-delivery.spec.ts`.
 
+`tests/runner-stop-request.spec.ts` (issue #159) drives a real Michelin
+holding a Round (`start`, `hold`), with data created through the API.
+The receipt's Stop must return `200` and show **Stopping…** while the
+Ticket stays In Progress and locked. Michelin's log must show the engine
+stopped before exactly one `command acknowledged` with outcome
+`applied`. Through Galley's API: the Round's command list is empty,
+replaying that acknowledgement returns the stored values, the other
+outcome is `409 command_already_acknowledged`, a repeated Stop returns
+the same `stopRequestedAt`, a claim gets `204`, and an edit is refused
+with `round_open`. The board slip shows **Stopping…** in the In Progress
+column. The Round stays open until M5.2, so `run.sh` resets the
+database and restarts Galley before this spec.
+
 `tests/ticket-priority-order.spec.ts` reorders three Ready Tickets by
 dragging onto the upper and lower halves of board slips, then with Move
 up and Move down in the list. After each step the rendered order must

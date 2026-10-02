@@ -85,6 +85,7 @@ func newHandler(cfg config.Config, logger *slog.Logger, srv *server) http.Handle
 	mux.HandleFunc("/api/tickets/{id}/status", methodNotAllowedHandler("POST"))
 	mux.HandleFunc("/api/tickets/{id}/accept", methodNotAllowedHandler("POST"))
 	mux.HandleFunc("/api/tickets/{id}/rework", methodNotAllowedHandler("POST"))
+	mux.HandleFunc("/api/tickets/{id}/stop", methodNotAllowedHandler("POST"))
 	mux.HandleFunc("/api/tickets/{id}/assignee", methodNotAllowedHandler("PUT", "DELETE"))
 	mux.HandleFunc("/api/badges", methodNotAllowedHandler("GET", "POST"))
 	mux.HandleFunc("/api/agents", methodNotAllowedHandler("GET", "POST"))
@@ -100,6 +101,8 @@ func newHandler(cfg config.Config, logger *slog.Logger, srv *server) http.Handle
 	mux.HandleFunc("/api/runner/heartbeat", methodNotAllowedHandler("POST"))
 	mux.HandleFunc("/api/runner/claims", methodNotAllowedHandler("POST"))
 	mux.HandleFunc("/api/runner/rounds/{roundId}/events", methodNotAllowedHandler("POST"))
+	mux.HandleFunc("/api/runner/rounds/{roundId}/commands", methodNotAllowedHandler("GET"))
+	mux.HandleFunc("/api/runner/rounds/{roundId}/commands/{commandId}/ack", methodNotAllowedHandler("POST"))
 	if cfg.Environment == config.EnvDevelopment {
 		mux.HandleFunc(devOnlyPathPrefix+"diagnostic-notes", methodNotAllowedHandler("GET", "POST"))
 		mux.HandleFunc(devOnlyPathPrefix+"clock/advance", methodNotAllowedHandler("POST"))

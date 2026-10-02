@@ -43,7 +43,7 @@ const TICKET = {
   id: "44444444-4444-4444-8444-444444444444",
   title: "Write the report",
   status: "InReview",
-  allowedActions: { statusChangeRejections: [], statusChanges: ["InProgress"], accept: { available: true }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } },
+  allowedActions: { statusChangeRejections: [], statusChanges: ["InProgress"], accept: { available: true }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } } },
   template: "Basic",
   completionCondition: "humanAcceptance",
   assigneeType: "owner",

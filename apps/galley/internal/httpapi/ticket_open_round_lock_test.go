@@ -132,23 +132,32 @@ func TestOpenRoundLock_EveryMutationRejectedWhileOpenAndAcceptedOnceClosed(t *te
 		}},
 	}
 	for _, m := range mutations {
-		t.Run(m.name, func(t *testing.T) {
-			f := newLockedTicketFixture(t)
-			if m.setUp != nil {
-				m.setUp(t, f)
+		for _, stopping := range []bool{false, true} {
+			name := m.name
+			if stopping {
+				name += " while Stopping"
 			}
-			call := m.call(f)
-			before := f.snapshot(t)
-			assertRoundOpen(t, f.validateContract(t, call), f.claim.RoundId)
-			if after := f.snapshot(t); !reflect.DeepEqual(after, before) {
-				t.Fatalf("rejected %s changed state:\nbefore %+v\nafter  %+v", m.name, before, after)
-			}
+			t.Run(name, func(t *testing.T) {
+				f := newLockedTicketFixture(t)
+				if m.setUp != nil {
+					m.setUp(t, f)
+				}
+				if stopping {
+					f.mustStop(t, f.locked.Id)
+				}
+				call := m.call(f)
+				before := f.snapshot(t)
+				assertRoundOpen(t, f.validateContract(t, call), f.claim.RoundId)
+				if after := f.snapshot(t); !reflect.DeepEqual(after, before) {
+					t.Fatalf("rejected %s changed state:\nbefore %+v\nafter  %+v", name, before, after)
+				}
 
-			closeRoundDirect(t, f.pool, f.claim.RoundId)
-			if rec := f.validateContract(t, call); rec.Code != http.StatusOK {
-				t.Fatalf("%s after the Round closed: status=%d body=%s", m.name, rec.Code, rec.Body.String())
-			}
-		})
+				closeRoundDirect(t, f.pool, f.claim.RoundId)
+				if rec := f.validateContract(t, call); rec.Code != http.StatusOK {
+					t.Fatalf("%s after the Round closed: status=%d body=%s", name, rec.Code, rec.Body.String())
+				}
+			})
+		}
 	}
 }
 

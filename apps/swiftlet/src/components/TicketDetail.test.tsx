@@ -13,7 +13,7 @@ const TICKET: Ticket = {
   id: "33333333-3333-4333-8333-333333333333",
   title: "Fix login bug on Safari",
   status: "Backlog",
-  allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } },
+  allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } } },
   template: "Basic",
   completionCondition: "humanAcceptance",
   assigneeType: "",
@@ -54,6 +54,7 @@ function noopActions() {
     onChangeStatus: vi.fn<(status: Ticket["status"]) => Promise<Ticket>>(),
     onAccept: vi.fn<() => Promise<Ticket>>(),
     onRework: vi.fn<() => Promise<Ticket>>(),
+    onStop: vi.fn<() => Promise<Ticket>>(),
     onAssign: vi.fn<(assignee: TicketAssignee) => Promise<Ticket>>(),
     onUnassign: vi.fn<() => Promise<Ticket>>(),
     onLoadAgents: vi.fn<() => Promise<Agent[]>>().mockResolvedValue([]),
@@ -179,7 +180,7 @@ describe("archive presentation", () => {
 
   it("keeps archived Tickets readable and disables their mutating controls with Galley's reason", () => {
     const reason = { code: "archived_ticket", message: "archived tickets are read-only" };
-    render(<TicketDetail ticket={{ ...TICKET, archivedAt: "2026-09-29T10:00:00Z", badges: [{ id: BADGE.id, name: BADGE.name }], allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } } }} onSave={vi.fn()} {...noopActions()} />);
+    render(<TicketDetail ticket={{ ...TICKET, archivedAt: "2026-09-29T10:00:00Z", badges: [{ id: BADGE.id, name: BADGE.name }], allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } } } }} onSave={vi.fn()} {...noopActions()} />);
     expect(screen.getByTestId("ticket-detail-archived")).toHaveTextContent(reason.message);
     expect(screen.getByTestId("ticket-detail-badges")).toHaveTextContent(BADGE.name);
     for (const name of ["Edit", "Archive", "Add badge", "Remove Urgent", "Assign"]) {
@@ -204,7 +205,7 @@ describe("archive presentation", () => {
 
   it("shows Ready becoming Backlog after Restore and unlocks editing", async () => {
     const reason = { code: "archived_ticket", message: "archived tickets are read-only" };
-    const archived = { ...TICKET, status: "Ready" as const, archivedAt: "2026-09-29T10:00:00Z", allowedActions: { statusChangeRejections: [], statusChanges: [] as Ticket["status"][], accept: { available: false, reason }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } } };
+    const archived = { ...TICKET, status: "Ready" as const, archivedAt: "2026-09-29T10:00:00Z", allowedActions: { statusChangeRejections: [], statusChanges: [] as Ticket["status"][], accept: { available: false, reason }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } } } };
     const restored: Ticket = { ...TICKET, status: "Backlog", archivedAt: null };
     const onRestore = vi.fn().mockResolvedValue(restored);
     render(<TicketDetail ticket={archived} onSave={vi.fn()} {...noopActions()} onRestore={onRestore} />);
@@ -227,8 +228,8 @@ describe("open-Round lock", () => {
     assigneeType: "agent",
     assigneeAgent: agent,
     badges: [{ id: BADGE.id, name: BADGE.name }],
-    openRound: { id: reason.roundId, sequence: 4, state: "running", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: "2026-10-01T10:01:00Z" },
-    allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } },
+    openRound: { id: reason.roundId, sequence: 4, state: "running", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: "2026-10-01T10:01:00Z", stopRequestedAt: null },
+    allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } } },
   };
 
   it("shows who holds the lock and keeps every field readable", () => {
@@ -260,7 +261,7 @@ describe("open-Round lock", () => {
 
   it("unlocks once Galley reports no open Round", () => {
     const { rerender } = render(<TicketDetail ticket={locked} onSave={vi.fn()} {...noopActions()} />);
-    rerender(<TicketDetail ticket={{ ...locked, openRound: null, allowedActions: { statusChangeRejections: [], statusChanges: ["Backlog"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } } }} onSave={vi.fn()} {...noopActions()} />);
+    rerender(<TicketDetail ticket={{ ...locked, openRound: null, allowedActions: { statusChangeRejections: [], statusChanges: ["Backlog"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } } } }} onSave={vi.fn()} {...noopActions()} />);
     expect(screen.queryByTestId("ticket-detail-locked")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled();
     expect(screen.getByTestId("ticket-detail-status-button-Backlog")).toBeEnabled();
@@ -617,7 +618,7 @@ describe("TicketDetail", () => {
       });
 
       it("shows Claimed by runner only while Galley reports the open Round as claimed", () => {
-        const round = { id: "r1", sequence: 1, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null };
+        const round = { id: "r1", sequence: 1, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null };
         const { rerender } = render(<TicketDetail ticket={{ ...agentTicket, status: "Ready", openRound: { ...round, state: "claimed" } }} onSave={vi.fn()} {...noopActions()} />);
         expect(screen.getByTestId("ticket-detail-claimed")).toHaveTextContent("Claimed by runner");
         expect(screen.queryByTestId("ticket-detail-queued")).not.toBeInTheDocument();
@@ -734,7 +735,7 @@ describe("the Rounds section", () => {
   afterEach(cleanup);
 
   const agent = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kind: "research" as const };
-  const claimedRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 3, state: "claimed" as const, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null };
+  const claimedRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 3, state: "claimed" as const, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null };
   const runningRound = { ...claimedRound, state: "running" as const, startedAt: "2026-10-01T10:01:00Z" };
   const usage = {
     observations: 0,
@@ -764,7 +765,7 @@ describe("the Rounds section", () => {
     assigneeType: "agent",
     assigneeAgent: agent,
     openRound,
-    allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: claimedRound.id } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } } },
+    allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: claimedRound.id } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } } },
   });
   const health = (state: "connected" | "disconnected" | "not_paired"): HealthView => ({
     kind: "loaded",
@@ -989,5 +990,86 @@ describe("Request rework", () => {
     render(<TicketDetail ticket={withRework({ available: false, reason: { code: "rework_not_available", message: "Only an Agent-assigned Ticket can be reworked" } })} onSave={vi.fn()} {...noopActions()} />);
     expect(screen.queryByText("Only an Agent-assigned Ticket can be reworked")).not.toBeInTheDocument();
     expect(screen.queryByTestId("ticket-detail-rework-unavailable")).not.toBeInTheDocument();
+  });
+});
+
+describe("Stop", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  const agent = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kind: "research" as const };
+  const runningRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 2, state: "running" as const, agent, claimedAt: "2026-10-02T10:00:00Z", startedAt: "2026-10-02T10:00:01Z", stopRequestedAt: null };
+  const locked = { code: "round_open", message: "Locked while atlas works on Round 2", roundId: runningRound.id };
+  const running: Ticket = {
+    ...REFINED_TICKET,
+    status: "InProgress",
+    assigneeType: "agent",
+    assigneeAgent: agent,
+    openRound: runningRound,
+    allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: locked }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: true } },
+  };
+  const stopping: Ticket = {
+    ...running,
+    openRound: { ...runningRound, stopRequestedAt: "2026-10-02T10:00:05Z" },
+    allowedActions: { ...running.allowedActions, stop: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } } },
+  };
+
+  it("is offered only when Galley says Stop is available, and is not disabled by the Round's lock", () => {
+    const { rerender } = render(<TicketDetail ticket={running} onSave={vi.fn()} {...noopActions()} />);
+    expect(screen.getByTestId("ticket-detail-stop-button")).toHaveTextContent("Stop");
+    expect(screen.getByTestId("ticket-detail-stop-button")).toBeEnabled();
+    expect(screen.queryByTestId("ticket-detail-stopping")).not.toBeInTheDocument();
+
+    rerender(<TicketDetail ticket={stopping} onSave={vi.fn()} {...noopActions()} />);
+    expect(screen.queryByTestId("ticket-detail-stop-button")).not.toBeInTheDocument();
+
+    rerender(<TicketDetail ticket={TICKET} onSave={vi.fn()} {...noopActions()} />);
+    expect(screen.queryByTestId("ticket-detail-stop-button")).not.toBeInTheDocument();
+  });
+
+  it("requests Stop without a confirmation and shows Stopping on the locked receipt Galley returned", async () => {
+    const confirm = vi.spyOn(window, "confirm");
+    const onStop = vi.fn<() => Promise<Ticket>>().mockResolvedValue(stopping);
+    render(<TicketDetail ticket={running} onSave={vi.fn()} {...noopActions()} onStop={onStop} />);
+
+    fireEvent.click(screen.getByTestId("ticket-detail-stop-button"));
+
+    expect(await screen.findByTestId("ticket-detail-stopping")).toHaveTextContent("Stopping…");
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("In Progress");
+    expect(screen.getByTestId("ticket-detail-locked")).toHaveTextContent("Locked while atlas works on Round 2");
+    expect(screen.queryByTestId("ticket-detail-stop-button")).not.toBeInTheDocument();
+  });
+
+  it("shows Stopping beside the claimed tag for a claimed Round", () => {
+    const claimedStopping: Ticket = { ...stopping, status: "Ready", openRound: { ...runningRound, state: "claimed", startedAt: null, stopRequestedAt: "2026-10-02T10:00:05Z" } };
+    render(<TicketDetail ticket={claimedStopping} onSave={vi.fn()} {...noopActions()} />);
+    expect(screen.getByTestId("ticket-detail-claimed")).toBeInTheDocument();
+    expect(screen.getByTestId("ticket-detail-stopping")).toHaveTextContent("Stopping…");
+  });
+
+  it("shows Galley's rejection verbatim and leaves the Ticket as it was", async () => {
+    const onStop = vi.fn<() => Promise<Ticket>>().mockRejectedValue(new GalleyError({ code: "stop_not_available", message: "Stop needs an open Round" }));
+    render(<TicketDetail ticket={running} onSave={vi.fn()} {...noopActions()} onStop={onStop} />);
+
+    fireEvent.click(screen.getByTestId("ticket-detail-stop-button"));
+
+    expect(await screen.findByTestId("ticket-detail-action-error")).toHaveTextContent("Stop needs an open Round");
+    expect(screen.queryByTestId("ticket-detail-stopping")).not.toBeInTheDocument();
+  });
+
+  it("is disabled while an action is pending", async () => {
+    let finish: (ticket: Ticket) => void = () => {};
+    const onStop = vi.fn(() => new Promise<Ticket>((resolve) => { finish = resolve; }));
+    render(<TicketDetail ticket={running} onSave={vi.fn()} {...noopActions()} onStop={onStop} />);
+
+    fireEvent.click(screen.getByTestId("ticket-detail-stop-button"));
+
+    await waitFor(() => expect(screen.getByTestId("ticket-detail-stop-button")).toBeDisabled());
+    finish(running);
+    await waitFor(() => expect(screen.getByTestId("ticket-detail-stop-button")).toBeEnabled());
   });
 });

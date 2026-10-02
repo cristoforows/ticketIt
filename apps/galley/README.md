@@ -1547,6 +1547,53 @@ claimed.
 Tests: `ticket_rework_test.go`, plus `contract_test.go`. Evidence:
 `docs/evidence/m4/137-rework.md`.
 
+## Stop request and pulled commands (issue #159)
+
+`POST /api/tickets/{id}/stop` takes no body and records one `stop` row
+in `round_commands` (migration 000017) for the open Round, carrying the
+Round's current `claim_epoch` and Galley's clock as `issued_at`. The
+row's `public_id` is the command's idempotency key. A `stop` row is the
+whole of "Stop requested": `openRound.stopRequestedAt` is its
+`issued_at`. Stopping is not a Status: the Ticket's Status, the Round's
+state, the open-Round lock and the slot are unchanged. `decideStop` is
+the one decision, shared by the command and by `allowedActions.stop`:
+
+| Check, in order | Command | `allowedActions.stop` |
+| --- | --- | --- |
+| No open Round (archived Tickets included) | `400 stop_not_available` | unavailable, same reason |
+| A `stop` row exists | `200`, the unchanged Ticket, no new row | unavailable, `stop_already_requested` |
+| Otherwise | `200`, the Ticket with `stopRequestedAt` | available |
+
+The insert runs under the Ticket row lock (`lockTicketForMutation`, which
+now also reads whether the open Round has a `stop` row). A unique
+violation on `round_commands_one_stop_per_round` is answered as
+`stop_already_requested`.
+
+The runner pulls commands with its bearer credential:
+
+- `GET /api/runner/rounds/{roundId}/commands` returns the Round's
+  unacknowledged commands, oldest `issued_at` first, and `[]` once the
+  Round is no longer open. An unknown, malformed or foreign Round is
+  the shared `404`.
+- `POST /api/runner/rounds/{roundId}/commands/{commandId}/ack` takes
+  `{"outcome": "applied" | "ignored"}` (strict decode). The first ack
+  records `acknowledged_at` from Galley's clock and the outcome. A
+  repeat with the same outcome returns the stored values; another
+  outcome is `409 command_already_acknowledged` and changes nothing. A
+  command of another Round is the shared `404`. The row is locked
+  `FOR UPDATE` while it is read, so concurrent acks record one outcome.
+  An ack never changes the Round or the Ticket.
+
+Galley does not reject an ack by epoch: Michelin compares the command's
+`claimEpoch` with its own claim and acknowledges a mismatch `ignored`.
+Ending a stopped Round (`stop_confirmed`) is M5.2.
+
+Tests: `round_commands_test.go` (decision table, Stop on claimed and
+running Rounds, concurrent and lock-adjacent duplicates, the listing,
+ack replay and conflict, concurrent acks, a stale-epoch Stop), the
+"while Stopping" cases in `ticket_open_round_lock_test.go`, and
+`contract_test.go`. Evidence: `docs/evidence/m5/159-stop-request.md`.
+
 ## Error shape
 
 `ErrorBody`/`ErrorDetail` are generated from
@@ -1831,6 +1878,7 @@ apps/galley/
         ├── ticket_rounds.go     # issue #134: GET /api/tickets/{id}/rounds
         ├── round_activity.go    # issue #135: progress notes, seq, the 50-note window
         ├── usage_observations.go  # issue #135: usage observations and the Round summary
+        ├── round_commands.go      # issue #159: Stop request, the runner's command list and acks
         ├── devclock.go     # issue #130: development-only clock advance for the browser suite
         └── no_execution_side_effects_test.go   # issue #60: the no-Round/queue/work-request guardrail
 ```

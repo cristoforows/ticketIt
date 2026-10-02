@@ -17,6 +17,11 @@ const invalidTransitionCode = "invalid_transition"
 
 const reworkNotAvailableCode = "rework_not_available"
 
+const (
+	stopNotAvailableCode     = "stop_not_available"
+	stopAlreadyRequestedCode = "stop_already_requested"
+)
+
 // reviewedPrMergeNotImplementedCode stays distinct from
 // invalidTransitionCode so a caller can tell "wrong state" apart from
 // "right state, but this condition cannot complete yet" -- a
@@ -130,6 +135,17 @@ func decideRework(state ticketWorkflowState) *transitionRejection {
 	return decideAgentReadiness(state)
 }
 
+// Archived Tickets never hold an open Round, so the first case covers them.
+func decideStop(state ticketWorkflowState) *transitionRejection {
+	switch {
+	case state.openRoundID == "":
+		return &transitionRejection{code: stopNotAvailableCode, message: "Stop needs an open Round"}
+	case state.stopRequested:
+		return &transitionRejection{code: stopAlreadyRequestedCode, message: "Stop is already requested for this Round"}
+	}
+	return nil
+}
+
 func containsStatus(statuses []TicketStatus, target TicketStatus) bool {
 	for _, s := range statuses {
 		if s == target {
@@ -146,6 +162,7 @@ func allowedActionsForTicket(state ticketWorkflowState, condition TicketCompleti
 		StatusChanges:          []TicketStatus{},
 		StatusChangeRejections: []TicketStatusChangeRejection{},
 		Rework:                 commandAvailability(decideRework(state)),
+		Stop:                   commandAvailability(decideStop(state)),
 	}
 	if rejection := decideTicketMutation(state.ticketLock, false); rejection != nil {
 		actions.Accept = commandAvailability(rejection)
