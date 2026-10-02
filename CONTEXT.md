@@ -121,7 +121,7 @@ The condition of an open **Round** after the owner has requested Stop and before
 _Avoid_: Stopped while the round is still open.
 
 **Stopped**:
-The outcome of a **Round** whose execution has ended following the owner's explicit stop request. Its **Ticket** returns to **Backlog** with a Stopped **Badge**, while the round's history, usage, and available partial results remain preserved.
+The terminal outcome of a **Round** whose runner has confirmed its execution ended following the owner's explicit stop request. Its **Ticket** returns to **Backlog** with the Stopped **Badge**, an ordinary Badge the owner may remove without changing the outcome; the round's activity and usage remain part of its history. Only an explicit move to Ready starts another round.
 _Avoid_: Interrupted when the round ended through an intentional stop request.
 
 **Failed**:

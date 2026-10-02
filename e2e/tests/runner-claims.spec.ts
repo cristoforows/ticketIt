@@ -120,6 +120,20 @@ test("a paired runner's claim of the top queued Ticket leaves it Ready, shows Cl
     await expect(page.getByTestId("ticket-detail-runner-disconnected")).toContainText("Runner disconnected");
     await expect(page.getByTestId("ticket-detail-round-state")).toHaveText("Claimed, waiting for the runner to start");
     await expect(page.getByTestId("ticket-detail-locked")).toHaveText(lockCopy);
+
+    // No Michelin polls this Round's commands, so Stopping lasts here; runner-stop.spec.ts confirms within a poll (#160).
+    const [stopped] = await Promise.all([
+      page.waitForResponse((r) => r.url().endsWith(`/api/tickets/${queued.id}/stop`) && r.request().method() === "POST"),
+      page.getByTestId("ticket-detail-stop-button").click(),
+    ]);
+    expect(stopped.status()).toBe(200);
+    await page.reload();
+    await expect(page.getByTestId("ticket-detail-stopping")).toHaveText("Stopping…");
+    await expect(page.getByTestId("ticket-detail-claimed")).toHaveText("Claimed by runner");
+    await expect(page.getByTestId("ticket-detail-locked")).toHaveText(lockCopy);
+    await page.goto("/board");
+    await expect(page.getByTestId("board-status-Ready").getByTestId(`board-ticket-${queued.id}`).getByTestId("board-stopping")).toHaveText("Stopping…");
+    expect(await ticket(page, queued.id)).toMatchObject({ status: "Ready", openRound: { id: round.id, state: "claimed", stopRequestedAt: expect.any(String) }, allowedActions: { stop: { available: false, reason: { code: "stop_already_requested" } } } });
   } finally {
     await runner.dispose();
   }

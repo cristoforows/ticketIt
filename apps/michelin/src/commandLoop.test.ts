@@ -33,6 +33,7 @@ function json(body: unknown, status = 200): Response {
 const noWork = () => new Response(null, { status: 204 });
 const claimed = () => json(CLAIM, 201);
 const created = () => json({ roundId: CLAIM.roundId, type: "execution_started", state: "running", startedAt: "2026-10-02T11:59:00Z" }, 201);
+const stopConfirmed = () => json({ roundId: CLAIM.roundId, type: "stop_confirmed", state: "stopped", startedAt: "2026-10-02T11:59:00Z", endedAt: "2026-10-02T12:00:04Z" }, 201);
 const listing = (...commands: unknown[]) => () => json({ commands });
 const unavailable = (status: number) => () => json({ error: { code: "database_unavailable", message: "try again" } }, status);
 const alreadyAcknowledged = () => json({ error: { code: "command_already_acknowledged", message: "another outcome" } }, 409);
@@ -42,7 +43,7 @@ type Route = (() => Response)[];
 function galley(routes: { claims?: Route; commands: Route; ack?: Route; events?: Route }) {
   const claims = routes.claims ?? [noWork, claimed, noWork];
   const acks = routes.ack ?? [];
-  const events = routes.events ?? [created];
+  const events = routes.events ?? [created, stopConfirmed];
   return vi.fn<FetchFn>(async (input, init) => {
     const path = new URL(String(input)).pathname;
     const queue = path === claimsPath ? claims : path === eventPath ? events : path === commandsPath ? routes.commands : path.startsWith(`${commandsPath}/`) ? acks : undefined;
@@ -118,11 +119,13 @@ describe("command loop", () => {
 
     await vi.advanceTimersByTimeAsync(4000);
 
-    expect(messages()).toEqual(["round claimed", "execution started reported", ...(script === START_HOLD ? ["engine holding"] : []), "stop requested", "engine stopped", "command acknowledged"]);
+    expect(messages()).toEqual(["round claimed", "execution started reported", ...(script === START_HOLD ? ["engine holding"] : []), "stop requested", "engine stopped", "stop confirmation reported", "command acknowledged"]);
     expect(records().find((record) => record["msg"] === "engine stopped")).toMatchObject({ roundId: CLAIM.roundId, stepIndex });
     expect(records().find((record) => record["msg"] === "command acknowledged")).toMatchObject({ commandId: STOP.id, outcome: "applied", attempt: 1 });
     expect(ackBodies(fetchFn, STOP.id)).toEqual([{ outcome: "applied" }]);
-    expect(calls(fetchFn, eventPath)).toHaveLength(1);
+    const events = calls(fetchFn, eventPath).map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+    expect(events.map((event) => event["type"])).toEqual(["execution_started", "stop_confirmed"]);
+    expect(events[1]).toMatchObject({ idempotencyKey: `${CLAIM.roundId}:stop`, claimEpoch: CLAIM.claimEpoch, data: { evidence: `Stopped before step ${stepIndex + 1} of ${script.steps.length} on Stop command ${STOP.id}` } });
     const ackAt = fetchFn.mock.calls.findIndex(([input]) => new URL(String(input)).pathname === ackPath(STOP.id));
     expect(fetchFn.mock.calls.slice(ackAt + 1).every(([input]) => new URL(String(input)).pathname === claimsPath)).toBe(true);
 
@@ -132,6 +135,42 @@ describe("command loop", () => {
     expect(calls(fetchFn, commandsPath)).toHaveLength(2);
     await loop.stop();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("acknowledges the Stop applied only once the confirmation lands through 5xx retries", async () => {
+    const fetchFn = galley({ commands: [listing(STOP), listing()], events: [created, unavailable(503), unavailable(500), stopConfirmed] });
+    const { loop, messages } = setup(fetchFn);
+
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(calls(fetchFn, eventPath)).toHaveLength(2);
+    expect(calls(fetchFn, ackPath(STOP.id))).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls(fetchFn, eventPath)).toHaveLength(3);
+    expect(calls(fetchFn, ackPath(STOP.id))).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(calls(fetchFn, eventPath)).toHaveLength(4);
+    expect(ackBodies(fetchFn, STOP.id)).toEqual([{ outcome: "applied" }]);
+    const confirmedAt = fetchFn.mock.calls.findLastIndex(([input]) => new URL(String(input)).pathname === eventPath);
+    const ackAt = fetchFn.mock.calls.findIndex(([input]) => new URL(String(input)).pathname === ackPath(STOP.id));
+    expect(ackAt).toBeGreaterThan(confirmedAt);
+    expect(messages().slice(-2)).toEqual(["stop confirmation reported", "command acknowledged"]);
+    await loop.stop();
+  });
+
+  it("acknowledges nothing and resumes claiming when Galley refuses the confirmation", async () => {
+    const refusal = () => json({ error: { code: "round_not_open", message: "this Round is no longer open" } }, 409);
+    const fetchFn = galley({ commands: [listing(STOP), listing()], events: [created, refusal] });
+    const { loop, records, messages } = setup(fetchFn);
+
+    await vi.advanceTimersByTimeAsync(6000);
+
+    expect(records().find((record) => record["msg"] === "round event refused; round abandoned locally")).toMatchObject({ level: "error", step: "stop", httpStatus: 409, errorCode: "round_not_open" });
+    expect(messages()).not.toContain("stop confirmation reported");
+    expect(calls(fetchFn, ackPath(STOP.id))).toHaveLength(0);
+    expect(calls(fetchFn, eventPath)).toHaveLength(2);
+    expect(calls(fetchFn, claimsPath).length).toBeGreaterThan(2);
+    await loop.stop();
   });
 
   it("sends no acknowledgement when the delivery in flight lands after the Stop", async () => {

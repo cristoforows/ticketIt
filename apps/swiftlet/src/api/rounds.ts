@@ -47,7 +47,7 @@ function parseRound(value: unknown): TicketRound | undefined {
     !round ||
     typeof round.id !== "string" ||
     typeof round.sequence !== "number" ||
-    (round.state !== "claimed" && round.state !== "running" && round.state !== "delivered") ||
+    (round.state !== "claimed" && round.state !== "running" && round.state !== "delivered" && round.state !== "stopped") ||
     !isAgentSummary(round.agent) ||
     typeof round.claimedAt !== "string" ||
     !isNullableString(round.startedAt) ||
@@ -59,7 +59,8 @@ function parseRound(value: unknown): TicketRound | undefined {
   const activity = round.activity.map(parseNote);
   const usage = parseUsage(round.usage);
   const deliverable = round.state === "delivered" ? parseDeliverable(round.deliverable) : round.deliverable === null ? null : undefined;
-  if (!usage || deliverable === undefined || !activity.every((note) => note !== undefined)) return undefined;
+  const outcomeNote = round.state === "stopped" ? (typeof round.outcomeNote === "string" ? round.outcomeNote : undefined) : round.outcomeNote === null ? null : undefined;
+  if (!usage || deliverable === undefined || outcomeNote === undefined || !activity.every((note) => note !== undefined)) return undefined;
   const { id, name, kind } = round.agent;
   return {
     id: round.id,
@@ -69,6 +70,7 @@ function parseRound(value: unknown): TicketRound | undefined {
     claimedAt: round.claimedAt,
     startedAt: round.startedAt,
     endedAt: round.endedAt,
+    outcomeNote,
     activity: activity as RoundActivityNote[],
     usage,
     deliverable,

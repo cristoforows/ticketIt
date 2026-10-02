@@ -178,14 +178,20 @@ reconciliation, which is M5 (#6).
 
 **Stop.** A Stop for the claim's epoch ends a `wait` or a `hold` at
 once. An event already in flight, its retries and backoff included, is
-allowed to finish; the engine then sends nothing further and logs
-`engine stopped`. Once the engine has stopped,
+allowed to finish; the engine then runs no further step and logs
+`engine stopped`. It then sends `stop_confirmed` with key
+`<roundId>:stop` and `data.evidence` `Stopped before step <step index
++ 1> of <step count> on Stop command <commandId>` (`Stopped after step
+<step count> of <step count> …` when the Stop lands during the last
+step's `wait`), with the same retry as any event.
+Galley answers `stopped`: the Round has ended, its slot is free and the
+Ticket is in Backlog with the Stopped Badge. Only after that answer is
 `POST /api/runner/rounds/{roundId}/commands/{commandId}/ack` with
-`{"outcome": "applied"}` is sent with the same retry as an event. A
-Round whose in-flight delivery lands, or whose event is refused, ends as
-delivered or abandoned, and its Stop is not acknowledged. Michelin
-sends no further event for a stopped Round; Galley ends the Round in
-M5.2. Claim polling resumes once the acknowledgement is answered.
+`{"outcome": "applied"}` sent, with the same retry. If Galley refuses
+the confirmation, Michelin logs `round event refused; round abandoned
+locally` and acknowledges nothing. A Round whose in-flight delivery
+lands ends as delivered, and its Stop is not acknowledged. Claim
+polling resumes once the acknowledgement is answered.
 
 Stopping Michelin aborts a wait, a hold, a backoff and an in-flight
 request at once.
@@ -215,7 +221,8 @@ context fields. The credential is never logged.
 | `round event refused; round abandoned locally` | `error` | `roundId`, `step`, `attempt`, `httpStatus`, Galley's `errorCode`. |
 | `engine holding`, `engine script finished` | `info` | The script reached `hold`, or its last step. |
 | `stop requested` | `info` | A `stop` for the claim's epoch arrived: `roundId`, `commandId`, `type`, `commandEpoch`, `claimEpoch`. |
-| `engine stopped` | `info` | The engine halted at `stepIndex` for a Stop. |
+| `engine stopped` | `info` | The engine halted at `stepIndex` for the Stop `commandId`. |
+| `stop confirmation reported` | `info` | `roundId`, `step` `stop`, `attempt`, `httpStatus`, Galley's `endedAt`. |
 | `command for another claim epoch ignored` | `warn` | As `stop requested`; the command is acknowledged `ignored`. |
 | `unknown command left unacknowledged` | `warn` | As `stop requested`, for a type this Michelin does not know. |
 | `round commands poll failed` | `error` | `roundId`, `reason`, `httpStatus`, `errorCode`; polling continues. |

@@ -572,7 +572,7 @@ func TestRounds_IdentityIsGalleyIssuedAndHasNoEngineReference(t *testing.T) {
 		columns = append(columns, name)
 	}
 	rows.Close()
-	want := []string{"agent_id", "claim_epoch", "claimed_at", "ended_at", "id", "owner_id", "public_id", "sequence", "started_at", "state", "ticket_id"}
+	want := []string{"agent_id", "claim_epoch", "claimed_at", "ended_at", "id", "outcome_note", "owner_id", "public_id", "sequence", "started_at", "state", "ticket_id"}
 	if !equalStrings(columns, want) {
 		t.Fatalf("rounds columns = %v, want %v (an engine execution reference is a separate record, ADR 0002)", columns, want)
 	}
@@ -595,7 +595,7 @@ func TestRounds_DatabaseEnforcesTheSlotAndInvariants(t *testing.T) {
 	}{
 		{"second claimed Round for the Owner", b.Id, "claimed", "NULL, NULL", oneOpenRoundPerOwnerIndex},
 		{"running beside a claimed Round", b.Id, "running", "now(), NULL", oneOpenRoundPerOwnerIndex},
-		{"state outside M4", b.Id, "stopped", "now(), now()", "rounds_state_m4"},
+		{"state outside M5.2", b.Id, "failed", "now(), now()", "rounds_state_m5"},
 		{"claimed with a start", b.Id, "claimed", "now(), NULL", "rounds_timestamps_follow_state"},
 		{"delivered without an end", b.Id, "delivered", "now(), NULL", "rounds_timestamps_follow_state"},
 		{"ended before claimed", b.Id, "delivered", "now(), now() - interval '1 hour'", "rounds_timestamps_ordered"},

@@ -789,10 +789,10 @@ Evidence: `docs/evidence/m4/134-controlled-engine.md`.
 
 ## Round activity and usage (issue #135)
 
-While the receipt's Ticket has an open Round or a delivery, the receipt
-fetches `GET /api/tickets/{id}/rounds` (`fetchTicketRounds`,
+The receipt fetches `GET /api/tickets/{id}/rounds` (`fetchTicketRounds`,
 `src/api/rounds.ts`) when it loads and on each tick of the same 3 s
-refresh, after the Ticket fetch, so there is no second timer. Each
+refresh, after the Ticket fetch, so there is no second timer (see
+"Confirmed Stop" for why every Ticket's list is fetched on load). Each
 Round's entry shows:
 
 - **Activity** (`ticket-detail-round-activity`): Galley's notes (at most
@@ -830,8 +830,7 @@ later Round is claimed).
   (`ticket-detail-delivered`) show **Delivered by {Agent}**
   (`DeliveredTag`, In Review's deep colour on paper) whenever
   `delivery` is set.
-- **No reload.** The receipt fetches the Round list when the Ticket has
-  an open Round *or* a delivery. On the refresh tick whose Ticket comes
+- **No reload.** On the refresh tick whose Ticket comes
   back delivered, it fetches the list once more in the same tick, so
   In Review, the tag and the deliverable appear together; then
   `openRound` is `null` and the 3 s timer stops. There is no second
@@ -955,3 +954,33 @@ state, and sets the repository reference on both Templates — see
 across-a-restart guarantee is proven at the Go level instead
 (`apps/galley/README.md`, "Ticket Templates and the retained
 completion condition"), so this spec needs no restart of its own.
+
+## Confirmed Stop (issue #160)
+
+When Michelin confirms a Stop, Galley ends the Round as `stopped`, moves
+the Ticket to Backlog and attaches the Stopped Badge. Swiftlet renders
+what Galley returns:
+
+- **Round entry.** A `stopped` Round's summary reads **Round n ·
+  Stopped**, with a `StoppedTag` (`ticket-detail-round-stopped`, the
+  `tag` cva's `stopped` variant: paper on Blocked-deep,
+  `tokens.test.ts` "stopped tag"). The entry shows **Stopped at**
+  (`ticket-detail-round-stopped-at`), the Round's `outcomeNote` under
+  **Outcome** (`ticket-detail-round-outcome-note`), and its Activity and
+  **Usage**. A Round stopped while claimed has no Started at.
+- **Badge.** The Stopped Badge is an ordinary Badge and renders through
+  the Badge tags; Swiftlet never reads it to infer the outcome.
+- **Stopping… disappears** because `openRound` is `null`, and the
+  receipt stops refreshing.
+- **Loading.** A stopped Ticket has neither an open Round nor a
+  delivery, so the receipt fetches the Round list on load for every
+  Ticket and on every refresh tick, and shows the Rounds section when
+  the Ticket has an open Round, a delivery or any listed Round. A Ticket
+  with no Round costs one extra request on load.
+- **Parsing.** `parseRound` accepts `stopped` and requires `outcomeNote`
+  to be a string exactly when the state is `stopped` and `null`
+  otherwise; a mismatch rejects the response.
+
+Tests: `TicketDetail.test.tsx` ("the Round history"),
+`TicketDetailPage.test.tsx` (the refresh that sees the Stop, and a
+reopened stopped Ticket) and `api/rounds.test.ts` (parsing).

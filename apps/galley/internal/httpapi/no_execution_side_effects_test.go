@@ -115,6 +115,11 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 	if resp := doLifecycleRequest(t, client, http.MethodPost, baseURL+"/api/tickets/"+created.Id+"/stop", nil); resp.status != http.StatusBadRequest || resp.errBody.Error.Code != stopNotAvailableCode {
 		t.Fatalf("stop without an open Round: status = %d, want 400 %s; error=%+v", resp.status, stopNotAvailableCode, resp.errBody)
 	}
+	for _, to := range []TicketStatus{Backlog, Ready} {
+		if resp := changeStatus(t, client, baseURL, created.Id, to); resp.status != http.StatusOK || len(resp.ticket.Badges) != 0 {
+			t.Fatalf("change status to %s: status = %d, badges = %+v, want 200 and none; error=%+v", to, resp.status, resp.ticket.Badges, resp.errBody)
+		}
+	}
 	assign(toOwner)
 	for _, to := range []TicketStatus{InProgress, Blocked, InProgress, InReview} {
 		if resp := changeStatus(t, client, baseURL, created.Id, to); resp.status != http.StatusOK {
@@ -210,6 +215,10 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 		case "round_deliverables":
 			if after != before[table] {
 				t.Errorf("%s row count changed from %d to %d -- a manual action recorded a deliverable; only a runner's delivered event may", table, before[table], after)
+			}
+		case "badges", "ticket_badges":
+			if after != before[table] {
+				t.Errorf("%s row count changed from %d to %d -- a manual move to Backlog created or attached a Badge; only a confirmed Stop attaches the Stopped Badge", table, before[table], after)
 			}
 		case "round_commands":
 			if after != before[table] {

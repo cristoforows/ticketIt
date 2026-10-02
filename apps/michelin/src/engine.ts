@@ -7,7 +7,7 @@ import type { Logger } from "./logger.ts";
 import { sleep } from "./statusLoop.ts";
 
 interface PendingEvent {
-  step: "start" | "progress" | "usage" | "deliver";
+  step: "start" | "progress" | "usage" | "deliver" | "stop";
   stepIndex: number;
   event: RoundEventRequest;
   reported: string;
@@ -75,12 +75,24 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
     data,
   });
   const halt = AbortSignal.any([signal, stop]);
-  const stopped = (): EngineOutcome => {
-    logger.info("engine stopped", { roundId, stepIndex });
-    return "stopped";
+  const steps = options.script.steps;
+  // Sent only once the engine has ceased: Galley ends the Round on this event alone.
+  const stopped = async (): Promise<EngineOutcome> => {
+    const commandId = typeof stop.reason === "string" ? stop.reason : undefined;
+    logger.info("engine stopped", { roundId, stepIndex, ...(commandId === undefined ? {} : { commandId }) });
+    const position = stepIndex < steps.length ? `before step ${stepIndex + 1}` : `after step ${steps.length}`;
+    const evidence = `Stopped ${position} of ${steps.length}${commandId === undefined ? "" : ` on Stop command ${commandId}`}`;
+    const outcome = await sendEvent(options, deps, {
+      step: "stop",
+      stepIndex,
+      event: envelope("stop_confirmed", `${roundId}:stop`, { evidence }),
+      reported: "stop confirmation reported",
+      context: {},
+    });
+    return outcome === "sent" ? "stopped" : outcome;
   };
   let stepIndex = 0;
-  for (const step of options.script.steps) {
+  for (const step of steps) {
     if (signal.aborted) {
       return "aborted";
     }

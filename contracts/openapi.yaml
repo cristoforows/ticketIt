@@ -1105,12 +1105,16 @@ paths:
         Round's, `409 round_not_open` for a Round that has ended, and
         `409 event_out_of_order` for a type the Round's state cannot
         take: `execution_started` needs a claimed Round; `progress`,
-        `usage_observed` and `delivered` a running one. A
-        `usage_observed` whose `observationId` is already recorded for
-        another Round is `409 observation_id_conflict`. `delivered`
-        retains the deliverable, ends the Round as `delivered`, frees the
-        Owner's slot and moves the Ticket from In Progress to In Review,
-        never Done. A body over 8 MiB is `413 request_too_large`. A
+        `usage_observed` and `delivered` a running one; `stop_confirmed`
+        either, and then `409 stop_not_requested` unless the Owner
+        requested Stop. A `usage_observed` whose `observationId` is
+        already recorded for another Round is
+        `409 observation_id_conflict`. `delivered` retains the
+        deliverable, ends the Round as `delivered`, frees the Owner's
+        slot and moves the Ticket from In Progress to In Review, never
+        Done. `stop_confirmed` ends the Round as `stopped` with its
+        evidence, frees the slot and moves the Ticket to Backlog with the
+        Stopped Badge. A body over 8 MiB is `413 request_too_large`. A
         rejection changes nothing. An unknown, malformed or foreign Round
         id returns the shared 404. A runner that is not Connected is
         still accepted, and an event is not a heartbeat.
@@ -1139,7 +1143,8 @@ paths:
           description: >-
             Error. See `ErrorBody`. Includes `idempotency_key_conflict`,
             `stale_claim_epoch`, `round_not_open`, `event_out_of_order`,
-            `observation_id_conflict` and `request_too_large`.
+            `stop_not_requested`, `observation_id_conflict` and
+            `request_too_large`.
           content:
             application/json:
               schema:
@@ -1536,9 +1541,10 @@ components:
       type: string
       description: >-
         `claimed` and `running` are open. `delivered` has ended and moved
-        the Ticket to In Review.
-      enum: [claimed, running, delivered]
-      x-enum-varnames: [RoundClaimed, RoundRunning, RoundDelivered]
+        the Ticket to In Review. `stopped` has ended and moved the Ticket
+        to Backlog.
+      enum: [claimed, running, delivered, stopped]
+      x-enum-varnames: [RoundClaimed, RoundRunning, RoundDelivered, RoundStopped]
     OpenRoundState:
       type: string
       description: >-
@@ -1578,7 +1584,7 @@ components:
     TicketRound:
       type: object
       additionalProperties: false
-      required: [id, sequence, state, agent, claimedAt, startedAt, endedAt, activity, usage, deliverable]
+      required: [id, sequence, state, agent, claimedAt, startedAt, endedAt, activity, usage, deliverable, outcomeNote]
       properties:
         id: {type: string, format: uuid, x-go-type: string}
         sequence: {type: integer, minimum: 1}
@@ -1603,6 +1609,9 @@ components:
           oneOf:
             - $ref: "#/components/schemas/RoundDeliverable"
             - type: "null"
+        outcomeNote:
+          type: [string, "null"]
+          description: Set exactly when `state` is `stopped`.
     RoundDeliverable:
       type: object
       additionalProperties: false
@@ -2064,8 +2073,8 @@ components:
     RoundEventType:
       type: string
       description: Grows by slice.
-      enum: [execution_started, progress, usage_observed, delivered]
-      x-enum-varnames: [RoundEventExecutionStarted, RoundEventProgress, RoundEventUsageObserved, RoundEventDelivered]
+      enum: [execution_started, progress, usage_observed, delivered, stop_confirmed]
+      x-enum-varnames: [RoundEventExecutionStarted, RoundEventProgress, RoundEventUsageObserved, RoundEventDelivered, RoundEventStopConfirmed]
     ExecutionStartedData:
       type: object
       additionalProperties: false
@@ -2144,6 +2153,19 @@ components:
           minLength: 1
           maxLength: 10000
           description: The Success Criteria assessment, counted in Unicode code points.
+    StopConfirmedData:
+      type: object
+      additionalProperties: false
+      required: [evidence]
+      properties:
+        evidence:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: >-
+            What was halted, kept as the Round's `outcomeNote`. Counted in
+            Unicode code points. Not blank; no control characters but tab
+            and line feed.
     RoundEventRequest:
       type: object
       additionalProperties: false
@@ -2169,12 +2191,14 @@ components:
         data:
           description: >-
             The payload for `type`: `ExecutionStartedData`,
-            `ProgressData`, `UsageObservedData` or `DeliveredData`.
+            `ProgressData`, `UsageObservedData`, `DeliveredData` or
+            `StopConfirmedData`.
           oneOf:
             - $ref: "#/components/schemas/ExecutionStartedData"
             - $ref: "#/components/schemas/ProgressData"
             - $ref: "#/components/schemas/UsageObservedData"
             - $ref: "#/components/schemas/DeliveredData"
+            - $ref: "#/components/schemas/StopConfirmedData"
     RoundEventResult:
       type: object
       additionalProperties: false
@@ -2185,11 +2209,14 @@ components:
           $ref: "#/components/schemas/RoundEventType"
         state:
           $ref: "#/components/schemas/RoundState"
-        startedAt: {type: string, format: date-time}
+        startedAt:
+          type: [string, "null"]
+          format: date-time
+          description: Null only for a Round stopped before it started.
         endedAt:
           type: string
           format: date-time
-          description: For `delivered`.
+          description: For `delivered` and `stop_confirmed`.
         seq:
           type: integer
           minimum: 1

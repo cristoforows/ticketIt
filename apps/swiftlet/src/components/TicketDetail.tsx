@@ -229,7 +229,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onRewor
             <ReceiptLine label="Created" data-testid="ticket-detail-created-at">{current.createdAt}</ReceiptLine>
             <ReceiptLine label="Updated" data-testid="ticket-detail-updated-at">{current.updatedAt}</ReceiptLine>
           </dl>
-          {(current.openRound || current.delivery) && (
+          {(current.openRound || current.delivery || (roundRecords?.rounds?.length ?? 0) > 0) && (
             <>
               <Rule />
               <RoundsSection openRound={current.openRound} runnerHealth={runnerHealth} records={roundRecords} />

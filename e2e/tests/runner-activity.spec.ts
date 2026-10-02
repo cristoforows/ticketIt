@@ -2,7 +2,7 @@ import { once } from "node:events";
 import { test, expect, type APIRequestContext, type Locator } from "@playwright/test";
 import { signIn, signInWithoutBrowser } from "../support/sign-in";
 import { pairRunnerViaApi, startMichelin, type EngineScriptStep } from "../support/runner";
-import { assignTicketDirect, changeTicketStatusDirect, createAgent, createTicket, listRounds, NO_USAGE, updateTicketDirect, type Round } from "../support/tickets";
+import { assignTicketDirect, changeTicketStatusDirect, createAgent, createTicket, listRounds, NO_USAGE, stopRoundThroughGalley, updateTicketDirect, type Round } from "../support/tickets";
 
 const SCRIPT: EngineScriptStep[] = [
   { step: "start" },
@@ -96,11 +96,14 @@ test("a real Michelin's activity notes and usage observations appear on the rece
     await expect(notes).toHaveCount(2);
     await expectUsage(usage, incomplete);
 
+    const ended = await stopRoundThroughGalley(api, queued.id);
+    expect(ended.status).toBe("Backlog");
+    expect(await round(api, queued.id)).toEqual({ ...settled, state: "stopped", endedAt: expect.any(String), outcomeNote: expect.stringMatching(/^Stopped before step 8 of 8 on Stop command [0-9a-f-]{36}$/) });
+
     michelin.child.kill("SIGTERM");
     const [code] = await once(michelin.child, "exit");
     stopped = true;
     expect(code).toBe(0);
-    expect(await round(api, queued.id)).toEqual(settled);
   } finally {
     if (!stopped) michelin.child.kill("SIGKILL");
     await context.close();
