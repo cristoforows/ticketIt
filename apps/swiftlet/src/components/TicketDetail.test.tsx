@@ -941,6 +941,40 @@ describe("the Rounds section", () => {
       expect(screen.getByTestId("ticket-detail-round-activity-empty")).toBeInTheDocument();
     });
 
+    it.each([
+      { state: "failed" as const, label: "Failed", note: "The repository is gone.", colours: ["bg-status-blocked-deep", "text-paper"] },
+      { state: "interrupted" as const, label: "Interrupted", note: "The engine process exited with signal 9.", colours: ["border-dashed", "bg-paper", "text-status-blocked-deep"] },
+    ])("shows a $state Round with its tag, its note beneath, its activity and usage, and offers the Owner Ready", ({ state, label, note, colours }) => {
+      const ended: TicketRound = {
+        ...recordOf(runningRound),
+        state,
+        endedAt: "2026-10-01T10:05:00Z",
+        outcomeNote: note,
+        activity: [{ seq: 1, note: "Reading the Ticket", occurredAt: "2026-10-01T10:02:00Z" }],
+        usage: { ...usage, observations: 1, inputTokens: { sum: 1200, complete: true, estimated: false } },
+      };
+      const blocked: Ticket = { ...roundTicket(null, "Blocked"), allowedActions: { ...roundTicket(null, "Blocked").allowedActions, statusChanges: ["Ready"] } };
+      render(<TicketDetail ticket={blocked} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [ended, round1] }} />);
+
+      const entry = within(entries()[0]);
+      expect(entries()[0]).toHaveAttribute("data-state", state);
+      expect(entry.getByTestId(`ticket-detail-round-${state}`)).toHaveTextContent(label);
+      expect(entry.getByTestId(`ticket-detail-round-${state}`).className.split(" ")).toEqual(expect.arrayContaining(colours));
+      expect(entries()[0].querySelector("summary")!.textContent).toBe(`+−Round 3 · ${label}`);
+      expect(entry.getByTestId("ticket-detail-round-outcome-note")).toHaveTextContent(note);
+      expect(entry.getByTestId(`ticket-detail-round-${state}-at`)).toHaveTextContent("2026-10-01T10:05:00Z");
+      expect(entry.getAllByTestId("ticket-detail-round-note").map((item) => item.textContent)).toEqual(["2026-10-01T10:02:00ZReading the Ticket"]);
+      expect(entry.getByRole("heading", { name: "Usage" })).toBeInTheDocument();
+      expect(entry.getByTestId("ticket-detail-round-usage-input-tokens")).toHaveTextContent("1,200");
+      expect(entry.queryByTestId("ticket-detail-round-summary")).not.toBeInTheDocument();
+      expect(entry.queryByTestId("ticket-detail-round-stopped")).not.toBeInTheDocument();
+      expect(within(entries()[1]).queryByTestId(`ticket-detail-round-${state}`)).not.toBeInTheDocument();
+
+      expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("Blocked");
+      expect(screen.getByTestId("ticket-detail-status-button-Ready")).toBeEnabled();
+      expect(screen.queryByTestId("ticket-detail-locked")).not.toBeInTheDocument();
+    });
+
     it("shows the records error beside the last good list", () => {
       render(<TicketDetail ticket={deliveredTicket} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [round2, round1], error: "503" }} />);
       expect(screen.getByTestId("ticket-detail-round-records-error")).toHaveTextContent("503");

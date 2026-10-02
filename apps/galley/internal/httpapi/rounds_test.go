@@ -595,7 +595,7 @@ func TestRounds_DatabaseEnforcesTheSlotAndInvariants(t *testing.T) {
 	}{
 		{"second claimed Round for the Owner", b.Id, "claimed", "NULL, NULL", oneOpenRoundPerOwnerIndex},
 		{"running beside a claimed Round", b.Id, "running", "now(), NULL", oneOpenRoundPerOwnerIndex},
-		{"state outside M5.2", b.Id, "failed", "now(), now()", "rounds_state_m5"},
+		{"state outside M5.3", b.Id, "abandoned", "now(), now()", "rounds_state_m5"},
 		{"claimed with a start", b.Id, "claimed", "now(), NULL", "rounds_timestamps_follow_state"},
 		{"delivered without an end", b.Id, "delivered", "now(), NULL", "rounds_timestamps_follow_state"},
 		{"ended before claimed", b.Id, "delivered", "now(), now() - interval '1 hour'", "rounds_timestamps_ordered"},

@@ -97,6 +97,7 @@ of that history is erased. The following owner transitions apply with no open Ro
 | In Progress | Ready | Yes | Owner pauses or backs out. |
 | In Progress | Blocked | Yes | Owner marks their own work stuck; no fake Round is created. |
 | Blocked | In Progress | Yes | Owner resumes human work when unblocked. |
+| Blocked | Ready | Agent-assigned only, no open Round | Owner's explicit recovery after Failed or Interrupted (M5.3). |
 | In Progress | In Review | Yes | Owner marks their work ready for review/completion. |
 | In Review | In Progress | Yes | Manual rework; no new execution Round. |
 | In Review | Done (human-acceptance condition) | Via explicit Accept | Same owner action as acceptance of Agent-delivered work. |

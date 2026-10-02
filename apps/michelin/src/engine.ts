@@ -7,14 +7,14 @@ import type { Logger } from "./logger.ts";
 import { sleep } from "./statusLoop.ts";
 
 interface PendingEvent {
-  step: "start" | "progress" | "usage" | "deliver" | "stop";
+  step: "start" | "progress" | "usage" | "deliver" | "fail" | "interrupt" | "stop";
   stepIndex: number;
   event: RoundEventRequest;
   reported: string;
   context: Record<string, unknown>;
 }
 
-export type EngineOutcome = "completed" | "delivered" | "abandoned" | "aborted" | "stopped";
+export type EngineOutcome = "completed" | "delivered" | "failed" | "interrupted" | "abandoned" | "aborted" | "stopped";
 
 export interface EngineDeps {
   sleep: (ms: number, signal: AbortSignal) => Promise<void>;
@@ -127,6 +127,12 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
         pending = { step: "deliver", stepIndex, event: envelope("delivered", `${roundId}:${stepIndex}`, deliverable), reported: "delivery reported", context: {} };
         break;
       }
+      case "fail":
+        pending = { step: "fail", stepIndex, event: envelope("failed", `${roundId}:${stepIndex}`, { explanation: step.explanation }), reported: "failure reported", context: {} };
+        break;
+      case "interrupt":
+        pending = { step: "interrupt", stepIndex, event: envelope("interrupted", `${roundId}:${stepIndex}`, { evidence: step.evidence }), reported: "interruption reported", context: {} };
+        break;
       case "wait":
         await deps.sleep(step.ms, halt);
         break;
@@ -143,6 +149,14 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
       if (pending.step === "deliver") {
         logger.info("engine delivered", { roundId });
         return "delivered";
+      }
+      if (pending.step === "fail") {
+        logger.info("engine failed", { roundId });
+        return "failed";
+      }
+      if (pending.step === "interrupt") {
+        logger.info("engine interrupted", { roundId });
+        return "interrupted";
       }
     }
     stepIndex++;

@@ -112,6 +112,8 @@ func (e OpenRoundState) Valid() bool {
 const (
 	RoundEventDelivered        RoundEventType = "delivered"
 	RoundEventExecutionStarted RoundEventType = "execution_started"
+	RoundEventFailed           RoundEventType = "failed"
+	RoundEventInterrupted      RoundEventType = "interrupted"
 	RoundEventProgress         RoundEventType = "progress"
 	RoundEventStopConfirmed    RoundEventType = "stop_confirmed"
 	RoundEventUsageObserved    RoundEventType = "usage_observed"
@@ -123,6 +125,10 @@ func (e RoundEventType) Valid() bool {
 	case RoundEventDelivered:
 		return true
 	case RoundEventExecutionStarted:
+		return true
+	case RoundEventFailed:
+		return true
+	case RoundEventInterrupted:
 		return true
 	case RoundEventProgress:
 		return true
@@ -137,10 +143,12 @@ func (e RoundEventType) Valid() bool {
 
 // Defines values for RoundState.
 const (
-	RoundClaimed   RoundState = "claimed"
-	RoundDelivered RoundState = "delivered"
-	RoundRunning   RoundState = "running"
-	RoundStopped   RoundState = "stopped"
+	RoundClaimed     RoundState = "claimed"
+	RoundDelivered   RoundState = "delivered"
+	RoundFailed      RoundState = "failed"
+	RoundInterrupted RoundState = "interrupted"
+	RoundRunning     RoundState = "running"
+	RoundStopped     RoundState = "stopped"
 )
 
 // Valid indicates whether the value is a known member of the RoundState enum.
@@ -149,6 +157,10 @@ func (e RoundState) Valid() bool {
 	case RoundClaimed:
 		return true
 	case RoundDelivered:
+		return true
+	case RoundFailed:
+		return true
+	case RoundInterrupted:
 		return true
 	case RoundRunning:
 		return true
@@ -545,6 +557,18 @@ type ExecutionStartedData struct {
 	EngineReference string `json:"engineReference"`
 }
 
+// FailedData defines model for FailedData.
+type FailedData struct {
+	// Explanation Why the work cannot be completed, kept as the Round's `outcomeNote`. Counted in Unicode code points. Not blank; no control characters but tab and line feed.
+	Explanation string `json:"explanation"`
+}
+
+// InterruptedData defines model for InterruptedData.
+type InterruptedData struct {
+	// Evidence The runner's own evidence that execution ceased, kept as the Round's `outcomeNote`. Counted in Unicode code points. Not blank; no control characters but tab and line feed.
+	Evidence string `json:"evidence"`
+}
+
 // OpenRoundState A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress.
 type OpenRoundState string
 
@@ -610,7 +634,7 @@ type RoundEventRequest struct {
 	// ClaimEpoch The fencing token from the claim.
 	ClaimEpoch int `json:"claimEpoch"`
 
-	// Data The payload for `type`: `ExecutionStartedData`, `ProgressData`, `UsageObservedData`, `DeliveredData` or `StopConfirmedData`.
+	// Data The payload for `type`: `ExecutionStartedData`, `ProgressData`, `UsageObservedData`, `DeliveredData`, `StopConfirmedData`, `FailedData` or `InterruptedData`. Not `oneOf`: `StopConfirmedData` and `InterruptedData` share a shape.
 	Data RoundEventRequest_Data `json:"data"`
 
 	// IdempotencyKey Taken verbatim; identity is never trimmed.
@@ -623,14 +647,14 @@ type RoundEventRequest struct {
 	Type RoundEventType `json:"type"`
 }
 
-// RoundEventRequest_Data The payload for `type`: `ExecutionStartedData`, `ProgressData`, `UsageObservedData`, `DeliveredData` or `StopConfirmedData`.
+// RoundEventRequest_Data The payload for `type`: `ExecutionStartedData`, `ProgressData`, `UsageObservedData`, `DeliveredData`, `StopConfirmedData`, `FailedData` or `InterruptedData`. Not `oneOf`: `StopConfirmedData` and `InterruptedData` share a shape.
 type RoundEventRequest_Data struct {
 	union json.RawMessage
 }
 
 // RoundEventResult defines model for RoundEventResult.
 type RoundEventResult struct {
-	// EndedAt For `delivered` and `stop_confirmed`.
+	// EndedAt For `delivered`, `stop_confirmed`, `failed` and `interrupted`.
 	EndedAt *time.Time `json:"endedAt,omitempty"`
 
 	// ObservationId For `usage_observed`, the observation recorded.
@@ -643,7 +667,7 @@ type RoundEventResult struct {
 	// StartedAt Null only for a Round stopped before it started.
 	StartedAt *time.Time `json:"startedAt"`
 
-	// State `claimed` and `running` are open. `delivered` has ended and moved the Ticket to In Review. `stopped` has ended and moved the Ticket to Backlog.
+	// State `claimed` and `running` are open. `delivered` has ended and moved the Ticket to In Review. `stopped` has ended and moved the Ticket to Backlog. `failed` and `interrupted` have ended and moved the Ticket to Blocked.
 	State RoundState `json:"state"`
 
 	// Type Grows by slice.
@@ -653,7 +677,7 @@ type RoundEventResult struct {
 // RoundEventType Grows by slice.
 type RoundEventType string
 
-// RoundState `claimed` and `running` are open. `delivered` has ended and moved the Ticket to In Review. `stopped` has ended and moved the Ticket to Backlog.
+// RoundState `claimed` and `running` are open. `delivered` has ended and moved the Ticket to In Review. `stopped` has ended and moved the Ticket to Backlog. `failed` and `interrupted` have ended and moved the Ticket to Blocked.
 type RoundState string
 
 // RoundUsage Sums of the known values. Unknown is never counted as zero.
@@ -929,12 +953,12 @@ type TicketRound struct {
 	EndedAt     *time.Time        `json:"endedAt"`
 	Id          string            `json:"id"`
 
-	// OutcomeNote Set exactly when `state` is `stopped`.
+	// OutcomeNote Set exactly when `state` is `stopped`, `failed` or `interrupted`.
 	OutcomeNote *string    `json:"outcomeNote"`
 	Sequence    int        `json:"sequence"`
 	StartedAt   *time.Time `json:"startedAt"`
 
-	// State `claimed` and `running` are open. `delivered` has ended and moved the Ticket to In Review. `stopped` has ended and moved the Ticket to Backlog.
+	// State `claimed` and `running` are open. `delivered` has ended and moved the Ticket to In Review. `stopped` has ended and moved the Ticket to Backlog. `failed` and `interrupted` have ended and moved the Ticket to Blocked.
 	State RoundState `json:"state"`
 
 	// Usage Sums of the known values. Unknown is never counted as zero.
@@ -1192,6 +1216,58 @@ func (t *RoundEventRequest_Data) FromStopConfirmedData(v StopConfirmedData) erro
 
 // MergeStopConfirmedData performs a merge with any union data inside the RoundEventRequest_Data, using the provided StopConfirmedData
 func (t *RoundEventRequest_Data) MergeStopConfirmedData(v StopConfirmedData) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsFailedData returns the union data inside the RoundEventRequest_Data as a FailedData
+func (t RoundEventRequest_Data) AsFailedData() (FailedData, error) {
+	var body FailedData
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromFailedData overwrites any union data inside the RoundEventRequest_Data as the provided FailedData
+func (t *RoundEventRequest_Data) FromFailedData(v FailedData) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeFailedData performs a merge with any union data inside the RoundEventRequest_Data, using the provided FailedData
+func (t *RoundEventRequest_Data) MergeFailedData(v FailedData) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsInterruptedData returns the union data inside the RoundEventRequest_Data as a InterruptedData
+func (t RoundEventRequest_Data) AsInterruptedData() (InterruptedData, error) {
+	var body InterruptedData
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromInterruptedData overwrites any union data inside the RoundEventRequest_Data as the provided InterruptedData
+func (t *RoundEventRequest_Data) FromInterruptedData(v InterruptedData) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeInterruptedData performs a merge with any union data inside the RoundEventRequest_Data, using the provided InterruptedData
+func (t *RoundEventRequest_Data) MergeInterruptedData(v InterruptedData) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err

@@ -984,3 +984,28 @@ what Galley returns:
 Tests: `TicketDetail.test.tsx` ("the Round history"),
 `TicketDetailPage.test.tsx` (the refresh that sees the Stop, and a
 reopened stopped Ticket) and `api/rounds.test.ts` (parsing).
+
+## Failed and Interrupted Rounds (issue #161)
+
+When Michelin reports `failed` or `interrupted`, Galley ends the Round,
+moves the Ticket to Blocked and keeps its activity and usage. Swiftlet
+renders what Galley returns:
+
+- **Round entry.** The summary reads **Round n · Failed** or **Round n ·
+  Interrupted**, with a `FailedTag` (`ticket-detail-round-failed`, paper
+  on Blocked-deep, `tokens.test.ts` "failed tag") or an `InterruptedTag`
+  (`ticket-detail-round-interrupted`, a dashed Blocked-deep outline on
+  paper, "interrupted tag"). The entry shows **Failed at** or
+  **Interrupted at**, the runner's explanation or evidence beneath under
+  **Outcome** (`ticket-detail-round-outcome-note`), and its Activity and
+  **Usage**. There is no Report.
+- **Recovery.** The Owner returns the Ticket to Ready with the existing
+  status control (`ticket-detail-status-button-Ready`), shown because
+  Galley lists `Ready` in `allowedActions.statusChanges` for an
+  Agent-assigned Blocked Ticket; there is no separate button.
+- **Parsing.** `parseRound` accepts `failed` and `interrupted`, and
+  requires `outcomeNote` to be a string exactly when the state is
+  `stopped`, `failed` or `interrupted`.
+
+Tests: `TicketDetail.test.tsx` ("the Round history"), `api/rounds.test.ts`
+(parsing) and `tokens.test.ts` (the two tags' contrast).

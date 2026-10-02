@@ -35,12 +35,24 @@ describe("fetchTicketRounds", () => {
   });
 
   it.each([
+    ["failed", "The repository is gone."],
+    ["interrupted", "The engine process exited with signal 9."],
+  ])("keeps a %s Round's outcome note, activity and usage", async (state, outcomeNote) => {
+    const ended = { ...STOPPED, state, startedAt: "2026-10-01T10:00:05Z", outcomeNote };
+    answer([ended]);
+    expect(await fetchTicketRounds("t")).toEqual([ended]);
+  });
+
+  it.each([
     ["a stopped Round without its note", { ...STOPPED, outcomeNote: null }],
     ["a stopped Round with no outcomeNote field", { ...STOPPED, outcomeNote: undefined }],
     ["a running Round with a note", { ...STOPPED, state: "running", endedAt: null }],
     ["a delivered Round with a note", { ...STOPPED, state: "delivered", deliverable: { bodyMarkdown: "b", summary: "s", criteriaAssessment: "c" } }],
     ["a stopped Round with a deliverable", { ...STOPPED, deliverable: { bodyMarkdown: "b", summary: "s", criteriaAssessment: "c" } }],
-    ["an unknown state", { ...STOPPED, state: "failed" }],
+    ["a failed Round without its note", { ...STOPPED, state: "failed", outcomeNote: null }],
+    ["an interrupted Round with no outcomeNote field", { ...STOPPED, state: "interrupted", outcomeNote: undefined }],
+    ["a failed Round with a deliverable", { ...STOPPED, state: "failed", deliverable: { bodyMarkdown: "b", summary: "s", criteriaAssessment: "c" } }],
+    ["an unknown state", { ...STOPPED, state: "abandoned" }],
   ])("refuses %s", async (_name, round) => {
     answer([round]);
     await expect(fetchTicketRounds("t")).rejects.toThrow("Galley's Round list was missing a required field.");

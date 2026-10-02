@@ -400,8 +400,11 @@ paths:
         so completion cannot happen by accident.
 
         Any move off D3 S2's table is rejected with
-        `invalid_transition`; notably `Blocked` resumes only to
-        `InProgress`, never straight to `Ready`.
+        `invalid_transition`; notably a human Ticket resumes from
+        `Blocked` only to `InProgress`, never straight to `Ready`. An
+        Agent-assigned Ticket with no open Round moves from `Blocked` to
+        `Ready`: the Owner's explicit recovery after a Failed or
+        Interrupted Round.
 
         On an Agent-assigned Ticket, `InProgress`, `InReview` and
         `Blocked` are rejected with `agent_owned_transition` (D3 S4),
@@ -1105,16 +1108,20 @@ paths:
         Round's, `409 round_not_open` for a Round that has ended, and
         `409 event_out_of_order` for a type the Round's state cannot
         take: `execution_started` needs a claimed Round; `progress`,
-        `usage_observed` and `delivered` a running one; `stop_confirmed`
-        either, and then `409 stop_not_requested` unless the Owner
-        requested Stop. A `usage_observed` whose `observationId` is
-        already recorded for another Round is
-        `409 observation_id_conflict`. `delivered` retains the
-        deliverable, ends the Round as `delivered`, frees the Owner's
-        slot and moves the Ticket from In Progress to In Review, never
-        Done. `stop_confirmed` ends the Round as `stopped` with its
+        `usage_observed`, `delivered`, `failed` and `interrupted` a
+        running one; `stop_confirmed` either, and then
+        `409 stop_not_requested` unless the Owner requested Stop. A
+        `usage_observed` whose `observationId` is already recorded for
+        another Round is `409 observation_id_conflict`. `delivered`
+        retains the deliverable, ends the Round as `delivered`, frees the
+        Owner's slot and moves the Ticket from In Progress to In Review,
+        never Done. `stop_confirmed` ends the Round as `stopped` with its
         evidence, frees the slot and moves the Ticket to Backlog with the
-        Stopped Badge. A body over 8 MiB is `413 request_too_large`. A
+        Stopped Badge. `failed` and `interrupted` end the Round as
+        `failed` or `interrupted` with the explanation or evidence, free
+        the slot and move the Ticket from In Progress to Blocked; no
+        Round starts until the Owner moves it to Ready. A body over 8 MiB
+        is `413 request_too_large`. A
         rejection changes nothing. An unknown, malformed or foreign Round
         id returns the shared 404. A runner that is not Connected is
         still accepted, and an event is not a heartbeat.
@@ -1542,9 +1549,10 @@ components:
       description: >-
         `claimed` and `running` are open. `delivered` has ended and moved
         the Ticket to In Review. `stopped` has ended and moved the Ticket
-        to Backlog.
-      enum: [claimed, running, delivered, stopped]
-      x-enum-varnames: [RoundClaimed, RoundRunning, RoundDelivered, RoundStopped]
+        to Backlog. `failed` and `interrupted` have ended and moved the
+        Ticket to Blocked.
+      enum: [claimed, running, delivered, stopped, failed, interrupted]
+      x-enum-varnames: [RoundClaimed, RoundRunning, RoundDelivered, RoundStopped, RoundFailed, RoundInterrupted]
     OpenRoundState:
       type: string
       description: >-
@@ -1611,7 +1619,7 @@ components:
             - type: "null"
         outcomeNote:
           type: [string, "null"]
-          description: Set exactly when `state` is `stopped`.
+          description: Set exactly when `state` is `stopped`, `failed` or `interrupted`.
     RoundDeliverable:
       type: object
       additionalProperties: false
@@ -2073,8 +2081,8 @@ components:
     RoundEventType:
       type: string
       description: Grows by slice.
-      enum: [execution_started, progress, usage_observed, delivered, stop_confirmed]
-      x-enum-varnames: [RoundEventExecutionStarted, RoundEventProgress, RoundEventUsageObserved, RoundEventDelivered, RoundEventStopConfirmed]
+      enum: [execution_started, progress, usage_observed, delivered, stop_confirmed, failed, interrupted]
+      x-enum-varnames: [RoundEventExecutionStarted, RoundEventProgress, RoundEventUsageObserved, RoundEventDelivered, RoundEventStopConfirmed, RoundEventFailed, RoundEventInterrupted]
     ExecutionStartedData:
       type: object
       additionalProperties: false
@@ -2166,6 +2174,32 @@ components:
             What was halted, kept as the Round's `outcomeNote`. Counted in
             Unicode code points. Not blank; no control characters but tab
             and line feed.
+    FailedData:
+      type: object
+      additionalProperties: false
+      required: [explanation]
+      properties:
+        explanation:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: >-
+            Why the work cannot be completed, kept as the Round's
+            `outcomeNote`. Counted in Unicode code points. Not blank; no
+            control characters but tab and line feed.
+    InterruptedData:
+      type: object
+      additionalProperties: false
+      required: [evidence]
+      properties:
+        evidence:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: >-
+            The runner's own evidence that execution ceased, kept as the
+            Round's `outcomeNote`. Counted in Unicode code points. Not
+            blank; no control characters but tab and line feed.
     RoundEventRequest:
       type: object
       additionalProperties: false
@@ -2191,14 +2225,18 @@ components:
         data:
           description: >-
             The payload for `type`: `ExecutionStartedData`,
-            `ProgressData`, `UsageObservedData`, `DeliveredData` or
-            `StopConfirmedData`.
-          oneOf:
+            `ProgressData`, `UsageObservedData`, `DeliveredData`,
+            `StopConfirmedData`, `FailedData` or `InterruptedData`. Not
+            `oneOf`: `StopConfirmedData` and `InterruptedData` share a
+            shape.
+          anyOf:
             - $ref: "#/components/schemas/ExecutionStartedData"
             - $ref: "#/components/schemas/ProgressData"
             - $ref: "#/components/schemas/UsageObservedData"
             - $ref: "#/components/schemas/DeliveredData"
             - $ref: "#/components/schemas/StopConfirmedData"
+            - $ref: "#/components/schemas/FailedData"
+            - $ref: "#/components/schemas/InterruptedData"
     RoundEventResult:
       type: object
       additionalProperties: false
@@ -2216,7 +2254,7 @@ components:
         endedAt:
           type: string
           format: date-time
-          description: For `delivered` and `stop_confirmed`.
+          description: For `delivered`, `stop_confirmed`, `failed` and `interrupted`.
         seq:
           type: integer
           minimum: 1

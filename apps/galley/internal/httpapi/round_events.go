@@ -48,7 +48,7 @@ type roundEvent struct {
 	note            string
 	usage           usageObservation
 	deliverable     RoundDeliverable
-	evidence        string
+	outcomeNote     string
 }
 
 type lockedRound struct {
@@ -76,7 +76,7 @@ type recordedRoundEvent struct {
 var errRoundEventTicketNotReady = errors.New("the Ticket of a claimed Round is not Ready")
 
 func isTicketGuardFailure(err error) bool {
-	return errors.Is(err, errRoundEventTicketNotReady) || errors.Is(err, errDeliveredTicketNotInProgress) || errors.Is(err, errStoppedTicketNotActive)
+	return errors.Is(err, errRoundEventTicketNotReady) || errors.Is(err, errDeliveredTicketNotInProgress) || errors.Is(err, errEndingTicketNotActive)
 }
 
 func writeRoundNotFound(w http.ResponseWriter) {
@@ -138,7 +138,7 @@ func (s *server) ReportRoundEvent(w http.ResponseWriter, r *http.Request, roundI
 
 func validateRoundEvent(req RoundEventRequest) (roundEvent, string) {
 	if !req.Type.Valid() {
-		return roundEvent{}, `"type" must be one of: execution_started, progress, usage_observed, delivered, stop_confirmed`
+		return roundEvent{}, `"type" must be one of: execution_started, progress, usage_observed, delivered, stop_confirmed, failed, interrupted`
 	}
 	if !validEventText(req.IdempotencyKey, idempotencyKeyMaxLength) {
 		return roundEvent{}, fmt.Sprintf(`"idempotencyKey" must be 1 to %d characters without control characters`, idempotencyKeyMaxLength)
@@ -168,8 +168,10 @@ func validateRoundEvent(req RoundEventRequest) (roundEvent, string) {
 		}
 	case RoundEventDelivered:
 		event.deliverable, problem = validateDeliveredData(data)
-	case RoundEventStopConfirmed:
-		event.evidence, problem = validateStopConfirmedData(data)
+	case RoundEventStopConfirmed, RoundEventInterrupted:
+		event.outcomeNote, problem = validateOutcomeNoteData(data, "evidence")
+	case RoundEventFailed:
+		event.outcomeNote, problem = validateOutcomeNoteData(data, "explanation")
 	}
 	if problem != "" {
 		return roundEvent{}, problem
@@ -284,13 +286,15 @@ func recordRoundEvent(ctx context.Context, pool *pgxpool.Pool, ownerID int64, ro
 		}
 		endedAt = endedAt.UTC()
 		result.State, result.StartedAt, result.EndedAt = RoundDelivered, utcOrNil(round.startedAt), &endedAt
-	case RoundEventStopConfirmed:
-		endedAt, err := stopRound(ctx, tx, ownerID, ticketID, round.id, event.evidence, now)
+	case RoundEventStopConfirmed, RoundEventFailed, RoundEventInterrupted:
+		ending := roundEndings[event.eventType]
+		ending.note = event.outcomeNote
+		endedAt, err := endRound(ctx, tx, ownerID, ticketID, round.id, ending, now)
 		if err != nil {
 			return recordedRoundEvent{}, err
 		}
 		endedAt = endedAt.UTC()
-		result.State, result.StartedAt, result.EndedAt = RoundStopped, utcOrNil(round.startedAt), &endedAt
+		result.State, result.StartedAt, result.EndedAt = ending.state, utcOrNil(round.startedAt), &endedAt
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil {
@@ -321,12 +325,12 @@ func decideRoundEvent(round lockedRound, eventType RoundEventType, claimEpoch in
 	return nil
 }
 
-// Progress, usage and delivery are facts about execution, which Galley knows began only once execution_started is recorded.
+// Progress, usage, delivery, failure and interruption are facts about execution, which Galley knows began only once execution_started is recorded.
 func roundStateTakes(state RoundState, eventType RoundEventType) bool {
 	switch eventType {
 	case RoundEventExecutionStarted:
 		return state == RoundClaimed
-	case RoundEventProgress, RoundEventUsageObserved, RoundEventDelivered:
+	case RoundEventProgress, RoundEventUsageObserved, RoundEventDelivered, RoundEventFailed, RoundEventInterrupted:
 		return state == RoundRunning
 	case RoundEventStopConfirmed:
 		return state == RoundClaimed || state == RoundRunning

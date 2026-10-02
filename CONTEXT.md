@@ -113,7 +113,7 @@ The condition of an open **Round** paused because its **Agent** needs a human an
 _Avoid_: Interrupted, finished when the round is still open for continuation.
 
 **Interrupted**:
-The outcome of a **Round** whose work stopped unexpectedly before delivery. Available progress and usage remain part of its history; returning execution capacity does not automatically start another round.
+The terminal outcome of a **Round** whose runner reported, with its own evidence, that the work stopped unexpectedly before delivery; lost contact alone never makes a round Interrupted. The **Ticket** becomes **Blocked**, and the round's activity, usage and the runner's evidence remain part of its history. Returning execution capacity does not start another round; only the owner's explicit move back to **Ready** does.
 _Avoid_: Failed when only an unexpected interruption, rather than a work failure, is known.
 
 **Stopping**:
@@ -125,7 +125,7 @@ The terminal outcome of a **Round** whose runner has confirmed its execution end
 _Avoid_: Interrupted when the round ended through an intentional stop request.
 
 **Failed**:
-The outcome of a **Round** whose agent cannot complete the work after investigation and reasonable attempts. The **Ticket** becomes **Blocked**, retaining usage, available partial work, and an explanation of the failure.
+The terminal outcome of a **Round** whose agent cannot complete the work after investigation and reasonable attempts. The **Ticket** becomes **Blocked**, and the round's activity, usage and the runner's explanation of the failure remain part of its history. Only the owner's explicit move back to **Ready** starts another round.
 _Avoid_: Interrupted for a known inability to complete the work; stopped for an outcome not requested by the owner.
 
 ## Example dialogue

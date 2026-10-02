@@ -164,7 +164,7 @@ export interface paths {
          * Change a Ticket's Status
          * @description A human-assigned lifecycle transition, implementing D3 S2's table (docs/decisions/d3-agent-template-compatibility.md). Validated against the Ticket's persisted current Status inside one transaction, so of two concurrent conflicting requests at most one applies.
          *     `Done` is always rejected here, whatever the current Status: it is reachable only through `POST /api/tickets/{id}/accept`, so completion cannot happen by accident.
-         *     Any move off D3 S2's table is rejected with `invalid_transition`; notably `Blocked` resumes only to `InProgress`, never straight to `Ready`.
+         *     Any move off D3 S2's table is rejected with `invalid_transition`; notably a human Ticket resumes from `Blocked` only to `InProgress`, never straight to `Ready`. An Agent-assigned Ticket with no open Round moves from `Blocked` to `Ready`: the Owner's explicit recovery after a Failed or Interrupted Round.
          *     On an Agent-assigned Ticket, `InProgress`, `InReview` and `Blocked` are rejected with `agent_owned_transition` (D3 S4), and `Ready` with `agent_readiness_incomplete` while an AgentReadinessInput is missing.
          *     Entering `Ready` moves the Ticket to the bottom of the Owner's priority order; every other move keeps its position.
          *     Creates no Round, work request, or queue entry. Requires a valid session; returns `401 unauthenticated` otherwise. Identifier handling matches the other `/api/tickets/{id}` operations.
@@ -599,7 +599,7 @@ export interface paths {
         put?: never;
         /**
          * Report an execution event for a Round
-         * @description An event is a fact the runner reports, recorded once per `(roundId, idempotencyKey)`. The same key with the same payload returns the original result with `200`; a different payload is `409 idempotency_key_conflict`. Checked in that order, then `409 stale_claim_epoch` for a `claimEpoch` other than the Round's, `409 round_not_open` for a Round that has ended, and `409 event_out_of_order` for a type the Round's state cannot take: `execution_started` needs a claimed Round; `progress`, `usage_observed` and `delivered` a running one; `stop_confirmed` either, and then `409 stop_not_requested` unless the Owner requested Stop. A `usage_observed` whose `observationId` is already recorded for another Round is `409 observation_id_conflict`. `delivered` retains the deliverable, ends the Round as `delivered`, frees the Owner's slot and moves the Ticket from In Progress to In Review, never Done. `stop_confirmed` ends the Round as `stopped` with its evidence, frees the slot and moves the Ticket to Backlog with the Stopped Badge. A body over 8 MiB is `413 request_too_large`. A rejection changes nothing. An unknown, malformed or foreign Round id returns the shared 404. A runner that is not Connected is still accepted, and an event is not a heartbeat.
+         * @description An event is a fact the runner reports, recorded once per `(roundId, idempotencyKey)`. The same key with the same payload returns the original result with `200`; a different payload is `409 idempotency_key_conflict`. Checked in that order, then `409 stale_claim_epoch` for a `claimEpoch` other than the Round's, `409 round_not_open` for a Round that has ended, and `409 event_out_of_order` for a type the Round's state cannot take: `execution_started` needs a claimed Round; `progress`, `usage_observed`, `delivered`, `failed` and `interrupted` a running one; `stop_confirmed` either, and then `409 stop_not_requested` unless the Owner requested Stop. A `usage_observed` whose `observationId` is already recorded for another Round is `409 observation_id_conflict`. `delivered` retains the deliverable, ends the Round as `delivered`, frees the Owner's slot and moves the Ticket from In Progress to In Review, never Done. `stop_confirmed` ends the Round as `stopped` with its evidence, frees the slot and moves the Ticket to Backlog with the Stopped Badge. `failed` and `interrupted` end the Round as `failed` or `interrupted` with the explanation or evidence, free the slot and move the Ticket from In Progress to Blocked; no Round starts until the Owner moves it to Ready. A body over 8 MiB is `413 request_too_large`. A rejection changes nothing. An unknown, malformed or foreign Round id returns the shared 404. A runner that is not Connected is still accepted, and an event is not a heartbeat.
          */
         post: operations["reportRoundEvent"];
         delete?: never;
@@ -798,10 +798,10 @@ export interface components {
             updatedAt: string;
         };
         /**
-         * @description `claimed` and `running` are open. `delivered` has ended and moved the Ticket to In Review. `stopped` has ended and moved the Ticket to Backlog.
+         * @description `claimed` and `running` are open. `delivered` has ended and moved the Ticket to In Review. `stopped` has ended and moved the Ticket to Backlog. `failed` and `interrupted` have ended and moved the Ticket to Blocked.
          * @enum {string}
          */
-        RoundState: "claimed" | "running" | "delivered" | "stopped";
+        RoundState: "claimed" | "running" | "delivered" | "stopped" | "failed" | "interrupted";
         /**
          * @description A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress.
          * @enum {string}
@@ -851,7 +851,7 @@ export interface components {
             usage: components["schemas"]["RoundUsage"];
             /** @description Set exactly when `state` is `delivered`. */
             deliverable: components["schemas"]["RoundDeliverable"] | null;
-            /** @description Set exactly when `state` is `stopped`. */
+            /** @description Set exactly when `state` is `stopped`, `failed` or `interrupted`. */
             outcomeNote: string | null;
         };
         RoundDeliverable: {
@@ -1074,7 +1074,7 @@ export interface components {
          * @description Grows by slice.
          * @enum {string}
          */
-        RoundEventType: "execution_started" | "progress" | "usage_observed" | "delivered" | "stop_confirmed";
+        RoundEventType: "execution_started" | "progress" | "usage_observed" | "delivered" | "stop_confirmed" | "failed" | "interrupted";
         ExecutionStartedData: {
             /** @description Attached as the Round's current engine execution reference. */
             engineReference: string;
@@ -1115,6 +1115,14 @@ export interface components {
             /** @description What was halted, kept as the Round's `outcomeNote`. Counted in Unicode code points. Not blank; no control characters but tab and line feed. */
             evidence: string;
         };
+        FailedData: {
+            /** @description Why the work cannot be completed, kept as the Round's `outcomeNote`. Counted in Unicode code points. Not blank; no control characters but tab and line feed. */
+            explanation: string;
+        };
+        InterruptedData: {
+            /** @description The runner's own evidence that execution ceased, kept as the Round's `outcomeNote`. Counted in Unicode code points. Not blank; no control characters but tab and line feed. */
+            evidence: string;
+        };
         RoundEventRequest: {
             type: components["schemas"]["RoundEventType"];
             /** @description Taken verbatim; identity is never trimmed. */
@@ -1126,8 +1134,8 @@ export interface components {
              * @description The runner's clock; Galley keeps it and times the Round by its own.
              */
             occurredAt: string;
-            /** @description The payload for `type`: `ExecutionStartedData`, `ProgressData`, `UsageObservedData`, `DeliveredData` or `StopConfirmedData`. */
-            data: components["schemas"]["ExecutionStartedData"] | components["schemas"]["ProgressData"] | components["schemas"]["UsageObservedData"] | components["schemas"]["DeliveredData"] | components["schemas"]["StopConfirmedData"];
+            /** @description The payload for `type`: `ExecutionStartedData`, `ProgressData`, `UsageObservedData`, `DeliveredData`, `StopConfirmedData`, `FailedData` or `InterruptedData`. Not `oneOf`: `StopConfirmedData` and `InterruptedData` share a shape. */
+            data: components["schemas"]["ExecutionStartedData"] | components["schemas"]["ProgressData"] | components["schemas"]["UsageObservedData"] | components["schemas"]["DeliveredData"] | components["schemas"]["StopConfirmedData"] | components["schemas"]["FailedData"] | components["schemas"]["InterruptedData"];
         };
         RoundEventResult: {
             /** Format: uuid */
@@ -1141,7 +1149,7 @@ export interface components {
             startedAt: string | null;
             /**
              * Format: date-time
-             * @description For `delivered` and `stop_confirmed`.
+             * @description For `delivered`, `stop_confirmed`, `failed` and `interrupted`.
              */
             endedAt?: string;
             /** @description For `progress`, the note's place in the Round's activity. */

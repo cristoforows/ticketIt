@@ -437,6 +437,12 @@ func TestTicketAllowedActions_MatchCommandsForEveryAssignee(t *testing.T) {
 						if ticket.RequestingAgentWork != wantRequesting {
 							t.Errorf("requestingAgentWork = %t, want %t", ticket.RequestingAgentWork, wantRequesting)
 						}
+						if from == Blocked {
+							wantRecovery := agentKind != "" && len(wantMissingInputs(agentKind, present)) == 0
+							if containsStatus(advertised.StatusChanges, Ready) != wantRecovery {
+								t.Errorf("Blocked -> Ready advertised %t, want %t (D3: Agent-assigned only)", containsStatus(advertised.StatusChanges, Ready), wantRecovery)
+							}
+						}
 
 						for _, target := range allTicketStatuses {
 							setTicketStatusDirect(t, pool, ownerID, created.Id, from)
@@ -491,7 +497,8 @@ func rejectionFor(actions TicketAllowedActions, target TicketStatus) *ErrorDetai
 }
 
 func TestAgentReadiness_ConcurrentClearAndReadinessNeverBothApply(t *testing.T) {
-	f := newReadinessFixture(t)
+	baseURL, client, pool, ownerID := devServerWithSessionAndPoolForTickets(t)
+	f := readinessFixture{baseURL: baseURL, client: client, agents: map[AgentKind]Agent{AgentKindResearch: createAgentHTTP(t, client, baseURL, AgentKindResearch)}}
 	all := map[AgentReadinessInput]bool{AgentReadinessInputGoal: true, AgentReadinessInputSuccessCriteria: true, AgentReadinessInputRepository: true}
 	const trials = 20
 	for _, race := range []struct {
@@ -511,6 +518,14 @@ func TestAgentReadiness_ConcurrentClearAndReadinessNeverBothApply(t *testing.T) 
 				changeStatus(t, f.client, f.baseURL, id, Ready)
 			},
 			enter: func(t *testing.T, id string) lifecycleResult { return f.assignAgent(t, id, AgentKindResearch) },
+		},
+		{
+			name: "clear goal vs recover a Blocked Agent Ticket to Ready",
+			setUp: func(t *testing.T, id string) {
+				f.assignAgent(t, id, AgentKindResearch)
+				setTicketStatusDirect(t, pool, ownerID, id, Blocked)
+			},
+			enter: func(t *testing.T, id string) lifecycleResult { return changeStatus(t, f.client, f.baseURL, id, Ready) },
 		},
 	} {
 		t.Run(race.name, func(t *testing.T) {

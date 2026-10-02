@@ -213,6 +213,32 @@ describe("claim loop", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it.each([
+    { step: { step: "fail" as const, explanation: "The goal cannot be met." }, type: "failed", reported: "failure reported", ended: "engine failed" },
+    { step: { step: "interrupt" as const, evidence: "The engine process died." }, type: "interrupted", reported: "interruption reported", ended: "engine interrupted" },
+  ])("resumes polling once the Round ends $type, and acknowledges nothing", async ({ step, type, reported, ended }) => {
+    const claims = [claimed, noWork];
+    const fetchFn = vi.fn<FetchFn>(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/api/runner/claims") return (claims.length > 1 ? claims.shift()! : claims[0]!)();
+      if (path.endsWith("/commands")) return json([], 200);
+      if (path !== `/api/runner/rounds/${CLAIM.roundId}/events`) throw new Error(`unexpected ${path}`);
+      const event = JSON.parse(String(init?.body)) as { type: string };
+      const end = event.type === type;
+      return json({ roundId: CLAIM.roundId, type: event.type, state: end ? type : "running", startedAt: "2026-10-01T12:00:00Z", ...(end ? { endedAt: "2026-10-01T12:00:01Z" } : {}) }, 201);
+    });
+    const { loop, records } = setup(fetchFn, true, { steps: [{ step: "start" }, step] });
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(records().map((record) => record["msg"])).toEqual(["round claimed", "execution started reported", reported, ended]);
+    await vi.advanceTimersByTimeAsync(1000);
+    const paths = fetchFn.mock.calls.map(([input]) => new URL(String(input)).pathname);
+    expect(paths.filter((path) => path === "/api/runner/claims")).toHaveLength(2);
+    expect(paths.some((path) => path.includes("/ack"))).toBe(false);
+    await loop.stop();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("resumes polling after Galley refuses the event and the Round is abandoned locally", async () => {
     const fetchFn = routed({ claims: [claimed, noWork], events: [() => json({ error: { code: "stale_claim_epoch", message: "x" } }, 409)] });
     const { loop, records } = setup(fetchFn);
