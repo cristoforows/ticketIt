@@ -22,12 +22,12 @@ export interface ErrorDetail {
 export interface Round {
   id: string;
   sequence: number;
-  state: "claimed" | "running" | "delivered" | "stopped";
+  state: "claimed" | "running" | "delivered" | "stopped" | "failed" | "interrupted";
   agent: { id: string; name: string; kind: AgentKind };
   claimedAt: string;
   startedAt: string | null;
   endedAt: string | null;
-  /** Michelin's evidence, set exactly when `state` is `stopped` (issue #160). */
+  /** Michelin's evidence or explanation, set exactly when `state` is `stopped` (issue #160), `failed` or `interrupted` (issue #161). */
   outcomeNote: string | null;
   activity: { seq: number; note: string; occurredAt: string }[];
   usage: RoundUsage;

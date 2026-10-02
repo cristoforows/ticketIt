@@ -974,6 +974,22 @@ func TestDecideRoundEvent(t *testing.T) {
 		"a stop confirmation, stale epoch":    {stopping(RoundRunning, 3), RoundEventStopConfirmed, 4, staleClaimEpochCode},
 		"waiting for input takes no stop":     {stopping("waiting_for_input", 3), RoundEventStopConfirmed, 3, eventOutOfOrderCode},
 		"progress on a stopped Round":         {lockedRound{state: "stopped", epoch: 3, stopRequested: true}, RoundEventProgress, 3, roundNotOpenCode},
+		"failed, running":                     {open(RoundRunning, 3), RoundEventFailed, 3, ""},
+		"interrupted, running":                {open(RoundRunning, 3), RoundEventInterrupted, 3, ""},
+		"failed, running and Stopping":        {stopping(RoundRunning, 3), RoundEventFailed, 3, ""},
+		"interrupted, running and Stopping":   {stopping(RoundRunning, 3), RoundEventInterrupted, 3, ""},
+		"failed, claimed":                     {open(RoundClaimed, 3), RoundEventFailed, 3, eventOutOfOrderCode},
+		"interrupted, claimed":                {open(RoundClaimed, 3), RoundEventInterrupted, 3, eventOutOfOrderCode},
+		"failed while waiting for input":      {open("waiting_for_input", 3), RoundEventFailed, 3, eventOutOfOrderCode},
+		"interrupted while waiting for input": {open("waiting_for_input", 3), RoundEventInterrupted, 3, eventOutOfOrderCode},
+		"failed at a stale epoch":             {open(RoundRunning, 3), RoundEventFailed, 2, staleClaimEpochCode},
+		"interrupted at a stale epoch":        {open(RoundRunning, 3), RoundEventInterrupted, 4, staleClaimEpochCode},
+		"a stale epoch beats a claimed Round": {open(RoundClaimed, 3), RoundEventInterrupted, 2, staleClaimEpochCode},
+		"failed after delivery":               {lockedRound{state: "delivered", epoch: 3}, RoundEventFailed, 3, roundNotOpenCode},
+		"interrupted after a failure":         {lockedRound{state: "failed", epoch: 3}, RoundEventInterrupted, 3, roundNotOpenCode},
+		"failed after an interruption":        {lockedRound{state: "interrupted", epoch: 3}, RoundEventFailed, 3, roundNotOpenCode},
+		"progress on a failed Round":          {lockedRound{state: "failed", epoch: 3}, RoundEventProgress, 3, roundNotOpenCode},
+		"stop confirmation, interrupted":      {lockedRound{state: "interrupted", epoch: 3, stopRequested: true}, RoundEventStopConfirmed, 3, roundNotOpenCode},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := decideRoundEvent(tc.round, tc.eventType, tc.epoch)
@@ -1004,6 +1020,8 @@ func TestRoundEvent_TakesTheOwnersPriorityLockThenTheTicketRowThenTheRoundRow(t 
 		{"usage_observed", true, false, func(t *testing.T) string { return usageEvent(t, observationA, 1, usageData(observationA)) }},
 		{"delivered", true, false, func(t *testing.T) string { return deliveredEvent(t, "k", 1, standardDeliverable()) }},
 		{"stop_confirmed", true, true, func(t *testing.T) string { return stopConfirmedEvent(t, "k", 1, stopEvidence) }},
+		{"failed", true, false, func(t *testing.T) string { return blockedEndings[0].event(t, "k", 1, failedExplanation) }},
+		{"interrupted", true, false, func(t *testing.T) string { return blockedEndings[1].event(t, "k", 1, interruptedEvidence) }},
 	} {
 		for _, tc := range []step{
 			{"the Owner's priority lock comes first", "priority", "pg_advisory_xact_lock", `SELECT 1 FROM tickets WHERE public_id = $1::uuid FOR UPDATE NOWAIT`},

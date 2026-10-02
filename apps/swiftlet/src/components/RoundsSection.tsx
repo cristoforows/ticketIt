@@ -3,7 +3,7 @@ import type { RoundDeliverable, TicketRound } from "../api/rounds";
 import type { Ticket } from "../api/tickets";
 import type { HealthView } from "./RunnerHealthPill";
 import { activeTime, costFigure, countFigure, type UsageFigure } from "./roundUsage";
-import { Disclosure, EstimateTag, FieldLabel, FieldNote, InlineError, Markdown, ReceiptLine, StoppedTag } from "./ui";
+import { Disclosure, EstimateTag, FailedTag, FieldLabel, FieldNote, InlineError, InterruptedTag, Markdown, ReceiptLine, StoppedTag } from "./ui";
 
 /** `rounds` is the last list Galley returned; `error` is the latest refresh's failure. */
 export interface RoundRecords {
@@ -45,6 +45,10 @@ function outcomeOf(round: TicketRound): ReactNode {
       return `Delivered by ${round.agent.name}`;
     case "stopped":
       return <StoppedTag data-testid="ticket-detail-round-stopped">Stopped</StoppedTag>;
+    case "failed":
+      return <FailedTag data-testid="ticket-detail-round-failed">Failed</FailedTag>;
+    case "interrupted":
+      return <InterruptedTag data-testid="ticket-detail-round-interrupted">Interrupted</InterruptedTag>;
     case "running":
       return "Running";
     case "claimed":
@@ -71,6 +75,8 @@ function RoundEntry({ round, defaultOpen }: { round: TicketRound; defaultOpen: b
           {round.startedAt !== null && <ReceiptLine label="Started at" data-testid="ticket-detail-round-started">{round.startedAt}</ReceiptLine>}
           {round.state === "delivered" && <ReceiptLine label="Delivered at" data-testid="ticket-detail-round-delivered-at">{round.endedAt}</ReceiptLine>}
           {round.state === "stopped" && <ReceiptLine label="Stopped at" data-testid="ticket-detail-round-stopped-at">{round.endedAt}</ReceiptLine>}
+          {round.state === "failed" && <ReceiptLine label="Failed at" data-testid="ticket-detail-round-failed-at">{round.endedAt}</ReceiptLine>}
+          {round.state === "interrupted" && <ReceiptLine label="Interrupted at" data-testid="ticket-detail-round-interrupted-at">{round.endedAt}</ReceiptLine>}
         </dl>
         {round.outcomeNote !== null && (
           <section aria-label="Outcome" className="mt-3">
@@ -79,7 +85,7 @@ function RoundEntry({ round, defaultOpen }: { round: TicketRound; defaultOpen: b
           </section>
         )}
         {round.deliverable && <Deliverable deliverable={round.deliverable} />}
-        <RoundRecordDetails round={round} usageLabel={round.state === "delivered" || round.state === "stopped" ? "Usage" : "Usage so far"} />
+        <RoundRecordDetails round={round} usageLabel={round.state === "claimed" || round.state === "running" ? "Usage so far" : "Usage"} />
       </Disclosure>
     </li>
   );

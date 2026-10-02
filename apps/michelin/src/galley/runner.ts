@@ -136,6 +136,8 @@ export function reportRoundEvent(request: RunnerRequest, roundId: string, body: 
   });
 }
 
+const END_STATES: Partial<Record<RoundEventRequest["type"], RoundEventResult["state"]>> = { delivered: "delivered", stop_confirmed: "stopped", failed: "failed", interrupted: "interrupted" };
+
 function parseRoundEventResult(payload: unknown, roundId: string, expected: RoundEventExpectation): RoundEventResult | string {
   if (!isRecord(payload)) {
     return "body is not a JSON object";
@@ -147,15 +149,12 @@ function parseRoundEventResult(payload: unknown, roundId: string, expected: Roun
   if (type !== expected.type) {
     return `type is not ${expected.type}`;
   }
-  const endState = type === "delivered" ? "delivered" : type === "stop_confirmed" ? "stopped" : undefined;
+  const endState = END_STATES[expected.type];
   if (endState !== undefined && state !== endState) {
     return `state is not ${endState}`;
   }
   if (endState === undefined && state !== "claimed" && state !== "running") {
     return "state is not claimed or running";
-  }
-  if (state !== "claimed" && state !== "running" && state !== "delivered" && state !== "stopped") {
-    return "state is not a Round state";
   }
   if (typeof startedAt !== "string" && !(type === "stop_confirmed" && startedAt === null)) {
     return "startedAt is not a string";
@@ -169,7 +168,7 @@ function parseRoundEventResult(payload: unknown, roundId: string, expected: Roun
   if (type === "usage_observed" && observationId !== expected.observationId) {
     return "observationId is not the observation the event was sent for";
   }
-  const result: RoundEventResult = { roundId: reportedRound, type: expected.type, state, startedAt };
+  const result: RoundEventResult = { roundId: reportedRound, type: expected.type, state: state as RoundEventResult["state"], startedAt };
   if (type === "progress") result.seq = seq as number;
   if (type === "usage_observed") result.observationId = observationId as string;
   if (endState !== undefined) result.endedAt = endedAt as string;

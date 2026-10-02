@@ -514,7 +514,7 @@ func TestStopConfirmed_ATicketNeitherReadyNorInProgressRollsBackAndAnswers500(t 
 	handler.ServeHTTP(rec, req)
 	assertErrorBody(t, rec, http.StatusInternalServerError, "internal_error", roundEventFailedMessage)
 	assertSnapshotUnchanged(t, f.pool, before, "a stop_confirmed whose Ticket guard failed")
-	if out := logs.String(); !strings.Contains(out, claim.RoundId) || !strings.Contains(out, "ERROR") || !strings.Contains(out, "neither Ready nor In Progress") {
+	if out := logs.String(); !strings.Contains(out, claim.RoundId) || !strings.Contains(out, "ERROR") || !strings.Contains(out, errEndingTicketNotActive.Error()) {
 		t.Fatalf("the broken invariant was not logged with the Round id:\n%s", out)
 	}
 }
@@ -592,26 +592,29 @@ func TestStopped_NoSignalButStopConfirmedEndsARound(t *testing.T) {
 	f.mustClaim(t)
 }
 
-func TestStopped_OnlyTheStopConfirmationWritesTheStoppedState(t *testing.T) {
+func TestRoundEndings_OnlyTheEndingCodeNamesTheEndedStates(t *testing.T) {
 	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var writers []string
-	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") || file == "api.gen.go" {
-			continue
+	for _, state := range []RoundState{RoundStopped, RoundFailed, RoundInterrupted} {
+		constant := map[RoundState]string{RoundStopped: "RoundStopped", RoundFailed: "RoundFailed", RoundInterrupted: "RoundInterrupted"}[state]
+		var writers []string
+		for _, file := range files {
+			if strings.HasSuffix(file, "_test.go") || file == "api.gen.go" {
+				continue
+			}
+			source, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bytes.Contains(source, []byte(constant)) || bytes.Contains(source, []byte("'"+string(state)+"'")) {
+				writers = append(writers, file)
+			}
 		}
-		source, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatal(err)
+		if !reflect.DeepEqual(writers, []string{"round_endings.go"}) {
+			t.Errorf("files naming the %s state = %v, want only round_endings.go", state, writers)
 		}
-		if bytes.Contains(source, []byte("string(RoundStopped)")) || bytes.Contains(source, []byte("'stopped'")) {
-			writers = append(writers, file)
-		}
-	}
-	if !reflect.DeepEqual(writers, []string{"round_endings.go"}) {
-		t.Fatalf("files naming the stopped state for SQL = %v, want only round_endings.go", writers)
 	}
 }
 

@@ -386,6 +386,21 @@ sequence 2, claim epoch 2), and a second Stop reattaches the same Badge.
 `run.sh` runs it after `runner-rework.spec.ts` with no reset, since
 delivered Rounds hold no slot.
 
+`tests/runner-failed.spec.ts` and `tests/runner-interrupted.spec.ts`
+(issue #161) each drive a real Michelin whose script reports a note and
+a usage observation, then `fail` with an explanation or `interrupt` with
+evidence. Michelin's log must show the report answered `201` with an
+`endedAt`, and no refusal. Galley's Ticket must then be Blocked with no
+open Round, no Badge and `Ready` offered, and the Round `failed` or
+`interrupted` with the runner's text as `outcomeNote` and its activity
+and usage kept. Two seconds later Michelin must still have claimed only
+one Round, and a late event is `409 round_not_open`. The receipt shows
+the Failed or Interrupted tag, the note beneath, the activity and the
+usage, and no Report. Ready on the receipt returns `200`, and the same
+Michelin claims Round 2 (a new id, sequence 2, claim epoch 2), which
+ends the same way while Round 1 stays unchanged. `run.sh` runs them after
+`runner-stop.spec.ts` with no reset, since ended Rounds hold no slot.
+
 `tests/ticket-priority-order.spec.ts` reorders three Ready Tickets by
 dragging onto the upper and lower halves of board slips, then with Move
 up and Move down in the list. After each step the rendered order must

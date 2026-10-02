@@ -859,8 +859,10 @@ change either: `POST /api/tickets/{id}/status`,
 **The D3 S2 table is inverted by target Status**, not inferred or generalised
 (`allowedSourceStatusesForTarget`): ten allowed (from, to) pairs,
 including Owner-approved `Backlog -> Blocked` ([#87](https://github.com/cristoforows/ticketIt/issues/87)),
-deliberately excluding `Blocked -> Ready` (only `Blocked -> InProgress`
-is permitted) and excluding `Done` as a target entirely -- `Done` is
+plus `Blocked -> Ready` for an Agent-assigned Ticket only
+(`agentRecoveryFromBlocked`, #161: the Owner's explicit recovery after a
+Failed or Interrupted Round; a human Ticket resumes only through
+`Blocked -> InProgress`), and excluding `Done` as a target entirely -- `Done` is
 reachable only through `POST /api/tickets/{id}/accept`
 (`decideAccept`), never a plain status write, whatever the Ticket's
 current Status or retained completion condition.
@@ -1384,8 +1386,8 @@ two.
 
 `GET /api/tickets/{id}/rounds` returns `{"rounds": [...]}`, newest
 first by `sequence`, for any of the Owner's Tickets including an
-archived one. `RoundState` is `claimed`, `running`, `delivered` or
-`stopped` (#160); `Ticket.openRound.state` uses `OpenRoundState`
+archived one. `RoundState` is `claimed`, `running`, `delivered`,
+`stopped` (#160), `failed` or `interrupted` (#161); `Ticket.openRound.state` uses `OpenRoundState`
 (`claimed`, `running`), since an ended Round is never open.
 
 Tests: `round_events_test.go`, `round_event_hash_test.go`,
@@ -1610,12 +1612,12 @@ text rules). The ladder takes it on a `claimed` or `running` Round, and
 after the state check rejects it with `409 stop_not_requested` unless
 the Round has a `stop` command; an unacknowledged Stop is enough. The
 Round lock query reads that as an `EXISTS` in the same `FOR UPDATE`.
-In the event's transaction (`stopRound`, `round_endings.go`):
+In the event's transaction (`endRound`, `round_endings.go`, since #161):
 
 - the Round becomes `stopped` with the evidence as `outcome_note` and
   `ended_at = GREATEST(now, COALESCE(started_at, claimed_at))`, which
   frees the slot and lifts the open-Round lock;
-- the Ticket moves to Backlog from Ready or In Progress, keeping its
+- the Ticket moves to Backlog from Ready (claimed) or In Progress (running), keeping its
   priority position; any other Status is a broken invariant, rolled
   back, logged and answered `500`;
 - `ensureStoppedBadge` finds the Owner's `system_key = 'stopped'` Badge,
@@ -1642,6 +1644,50 @@ creation, rollback, terminal regression, constraints),
 `TestStopConfirmed_ResponsesMatchContract` in `contract_test.go`, and the
 Badge assertions in `no_execution_side_effects_test.go`. Evidence:
 `docs/evidence/m5/160-confirmed-stop.md`.
+
+## Failed and Interrupted Rounds, and recovery from Blocked (issue #161)
+
+Migration `000019_fail_and_interrupt_rounds.up.sql` replaces
+`rounds_state_m5` and `round_events_type_m5` adding `failed` and
+`interrupted`, requires `started_at` and `ended_at` for both, and sets
+`outcome_note` exactly when the state is `stopped`, `failed` or
+`interrupted`.
+
+`failed` takes `data: {"explanation": "..."}` and `interrupted`
+`data: {"evidence": "..."}`, each 1 to 2000 characters with the progress
+note's text rules. The ladder takes both only on a `running` Round
+(`409 event_out_of_order` while `claimed`). Interrupted is only ever the
+runner's own report; nothing in Galley infers it from lost contact, time
+or a stale epoch.
+
+Every ending but delivery goes through `endRound` (`round_endings.go`),
+with a `roundEnding` from the `roundEndings` table keyed by event type:
+`stop_confirmed` → `stopped`, Backlog, Stopped Badge; `failed` →
+`failed`, Blocked; `interrupted` → `interrupted`, Blocked. In one
+transaction the Round ends with the note as `outcome_note` (freeing the
+slot and lifting the lock) and the Ticket moves from Ready (a claimed
+Round) or In Progress (a running one); any other Status is a broken
+invariant, rolled back, logged and answered `500`. Activity and usage
+stay listed under the Round; no Report is kept.
+
+No Round starts automatically: a claim answers `204` until the Owner
+moves the Agent-assigned Ticket from Blocked to Ready through
+`POST /api/tickets/{id}/status`. That move needs no open Round
+(`round_open`), passes the readiness check (`agent_readiness_incomplete`),
+enters Ready at the bottom of the order and is advertised in
+`allowedActions.statusChanges` by the same `decidePlainStatusChange`.
+The next claim is a new Round (`sequence + 1`, `claimEpoch + 1`); the
+ended Round is unchanged.
+
+Tests: `round_blocked_endings_test.go` (outcome, ladder rejections,
+replay, concurrency, racing endings and recovery, rollback, guard,
+terminal regression, recovery rules, constraints), `TestDecideRoundEvent`
+and the lock-order test in `round_events_test.go`,
+`TestFailedAndInterrupted_ResponsesMatchContract`,
+`TestRoundEndings_OnlyTheEndingCodeNamesTheEndedStates`, the recovery
+race in `agent_readiness_test.go` and the recovery step in
+`no_execution_side_effects_test.go`. Evidence:
+`docs/evidence/m5/161-failed-interrupted.md`.
 
 ## Error shape
 
@@ -1928,7 +1974,7 @@ apps/galley/
         ├── round_activity.go    # issue #135: progress notes, seq, the 50-note window
         ├── usage_observations.go  # issue #135: usage observations and the Round summary
         ├── round_commands.go      # issue #159: Stop request, the runner's command list and acks
-        ├── round_endings.go       # issue #160: stop_confirmed, the Stopped Round and the Stopped Badge
+        ├── round_endings.go       # issues #160, #161: endRound for stop_confirmed, failed and interrupted; the Stopped Badge
         ├── devclock.go     # issue #130: development-only clock advance for the browser suite
         └── no_execution_side_effects_test.go   # issue #60: the no-Round/queue/work-request guardrail
 ```

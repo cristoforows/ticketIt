@@ -518,6 +518,8 @@ const USAGE: EngineStep = {
   providerGenerationId: null,
 };
 
+const ENDED_STATES: Record<string, string> = { delivered: "delivered", stop_confirmed: "stopped", failed: "failed", interrupted: "interrupted" };
+
 type SentEvent = { type: string; idempotencyKey: string; claimEpoch: number; occurredAt: string; data: Record<string, unknown> };
 
 function answering(...failures: (() => Response)[]) {
@@ -533,9 +535,9 @@ function answering(...failures: (() => Response)[]) {
       {
         roundId: ROUND_ID,
         type: event.type,
-        state: event.type === "delivered" ? "delivered" : event.type === "stop_confirmed" ? "stopped" : "running",
+        state: ENDED_STATES[event.type] ?? "running",
         startedAt: "2026-10-01T12:00:00Z",
-        ...(event.type === "delivered" || event.type === "stop_confirmed" ? { endedAt: "2026-10-01T12:00:09Z" } : {}),
+        ...(event.type in ENDED_STATES ? { endedAt: "2026-10-01T12:00:09Z" } : {}),
         ...(event.type === "progress" ? { seq: ++notes } : {}),
         ...(event.type === "usage_observed" ? { observationId: event.data["observationId"] } : {}),
       },
@@ -732,6 +734,88 @@ describe("the deliver step", () => {
     expect(fetchFn).toHaveBeenCalledTimes(2);
     harness.controller.abort();
     expect(await harness.run).toBe("aborted");
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe.each([
+  { name: "fail", type: "failed", field: "explanation", state: "failed", reported: "failure reported", ended: "engine failed" },
+  { name: "interrupt", type: "interrupted", field: "evidence", state: "interrupted", reported: "interruption reported", ended: "engine interrupted" },
+] as const)("the $name step", ({ name, type, field, state, reported, ended }) => {
+  const step = (note: string): EngineStep => (name === "fail" ? { step: "fail", explanation: note } : { step: "interrupt", evidence: note });
+  const endedResult = (status: number) => () => json({ roundId: ROUND_ID, type, state, startedAt: "2026-10-01T12:00:00Z", endedAt: "2026-10-01T12:00:09Z" }, status);
+
+  it(`reports ${type} keyed by Round and step index with its ${field}, logs the end, and returns ${state}`, async () => {
+    const fetchFn = answering();
+    const harness = start([START, NOTE("n"), step("Ran out of road")], fetchFn, { instantSleep: true });
+    expect(await harness.run).toBe(state);
+    expect(sent(fetchFn)[2]).toEqual({
+      type,
+      idempotencyKey: `${ROUND_ID}:2`,
+      claimEpoch: 3,
+      occurredAt: "2026-10-01T12:00:02.123Z",
+      data: { [field]: "Ran out of road" },
+    });
+    expect(harness.records().find((record) => record["msg"] === reported)).toMatchObject({ roundId: ROUND_ID, step: name, stepIndex: 2, attempt: 1, httpStatus: 201, endedAt: "2026-10-01T12:00:09Z" });
+    expect(harness.records().at(-1)).toMatchObject({ msg: ended, roundId: ROUND_ID });
+  });
+
+  it("resends the identical bytes under the same key through 5xx and network failures, and accepts a replay", async () => {
+    const fetchFn = answering(created, refused, error(503, "database_unavailable"), () => new Response("<html>", { status: 201 }), endedResult(200));
+    const harness = start([START, step("x")], fetchFn, { instantSleep: true });
+    expect(await harness.run).toBe(state);
+    const bodies = fetchFn.mock.calls.map(([, init]) => String(init?.body));
+    expect(bodies).toHaveLength(5);
+    expect(new Set(bodies.slice(1)).size).toBe(1);
+    expect(harness.sleeps).toEqual([1000, 2000, 4000]);
+    expect(harness.records().find((record) => record["msg"] === reported)).toMatchObject({ attempt: 4, httpStatus: 200, replayed: true });
+  });
+
+  it.each([
+    ["a result still running", { state: "running", endedAt: "2026-10-01T12:00:09Z" }],
+    ["a result without endedAt", { endedAt: undefined }],
+    ["another ended state", { state: state === "failed" ? "interrupted" : "failed" }],
+  ])("retries %s as an invalid body", async (_name, wrong) => {
+    const fetchFn = answering(created, () => json({ roundId: ROUND_ID, type, state, startedAt: "2026-10-01T12:00:00Z", endedAt: "2026-10-01T12:00:09Z", ...wrong }, 201));
+    const harness = start([START, step("x")], fetchFn, { instantSleep: true });
+    expect(await harness.run).toBe(state);
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+    expect(harness.records().find((record) => record["level"] === "warn")).toMatchObject({ reason: "invalid_body", stepIndex: 1 });
+  });
+
+  it.each([
+    [409, "round_not_open"],
+    [409, "event_out_of_order"],
+    [409, "stale_claim_epoch"],
+    [409, "idempotency_key_conflict"],
+    [400, "invalid_request"],
+  ])("abandons the Round when Galley refuses it with %i %s", async (status, code) => {
+    const fetchFn = answering(created, error(status, code));
+    const harness = start([START, step("x")], fetchFn, { instantSleep: true });
+    expect(await harness.run).toBe("abandoned");
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(harness.records().at(-1)).toMatchObject({ level: "error", step: name, stepIndex: 1, errorCode: code });
+  });
+
+  it(`confirms a Stop that arrives before the ${name} step instead of sending it`, async () => {
+    const fetchFn = answering();
+    const harness = start([START, wait(60_000), step("never sent")], fetchFn);
+    await vi.advanceTimersByTimeAsync(10);
+    harness.stopper.abort("55555555-5555-4555-8555-555555555555");
+    expect(await harness.run).toBe("stopped");
+    expect(sent(fetchFn).map((event) => event.type)).toEqual(["execution_started", "stop_confirmed"]);
+  });
+
+  it(`returns ${state} when the report in flight lands after a Stop request, and confirms nothing`, async () => {
+    let resolve!: (response: Response) => void;
+    const pending = new Promise<Response>((done) => (resolve = done));
+    let calls = 0;
+    const fetchFn = vi.fn<FetchFn>(() => (++calls === 1 ? Promise.resolve(created()) : pending));
+    const harness = start([START, step("x")], fetchFn);
+    await vi.advanceTimersByTimeAsync(10);
+    harness.stopper.abort("55555555-5555-4555-8555-555555555555");
+    resolve(endedResult(201)());
+    expect(await harness.run).toBe(state);
     expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 });

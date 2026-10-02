@@ -29,10 +29,10 @@ const (
 const reviewedPrMergeNotImplementedCode = "reviewed_pr_merge_not_implemented"
 
 // D3 S2's table, including the Owner-approved Backlog -> Blocked correction (#87).
-// Done is reached through Accept; Blocked -> Ready remains disallowed.
+// Done is reached through Accept; Blocked -> Ready only through agentRecoveryFromBlocked.
 var allowedSourceStatusesForTarget = map[TicketStatus][]TicketStatus{
 	Backlog:    {Ready},
-	Ready:      {Backlog, InProgress, Done},
+	Ready:      {Backlog, InProgress, Done, Blocked},
 	InProgress: {Ready, Blocked, InReview},
 	Blocked:    {Backlog, InProgress},
 	InReview:   {InProgress},
@@ -75,7 +75,7 @@ func decidePlainStatusChange(state ticketWorkflowState, target TicketStatus) *tr
 		}
 	}
 	sources, known := allowedSourceStatusesForTarget[target]
-	if !known || !containsStatus(sources, current) {
+	if !known || !containsStatus(sources, current) || (current == Blocked && target == Ready && !agentRecoveryFromBlocked(state)) {
 		return &transitionRejection{
 			code:    invalidTransitionCode,
 			message: fmt.Sprintf("the transition %s -> %s is not permitted", current, target),
@@ -92,6 +92,12 @@ func decidePlainStatusChange(state ticketWorkflowState, target TicketStatus) *tr
 		return decideAgentReadiness(state)
 	}
 	return nil
+}
+
+// The Owner's explicit recovery after a Failed or Interrupted Round: v1-scope.md, "explicit recovery required"; #161.
+// Human work resumes from Blocked through In Progress, as D3 S2 lists.
+func agentRecoveryFromBlocked(state ticketWorkflowState) bool {
+	return state.agentAssigned()
 }
 
 // decideAccept implements POST /api/tickets/{id}/accept's rule: D3 S2

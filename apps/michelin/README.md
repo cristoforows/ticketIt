@@ -14,7 +14,9 @@ reports activity notes and usage observations
 delivers a result
 ([#136](https://github.com/cristoforows/ticketIt/issues/136)), and
 pulls the Round's commands so the Owner can Stop it
-([#159](https://github.com/cristoforows/ticketIt/issues/159)): no model,
+([#159](https://github.com/cristoforows/ticketIt/issues/159)), and can
+report a Failed or Interrupted Round
+([#161](https://github.com/cristoforows/ticketIt/issues/161)): no model,
 provider or network call beyond Galley. Every connection is outbound;
 Michelin opens no listening socket. See
 [ADR 0001](../../docs/adr/0001-single-authority-galley.md): Michelin
@@ -145,7 +147,9 @@ makes no model or provider call. Each reporting step sends one event to
 | `usage` | `usage_observed` | the `observationId` | Report one usage observation. `observationId` is a UUID generated once when the step runs. `provider` and `model` are required, 1 to 200 characters. `inputTokens`, `outputTokens` and `activeMs` are integers from 0 to 2^53−1. `costUsd` is a decimal string with at most 6 places, from `"0"` to `"999999.999999"`. `providerGenerationId` is optional. A figure that is absent or `null` is reported as unknown. `basis` is `reported` or `estimated`. |
 | `wait` | none | none | Sleep `ms` (an integer, 1 to 3600000). |
 | `deliver` | `delivered` | `<roundId>:<step index>` | Deliver the result: `bodyMarkdown` (1 to 1048576 bytes of UTF-8), `summary` (1 to 2000 characters) and `criteriaAssessment` (1 to 10000 characters), each not blank, with no control characters but tab and line feed. Galley moves the Ticket to In Review and frees the slot; the engine returns and the claim loop polls again. Only the last step. |
-| `hold` | none | none | Wait until Michelin stops. Only the last step, so a script holds or delivers, never both. |
+| `fail` | `failed` | `<roundId>:<step index>` | End the Round as Failed with `explanation` (the progress note's limits). Galley moves the Ticket to Blocked, keeps the activity and usage, and frees the slot; the engine returns and the claim loop polls again. Only the last step. |
+| `interrupt` | `interrupted` | `<roundId>:<step index>` | End the Round as Interrupted with `evidence` (the progress note's limits), otherwise as `fail`. Only the last step. |
+| `hold` | none | none | Wait until Michelin stops. Only the last step, so a script ends with at most one of `hold`, `deliver`, `fail` and `interrupt`. |
 
 With `MICHELIN_ENGINE_SCRIPT` unset, the script is: `start`; progress
 "Reading the Ticket", "Working towards the goal" and "Writing up the
@@ -156,7 +160,7 @@ was written by a scripted engine.
 
 The script is read and checked when Michelin starts, against the same
 limits Galley enforces. An unknown step, an unknown key, an invalid
-field, or a `deliver` or `hold` that is not the last step is a configuration error. The error names
+field, or a `deliver`, `hold`, `fail` or `interrupt` that is not the last step is a configuration error. The error names
 the step and the steps supported now, so a script can never silently
 do nothing and a bad note, figure or deliverable never abandons a Round.
 "Not blank" uses Go's `unicode.IsSpace`, as Galley does, not
@@ -189,8 +193,10 @@ Ticket is in Backlog with the Stopped Badge. Only after that answer is
 `POST /api/runner/rounds/{roundId}/commands/{commandId}/ack` with
 `{"outcome": "applied"}` sent, with the same retry. If Galley refuses
 the confirmation, Michelin logs `round event refused; round abandoned
-locally` and acknowledges nothing. A Round whose in-flight delivery
-lands ends as delivered, and its Stop is not acknowledged. Claim
+locally` and acknowledges nothing. A Round whose in-flight delivery,
+failure or interruption lands ends as reported, and its Stop is not
+acknowledged; a Stop that arrives before a `fail` or `interrupt` step
+wins, and that step is never sent. Claim
 polling resumes once the acknowledgement is answered.
 
 Stopping Michelin aborts a wait, a hold, a backoff and an in-flight
@@ -217,6 +223,7 @@ context fields. The credential is never logged.
 | `progress reported` | `info` | As above, plus the note's `seq` from Galley. |
 | `usage observation reported` | `info` | As above, plus `observationId`. |
 | `delivery reported`, `engine delivered` | `info` | As above, plus Galley's `endedAt`; then the engine returns and polling resumes. |
+| `failure reported`, `engine failed`; `interruption reported`, `engine interrupted` | `info` | As above, plus Galley's `endedAt`; then the engine returns and polling resumes. |
 | `round event failed; retrying` | `warn` | `roundId`, `step`, `attempt`, `reason`, `httpStatus`, `errorCode`, `retryInMs`. |
 | `round event refused; round abandoned locally` | `error` | `roundId`, `step`, `attempt`, `httpStatus`, Galley's `errorCode`. |
 | `engine holding`, `engine script finished` | `info` | The script reached `hold`, or its last step. |

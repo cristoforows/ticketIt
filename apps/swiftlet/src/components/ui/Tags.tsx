@@ -13,6 +13,8 @@ const tag = cva("inline-block rounded-tag text-label uppercase", {
       claimed: "border border-ink bg-paper px-2 py-px font-bold tracking-label text-ink",
       stopping: "border border-status-blocked-deep bg-paper px-2 py-px font-bold tracking-label text-status-blocked-deep",
       stopped: "border border-status-blocked-deep bg-status-blocked-deep px-2 py-px font-bold tracking-label text-paper",
+      failed: "border border-status-blocked-deep bg-status-blocked-deep px-2 py-px font-bold tracking-label text-paper",
+      interrupted: "border border-dashed border-status-blocked-deep bg-paper px-2 py-px font-bold tracking-label text-status-blocked-deep",
       delivered: "border border-status-in-review-deep bg-paper px-2 py-px font-bold tracking-label text-status-in-review-deep",
       estimate: "border border-muted bg-paper px-1.5 py-px font-bold tracking-label text-muted normal-case",
     },
@@ -50,6 +52,14 @@ export function StoppingTag({ className, ...rest }: ComponentPropsWithRef<"span"
 
 export function StoppedTag({ className, ...rest }: ComponentPropsWithRef<"span">) {
   return <span className={cn(tag({ kind: "stopped" }), className)} {...rest} />;
+}
+
+export function FailedTag({ className, ...rest }: ComponentPropsWithRef<"span">) {
+  return <span className={cn(tag({ kind: "failed" }), className)} {...rest} />;
+}
+
+export function InterruptedTag({ className, ...rest }: ComponentPropsWithRef<"span">) {
+  return <span className={cn(tag({ kind: "interrupted" }), className)} {...rest} />;
 }
 
 export function DeliveredTag({ className, ...rest }: ComponentPropsWithRef<"span">) {

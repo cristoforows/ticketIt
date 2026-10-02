@@ -41,13 +41,16 @@ function parseDeliverable(value: unknown): RoundDeliverable | undefined {
   return { bodyMarkdown: deliverable.bodyMarkdown, summary: deliverable.summary, criteriaAssessment: deliverable.criteriaAssessment };
 }
 
+const ROUND_STATES: readonly TicketRound["state"][] = ["claimed", "running", "delivered", "stopped", "failed", "interrupted"];
+const NOTED_STATES: readonly TicketRound["state"][] = ["stopped", "failed", "interrupted"];
+
 function parseRound(value: unknown): TicketRound | undefined {
   const round = record(value);
   if (
     !round ||
     typeof round.id !== "string" ||
     typeof round.sequence !== "number" ||
-    (round.state !== "claimed" && round.state !== "running" && round.state !== "delivered" && round.state !== "stopped") ||
+    !ROUND_STATES.includes(round.state as TicketRound["state"]) ||
     !isAgentSummary(round.agent) ||
     typeof round.claimedAt !== "string" ||
     !isNullableString(round.startedAt) ||
@@ -59,13 +62,13 @@ function parseRound(value: unknown): TicketRound | undefined {
   const activity = round.activity.map(parseNote);
   const usage = parseUsage(round.usage);
   const deliverable = round.state === "delivered" ? parseDeliverable(round.deliverable) : round.deliverable === null ? null : undefined;
-  const outcomeNote = round.state === "stopped" ? (typeof round.outcomeNote === "string" ? round.outcomeNote : undefined) : round.outcomeNote === null ? null : undefined;
+  const outcomeNote = NOTED_STATES.includes(round.state as TicketRound["state"]) ? (typeof round.outcomeNote === "string" ? round.outcomeNote : undefined) : round.outcomeNote === null ? null : undefined;
   if (!usage || deliverable === undefined || outcomeNote === undefined || !activity.every((note) => note !== undefined)) return undefined;
   const { id, name, kind } = round.agent;
   return {
     id: round.id,
     sequence: round.sequence,
-    state: round.state,
+    state: round.state as TicketRound["state"],
     agent: { id, name, kind },
     claimedAt: round.claimedAt,
     startedAt: round.startedAt,

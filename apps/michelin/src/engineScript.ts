@@ -19,7 +19,15 @@ export interface DeliverStep {
   criteriaAssessment: string;
 }
 
-export type EngineStep = { step: "start" } | { step: "wait"; ms: number } | { step: "progress"; note: string } | UsageStep | DeliverStep | { step: "hold" };
+export type EngineStep =
+  | { step: "start" }
+  | { step: "wait"; ms: number }
+  | { step: "progress"; note: string }
+  | UsageStep
+  | DeliverStep
+  | { step: "hold" }
+  | { step: "fail"; explanation: string }
+  | { step: "interrupt"; evidence: string };
 
 export interface EngineScript {
   steps: readonly EngineStep[];
@@ -74,7 +82,7 @@ export const DEFAULT_ENGINE_SCRIPT: EngineScript = {
   ],
 };
 
-const SUPPORTED_STEPS = "start, wait, progress, usage, deliver, hold";
+const SUPPORTED_STEPS = "start, wait, progress, usage, deliver, hold, fail, interrupt";
 
 const USAGE_KEYS = ["provider", "model", "inputTokens", "outputTokens", "costUsd", "activeMs", "basis", "providerGenerationId"];
 
@@ -137,12 +145,21 @@ function parseStep(raw: unknown, index: number, total: number, problems: string[
       break;
     case "hold":
     case "deliver":
+    case "fail":
+    case "interrupt":
       if (index < total - 1) {
-        problems.push(`${at}: ${JSON.stringify(name)} may only be the last step; "hold" and "deliver" are mutually exclusive`);
+        problems.push(`${at}: ${JSON.stringify(name)} may only be the last step; "hold", "deliver", "fail" and "interrupt" are mutually exclusive`);
       }
       if (name === "deliver") {
         DELIVER_KEYS.forEach((key) => known.add(key));
         checkDeliverable(fields, at, problems);
+      }
+      if (name === "fail" || name === "interrupt") {
+        const key = name === "fail" ? "explanation" : "evidence";
+        known.add(key);
+        if (!validNote(fields[key])) {
+          problems.push(`${at}: "${key}" must be 1 to ${NOTE_MAX_LENGTH} characters, not blank, without control characters other than tab and line feed`);
+        }
       }
       break;
     case "wait":
@@ -192,6 +209,10 @@ function parseStep(raw: unknown, index: number, total: number, problems: string[
       };
     case "deliver":
       return { step: "deliver", bodyMarkdown: fields["bodyMarkdown"] as string, summary: fields["summary"] as string, criteriaAssessment: fields["criteriaAssessment"] as string };
+    case "fail":
+      return { step: "fail", explanation: fields["explanation"] as string };
+    case "interrupt":
+      return { step: "interrupt", evidence: fields["evidence"] as string };
     default:
       return { step: name as "start" | "hold" };
   }

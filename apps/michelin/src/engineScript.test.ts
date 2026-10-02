@@ -42,6 +42,8 @@ const USAGE = {
   providerGenerationId: "gen-1",
 };
 const DELIVER = { step: "deliver", bodyMarkdown: "# Done\n\n- one\n", summary: "Done.", criteriaAssessment: "Met." };
+const FAIL = { step: "fail", explanation: "The repository is gone." };
+const INTERRUPT = { step: "interrupt", evidence: "The engine process exited with signal 9." };
 const deliverWith = (fields: Record<string, unknown>) => scriptOf({ step: "start" }, { ...DELIVER, ...fields });
 const UNKNOWN_USAGE = { step: "usage", provider: "p", model: "m", inputTokens: null, outputTokens: null, costUsd: null, activeMs: null, basis: "reported", providerGenerationId: null };
 
@@ -65,6 +67,11 @@ describe("parseEngineScript", () => {
     ["summary and assessment at their bounds", deliverWith({ summary: "é".repeat(2000), criteriaAssessment: "😀".repeat(10_000) }), [{ step: "start" }, { ...DELIVER, summary: "é".repeat(2000), criteriaAssessment: "😀".repeat(10_000) }]],
     ["tabs and line feeds in a deliverable", deliverWith({ bodyMarkdown: "a\tb\n", summary: "a\tb\n", criteriaAssessment: "a\tb\n" }), [{ step: "start" }, { ...DELIVER, bodyMarkdown: "a\tb\n", summary: "a\tb\n", criteriaAssessment: "a\tb\n" }]],
     ["a note of only U+FEFF, which Galley does not read as blank", scriptOf({ step: "start" }, { step: "progress", note: "\ufeff" }), [{ step: "start" }, { step: "progress", note: "\ufeff" }]],
+    ["progress, usage, then fail", scriptOf({ step: "start" }, { step: "progress", note: "n" }, USAGE, FAIL), [{ step: "start" }, { step: "progress", note: "n" }, USAGE, FAIL]],
+    ["start then interrupt", scriptOf({ step: "start" }, INTERRUPT), [{ step: "start" }, INTERRUPT]],
+    ["an explanation at its length bound", scriptOf({ step: "start" }, { step: "fail", explanation: "é".repeat(2000) }), [{ step: "start" }, { step: "fail", explanation: "é".repeat(2000) }]],
+    ["evidence of one character with tabs allowed", scriptOf({ step: "start" }, { step: "interrupt", evidence: "x" }), [{ step: "start" }, { step: "interrupt", evidence: "x" }]],
+    ["an explanation with tabs and line feeds", scriptOf({ step: "start" }, { step: "fail", explanation: "a\tb\nc" }), [{ step: "start" }, { step: "fail", explanation: "a\tb\nc" }]],
   ])("accepts %s", (_name, text, steps) => {
     const { script, problems } = parse(text);
     expect(problems).toEqual([]);
@@ -96,11 +103,31 @@ describe("parseEngineScript", () => {
     ["a step that is not an object", scriptOf({ step: "start" }, "wait"), /steps\[1\].*must be an object/],
     ["a step without a name", scriptOf({ step: "start" }, { ms: 5 }), /steps\[1\].*"step" must be a string/],
     ["a step name that is not a string", scriptOf({ step: "start" }, { step: 7 }), /steps\[1\].*"step" must be a string/],
-    ["an unknown step name", scriptOf({ step: "start" }, { step: "sleep", ms: 5 }), /steps\[1\].*unknown step "sleep".*start, wait, progress, usage, deliver, hold/],
+    ["an unknown step name", scriptOf({ step: "start" }, { step: "sleep", ms: 5 }), /steps\[1\].*unknown step "sleep".*start, wait, progress, usage, deliver, hold, fail, interrupt/],
     ["deliver before the last step", scriptOf({ step: "start" }, DELIVER, { step: "wait", ms: 10 }), /steps\[1\].*"deliver" may only be the last step/],
     ["deliver then hold", scriptOf({ step: "start" }, DELIVER, { step: "hold" }), /steps\[1\].*"deliver".*last.*mutually exclusive/],
     ["hold then deliver", scriptOf({ step: "start" }, { step: "hold" }, DELIVER), /steps\[1\].*"hold".*last.*mutually exclusive/],
     ["two delivers", scriptOf({ step: "start" }, DELIVER, DELIVER), /steps\[1\].*"deliver".*last/],
+    ["fail before the last step", scriptOf({ step: "start" }, FAIL, { step: "wait", ms: 10 }), /steps\[1\].*"fail" may only be the last step/],
+    ["interrupt before the last step", scriptOf({ step: "start" }, INTERRUPT, { step: "progress", note: "n" }), /steps\[1\].*"interrupt" may only be the last step/],
+    ["fail then deliver", scriptOf({ step: "start" }, FAIL, DELIVER), /steps\[1\].*"fail".*last.*"hold", "deliver", "fail" and "interrupt" are mutually exclusive/],
+    ["deliver then fail", scriptOf({ step: "start" }, DELIVER, FAIL), /steps\[1\].*"deliver".*last.*mutually exclusive/],
+    ["interrupt then hold", scriptOf({ step: "start" }, INTERRUPT, { step: "hold" }), /steps\[1\].*"interrupt".*last.*mutually exclusive/],
+    ["hold then interrupt", scriptOf({ step: "start" }, { step: "hold" }, INTERRUPT), /steps\[1\].*"hold".*last.*mutually exclusive/],
+    ["fail then interrupt", scriptOf({ step: "start" }, FAIL, INTERRUPT), /steps\[1\].*"fail".*last.*mutually exclusive/],
+    ["fail as the first step", scriptOf(FAIL), /steps\[0\].*start/],
+    ["fail without an explanation", scriptOf({ step: "start" }, { step: "fail" }), /steps\[1\].*"explanation" must be 1 to 2000 characters/],
+    ["an empty explanation", scriptOf({ step: "start" }, { step: "fail", explanation: "" }), /steps\[1\].*"explanation"/],
+    ["a blank explanation", scriptOf({ step: "start" }, { step: "fail", explanation: " \n\u0085" }), /steps\[1\].*"explanation".*not blank/],
+    ["an explanation over 2000 characters", scriptOf({ step: "start" }, { step: "fail", explanation: "é".repeat(2001) }), /steps\[1\].*"explanation".*2000/],
+    ["an explanation with a carriage return", scriptOf({ step: "start" }, { step: "fail", explanation: "a\rb" }), /steps\[1\].*"explanation".*control/],
+    ["an explanation that is not a string", scriptOf({ step: "start" }, { step: "fail", explanation: 5 }), /steps\[1\].*"explanation"/],
+    ["fail given evidence", scriptOf({ step: "start" }, { step: "fail", evidence: "x" }), /steps\[1\].*unknown key "evidence"/],
+    ["interrupt without evidence", scriptOf({ step: "start" }, { step: "interrupt" }), /steps\[1\].*"evidence" must be 1 to 2000 characters/],
+    ["blank evidence", scriptOf({ step: "start" }, { step: "interrupt", evidence: "\t" }), /steps\[1\].*"evidence".*not blank/],
+    ["evidence over 2000 characters", scriptOf({ step: "start" }, { step: "interrupt", evidence: "a".repeat(2001) }), /steps\[1\].*"evidence".*2000/],
+    ["evidence with an escape character", scriptOf({ step: "start" }, { step: "interrupt", evidence: "a\u001bb" }), /steps\[1\].*"evidence".*control/],
+    ["interrupt given an explanation", scriptOf({ step: "start" }, { step: "interrupt", evidence: "x", explanation: "y" }), /steps\[1\].*unknown key "explanation"/],
     ["deliver as the first step", scriptOf(DELIVER), /steps\[0\].*start/],
     ["a body of 1 MiB + 1", deliverWith({ bodyMarkdown: "a".repeat(BODY_MARKDOWN_MAX_BYTES + 1) }), /steps\[1\].*"bodyMarkdown".*1048576 bytes/],
     ["a body of 1 MiB + 1 in two-byte characters", deliverWith({ bodyMarkdown: "é".repeat(BODY_MARKDOWN_MAX_BYTES / 2) + "a" }), /steps\[1\].*"bodyMarkdown"/],

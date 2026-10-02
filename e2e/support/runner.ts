@@ -31,7 +31,7 @@ export interface DeliverScriptStep {
   criteriaAssessment: string;
 }
 
-export type EngineScriptStep = { step: "start" } | { step: "wait"; ms: number } | { step: "progress"; note: string } | UsageScriptStep | DeliverScriptStep | { step: "hold" };
+export type EngineScriptStep = { step: "start" } | { step: "wait"; ms: number } | { step: "progress"; note: string } | UsageScriptStep | DeliverScriptStep | { step: "hold" } | { step: "fail"; explanation: string } | { step: "interrupt"; evidence: string };
 
 function writeEngineScript(steps: EngineScriptStep[]): string {
   const file = path.join(mkdtempSync(path.join(tmpdir(), "michelin-e2e-")), "script.json");

@@ -121,7 +121,17 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 		}
 	}
 	assign(toOwner)
-	for _, to := range []TicketStatus{InProgress, Blocked, InProgress, InReview} {
+	for _, to := range []TicketStatus{InProgress, Blocked} {
+		if resp := changeStatus(t, client, baseURL, created.Id, to); resp.status != http.StatusOK {
+			t.Fatalf("change status to %s: status = %d, want 200; error=%+v", to, resp.status, resp.errBody)
+		}
+	}
+	assign(toAgent)
+	if resp := changeStatus(t, client, baseURL, created.Id, Ready); resp.status != http.StatusOK || !resp.ticket.RequestingAgentWork {
+		t.Fatalf("recover Blocked -> Ready with an Agent: status = %d, requestingAgentWork = %t; error=%+v", resp.status, resp.ticket.RequestingAgentWork, resp.errBody)
+	}
+	assign(toOwner)
+	for _, to := range []TicketStatus{InProgress, InReview} {
 		if resp := changeStatus(t, client, baseURL, created.Id, to); resp.status != http.StatusOK {
 			t.Fatalf("change status to %s: status = %d, want 200; error=%+v", to, resp.status, resp.errBody)
 		}
@@ -202,7 +212,7 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 			}
 		case "rounds":
 			if after != before[table] {
-				t.Errorf("rounds row count changed from %d to %d -- a manual action created a Round; only a runner claim may", before[table], after)
+				t.Errorf("rounds row count changed from %d to %d -- a manual action, including the recovery from Blocked, created a Round; only a runner claim may", before[table], after)
 			}
 		case "round_events", "round_engine_references":
 			if after != before[table] {

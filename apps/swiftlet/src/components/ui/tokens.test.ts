@@ -41,6 +41,8 @@ const textPairs: Array<[string, string, string]> = [
   ["claimed tag: ink on paper", "ink", "paper"],
   ["stopping tag: status-blocked-deep on paper", "status-blocked-deep", "paper"],
   ["stopped tag: paper on status-blocked-deep", "paper", "status-blocked-deep"],
+  ["failed tag: paper on status-blocked-deep", "paper", "status-blocked-deep"],
+  ["interrupted tag: status-blocked-deep on paper", "status-blocked-deep", "paper"],
   ["delivered tag: status-in-review-deep on paper", "status-in-review-deep", "paper"],
   ["Report blockquote: muted on paper", "muted", "paper"],
   ["estimate tag: muted on paper", "muted", "paper"],
