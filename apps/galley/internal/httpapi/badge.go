@@ -145,7 +145,7 @@ func (s *server) AttachTicketBadge(w http.ResponseWriter, r *http.Request, id, b
 		writeBadgeNotFound(w)
 		return
 	}
-	ticket, found, err := getTicketForOwner(ctx, tx, owner.ID, id)
+	ticket, found, err := getTicketForOwner(ctx, tx, owner.ID, id, s.clockNow())
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to read the ticket")
 		return
@@ -229,7 +229,7 @@ func (s *server) DetachTicketBadge(w http.ResponseWriter, r *http.Request, id, b
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to detach the badge")
 		return
 	}
-	ticket, found, err := getTicketForOwner(ctx, tx, owner.ID, id)
+	ticket, found, err := getTicketForOwner(ctx, tx, owner.ID, id, s.clockNow())
 	if err != nil || !found {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to read the ticket")
 		return

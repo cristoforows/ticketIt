@@ -228,7 +228,7 @@ describe("open-Round lock", () => {
     assigneeType: "agent",
     assigneeAgent: agent,
     badges: [{ id: BADGE.id, name: BADGE.name }],
-    openRound: { id: reason.roundId, sequence: 4, state: "running", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: "2026-10-01T10:01:00Z", stopRequestedAt: null },
+    openRound: { id: reason.roundId, sequence: 4, state: "running", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: "2026-10-01T10:01:00Z", stopRequestedAt: null, waitingReason: "working" },
     allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } } },
   };
 
@@ -280,8 +280,9 @@ describe("TicketDetail", () => {
     expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent(statusLabel(TICKET.status));
     expect(screen.getByTestId("ticket-detail-template")).toHaveTextContent("Basic");
     expect(screen.getByTestId("ticket-detail-completion-condition")).toHaveTextContent("Human acceptance");
-    expect(screen.getByTestId("ticket-detail-created-at")).toHaveTextContent(TICKET.createdAt);
-    expect(screen.getByTestId("ticket-detail-updated-at")).toHaveTextContent(TICKET.updatedAt);
+    expect(screen.getByTestId("ticket-detail-created-at")).toHaveTextContent("22 Sep 2026 15:30:00 UTC+05:30");
+    expect(screen.getByTestId("ticket-detail-updated-at")).toHaveTextContent("22 Sep 2026 15:35:00 UTC+05:30");
+    expect(screen.getByTestId("ticket-detail-created-at").querySelector("time")).toHaveAttribute("dateTime", TICKET.createdAt);
   });
 
   it("renders no section for a Round, Report, or Grill Mode -- none of those exist yet", () => {
@@ -618,12 +619,12 @@ describe("TicketDetail", () => {
       });
 
       it("shows Claimed by runner only while Galley reports the open Round as claimed", () => {
-        const round = { id: "r1", sequence: 1, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null };
+        const round = { id: "r1", sequence: 1, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null, waitingReason: "starting" as const };
         const { rerender } = render(<TicketDetail ticket={{ ...agentTicket, status: "Ready", openRound: { ...round, state: "claimed" } }} onSave={vi.fn()} {...noopActions()} />);
         expect(screen.getByTestId("ticket-detail-claimed")).toHaveTextContent("Claimed by runner");
         expect(screen.queryByTestId("ticket-detail-queued")).not.toBeInTheDocument();
 
-        rerender(<TicketDetail ticket={{ ...agentTicket, status: "Ready", openRound: { ...round, state: "running", startedAt: "2026-10-01T10:01:00Z" } }} onSave={vi.fn()} {...noopActions()} />);
+        rerender(<TicketDetail ticket={{ ...agentTicket, status: "Ready", openRound: { ...round, state: "running", startedAt: "2026-10-01T10:01:00Z", waitingReason: "working" } }} onSave={vi.fn()} {...noopActions()} />);
         expect(screen.queryByTestId("ticket-detail-claimed")).not.toBeInTheDocument();
       });
 
@@ -735,8 +736,8 @@ describe("the Rounds section", () => {
   afterEach(cleanup);
 
   const agent = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kind: "research" as const };
-  const claimedRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 3, state: "claimed" as const, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null };
-  const runningRound = { ...claimedRound, state: "running" as const, startedAt: "2026-10-01T10:01:00Z" };
+  const claimedRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 3, state: "claimed" as const, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null, waitingReason: "starting" as const };
+  const runningRound = { ...claimedRound, state: "running" as const, startedAt: "2026-10-01T10:01:00Z", waitingReason: "working" as const };
   const usage = {
     observations: 0,
     complete: true,
@@ -746,7 +747,7 @@ describe("the Rounds section", () => {
     outputTokens: { sum: null, complete: true, estimated: false },
     activeMs: { sum: null, complete: true, estimated: false },
   };
-  const recordOf = (round: NonNullable<Ticket["openRound"]>): TicketRound => ({ ...round, endedAt: null, outcomeNote: null, activity: [], usage, deliverable: null });
+  const recordOf = (round: NonNullable<Ticket["openRound"]>): TicketRound => ({ ...round, endedAt: null, outcomeNote: null, activity: [], earlierActivityCursor: null, usage, deliverable: null });
   const deliveredRecord = (sequence: number, id: string): TicketRound => ({
     id,
     sequence,
@@ -757,6 +758,7 @@ describe("the Rounds section", () => {
     endedAt: `2026-10-0${sequence}T10:09:00Z`,
     outcomeNote: null,
     activity: [],
+    earlierActivityCursor: null,
     usage,
     deliverable: { summary: `Summary ${sequence}`, criteriaAssessment: `Assessment ${sequence}`, bodyMarkdown: `Report ${sequence}` },
   });
@@ -795,7 +797,7 @@ describe("the Rounds section", () => {
     expect(section.getByRole("heading", { name: "Rounds" })).toBeInTheDocument();
     expect(section.getByTestId("ticket-detail-round-number")).toHaveTextContent("Round 3");
     expect(section.getByTestId("ticket-detail-round-agent")).toHaveTextContent("atlas");
-    expect(section.getByTestId("ticket-detail-round-claimed-at")).toHaveTextContent("2026-10-01T10:00:00Z");
+    expect(section.getByTestId("ticket-detail-round-claimed-at")).toHaveTextContent("01 Oct 2026 15:30:00 UTC+05:30");
     expect(section.getByTestId("ticket-detail-round-state")).toHaveTextContent("Claimed, waiting for the runner to start");
     expect(section.queryByTestId("ticket-detail-round-started")).not.toBeInTheDocument();
     expect(section.queryByTestId("ticket-detail-round-records-loading")).not.toBeInTheDocument();
@@ -807,7 +809,7 @@ describe("the Rounds section", () => {
     expect(section.getByTestId("ticket-detail-round-number")).toHaveTextContent("Round 3");
     expect(section.getByTestId("ticket-detail-round-agent")).toHaveTextContent("atlas");
     expect(section.getByTestId("ticket-detail-round-state")).toHaveTextContent("Running");
-    expect(section.getByTestId("ticket-detail-round-started")).toHaveTextContent("2026-10-01T10:01:00Z");
+    expect(section.getByTestId("ticket-detail-round-started")).toHaveTextContent("01 Oct 2026 15:31:00 UTC+05:30");
     expect(section.queryByTestId("ticket-detail-round-delivered-at")).not.toBeInTheDocument();
     expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("In Progress");
     expect(screen.queryByTestId("ticket-detail-claimed")).not.toBeInTheDocument();
@@ -823,7 +825,7 @@ describe("the Rounds section", () => {
     expect(overlay).toHaveTextContent("Runner disconnected");
     expect(overlay).toHaveAttribute("role", "status");
     expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("In Progress");
-    expect(screen.getByTestId("ticket-detail-round-started")).toHaveTextContent("2026-10-01T10:01:00Z");
+    expect(screen.getByTestId("ticket-detail-round-started")).toHaveTextContent("01 Oct 2026 15:31:00 UTC+05:30");
   });
 
   it.each([
@@ -846,7 +848,7 @@ describe("the Rounds section", () => {
     expect(screen.getByTestId("ticket-detail-round-state")).toHaveTextContent("Claimed, waiting for the runner to start");
     rerender(<TicketDetail ticket={roundTicket(runningRound, "InProgress")} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [recordOf(runningRound)] }} />);
     expect(screen.getByTestId("ticket-detail-round-state")).toHaveTextContent("Running");
-    expect(screen.getByTestId("ticket-detail-round-started")).toHaveTextContent("2026-10-01T10:01:00Z");
+    expect(screen.getByTestId("ticket-detail-round-started")).toHaveTextContent("01 Oct 2026 15:31:00 UTC+05:30");
   });
 
   describe("the Round history", () => {
@@ -862,7 +864,7 @@ describe("the Rounds section", () => {
       expect(entries().map(entryOpen)).toEqual([true, false]);
       expect(within(entries()[0]).getByTestId("ticket-detail-round-state")).toHaveTextContent("Delivered by atlas");
       expect(entries()[0].querySelector("summary")!.textContent).toBe("+−Round 2 · Delivered by atlas");
-      expect(within(entries()[0]).getByTestId("ticket-detail-round-delivered-at")).toHaveTextContent(round2.endedAt!);
+      expect(within(entries()[0]).getByTestId("ticket-detail-round-delivered-at")).toHaveTextContent("02 Oct 2026 15:39:00 UTC+05:30");
     });
 
     it("opens an earlier Round from its summary to show its own report, activity and usage", () => {
@@ -916,9 +918,9 @@ describe("the Rounds section", () => {
       expect(entry.getByTestId("ticket-detail-round-stopped")).toHaveTextContent("Stopped");
       expect(entries()[0].querySelector("summary")!.textContent).toBe("+−Round 3 · Stopped");
       expect(entry.getByTestId("ticket-detail-round-outcome-note")).toHaveTextContent(stopped.outcomeNote!);
-      expect(entry.getByTestId("ticket-detail-round-stopped-at")).toHaveTextContent("2026-10-01T10:05:00Z");
-      expect(entry.getByTestId("ticket-detail-round-started")).toHaveTextContent("2026-10-01T10:01:00Z");
-      expect(entry.getAllByTestId("ticket-detail-round-note").map((note) => note.textContent)).toEqual(["2026-10-01T10:02:00ZReading the Ticket"]);
+      expect(entry.getByTestId("ticket-detail-round-stopped-at")).toHaveTextContent("01 Oct 2026 15:35:00 UTC+05:30");
+      expect(entry.getByTestId("ticket-detail-round-started")).toHaveTextContent("01 Oct 2026 15:31:00 UTC+05:30");
+      expect(entry.getAllByTestId("ticket-detail-round-note").map((note) => note.textContent)).toEqual(["01 Oct 2026 15:32:00 UTC+05:30Reading the Ticket"]);
       expect(entry.getByRole("heading", { name: "Usage" })).toBeInTheDocument();
       expect(entry.getByTestId("ticket-detail-round-usage-input-tokens")).toHaveTextContent("1,200");
       expect(entry.queryByTestId("ticket-detail-round-summary")).not.toBeInTheDocument();
@@ -962,8 +964,8 @@ describe("the Rounds section", () => {
       expect(entry.getByTestId(`ticket-detail-round-${state}`).className.split(" ")).toEqual(expect.arrayContaining(colours));
       expect(entries()[0].querySelector("summary")!.textContent).toBe(`+−Round 3 · ${label}`);
       expect(entry.getByTestId("ticket-detail-round-outcome-note")).toHaveTextContent(note);
-      expect(entry.getByTestId(`ticket-detail-round-${state}-at`)).toHaveTextContent("2026-10-01T10:05:00Z");
-      expect(entry.getAllByTestId("ticket-detail-round-note").map((item) => item.textContent)).toEqual(["2026-10-01T10:02:00ZReading the Ticket"]);
+      expect(entry.getByTestId(`ticket-detail-round-${state}-at`)).toHaveTextContent("01 Oct 2026 15:35:00 UTC+05:30");
+      expect(entry.getAllByTestId("ticket-detail-round-note").map((item) => item.textContent)).toEqual(["01 Oct 2026 15:32:00 UTC+05:30Reading the Ticket"]);
       expect(entry.getByRole("heading", { name: "Usage" })).toBeInTheDocument();
       expect(entry.getByTestId("ticket-detail-round-usage-input-tokens")).toHaveTextContent("1,200");
       expect(entry.queryByTestId("ticket-detail-round-summary")).not.toBeInTheDocument();
@@ -1078,7 +1080,7 @@ describe("Stop", () => {
   });
 
   const agent = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kind: "research" as const };
-  const runningRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 2, state: "running" as const, agent, claimedAt: "2026-10-02T10:00:00Z", startedAt: "2026-10-02T10:00:01Z", stopRequestedAt: null };
+  const runningRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 2, state: "running" as const, agent, claimedAt: "2026-10-02T10:00:00Z", startedAt: "2026-10-02T10:00:01Z", stopRequestedAt: null, waitingReason: "working" as const };
   const locked = { code: "round_open", message: "Locked while atlas works on Round 2", roundId: runningRound.id };
   const running: Ticket = {
     ...REFINED_TICKET,
@@ -1090,7 +1092,7 @@ describe("Stop", () => {
   };
   const stopping: Ticket = {
     ...running,
-    openRound: { ...runningRound, stopRequestedAt: "2026-10-02T10:00:05Z" },
+    openRound: { ...runningRound, stopRequestedAt: "2026-10-02T10:00:05Z", waitingReason: "stopping" },
     allowedActions: { ...running.allowedActions, stop: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } } },
   };
 
@@ -1123,7 +1125,7 @@ describe("Stop", () => {
   });
 
   it("shows Stopping beside the claimed tag for a claimed Round", () => {
-    const claimedStopping: Ticket = { ...stopping, status: "Ready", openRound: { ...runningRound, state: "claimed", startedAt: null, stopRequestedAt: "2026-10-02T10:00:05Z" } };
+    const claimedStopping: Ticket = { ...stopping, status: "Ready", openRound: { ...runningRound, state: "claimed", startedAt: null, stopRequestedAt: "2026-10-02T10:00:05Z", waitingReason: "stopping" } };
     render(<TicketDetail ticket={claimedStopping} onSave={vi.fn()} {...noopActions()} />);
     expect(screen.getByTestId("ticket-detail-claimed")).toBeInTheDocument();
     expect(screen.getByTestId("ticket-detail-stopping")).toHaveTextContent("Stopping…");

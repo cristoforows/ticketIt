@@ -23,7 +23,7 @@ test.describe("ticket detail page", () => {
     expect(new URL(page.url()).pathname).toBe(`/tickets/${ticket.id}`);
     await expect(page.getByRole("dialog", { name: "Ticket details" }).getByTestId("ticket-detail-title")).toHaveText(title);
     await expect(page.getByTestId("ticket-detail-status")).toHaveText(statusLabel(ticket.status));
-    await expect(page.getByTestId("ticket-detail-created-at")).toHaveText(ticket.createdAt);
+    await expect(page.getByTestId("ticket-detail-created-at").locator("time")).toHaveAttribute("datetime", ticket.createdAt);
 
     // The classic failure point named in issue #57: the static server
     // (vite preview) must fall back to index.html for this path, not

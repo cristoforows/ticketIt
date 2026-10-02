@@ -698,9 +698,9 @@ otherwise collapse first and move the toggle out from under the tap.
 
 ## Claimed by runner (issue #132)
 
-While Galley's `openRound.state` is `claimed`, the slip
-(`board-claimed`) and the receipt (`ticket-detail-claimed`) show
-**Claimed by runner** as a `ClaimedTag`, the `tag` cva's `claimed`
+While Galley's `openRound.state` is `claimed`, the receipt
+(`ticket-detail-claimed`) shows **Claimed by runner** as a `ClaimedTag`
+(the slip shows the waiting reason instead since issue #162), the `tag` cva's `claimed`
 variant: an ink outline with ink text on paper (14.91:1, `tokens.test.ts`
 "claimed tag: ink on paper"). It differs from the Ready-deep **Queued
 for** outline, and the two never show together, because Galley reports
@@ -739,8 +739,8 @@ While `openRound` is set:
   the serial line, so a claimed slip has one tag, not two.
 
 `tokens.test.ts` "lock notice and lock glyph: ink on paper" pins the
-contrast (14.91:1). Nothing animates. The greyed active card,
-animation and View/Stop controls are M5 (#6).
+contrast (14.91:1). The greyed active card, its animation and its View
+and Stop controls are "Active order slip (issue #162)".
 
 ## Rounds, In Progress and refreshing (issue #134)
 
@@ -795,8 +795,9 @@ refresh, after the Ticket fetch, so there is no second timer (see
 "Confirmed Stop" for why every Ticket's list is fetched on load). Each
 Round's entry shows:
 
-- **Activity** (`ticket-detail-round-activity`): Galley's notes (at most
-  the latest 50), oldest first, each with the runner's `occurredAt`.
+- **Activity** (`ticket-detail-round-activity`): Galley's notes (the
+  latest 50, then **Load earlier**; see #162), oldest first, each with
+  the runner's `occurredAt` in local time.
   "No activity yet." when there are none.
 - **Usage so far** for an open Round, **Usage** for an ended one
   (`ticket-detail-round-usage`): Cost, Input tokens,
@@ -905,12 +906,12 @@ answers; Swiftlet renders them and decides nothing.
   `POST /api/tickets/{id}/stop` (`requestTicketStop`) through the same
   action path: no confirmation, no optimistic update, Galley's
   rejection shown verbatim. It is the one action the open-Round lock
-  does not disable. There is no Stop control on the slip.
+  does not disable. The slip has its own Stop since issue #162.
 - **Stopping…** shows once `stopRequestedAt` is set, as a
   `StoppingTag` (the `tag` cva's `stopping` variant: a Blocked-deep
   outline and text on paper, `tokens.test.ts` "stopping tag") on the
-  receipt (`ticket-detail-stopping`) and on the slip (`board-stopping`),
-  next to **Claimed by runner**. Stopping is not a Status: the Ticket
+  receipt (`ticket-detail-stopping`), next to **Claimed by runner**. The
+  slip shows the waiting reason instead (issue #162). Stopping is not a Status: the Ticket
   stays in its Status column, locked, and the receipt keeps refreshing
   while the Round is open. `parseTicket` requires `stopRequestedAt`
   (`null` or a string) on an open Round and `allowedActions.stop`.
@@ -1009,3 +1010,62 @@ renders what Galley returns:
 
 Tests: `TicketDetail.test.tsx` ("the Round history"), `api/rounds.test.ts`
 (parsing) and `tokens.test.ts` (the two tags' contrast).
+
+## Active order slip (issue #162)
+
+While `openRound` is set, the Board slip and the Backlog row render the
+active order slip (`ActiveOrder` in `components/ActiveOrder.tsx`, test
+ids `board-…` and `ticket-…`). Swiftlet decides nothing on it:
+
+- **Waiting reason.** `openRound.waitingReason` is Galley's
+  (`apps/galley/README.md`, "Waiting reason and activity paging").
+  `waitingReasonLabels` maps it to **Starting**, **Working**,
+  **Stopping** or **Runner disconnected** (`board-waiting-reason`,
+  `ticket-waiting-reason`); nothing is derived from timestamps or the
+  Round's state. `parseTicket` rejects a missing or unknown value. The
+  slip no longer shows `ClaimedTag` or `StoppingTag`.
+- **Greyed and locked.** The slip paper (`SlipPaper active`, the
+  `slipPaper` cva's `active` variant) and the Backlog row are `bg-rule`,
+  and every text on them is ink: muted on rule is 3.5:1, so the serial,
+  the date and the row's Status switch to ink. `tokens.test.ts` pins
+  "ink on rule" (AA text) and the indicator's 3:1, and
+  `ActiveOrder.test.tsx` fails if muted, dim or a status-text colour
+  appears on an active slip. The lock glyph stays; the slip is not
+  draggable; on a phone the actions toggle is hidden, because it would
+  cover View and Stop.
+- **Delivery indicator.** `DeliveryIndicator` is decorative
+  (`aria-hidden`); the text label carries the meaning. The rider idles
+  at the kitchen while Starting, rides while Working, rides back while
+  Stopping and stands still mid-road while Runner disconnected
+  (`styles.css`, `.delivery`). Under `prefers-reduced-motion: reduce`,
+  `animation: none` leaves each reason's static position.
+- **View and Stop.** View is a link to the receipt (`TicketModalLink`
+  with button classes), named "View <title>". Stop is a button named
+  "Stop <title>", shown only while `allowedActions.stop.available`. It
+  calls `requestTicketStop` and puts Galley's returned Ticket in the
+  list. A refusal shows Galley's message under the slip. Neither control
+  is nested in another.
+
+Receipt follow-ups from the M4 gate:
+
+- **Local time.** Every timestamp goes through `localTimestamp` /
+  `LocalTime` (`components/ui/time.tsx`): "03 Oct 2026 19:35:09
+  UTC+05:30" in the viewer's zone, with the ISO value in `dateTime`.
+  The slip's `shortDate` is local too. The unit suite runs in
+  `Asia/Kolkata` (`vite.config.ts`, `test.env.TZ`), so a UTC rendering
+  fails, and `time.test.ts` sets other zones explicitly.
+- **Paging.** The receipt shows the Round list's latest 50 notes and a
+  **Load earlier** button (`ticket-detail-round-load-earlier`) while
+  `earlierActivityCursor` is set. It calls `fetchRoundActivity` with
+  the oldest page's cursor. Shown notes are kept across refreshes; a
+  refresh whose window skipped past them is back-filled through the
+  window's own cursor.
+- **One runner health.** `useRunnerHealth` reads one shared poll, so
+  the header pill, the receipt's Runner disconnected notice and the
+  Runner page always show the same Galley value. A receipt opened
+  between polls shows the header's value at once.
+
+Tests: `ActiveOrder.test.tsx` (list and board), `TicketBoard.test.tsx`,
+`TicketBoardMobile.test.tsx`, `TicketDetailPage.test.tsx` (paging and
+the shared health), `api/tickets.test.ts`, `api/rounds.test.ts`,
+`ui/time.test.ts`, `ui/slip.test.ts` (motion) and `ui/tokens.test.ts`.

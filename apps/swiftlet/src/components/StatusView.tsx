@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { ErrorMessage, LoadingMessage } from "./ui";
+import { useEffect, useState, type ReactNode } from "react";
+import { ErrorMessage, LoadingMessage, LocalTime } from "./ui";
 import { fetchGalleyStatus, type GalleyStatus } from "../api/status";
 
 type FetchState =
@@ -52,12 +52,12 @@ export function StatusView() {
   }
 
   const { application, status, version, environment, startedAt } = state.data;
-  const rows: Array<[string, string, string]> = [
+  const rows: Array<[string, string, ReactNode]> = [
     ["Application", "status-application", application],
     ["Status", "status-status", status],
     ["Version", "status-version", version],
     ["Environment", "status-environment", environment],
-    ["Started at", "status-started-at", startedAt],
+    ["Started at", "status-started-at", <LocalTime iso={startedAt} />],
   ];
 
   return (

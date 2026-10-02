@@ -49,9 +49,7 @@ describe("StatusView", () => {
     expect(screen.getByTestId("status-environment")).toHaveTextContent(
       SAMPLE_STATUS.environment,
     );
-    expect(screen.getByTestId("status-started-at")).toHaveTextContent(
-      SAMPLE_STATUS.startedAt,
-    );
+    expect(screen.getByTestId("status-started-at")).toHaveTextContent("21 Sep 2026 15:30:00 UTC+05:30");
     expect(screen.queryByTestId("status-error")).not.toBeInTheDocument();
   });
 

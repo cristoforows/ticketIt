@@ -9,6 +9,7 @@ const modalLink = cva("text-ink", {
     variant: {
       log: "block min-w-0 truncate font-bold no-underline hover:underline",
       slip: "font-bold break-words",
+      action: "",
     },
   },
 });

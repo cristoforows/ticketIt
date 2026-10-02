@@ -458,6 +458,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tickets/{id}/rounds/{roundId}/activity": {
+        parameters: {
+            query?: {
+                /** @description An `earlierActivityCursor` from this Round. Omitted, the page is the latest 50 notes, the same as the Round's `activity`. */
+                before?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+                roundId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Page through a Round's activity
+         * @description Up to 50 notes before the cursor, oldest first. A malformed cursor is `400 invalid_cursor`. An unknown, malformed or foreign Ticket or Round id, or a Round of another Ticket, returns the shared 404.
+         */
+        get: operations["listRoundActivity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/session": {
         parameters: {
             query?: never;
@@ -807,6 +833,11 @@ export interface components {
          * @enum {string}
          */
         OpenRoundState: "claimed" | "running";
+        /**
+         * @description What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `stopping` (Stop requested), `starting` (claimed) and `working` (running) applies.
+         * @enum {string}
+         */
+        RoundWaitingReason: "starting" | "working" | "stopping" | "runner_disconnected";
         TicketOpenRound: {
             /** Format: uuid */
             id: string;
@@ -823,6 +854,7 @@ export interface components {
              * @description When the Owner requested Stop; the Ticket shows Stopping. Not a Status.
              */
             stopRequestedAt: string | null;
+            waitingReason: components["schemas"]["RoundWaitingReason"];
         };
         TicketDelivery: {
             /** Format: uuid */
@@ -848,6 +880,7 @@ export interface components {
             endedAt: string | null;
             /** @description The latest 50 notes, oldest first. */
             activity: components["schemas"]["RoundActivityNote"][];
+            earlierActivityCursor: components["schemas"]["EarlierActivityCursor"];
             usage: components["schemas"]["RoundUsage"];
             /** @description Set exactly when `state` is `delivered`. */
             deliverable: components["schemas"]["RoundDeliverable"] | null;
@@ -858,6 +891,13 @@ export interface components {
             bodyMarkdown: string;
             summary: string;
             criteriaAssessment: string;
+        };
+        /** @description Opaque. Passed as `before` to `listRoundActivity`, it reads the notes older than this page's first. Null when there are none. */
+        EarlierActivityCursor: string | null;
+        RoundActivityPage: {
+            /** @description Oldest first. */
+            activity: components["schemas"]["RoundActivityNote"][];
+            earlierActivityCursor: components["schemas"]["EarlierActivityCursor"];
         };
         RoundActivityNote: {
             /** @description Galley's arrival order within the Round, without gaps. */
@@ -2045,6 +2085,41 @@ export interface operations {
                 };
             };
             /** @description Error. See `ErrorBody`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    listRoundActivity: {
+        parameters: {
+            query?: {
+                /** @description An `earlierActivityCursor` from this Round. Omitted, the page is the latest 50 notes, the same as the Round's `activity`. */
+                before?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+                roundId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of the Round's activity. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoundActivityPage"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. Includes `invalid_cursor`. */
             default: {
                 headers: {
                     [name: string]: unknown;

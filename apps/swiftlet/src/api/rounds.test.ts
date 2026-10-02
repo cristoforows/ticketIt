@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchTicketRounds } from "./rounds";
+import { UnauthenticatedError } from "./session";
+import { fetchRoundActivity, fetchTicketRounds } from "./rounds";
+import { TicketNotFoundError } from "./tickets";
 
 const usage = {
   observations: 1,
@@ -20,6 +22,7 @@ const STOPPED = {
   endedAt: "2026-10-01T10:00:30Z",
   outcomeNote: "Stopped before step 1 of 2 on Stop command 55555555-5555-4555-8555-555555555555",
   activity: [{ seq: 1, note: "Reading the Ticket", occurredAt: "2026-10-01T10:00:10Z" }],
+  earlierActivityCursor: null,
   usage,
   deliverable: null,
 };
@@ -53,8 +56,44 @@ describe("fetchTicketRounds", () => {
     ["an interrupted Round with no outcomeNote field", { ...STOPPED, state: "interrupted", outcomeNote: undefined }],
     ["a failed Round with a deliverable", { ...STOPPED, state: "failed", deliverable: { bodyMarkdown: "b", summary: "s", criteriaAssessment: "c" } }],
     ["an unknown state", { ...STOPPED, state: "abandoned" }],
+    ["no earlierActivityCursor field", { ...STOPPED, earlierActivityCursor: undefined }],
+    ["a numeric earlierActivityCursor", { ...STOPPED, earlierActivityCursor: 51 }],
   ])("refuses %s", async (_name, round) => {
     answer([round]);
     await expect(fetchTicketRounds("t")).rejects.toThrow("Galley's Round list was missing a required field.");
+  });
+});
+
+describe("fetchRoundActivity", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const respond = (body: unknown, status = 200) => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: status < 300, status, statusText: "", json: async () => body });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  };
+
+  it("asks Galley for the page before the cursor and keeps it as returned", async () => {
+    const page = { activity: STOPPED.activity, earlierActivityCursor: "opaque/1" };
+    const fetchMock = respond(page);
+    expect(await fetchRoundActivity("t 1", "r/1", "opaque/1")).toEqual(page);
+    expect(fetchMock).toHaveBeenCalledWith("/api/tickets/t%201/rounds/r%2F1/activity?before=opaque%2F1", undefined);
+  });
+
+  it.each([
+    ["no activity array", { earlierActivityCursor: null }],
+    ["a note without seq", { activity: [{ note: "n", occurredAt: "2026-10-01T10:00:00Z" }], earlierActivityCursor: null }],
+    ["no cursor field", { activity: [] }],
+  ])("refuses a page with %s", async (_name, body) => {
+    respond(body);
+    await expect(fetchRoundActivity("t", "r", "1")).rejects.toThrow("Galley's activity page was missing a required field.");
+  });
+
+  it("maps 404 to not found, 401 to unauthenticated, and other failures to Galley's status", async () => {
+    respond({ error: { code: "not_found", message: "round not found" } }, 404);
+    await expect(fetchRoundActivity("t", "r", "1")).rejects.toBeInstanceOf(TicketNotFoundError);
+    respond({}, 401);
+    await expect(fetchRoundActivity("t", "r", "1")).rejects.toBeInstanceOf(UnauthenticatedError);
+    respond({ error: { code: "invalid_cursor", message: "bad" } }, 400);
+    await expect(fetchRoundActivity("t", "r", "1")).rejects.toThrow("400");
   });
 });

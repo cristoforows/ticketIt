@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -138,7 +139,7 @@ func decideReorderAnchor(moved priorityRow, anchor *priorityRow) *transitionReje
 }
 
 // anchorID is "" when the request named a malformed identifier.
-func reorderTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, publicID, anchorID string, placement reorderPlacement) (Ticket, bool, *transitionRejection, error) {
+func reorderTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, publicID, anchorID string, placement reorderPlacement, now time.Time) (Ticket, bool, *transitionRejection, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return Ticket{}, false, nil, err
@@ -172,7 +173,7 @@ func reorderTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int6
 		return Ticket{}, true, nil, err
 	}
 
-	ticket, err := readLockedTicket(ctx, tx, ownerID, publicID)
+	ticket, err := readLockedTicket(ctx, tx, ownerID, publicID, now)
 	if err != nil {
 		return Ticket{}, true, nil, err
 	}
@@ -246,7 +247,7 @@ func (s *server) ReorderTicket(w http.ResponseWriter, r *http.Request, id string
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
 
-	ticket, found, rejection, err := reorderTicketForOwner(ctx, s.pool, owner.ID, id, anchorID, placement)
+	ticket, found, rejection, err := reorderTicketForOwner(ctx, s.pool, owner.ID, id, anchorID, placement, s.clockNow())
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to reorder the ticket")
 		return

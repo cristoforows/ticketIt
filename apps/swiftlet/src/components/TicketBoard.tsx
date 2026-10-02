@@ -77,6 +77,11 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
 
   useEffect(() => () => clearTimeout(scrollTimer.current), []);
 
+  const replaceTicket = (updated: Ticket) => {
+    requestId.current++;
+    setState((current) => (current.kind === "loaded" ? { ...current, tickets: current.tickets.map((ticket) => (ticket.id === updated.id ? updated : ticket)) } : current));
+  };
+
   const loaded = state.kind === "loaded";
   useLayoutEffect(() => {
     if (!loaded || !phone || stage === 0) return;
@@ -357,6 +362,8 @@ export function TicketBoard({ onUnauthenticated, refreshKey = 0, focusTicketId, 
                         onDismiss={() => setSelectedId(null)}
                         onMove={(target) => void moveTicket(ticket, target)}
                         onReorder={(placement, direction) => void reorderOnBoard(ticket, placement, direction)}
+                        onStopped={replaceTicket}
+                        onUnauthenticated={onUnauthenticated}
                         dropPosition={dropSlot?.id === ticket.id ? dropSlot.placement : undefined}
                         {...reorderDropHandlers(ticket)}
                         onDragStart={(event) => {

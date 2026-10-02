@@ -587,7 +587,7 @@ func TestListTicketsForOwner_ScopedToOwner(t *testing.T) {
 
 	bogusOwnerID := ownerID + 1_000_000_000
 
-	tickets, err := listTicketsForOwner(ctx, pool, bogusOwnerID)
+	tickets, err := listTicketsForOwner(ctx, pool, bogusOwnerID, time.Now())
 	if err != nil {
 		t.Fatalf("listTicketsForOwner() returned unexpected error: %v", err)
 	}
@@ -693,7 +693,7 @@ func TestGetTicket_ScopedToOwner(t *testing.T) {
 
 	bogusOwnerID := ownerID + 1_000_000_000
 
-	_, found, err := getTicketForOwner(ctx, pool, bogusOwnerID, publicID)
+	_, found, err := getTicketForOwner(ctx, pool, bogusOwnerID, publicID, time.Now())
 	if err != nil {
 		t.Fatalf("getTicketForOwner() returned unexpected error: %v", err)
 	}
@@ -1211,7 +1211,7 @@ func TestUpdateTicket_ScopedToOwner(t *testing.T) {
 
 	bogusOwnerID := ownerID + 1_000_000_000
 
-	_, found, _, err := updateTicketForOwner(ctx, pool, bogusOwnerID, publicID, ticketUpdate{title: strPtr(uniqueTitle(t) + "-hijacked")})
+	_, found, _, err := updateTicketForOwner(ctx, pool, bogusOwnerID, publicID, ticketUpdate{title: strPtr(uniqueTitle(t) + "-hijacked")}, time.Now())
 	if err != nil {
 		t.Fatalf("updateTicketForOwner() returned unexpected error: %v", err)
 	}
@@ -1219,7 +1219,7 @@ func TestUpdateTicket_ScopedToOwner(t *testing.T) {
 		t.Errorf("updateTicketForOwner(bogusOwnerID, %s) updated a ticket belonging to a different owner -- owner scoping is not enforced", publicID)
 	}
 
-	ticket, found, err := getTicketForOwner(ctx, pool, ownerID, publicID)
+	ticket, found, err := getTicketForOwner(ctx, pool, ownerID, publicID, time.Now())
 	if err != nil {
 		t.Fatalf("getTicketForOwner() returned unexpected error: %v", err)
 	}

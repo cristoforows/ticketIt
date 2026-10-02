@@ -1,6 +1,7 @@
 import type { DragEvent } from "react";
 import type { Ticket, TicketPlacement } from "../api/tickets";
-import { BadgeList, ClaimedTag, DeliveredTag, LockGlyph, PendingTag, QueuedTag, Rule, StoppingTag, shortDate, Slip, SlipPaper, SlipToggle, slipTilt, ticketSerial } from "./ui";
+import { ActiveOrder } from "./ActiveOrder";
+import { BadgeList, cn, DeliveredTag, LockGlyph, PendingTag, QueuedTag, Rule, shortDate, Slip, SlipPaper, SlipToggle, slipTilt, ticketSerial } from "./ui";
 import { openTicketModal } from "../router";
 import { assigneeLabel } from "./assignee";
 import { lockedLabel } from "./roundLock";
@@ -8,7 +9,7 @@ import type { ReorderDirection } from "./ReorderButtons";
 import { SlipActions } from "./SlipActions";
 import { TicketModalLink, ticketRowTestId } from "./TicketModalLink";
 
-export function TicketSlip({ ticket, stageTickets, phone, pending, anyPending, selected, beingDragged, dropPosition, moveTargets, onToggle, onDismiss, onMove, onReorder, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }: {
+export function TicketSlip({ ticket, stageTickets, phone, pending, anyPending, selected, beingDragged, dropPosition, moveTargets, onToggle, onDismiss, onMove, onReorder, onStopped, onUnauthenticated, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }: {
   ticket: Ticket;
   stageTickets: Ticket[];
   phone: boolean;
@@ -22,6 +23,8 @@ export function TicketSlip({ ticket, stageTickets, phone, pending, anyPending, s
   onDismiss: () => void;
   onMove: (target: Ticket["status"]) => void;
   onReorder: (placement: TicketPlacement, direction: ReorderDirection) => void;
+  onStopped: (ticket: Ticket) => void;
+  onUnauthenticated: () => void;
   onDragStart: (event: DragEvent<HTMLLIElement>) => void;
   onDragEnd: () => void;
   onDragOver: (event: DragEvent<HTMLLIElement>) => void;
@@ -29,27 +32,29 @@ export function TicketSlip({ ticket, stageTickets, phone, pending, anyPending, s
   onDrop: (event: DragEvent<HTMLLIElement>) => void;
 }) {
   const panelId = `board-slip-actions-${ticket.id}`;
+  const { openRound } = ticket;
   return (
     <Slip
       tilt={slipTilt(ticket.id)}
       stacked={phone}
       dragging={beingDragged}
       selected={selected}
+      active={openRound !== null}
       dropPosition={dropPosition}
       data-testid={ticketRowTestId("board", ticket.id)}
       aria-busy={pending}
-      draggable={!pending && !phone && !ticket.openRound}
+      draggable={!pending && !phone && !openRound}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
-      <SlipPaper status={ticket.status}>
-        <div className="flex justify-between text-label text-muted">
+      <SlipPaper status={ticket.status} active={openRound !== null}>
+        <div className={cn("flex justify-between text-label", openRound ? "text-ink" : "text-muted")}>
           <span className="flex items-center gap-1">
             {ticketSerial(ticket.id)}
-            {ticket.openRound && <LockGlyph data-testid="board-locked" label={lockedLabel(ticket.openRound)} className="text-ink" />}
+            {openRound && <LockGlyph data-testid="board-locked" label={lockedLabel(openRound)} className="text-ink" />}
           </span>
           <time dateTime={ticket.createdAt}>{shortDate(ticket.createdAt)}</time>
         </div>
@@ -62,19 +67,14 @@ export function TicketSlip({ ticket, stageTickets, phone, pending, anyPending, s
         {ticket.requestingAgentWork && ticket.assigneeAgent && (
           <QueuedTag data-testid="board-queued" className="self-start">Queued for {ticket.assigneeAgent.name}</QueuedTag>
         )}
-        {ticket.openRound?.state === "claimed" && (
-          <ClaimedTag data-testid="board-claimed" className="self-start">Claimed by runner</ClaimedTag>
-        )}
-        {ticket.openRound?.stopRequestedAt && (
-          <StoppingTag data-testid="board-stopping" className="self-start">Stopping…</StoppingTag>
-        )}
+        {openRound && <ActiveOrder ticket={{ ...ticket, openRound }} view="board" onStopped={onStopped} onUnauthenticated={onUnauthenticated} />}
         {ticket.delivery && (
           <DeliveredTag data-testid="board-delivered" className="self-start">Delivered by {ticket.delivery.agent.name}</DeliveredTag>
         )}
         <BadgeList data-testid="board-badges" badges={ticket.badges} />
         {pending && <PendingTag className="self-start">Moving…</PendingTag>}
       </SlipPaper>
-      {phone && !pending && (
+      {phone && !pending && !openRound && (
         <SlipToggle
           data-testid="board-slip-toggle"
           aria-label={`Actions for ${ticket.title}`}

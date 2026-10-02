@@ -46,6 +46,7 @@ test("a real Michelin starts a claimed Round with no browser open, and the slip 
       endedAt: null,
       outcomeNote: null,
       activity: [],
+      earlierActivityCursor: null,
       usage: NO_USAGE,
       deliverable: null,
     }]);
@@ -66,7 +67,7 @@ test("a real Michelin starts a claimed Round with no browser open, and the slip 
     await expect(slip).toBeVisible();
     await expect(slip.getByTestId("board-assignee")).toHaveText(`Assignee: ${agent.name}`);
     await expect(slip.getByRole("img", { name: `Locked while ${agent.name} works on Round 1` })).toBeVisible();
-    await expect(slip.getByTestId("board-claimed")).toHaveCount(0);
+    await expect(slip.getByTestId("board-waiting-reason")).toHaveText("Working");
     await expect(page.getByTestId("board-status-Ready").getByTestId(`board-ticket-${queued.id}`)).toHaveCount(0);
 
     await page.goto(`/tickets/${queued.id}`);
@@ -74,7 +75,7 @@ test("a real Michelin starts a claimed Round with no browser open, and the slip 
     const section = page.getByTestId("ticket-detail-rounds");
     await expect(section.getByTestId("ticket-detail-round-number")).toHaveText("Round 1");
     await expect(section.getByTestId("ticket-detail-round-agent")).toHaveText(agent.name);
-    await expect(section.getByTestId("ticket-detail-round-started")).toHaveText(started.openRound!.startedAt!);
+    await expect(section.getByTestId("ticket-detail-round-started").locator("time")).toHaveAttribute("datetime", started.openRound!.startedAt!);
     await expect(section.getByTestId("ticket-detail-round-state")).toHaveText("Running");
     await expect(page.getByTestId("ticket-detail-claimed")).toHaveCount(0);
     await expect(page.getByTestId("ticket-detail-locked")).toHaveText(`Locked while ${agent.name} works on Round 1`);
@@ -95,7 +96,7 @@ test("a real Michelin starts a claimed Round with no browser open, and the slip 
     // This navigation can discard the body of a response from the page signIn left.
     expect((await healthRead).status()).toBe(200);
     expect((await (await api.get("/api/runner-health")).json()).state).toBe("connected");
-    await expect(reopened.getByTestId("ticket-detail-round-started")).toHaveText(started.openRound!.startedAt!);
+    await expect(reopened.getByTestId("ticket-detail-round-started").locator("time")).toHaveAttribute("datetime", started.openRound!.startedAt!);
     await expect(reopened.getByTestId("ticket-detail-runner-disconnected")).toHaveCount(0);
 
     michelin.child.kill("SIGTERM");
@@ -110,11 +111,11 @@ test("a real Michelin starts a claimed Round with no browser open, and the slip 
     expect((await (await api.get("/api/runner-health")).json()).state).toBe("disconnected");
     await expect(reopened.getByTestId("ticket-detail-runner-disconnected")).toContainText("Runner disconnected", { timeout: 20_000 });
     await expect(reopened.getByTestId("ticket-detail-status")).toHaveText("In Progress");
-    await expect(reopened.getByTestId("ticket-detail-round-started")).toHaveText(started.openRound!.startedAt!);
+    await expect(reopened.getByTestId("ticket-detail-round-started").locator("time")).toHaveAttribute("datetime", started.openRound!.startedAt!);
 
     const afterLoss = await ticket(api, queued.id);
     expect(afterLoss.status).toBe("InProgress");
-    expect(afterLoss.openRound).toEqual(started.openRound);
+    expect(afterLoss.openRound).toEqual({ ...started.openRound, waitingReason: "runner_disconnected" });
     await second.close();
   } finally {
     if (!stopped) michelin.child.kill("SIGKILL");

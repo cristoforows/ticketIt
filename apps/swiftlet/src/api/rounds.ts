@@ -8,6 +8,7 @@ export type RoundActivityNote = components["schemas"]["RoundActivityNote"];
 export type RoundUsage = components["schemas"]["RoundUsage"];
 export type UsageCount = components["schemas"]["UsageCount"];
 export type RoundDeliverable = components["schemas"]["RoundDeliverable"];
+export type RoundActivityPage = components["schemas"]["RoundActivityPage"];
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
@@ -41,6 +42,11 @@ function parseDeliverable(value: unknown): RoundDeliverable | undefined {
   return { bodyMarkdown: deliverable.bodyMarkdown, summary: deliverable.summary, criteriaAssessment: deliverable.criteriaAssessment };
 }
 
+function parseActivity(value: unknown): RoundActivityNote[] | undefined {
+  const notes = Array.isArray(value) ? value.map(parseNote) : undefined;
+  return notes?.every((note) => note !== undefined) ? (notes as RoundActivityNote[]) : undefined;
+}
+
 const ROUND_STATES: readonly TicketRound["state"][] = ["claimed", "running", "delivered", "stopped", "failed", "interrupted"];
 const NOTED_STATES: readonly TicketRound["state"][] = ["stopped", "failed", "interrupted"];
 
@@ -55,15 +61,15 @@ function parseRound(value: unknown): TicketRound | undefined {
     typeof round.claimedAt !== "string" ||
     !isNullableString(round.startedAt) ||
     !isNullableString(round.endedAt) ||
-    !Array.isArray(round.activity)
+    !isNullableString(round.earlierActivityCursor)
   ) {
     return undefined;
   }
-  const activity = round.activity.map(parseNote);
+  const activity = parseActivity(round.activity);
   const usage = parseUsage(round.usage);
   const deliverable = round.state === "delivered" ? parseDeliverable(round.deliverable) : round.deliverable === null ? null : undefined;
   const outcomeNote = NOTED_STATES.includes(round.state as TicketRound["state"]) ? (typeof round.outcomeNote === "string" ? round.outcomeNote : undefined) : round.outcomeNote === null ? null : undefined;
-  if (!usage || deliverable === undefined || outcomeNote === undefined || !activity.every((note) => note !== undefined)) return undefined;
+  if (!usage || deliverable === undefined || outcomeNote === undefined || !activity) return undefined;
   const { id, name, kind } = round.agent;
   return {
     id: round.id,
@@ -74,7 +80,8 @@ function parseRound(value: unknown): TicketRound | undefined {
     startedAt: round.startedAt,
     endedAt: round.endedAt,
     outcomeNote,
-    activity: activity as RoundActivityNote[],
+    activity,
+    earlierActivityCursor: round.earlierActivityCursor,
     usage,
     deliverable,
   };
@@ -90,4 +97,16 @@ export async function fetchTicketRounds(ticketId: string): Promise<TicketRound[]
     throw new Error("Galley's Round list was missing a required field.");
   }
   return parsed as TicketRound[];
+}
+
+export async function fetchRoundActivity(ticketId: string, roundId: string, before: string): Promise<RoundActivityPage> {
+  const response = await authenticatedFetch(`/api/tickets/${encodeURIComponent(ticketId)}/rounds/${encodeURIComponent(roundId)}/activity?before=${encodeURIComponent(before)}`);
+  if (response.status === 404) throw new TicketNotFoundError();
+  if (!response.ok) throw new Error(`Galley returned an error response: ${response.status} ${response.statusText}`.trim());
+  const page = record(await response.json());
+  const activity = parseActivity(page?.activity);
+  if (!page || !activity || !isNullableString(page.earlierActivityCursor)) {
+    throw new Error("Galley's activity page was missing a required field.");
+  }
+  return { activity, earlierActivityCursor: page.earlierActivityCursor };
 }

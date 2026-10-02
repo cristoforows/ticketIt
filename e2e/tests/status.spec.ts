@@ -41,7 +41,7 @@ test("status page displays the values Galley actually returns", async ({ page, r
   await expect(page.getByTestId("status-status")).toHaveText(body.status);
   await expect(page.getByTestId("status-version")).toHaveText(body.version);
   await expect(page.getByTestId("status-environment")).toHaveText(body.environment);
-  await expect(page.getByTestId("status-started-at")).toHaveText(body.startedAt);
+  await expect(page.getByTestId("status-started-at").locator("time")).toHaveAttribute("datetime", body.startedAt);
 
   // Prove this ran against real, reachable PostgreSQL, not just that
   // Galley itself answered -- `database.status` is computed live on every

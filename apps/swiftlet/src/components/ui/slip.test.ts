@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ticketSerial } from "./serial";
-import { shortDate, slipTilt } from "./slip";
+import { slipTilt } from "./slip";
 
 describe("slip helpers", () => {
   it("derives the serial from the id", () => {
@@ -19,10 +19,6 @@ describe("slip helpers", () => {
     const spread = new Set(Array.from({ length: 40 }, (_, index) => slipTilt(`id-${index}`)));
     expect(spread.size).toBeGreaterThan(3);
   });
-
-  it("formats the capture date in UTC", () => {
-    expect(shortDate("2026-09-22T23:59:00Z")).toBe("22 Sep");
-  });
 });
 
 describe("slip motion", () => {
@@ -34,5 +30,33 @@ describe("slip motion", () => {
     expect(reduced).toContain(".slip:focus-within");
     expect(reduced).toMatch(/rotate:\s*none/);
     expect(reduced).toMatch(/translate:\s*none/);
+  });
+});
+
+describe("delivery indicator motion", () => {
+  const css = readFileSync(fileURLToPath(new URL("../../styles.css", import.meta.url)), "utf8");
+  const components = css.slice(css.indexOf("@layer components"), css.indexOf("@layer base"));
+  const reducedAt = components.indexOf("@media (prefers-reduced-motion: reduce)");
+  const motion = components.slice(0, reducedAt);
+  const reduced = components.slice(reducedAt);
+  const rule = (selector: string) => motion.match(new RegExp(`${selector.replace(/[[\]().*"=]/g, "\\$&")}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
+
+  it.each([
+    ["starting", "delivery-idle"],
+    ["working", "delivery-ride"],
+    ["stopping", "delivery-return"],
+  ])("animates the rider while the reason is %s", (reason, keyframes) => {
+    expect(rule(`.delivery[data-reason="${reason}"] .delivery-rider`)).toContain(keyframes);
+    expect(motion).toContain(`@keyframes ${keyframes}`);
+  });
+
+  it("keeps the rider still while the runner is disconnected", () => {
+    expect(motion).not.toContain('[data-reason="runner_disconnected"]');
+    expect(rule(".delivery .delivery-rider")).toContain("inset-inline-start");
+    expect(rule(".delivery .delivery-rider")).not.toContain("animation");
+  });
+
+  it("stops the rider under reduced motion", () => {
+    expect(reduced).toMatch(/\.delivery \.delivery-rider\s*\{\s*animation:\s*none !important;/);
   });
 });

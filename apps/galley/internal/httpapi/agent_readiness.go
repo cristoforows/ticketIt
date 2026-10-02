@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -136,9 +137,9 @@ func decideTicketUpdate(s ticketWorkflowState, update ticketUpdate) *transitionR
 }
 
 // The caller must already hold the row lock (lockTicketForMutation).
-func readLockedTicket(ctx context.Context, tx pgx.Tx, ownerID int64, publicID string) (Ticket, error) {
+func readLockedTicket(ctx context.Context, tx pgx.Tx, ownerID int64, publicID string, now time.Time) (Ticket, error) {
 	return scanTicketRow(tx.QueryRow(ctx,
 		`SELECT `+ticketSelectColumns+` FROM tickets WHERE owner_id = $1 AND public_id = $2::uuid`,
 		ownerID, publicID,
-	))
+	), now)
 }

@@ -97,7 +97,7 @@ func (s *server) ListTickets(w http.ResponseWriter, r *http.Request, params List
 		}
 	}
 	archived := params.Archived != nil && *params.Archived
-	tickets, err := listTicketsForOwnerWithVisibility(ctx, s.pool, owner.ID, archived, badgeIDs...)
+	tickets, err := listTicketsForOwnerWithVisibility(ctx, s.pool, owner.ID, archived, s.clockNow(), badgeIDs...)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to read tickets")
 		return
@@ -128,7 +128,7 @@ func (s *server) GetTicket(w http.ResponseWriter, r *http.Request, id string) {
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
 
-	ticket, found, err := getTicketForOwner(ctx, s.pool, owner.ID, id)
+	ticket, found, err := getTicketForOwner(ctx, s.pool, owner.ID, id, s.clockNow())
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to read the ticket")
 		return
@@ -223,7 +223,7 @@ func (s *server) UpdateTicket(w http.ResponseWriter, r *http.Request, id string)
 		successCriteria: refinement.successCriteria,
 		constraints:     refinement.constraints,
 		repository:      refinement.repository,
-	})
+	}, s.clockNow())
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to update the ticket")
 		return
@@ -380,7 +380,7 @@ func (s *server) CreateTicket(w http.ResponseWriter, r *http.Request) {
 	// TicketStatus enum) is the only Status this slice ever produces --
 	// docs/ticket-creation.md, "Quick capture": a title alone captures a
 	// Ticket in Backlog. No transition exists yet (#60).
-	ticket, err := insertTicket(ctx, s.pool, owner.ID, title, template, refinement)
+	ticket, err := insertTicket(ctx, s.pool, owner.ID, title, template, refinement, s.clockNow())
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to create the ticket")
 		return
@@ -421,6 +421,7 @@ const ticketSelectColumns = `public_id::text, title, status, template, completio
 	   FROM (SELECT * FROM rounds WHERE owner_id = tickets.owner_id AND ticket_id = tickets.id ORDER BY sequence DESC LIMIT 1) r
 	   JOIN agents a ON a.owner_id = r.owner_id AND a.id = r.agent_id
 	  WHERE r.state = 'delivered'),
+	(SELECT ru.last_seen_at FROM runners ru WHERE ru.owner_id = tickets.owner_id),
 	goal, context, success_criteria, constraints, repository, created_at, updated_at, archived_at`
 
 // ticketRowScanner is satisfied by both pgx.Row (QueryRow) and pgx.Rows
@@ -438,18 +439,19 @@ type ticketRowScanner interface {
 // column is NULL, which is exactly this endpoint's documented "unset
 // reads as empty string" rule (contracts/openapi.yaml's Ticket.goal
 // description).
-func scanTicketRow(row ticketRowScanner) (Ticket, error) {
+func scanTicketRow(row ticketRowScanner, now time.Time) (Ticket, error) {
 	var (
 		ticket                                                   Ticket
 		status, template, completionCondition                    string
 		assigneeType                                             sql.NullString
+		runnerLastSeenAt                                         *time.Time
 		goal, ctxField, successCriteria, constraints, repository sql.NullString
 		createdAt, updatedAt                                     time.Time
 		archivedAt                                               sql.NullTime
 	)
 	if err := row.Scan(
 		&ticket.Id, &ticket.Title, &status, &template, &completionCondition, &assigneeType, &ticket.AssigneeAgent, &ticket.OpenRound, &ticket.Delivery,
-		&goal, &ctxField, &successCriteria, &constraints, &repository,
+		&runnerLastSeenAt, &goal, &ctxField, &successCriteria, &constraints, &repository,
 		&createdAt, &updatedAt, &archivedAt,
 	); err != nil {
 		return Ticket{}, err
@@ -473,6 +475,7 @@ func scanTicketRow(row ticketRowScanner) (Ticket, error) {
 		ticket.OpenRound.ClaimedAt = ticket.OpenRound.ClaimedAt.UTC()
 		ticket.OpenRound.StartedAt = utcOrNil(ticket.OpenRound.StartedAt)
 		ticket.OpenRound.StopRequestedAt = utcOrNil(ticket.OpenRound.StopRequestedAt)
+		ticket.OpenRound.WaitingReason = decideWaitingReason(ticket.OpenRound.State, ticket.OpenRound.StopRequestedAt != nil, runnerConnected(now, runnerLastSeenAt))
 	}
 	if ticket.Delivery != nil {
 		ticket.Delivery.DeliveredAt = ticket.Delivery.DeliveredAt.UTC()
@@ -491,7 +494,7 @@ func scanTicketRow(row ticketRowScanner) (Ticket, error) {
 // is what makes completion_condition "derived from the Template's
 // default exactly once, at creation" (D3, issue #59) true by
 // construction: no other function ever computes or assigns this value.
-func insertTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64, title string, template TicketTemplate, refinement ticketRefinement) (Ticket, error) {
+func insertTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64, title string, template TicketTemplate, refinement ticketRefinement, now time.Time) (Ticket, error) {
 	// public_id is generated here, in Go, rather than left to the
 	// column's DEFAULT -- matching how every other identifier in this
 	// codebase (session tokens, OAuth state) is generated in
@@ -515,7 +518,7 @@ func insertTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64, title 
 		unsetIfEmpty(refinement.goal), unsetIfEmpty(refinement.context), unsetIfEmpty(refinement.successCriteria),
 		unsetIfEmpty(refinement.constraints), unsetIfEmpty(refinement.repository),
 	)
-	ticket, err := scanTicketRow(row)
+	ticket, err := scanTicketRow(row, now)
 	if err != nil {
 		return Ticket{}, err
 	}
@@ -534,14 +537,14 @@ func insertTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64, title 
 // publicID must already be a validated UUID string (GetTicket checks
 // this before calling in) -- an invalid one would fail the ::uuid cast
 // as a query error, not a "no rows" miss.
-func getTicketForOwner(ctx context.Context, db ticketDB, ownerID int64, publicID string) (Ticket, bool, error) {
+func getTicketForOwner(ctx context.Context, db ticketDB, ownerID int64, publicID string, now time.Time) (Ticket, bool, error) {
 	row := db.QueryRow(ctx,
 		`SELECT `+ticketSelectColumns+`
 		   FROM tickets
 		  WHERE owner_id = $1 AND public_id = $2::uuid`,
 		ownerID, publicID,
 	)
-	ticket, err := scanTicketRow(row)
+	ticket, err := scanTicketRow(row, now)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Ticket{}, false, nil
 	}
@@ -586,7 +589,7 @@ type ticketUpdate struct {
 // function could be passed that would change either column, so no
 // caller of this function -- today or in the future -- can make it
 // recompute or overwrite them.
-func updateTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, publicID string, update ticketUpdate) (Ticket, bool, *transitionRejection, error) {
+func updateTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, publicID string, update ticketUpdate, now time.Time) (Ticket, bool, *transitionRejection, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return Ticket{}, false, nil, err
@@ -596,7 +599,7 @@ func updateTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64
 	if err != nil || !found || rejection != nil {
 		return Ticket{}, found, rejection, err
 	}
-	locked, err := readLockedTicket(ctx, tx, ownerID, publicID)
+	locked, err := readLockedTicket(ctx, tx, ownerID, publicID, now)
 	if err != nil {
 		return Ticket{}, false, nil, err
 	}
@@ -616,7 +619,7 @@ func updateTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64
 		  RETURNING `+ticketSelectColumns,
 		ownerID, publicID, update.title, update.goal, update.context, update.successCriteria, update.constraints, update.repository,
 	)
-	ticket, err := scanTicketRow(row)
+	ticket, err := scanTicketRow(row, now)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Ticket{}, false, nil, nil
 	}
@@ -632,11 +635,11 @@ func updateTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64
 	return ticket, true, nil, nil
 }
 
-func listTicketsForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, badgeIDs ...string) ([]Ticket, error) {
-	return listTicketsForOwnerWithVisibility(ctx, pool, ownerID, false, badgeIDs...)
+func listTicketsForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, now time.Time, badgeIDs ...string) ([]Ticket, error) {
+	return listTicketsForOwnerWithVisibility(ctx, pool, ownerID, false, now, badgeIDs...)
 }
 
-func listTicketsForOwnerWithVisibility(ctx context.Context, pool *pgxpool.Pool, ownerID int64, archived bool, badgeIDs ...string) ([]Ticket, error) {
+func listTicketsForOwnerWithVisibility(ctx context.Context, pool *pgxpool.Pool, ownerID int64, archived bool, now time.Time, badgeIDs ...string) ([]Ticket, error) {
 	if badgeIDs == nil {
 		badgeIDs = []string{}
 	}
@@ -659,7 +662,7 @@ func listTicketsForOwnerWithVisibility(ctx context.Context, pool *pgxpool.Pool, 
 	}
 	tickets := []Ticket{}
 	for rows.Next() {
-		ticket, err := scanTicketRow(rows)
+		ticket, err := scanTicketRow(rows, now)
 		if err != nil {
 			rows.Close()
 			return nil, err

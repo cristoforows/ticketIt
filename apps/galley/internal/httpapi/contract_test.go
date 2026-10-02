@@ -1211,3 +1211,58 @@ func TestFailedAndInterrupted_ResponsesMatchContract(t *testing.T) {
 		f.mustEndAs(t, e, next)
 	}
 }
+
+func TestWaitingReasonAndActivityPaging_ResponsesMatchContractAndMethod405(t *testing.T) {
+	f := newClaimFixture(t)
+	router, err := legacy.NewRouter(loadContract(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate := func(call runnerCall, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(call.method, call.path, strings.NewReader(call.body))
+		if call.cookie != nil {
+			req.AddCookie(call.cookie)
+		}
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("%s %s: status=%d, want %d; body=%s", call.method, call.path, rec.Code, want, rec.Body.String())
+		}
+		validateAgainstContract(t, router, req, rec)
+		return rec
+	}
+	get := func(path string) runnerCall { return runnerCall{method: http.MethodGet, path: path, cookie: f.cookie} }
+	queued, claim := f.claimTicket(t, "contract")
+	ticket, list, rounds := get("/api/tickets/"+queued.Id), get("/api/tickets"), get("/api/tickets/"+queued.Id+"/rounds")
+	page := get(activityPath(queued.Id, claim.RoundId))
+
+	for _, step := range []func(){
+		func() {},
+		func() { f.startRound(t, claim, "start") },
+		func() { f.mustStop(t, queued.Id) },
+		func() { f.clock.Set(runnerEpoch.Add(runnerHealthWindow)) },
+	} {
+		step()
+		validate(ticket, http.StatusOK)
+		validate(list, http.StatusOK)
+		validate(rounds, http.StatusOK)
+		validate(page, http.StatusOK)
+	}
+	f.heartbeat(t, f.token, http.StatusOK)
+	f.appendNotes(t, claim.RoundId, 1, 51)
+	validate(rounds, http.StatusOK)
+	cursor := decodeActivityPage(t, validate(page, http.StatusOK)).EarlierActivityCursor
+	if cursor == nil {
+		t.Fatal("51 notes: no earlierActivityCursor")
+	}
+	validate(get(page.path+"?before="+*cursor), http.StatusOK)
+	assertErrorCode(t, validate(get(page.path+"?before=0"), http.StatusBadRequest), invalidCursorCode)
+	validate(get(activityPath(queued.Id, uuid.NewString())), http.StatusNotFound)
+	validate(runnerCall{method: http.MethodGet, path: page.path}, http.StatusUnauthorized)
+
+	rec := f.expect(t, runnerCall{method: http.MethodPost, path: page.path, cookie: f.cookie}, http.StatusMethodNotAllowed)
+	if rec.Header().Get("Allow") != "GET" {
+		t.Fatalf("POST %s: Allow = %q, want GET", page.path, rec.Header().Get("Allow"))
+	}
+}

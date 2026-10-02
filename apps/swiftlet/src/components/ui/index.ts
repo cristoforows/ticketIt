@@ -15,7 +15,8 @@ export { ReceiptBody, ReceiptDialog, ReceiptFooter, ReceiptLine, ReceiptTitle } 
 export { Rule } from "./Rule";
 export { ticketSerial } from "./serial";
 export { Slip, SlipPaper, SlipToggle } from "./SlipCard";
-export { shortDate, slipTilt } from "./slip";
+export { slipTilt } from "./slip";
+export { LocalTime, localTimestamp, shortDate } from "./time";
 export { StageLabel, StageStep } from "./Stage";
 export { statuses, statusLabel, statusTone, type TicketStatus } from "./status";
 export { Markdown } from "./Markdown";

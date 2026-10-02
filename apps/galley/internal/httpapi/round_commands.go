@@ -68,14 +68,14 @@ func requestStopForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64,
 			ownerID, lock.openRoundID, uuid.NewString(), string(RunnerCommandStop), now)
 		if isUniqueViolation(err, oneStopPerRoundIndex) {
 			_ = tx.Rollback(ctx)
-			ticket, found, err := getTicketForOwner(ctx, pool, ownerID, id)
+			ticket, found, err := getTicketForOwner(ctx, pool, ownerID, id, now)
 			return ticket, found, nil, err
 		}
 		if err != nil {
 			return Ticket{}, true, nil, err
 		}
 	}
-	ticket, err := readLockedTicket(ctx, tx, ownerID, id)
+	ticket, err := readLockedTicket(ctx, tx, ownerID, id, now)
 	if err != nil {
 		return Ticket{}, true, nil, err
 	}

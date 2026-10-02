@@ -195,7 +195,7 @@ func TestBadges_AttachOwnerScopeAndTicketResponses(t *testing.T) {
 	if found, err := attachBadgeForOwner(context.Background(), pool, ownerID+1000000, first.Id, a.Id); err != nil || found {
 		t.Fatalf("foreign owner attach found = %t, error = %v", found, err)
 	}
-	if _, found, err := getTicketForOwner(context.Background(), pool, ownerID+1000000, first.Id); err != nil || found {
+	if _, found, err := getTicketForOwner(context.Background(), pool, ownerID+1000000, first.Id, time.Now()); err != nil || found {
 		t.Fatalf("foreign owner Ticket found = %t, error = %v", found, err)
 	}
 }

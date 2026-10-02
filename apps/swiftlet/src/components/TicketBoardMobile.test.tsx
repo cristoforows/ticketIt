@@ -59,23 +59,24 @@ describe("TicketBoard on phones", () => {
     expect(screen.queryByTestId("board-archive-zone")).not.toBeInTheDocument();
   });
 
-  it("offers no edit, move or reorder on a locked slip, with Galley's reason on Edit", async () => {
+  it("gives an active slip its own View and Stop, with no actions toggle covering them, and no edit, move or reorder", async () => {
     const reason = { code: "round_open", message: "this Ticket has an open Round; it can be changed once the Round ends", roundId: "r1" };
     const agent = { id: "a1", name: "Builder", kind: "coding" };
-    const openRound = { id: "r1", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null };
+    const openRound = { id: "r1", sequence: 1, state: "running", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: "2026-10-01T10:00:01Z", stopRequestedAt: null, waitingReason: "working" };
     stubTickets([
-      { ...ticket("locked", "Backlog"), assigneeType: "agent", assigneeAgent: agent, openRound, allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason }, rework, stop } },
+      { ...ticket("locked", "Backlog"), assigneeType: "agent", assigneeAgent: agent, openRound, allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason }, rework, stop: { available: true } } },
       ticket("next", "Backlog", ["Ready"]),
     ]);
     render(<TicketBoard onUnauthenticated={() => {}} />);
-    fireEvent.click(within(await screen.findByTestId("board-ticket-locked")).getByTestId("board-slip-toggle"));
+    const slip = within(await screen.findByTestId("board-ticket-locked"));
 
-    const actions = screen.getByTestId("board-slip-actions");
-    expect(within(actions).getByTestId("board-slip-view")).toBeEnabled();
-    expect(within(actions).getByTestId("board-slip-edit")).toBeDisabled();
-    expect(within(actions).getByTestId("board-slip-edit")).toHaveAttribute("title", reason.message);
-    expect(within(actions).getByTestId("board-slip-move")).toBeDisabled();
-    expect(within(actions).queryByTestId("board-slip-reorder-up")).not.toBeInTheDocument();
+    expect(slip.queryByTestId("board-slip-toggle")).not.toBeInTheDocument();
+    expect(slip.getByRole("link", { name: "View Ticket locked" })).toHaveAttribute("href", "/tickets/locked?from=board");
+    expect(slip.getByRole("button", { name: "Stop Ticket locked" })).toBeEnabled();
+    expect(slip.getByTestId("board-waiting-reason")).toHaveTextContent("Working");
+    expect(slip.queryByTestId("board-slip-edit")).not.toBeInTheDocument();
+    expect(slip.queryByTestId("board-slip-reorder-up")).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("board-ticket-next")).getByTestId("board-slip-toggle")).toBeInTheDocument();
   });
 
   describe("stage switcher", () => {

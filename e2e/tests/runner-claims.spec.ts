@@ -17,7 +17,7 @@ async function ticket(page: Page, id: string): Promise<Ticket> {
 
 // The claim is made directly with the runner credential, not by a real Michelin: a real one starts the Round
 // within milliseconds (tests/runner-engine.spec.ts), and the claimed state is what this spec shows.
-test("a paired runner's claim of the top queued Ticket leaves it Ready, shows Claimed by runner, locks it against every mutation, and keeps its Round after the runner goes Disconnected", async ({ page, request, playwright }) => {
+test("a paired runner's claim of the top queued Ticket leaves it Ready, shows it Starting, locks it against every mutation, and keeps its Round after the runner goes Disconnected", async ({ page, request, playwright }) => {
   await signIn(page, request, "owner");
   expect((await tickets(page)).filter((t) => t.openRound !== null)).toEqual([]);
 
@@ -53,7 +53,7 @@ test("a paired runner's claim of the top queued Ticket leaves it Ready, shows Cl
     await page.goto("/board");
     const slip = page.getByTestId(`board-ticket-${queued.id}`);
     await expect(page.getByTestId("board-status-Ready").getByTestId(`board-ticket-${queued.id}`)).toBeVisible();
-    await expect(slip.getByTestId("board-claimed")).toHaveText("Claimed by runner");
+    await expect(slip.getByTestId("board-waiting-reason")).toHaveText("Starting");
     await expect(slip.getByTestId("board-queued")).toHaveCount(0);
     await expect(slip.getByRole("img", { name: lockCopy })).toBeVisible();
     await expect(slip).toHaveAttribute("draggable", "false");
@@ -112,7 +112,7 @@ test("a paired runner's claim of the top queued Ticket leaves it Ready, shows Cl
     expect(advanced.status()).toBe(200);
     expect((await (await page.request.get("/api/runner-health")).json()).state).toBe("disconnected");
     const afterLoss = await ticket(page, queued.id);
-    expect(afterLoss.openRound).toEqual(claimed.openRound);
+    expect(afterLoss.openRound).toEqual({ ...claimed.openRound, waitingReason: "runner_disconnected" });
     expect(afterLoss.status).toBe("Ready");
     expect(afterLoss.requestingAgentWork).toBe(false);
 
@@ -132,7 +132,7 @@ test("a paired runner's claim of the top queued Ticket leaves it Ready, shows Cl
     await expect(page.getByTestId("ticket-detail-claimed")).toHaveText("Claimed by runner");
     await expect(page.getByTestId("ticket-detail-locked")).toHaveText(lockCopy);
     await page.goto("/board");
-    await expect(page.getByTestId("board-status-Ready").getByTestId(`board-ticket-${queued.id}`).getByTestId("board-stopping")).toHaveText("Stopping…");
+    await expect(page.getByTestId("board-status-Ready").getByTestId(`board-ticket-${queued.id}`).getByTestId("board-waiting-reason")).toHaveText("Runner disconnected");
     expect(await ticket(page, queued.id)).toMatchObject({ status: "Ready", openRound: { id: round.id, state: "claimed", stopRequestedAt: expect.any(String) }, allowedActions: { stop: { available: false, reason: { code: "stop_already_requested" } } } });
   } finally {
     await runner.dispose();

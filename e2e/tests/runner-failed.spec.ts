@@ -84,7 +84,7 @@ test("a real Michelin's failed report ends the Round as Failed: Blocked with its
     await expect(page.getByTestId("ticket-detail-locked")).toHaveCount(0);
     await expect(section.getByTestId("ticket-detail-round-failed")).toHaveText("Failed");
     await expect(section.getByTestId("ticket-detail-round-outcome-note")).toHaveText(NOTE);
-    await expect(section.getByTestId("ticket-detail-round-failed-at")).toHaveText(round1!.endedAt!);
+    await expect(section.getByTestId("ticket-detail-round-failed-at").locator("time")).toHaveAttribute("datetime", round1!.endedAt!);
     await expect(section.getByTestId("ticket-detail-round-note")).toContainText("Reading the Ticket");
     await expect(section.getByTestId("ticket-detail-round-usage-cost")).toHaveText("$0.0045");
     await expect(section.getByTestId("ticket-detail-round-usage-input-tokens")).toHaveText("1,200");

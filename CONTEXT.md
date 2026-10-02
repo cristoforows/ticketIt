@@ -120,6 +120,10 @@ _Avoid_: Failed when only an unexpected interruption, rather than a work failure
 The condition of an open **Round** after the owner has requested Stop and before its execution is confirmed to have ended. It is not a **Status**: the **Ticket** keeps its Status and stays locked until the round ends as **Stopped**.
 _Avoid_: Stopped while the round is still open.
 
+**Waiting Reason**:
+What an open **Round** is waiting on, as the owner sees it: Starting, Working, **Stopping**, or Runner disconnected. Lost contact with the runner outranks the others but never ends the round. It is not a **Status**.
+_Avoid_: Status, round state when referring to this owner-facing reason.
+
 **Stopped**:
 The terminal outcome of a **Round** whose runner has confirmed its execution ended following the owner's explicit stop request. Its **Ticket** returns to **Backlog** with the Stopped **Badge**, an ordinary Badge the owner may remove without changing the outcome; the round's activity and usage remain part of its history. Only an explicit move to Ready starts another round.
 _Avoid_: Interrupted when the round ended through an intentional stop request.
