@@ -57,6 +57,7 @@ describe("parseEngineScript", () => {
     ["progress notes at both length bounds", scriptOf({ step: "start" }, { step: "progress", note: "x" }, { step: "progress", note: "é".repeat(2000) }), [{ step: "start" }, { step: "progress", note: "x" }, { step: "progress", note: "é".repeat(2000) }]],
     ["a note with tabs and line feeds", scriptOf({ step: "start" }, { step: "progress", note: "a\tb\nc" }), [{ step: "start" }, { step: "progress", note: "a\tb\nc" }]],
     ["a fully known usage", scriptOf({ step: "start" }, USAGE), [{ step: "start" }, USAGE]],
+    ["an ask at both length bounds", scriptOf({ step: "start" }, { step: "ask", question: "?" }, { step: "ask", question: "é".repeat(2000) }), [{ step: "start" }, { step: "ask", question: "?" }, { step: "ask", question: "é".repeat(2000) }]],
     ["a usage with every figure null", scriptOf({ step: "start" }, UNKNOWN_USAGE), [{ step: "start" }, UNKNOWN_USAGE]],
     ["a usage with absent figures, read as unknown", scriptOf({ step: "start" }, { step: "usage", provider: "p", model: "m", basis: "reported" }), [{ step: "start" }, UNKNOWN_USAGE]],
     ["usage at the count and cost bounds", scriptOf({ step: "start" }, { ...USAGE, inputTokens: Number.MAX_SAFE_INTEGER, costUsd: "999999.999999" }), [{ step: "start" }, { ...USAGE, inputTokens: Number.MAX_SAFE_INTEGER, costUsd: "999999.999999" }]],
@@ -103,7 +104,7 @@ describe("parseEngineScript", () => {
     ["a step that is not an object", scriptOf({ step: "start" }, "wait"), /steps\[1\].*must be an object/],
     ["a step without a name", scriptOf({ step: "start" }, { ms: 5 }), /steps\[1\].*"step" must be a string/],
     ["a step name that is not a string", scriptOf({ step: "start" }, { step: 7 }), /steps\[1\].*"step" must be a string/],
-    ["an unknown step name", scriptOf({ step: "start" }, { step: "sleep", ms: 5 }), /steps\[1\].*unknown step "sleep".*start, wait, progress, usage, deliver, hold, fail, interrupt/],
+    ["an unknown step name", scriptOf({ step: "start" }, { step: "sleep", ms: 5 }), /steps\[1\].*unknown step "sleep".*start, wait, progress, ask, usage, deliver, hold, fail, interrupt/],
     ["deliver before the last step", scriptOf({ step: "start" }, DELIVER, { step: "wait", ms: 10 }), /steps\[1\].*"deliver" may only be the last step/],
     ["deliver then hold", scriptOf({ step: "start" }, DELIVER, { step: "hold" }), /steps\[1\].*"deliver".*last.*mutually exclusive/],
     ["hold then deliver", scriptOf({ step: "start" }, { step: "hold" }, DELIVER), /steps\[1\].*"hold".*last.*mutually exclusive/],
@@ -176,6 +177,12 @@ describe("parseEngineScript", () => {
     ["an unknown key on start", scriptOf({ step: "start", ms: 5 }), /steps\[0\].*unknown key "ms"/],
     ["an unknown key on wait", scriptOf({ step: "start" }, { step: "wait", ms: 5, seconds: 1 }), /steps\[1\].*unknown key "seconds"/],
     ["an unknown key on hold", scriptOf({ step: "start" }, { step: "hold", ms: 5 }), /steps\[1\].*unknown key "ms"/],
+    ["an ask without a question", scriptOf({ step: "start" }, { step: "ask" }), /steps\[1\].*"question" must be 1 to 2000/],
+    ["an ask with a blank question", scriptOf({ step: "start" }, { step: "ask", question: " \n " }), /steps\[1\].*"question"/],
+    ["an ask over 2000 characters", scriptOf({ step: "start" }, { step: "ask", question: "é".repeat(2001) }), /steps\[1\].*"question"/],
+    ["an ask with a control character", scriptOf({ step: "start" }, { step: "ask", question: "a\u0007b" }), /steps\[1\].*"question"/],
+    ["an ask with an unknown key", scriptOf({ step: "start" }, { step: "ask", question: "q", options: ["a"] }), /steps\[1\].*unknown key "options"/],
+    ["an ask before start", scriptOf({ step: "ask", question: "q" }), /steps\[0\].*first step must be "start"/],
   ])("rejects %s, naming the step index", (_name, text, message) => {
     const { script, problems } = parse(text);
     expect(script).toBeUndefined();

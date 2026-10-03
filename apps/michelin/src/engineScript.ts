@@ -23,6 +23,7 @@ export type EngineStep =
   | { step: "start" }
   | { step: "wait"; ms: number }
   | { step: "progress"; note: string }
+  | { step: "ask"; question: string }
   | UsageStep
   | DeliverStep
   | { step: "hold" }
@@ -82,7 +83,7 @@ export const DEFAULT_ENGINE_SCRIPT: EngineScript = {
   ],
 };
 
-const SUPPORTED_STEPS = "start, wait, progress, usage, deliver, hold, fail, interrupt";
+const SUPPORTED_STEPS = "start, wait, progress, ask, usage, deliver, hold, fail, interrupt";
 
 const USAGE_KEYS = ["provider", "model", "inputTokens", "outputTokens", "costUsd", "activeMs", "basis", "providerGenerationId"];
 
@@ -174,6 +175,12 @@ function parseStep(raw: unknown, index: number, total: number, problems: string[
         problems.push(`${at}: "note" must be 1 to ${NOTE_MAX_LENGTH} characters, not blank, without control characters other than tab and line feed`);
       }
       break;
+    case "ask":
+      known.add("question");
+      if (!validNote(fields["question"])) {
+        problems.push(`${at}: "question" must be 1 to ${NOTE_MAX_LENGTH} characters, not blank, without control characters other than tab and line feed`);
+      }
+      break;
     case "usage":
       USAGE_KEYS.forEach((key) => known.add(key));
       checkUsage(fields, at, problems);
@@ -195,6 +202,8 @@ function parseStep(raw: unknown, index: number, total: number, problems: string[
       return { step: "wait", ms: fields["ms"] as number };
     case "progress":
       return { step: "progress", note: fields["note"] as string };
+    case "ask":
+      return { step: "ask", question: fields["question"] as string };
     case "usage":
       return {
         step: "usage",

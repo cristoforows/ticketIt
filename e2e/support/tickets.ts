@@ -22,11 +22,12 @@ export interface ErrorDetail {
 export interface Round {
   id: string;
   sequence: number;
-  state: "claimed" | "running" | "delivered" | "stopped" | "failed" | "interrupted";
+  state: "claimed" | "running" | "waiting_for_input" | "delivered" | "stopped" | "failed" | "interrupted";
   agent: { id: string; name: string; kind: AgentKind };
   claimedAt: string;
   startedAt: string | null;
   endedAt: string | null;
+  questions: RoundQuestion[];
   /** Michelin's evidence or explanation, set exactly when `state` is `stopped` (issue #160), `failed` or `interrupted` (issue #161). */
   outcomeNote: string | null;
   /** Galley's latest 50 notes, oldest first (issue #162). */
@@ -36,6 +37,14 @@ export interface Round {
   usage: RoundUsage;
   /** Set exactly when `state` is `delivered` (issue #136). */
   deliverable: { bodyMarkdown: string; summary: string; criteriaAssessment: string } | null;
+}
+
+export interface RoundQuestion {
+  id: string;
+  text: string;
+  askedAt: string;
+  answer: string | null;
+  answeredAt: string | null;
 }
 
 export interface RoundActivityNote {
@@ -49,7 +58,7 @@ export interface RoundActivityPage {
   earlierActivityCursor: string | null;
 }
 
-export type WaitingReason = "starting" | "working" | "stopping" | "runner_disconnected";
+export type WaitingReason = "starting" | "working" | "waiting_for_answer" | "resuming" | "stopping" | "runner_disconnected";
 
 export interface UsageCount {
   sum: number | null;
@@ -83,6 +92,7 @@ export interface Ticket {
     accept: { available: boolean; reason?: ErrorDetail };
     rework: { available: boolean; reason?: ErrorDetail };
     stop: { available: boolean; reason?: ErrorDetail };
+    answer: { available: boolean; reason?: ErrorDetail };
     statusChangeRejections: { status: TicketStatus; reason: ErrorDetail }[];
   };
   requestingAgentWork: boolean;
@@ -90,7 +100,7 @@ export interface Ticket {
   openRound: {
     id: string;
     sequence: number;
-    state: "claimed" | "running";
+    state: "claimed" | "running" | "waiting_for_input";
     agent: { id: string; name: string; kind: AgentKind };
     claimedAt: string;
     startedAt: string | null;
@@ -98,6 +108,8 @@ export interface Ticket {
     stopRequestedAt: string | null;
     /** Galley's reason the Round is still open (issue #162). */
     waitingReason: WaitingReason;
+    /** Set exactly while `state` is `waiting_for_input` (issue #163). */
+    question: RoundQuestion | null;
   } | null;
   /** The latest Round, when it was delivered (issue #136). */
   delivery: {
@@ -216,6 +228,11 @@ export async function stopRoundThroughGalley(from: Api, id: string, timeout = 15
     return stopped.openRound;
   }, { timeout }).toBeNull();
   return stopped!;
+}
+
+/** Same purpose as changeTicketStatusDirect, for answering a Round's question. */
+export async function answerQuestionDirect(from: Api, id: string, roundId: string, questionId: string, answer: string): Promise<TicketCommandResult> {
+  return ticketCommand(from, "POST", `/api/tickets/${id}/rounds/${roundId}/questions/${questionId}/answer`, { answer });
 }
 
 export type TicketAssignee = { type: "owner" } | { type: "agent"; agentId: string };

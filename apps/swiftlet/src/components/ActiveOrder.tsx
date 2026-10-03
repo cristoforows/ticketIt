@@ -10,6 +10,8 @@ export type WaitingReason = NonNullable<Ticket["openRound"]>["waitingReason"];
 export const waitingReasonLabels: Record<WaitingReason, string> = {
   starting: "Starting",
   working: "Working",
+  waiting_for_answer: "Waiting for your answer",
+  resuming: "Resuming",
   stopping: "Stopping",
   runner_disconnected: "Runner disconnected",
 };

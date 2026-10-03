@@ -21,6 +21,7 @@ const reworkNotAvailableCode = "rework_not_available"
 const (
 	stopNotAvailableCode     = "stop_not_available"
 	stopAlreadyRequestedCode = "stop_already_requested"
+	answerNotAvailableCode   = "answer_not_available"
 )
 
 // reviewedPrMergeNotImplementedCode stays distinct from
@@ -96,9 +97,10 @@ func decidePlainStatusChange(state ticketWorkflowState, target TicketStatus) *tr
 }
 
 // The Owner's explicit recovery after a Failed or Interrupted Round: v1-scope.md, "explicit recovery required"; #161.
-// Human work resumes from Blocked through In Progress, as D3 S2 lists.
+// Human work resumes from Blocked through In Progress, as D3 S2 lists. A Round waiting for input also holds its
+// Ticket Blocked (#163), and only its answer or Stop moves it.
 func agentRecoveryFromBlocked(state ticketWorkflowState) bool {
-	return state.agentAssigned()
+	return state.agentAssigned() && state.openRoundID == ""
 }
 
 // decideAccept implements POST /api/tickets/{id}/accept's rule: D3 S2
@@ -170,6 +172,7 @@ func allowedActionsForTicket(state ticketWorkflowState, condition TicketCompleti
 		StatusChangeRejections: []TicketStatusChangeRejection{},
 		Rework:                 commandAvailability(decideRework(state)),
 		Stop:                   commandAvailability(decideStop(state)),
+		Answer:                 commandAvailability(decideWaitingAnswer(state)),
 	}
 	if rejection := decideTicketMutation(state.ticketLock, false); rejection != nil {
 		actions.Accept = commandAvailability(rejection)

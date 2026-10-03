@@ -114,6 +114,10 @@
   .delivery[data-reason="working"] .delivery-rider {
     animation: delivery-ride 2400ms linear infinite;
   }
+  .delivery[data-reason="waiting_for_answer"] .delivery-rider,
+  .delivery[data-reason="resuming"] .delivery-rider {
+    animation: delivery-idle 600ms ease-in-out infinite alternate;
+  }
   .delivery[data-reason="stopping"] .delivery-rider {
     scale: -1 1;
     animation: delivery-return 2400ms linear infinite;

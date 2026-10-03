@@ -42,7 +42,7 @@ func validateUsageObservedData(raw []byte) (usageObservation, string) {
 	}
 	var observation usageObservation
 	var id string
-	if json.Unmarshal(fields["observationId"], &id) != nil || !canonicalObservationID(id) {
+	if json.Unmarshal(fields["observationId"], &id) != nil || !canonicalRunnerUUID(id) {
 		return usageObservation{}, `"observationId" must be a non-nil UUID in lowercase canonical form`
 	}
 	observation.id = id
@@ -84,8 +84,8 @@ func validateUsageObservedData(raw []byte) (usageObservation, string) {
 	return observation, ""
 }
 
-// One spelling per observation, so the idempotency key and the stored id are the same text.
-func canonicalObservationID(id string) bool {
+// One spelling per runner-generated id, so the idempotency key and the stored id are the same text.
+func canonicalRunnerUUID(id string) bool {
 	parsed, err := uuid.Parse(id)
 	return err == nil && parsed != uuid.Nil && parsed.String() == id
 }

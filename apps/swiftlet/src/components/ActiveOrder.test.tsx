@@ -9,12 +9,12 @@ const jsonResponse = (body: unknown, status = 200): MockResponse => ({ ok: statu
 const agent = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kind: "research" };
 const locked = { code: "round_open", message: "Locked while atlas works on Round 2", roundId: "66666666-6666-4666-8666-666666666666" };
 const unavailable = (code: string) => ({ available: false, reason: { code, message: code } });
-const openRound = { id: locked.roundId, sequence: 2, state: "running", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: "2026-10-01T10:00:01Z", stopRequestedAt: null, waitingReason: "working" };
+const openRound = { id: locked.roundId, sequence: 2, state: "running", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: "2026-10-01T10:00:01Z", stopRequestedAt: null, waitingReason: "working", question: null };
 const ACTIVE = {
   id: "44444444-4444-4444-8444-444444444444",
   title: "Write the report",
   status: "InProgress",
-  allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason: locked }, rework: unavailable("rework_not_available"), stop: { available: true } },
+  allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason: locked }, rework: unavailable("rework_not_available"), stop: { available: true }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } } },
   template: "Basic",
   completionCondition: "humanAcceptance",
   assigneeType: "agent",
@@ -34,7 +34,7 @@ const ACTIVE = {
 };
 const STOPPING = {
   ...ACTIVE,
-  openRound: { ...openRound, stopRequestedAt: "2026-10-01T10:00:07Z", waitingReason: "stopping" },
+  openRound: { ...openRound, stopRequestedAt: "2026-10-01T10:00:07Z", waitingReason: "stopping", question: null },
   allowedActions: { ...ACTIVE.allowedActions, stop: unavailable("stop_already_requested") },
 };
 const IDLE = { ...ACTIVE, id: "55555555-5555-4555-8555-555555555555", title: "Idle order", status: "Backlog", openRound: null, assigneeType: "", assigneeAgent: null, allowedActions: { ...ACTIVE.allowedActions, accept: unavailable("invalid_transition"), stop: unavailable("stop_not_available") } };
@@ -76,6 +76,19 @@ describe.each(views)("the active order slip on the $name", ({ prefix, row, query
     const indicator = slip.getByTestId("delivery-indicator");
     expect(indicator).toHaveAttribute("aria-hidden", "true");
     expect(indicator).toHaveAttribute("data-reason", waitingReason);
+  });
+
+  it.each([
+    ["waiting_for_answer", "Waiting for your answer", null, null],
+    ["resuming", "Resuming", "Europe", "2026-10-01T10:00:09Z"],
+  ])("labels a Blocked Ticket whose Round waits for input with %s as %s", async (waitingReason, label, answer, answeredAt) => {
+    const question = { id: "99999999-9999-5999-8999-999999999999", text: "Which region?", askedAt: "2026-10-01T10:00:05Z", answer, answeredAt };
+    stubGalley([{ ...ACTIVE, status: "Blocked", openRound: { ...openRound, state: "waiting_for_input", waitingReason, question } }]);
+    renderView();
+    const slip = within(await screen.findByTestId(row(ACTIVE.id)));
+    expect(slip.getByTestId(`${prefix}-waiting-reason`)).toHaveTextContent(new RegExp(`^${label}$`));
+    expect(slip.getByTestId("delivery-indicator")).toHaveAttribute("data-reason", waitingReason);
+    expect(slip.getByRole("button", { name: `Stop ${ACTIVE.title}` })).toBeInTheDocument();
   });
 
   it("is greyed and locked only while the Round is open, in text that keeps AA contrast", async () => {

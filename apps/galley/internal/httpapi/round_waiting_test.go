@@ -8,23 +8,34 @@ import (
 )
 
 func TestDecideWaitingReason(t *testing.T) {
+	answer := "Use the staging data"
+	unanswered := &RoundQuestion{Text: "Which data?"}
+	answered := &RoundQuestion{Text: "Which data?", Answer: &answer}
 	for _, tc := range []struct {
 		state           OpenRoundState
+		question        *RoundQuestion
 		stopRequested   bool
 		runnerConnected bool
 		want            RoundWaitingReason
 	}{
-		{OpenRoundClaimed, false, true, WaitingStarting},
-		{OpenRoundRunning, false, true, WaitingWorking},
-		{OpenRoundClaimed, true, true, WaitingStopping},
-		{OpenRoundRunning, true, true, WaitingStopping},
-		{OpenRoundClaimed, false, false, WaitingRunnerDisconnected},
-		{OpenRoundRunning, false, false, WaitingRunnerDisconnected},
-		{OpenRoundClaimed, true, false, WaitingRunnerDisconnected},
-		{OpenRoundRunning, true, false, WaitingRunnerDisconnected},
+		{OpenRoundClaimed, nil, false, true, WaitingStarting},
+		{OpenRoundRunning, nil, false, true, WaitingWorking},
+		{OpenRoundClaimed, nil, true, true, WaitingStopping},
+		{OpenRoundRunning, nil, true, true, WaitingStopping},
+		{OpenRoundClaimed, nil, false, false, WaitingRunnerDisconnected},
+		{OpenRoundRunning, nil, false, false, WaitingRunnerDisconnected},
+		{OpenRoundClaimed, nil, true, false, WaitingRunnerDisconnected},
+		{OpenRoundRunning, nil, true, false, WaitingRunnerDisconnected},
+		{OpenRoundWaitingForInput, unanswered, false, true, WaitingForAnswer},
+		{OpenRoundWaitingForInput, answered, false, true, WaitingResuming},
+		{OpenRoundWaitingForInput, unanswered, true, true, WaitingStopping},
+		{OpenRoundWaitingForInput, answered, true, true, WaitingStopping},
+		{OpenRoundWaitingForInput, unanswered, false, false, WaitingRunnerDisconnected},
+		{OpenRoundWaitingForInput, answered, true, false, WaitingRunnerDisconnected},
 	} {
-		if got := decideWaitingReason(tc.state, tc.stopRequested, tc.runnerConnected); got != tc.want {
-			t.Errorf("decideWaitingReason(%s, stopRequested=%t, connected=%t) = %s, want %s", tc.state, tc.stopRequested, tc.runnerConnected, got, tc.want)
+		got := decideWaitingReason(tc.state, tc.question, tc.stopRequested, tc.runnerConnected)
+		if got != tc.want {
+			t.Errorf("decideWaitingReason(%s, question=%+v, stopRequested=%t, connected=%t) = %s, want %s", tc.state, tc.question, tc.stopRequested, tc.runnerConnected, got, tc.want)
 		}
 	}
 }

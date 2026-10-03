@@ -23,9 +23,12 @@ const STOPPED = {
   outcomeNote: "Stopped before step 1 of 2 on Stop command 55555555-5555-4555-8555-555555555555",
   activity: [{ seq: 1, note: "Reading the Ticket", occurredAt: "2026-10-01T10:00:10Z" }],
   earlierActivityCursor: null,
+  questions: [],
   usage,
   deliverable: null,
 };
+
+const QUESTION = { id: "99999999-9999-5999-8999-999999999999", text: "Which region?", askedAt: "2026-10-01T10:00:10Z", answer: null, answeredAt: null };
 
 const answer = (rounds: unknown[]) => vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => ({ rounds }) }));
 
@@ -35,6 +38,12 @@ describe("fetchTicketRounds", () => {
   it("keeps a stopped Round's outcome note, activity and usage", async () => {
     answer([STOPPED, { ...STOPPED, id: "77777777-7777-4777-8777-777777777777", state: "running", startedAt: "2026-10-01T10:00:05Z", endedAt: null, outcomeNote: null }]);
     expect(await fetchTicketRounds("t")).toEqual([STOPPED, { ...STOPPED, id: "77777777-7777-4777-8777-777777777777", state: "running", startedAt: "2026-10-01T10:00:05Z", endedAt: null, outcomeNote: null }]);
+  });
+
+  it("keeps a Round's questions with their answers, answered or not", async () => {
+    const waiting = { ...STOPPED, state: "waiting_for_input", startedAt: "2026-10-01T10:00:05Z", endedAt: null, outcomeNote: null, questions: [{ ...QUESTION, answer: "Europe", answeredAt: "2026-10-01T10:00:20Z" }, { ...QUESTION, id: "88888888-8888-5888-8888-888888888888" }] };
+    answer([waiting]);
+    expect(await fetchTicketRounds("t")).toEqual([waiting]);
   });
 
   it.each([
@@ -58,6 +67,9 @@ describe("fetchTicketRounds", () => {
     ["an unknown state", { ...STOPPED, state: "abandoned" }],
     ["no earlierActivityCursor field", { ...STOPPED, earlierActivityCursor: undefined }],
     ["a numeric earlierActivityCursor", { ...STOPPED, earlierActivityCursor: 51 }],
+    ["no questions field", { ...STOPPED, questions: undefined }],
+    ["a question without askedAt", { ...STOPPED, questions: [{ ...QUESTION, askedAt: undefined }] }],
+    ["an answer without answeredAt", { ...STOPPED, questions: [{ ...QUESTION, answer: "Europe" }] }],
   ])("refuses %s", async (_name, round) => {
     answer([round]);
     await expect(fetchTicketRounds("t")).rejects.toThrow("Galley's Round list was missing a required field.");

@@ -1,7 +1,7 @@
 import type { components } from "./generated/schema";
 import { isAgentSummary } from "./agents";
 import { authenticatedFetch, isNullableString } from "./http";
-import { TicketNotFoundError } from "./tickets";
+import { parseRoundQuestion, TicketNotFoundError, type RoundQuestion } from "./tickets";
 
 export type TicketRound = components["schemas"]["TicketRound"];
 export type RoundActivityNote = components["schemas"]["RoundActivityNote"];
@@ -47,7 +47,12 @@ function parseActivity(value: unknown): RoundActivityNote[] | undefined {
   return notes?.every((note) => note !== undefined) ? (notes as RoundActivityNote[]) : undefined;
 }
 
-const ROUND_STATES: readonly TicketRound["state"][] = ["claimed", "running", "delivered", "stopped", "failed", "interrupted"];
+const ROUND_STATES: readonly TicketRound["state"][] = ["claimed", "running", "waiting_for_input", "delivered", "stopped", "failed", "interrupted"];
+
+function parseQuestions(value: unknown): RoundQuestion[] | undefined {
+  const questions = Array.isArray(value) ? value.map(parseRoundQuestion) : undefined;
+  return questions?.every((question) => question !== undefined) ? (questions as RoundQuestion[]) : undefined;
+}
 const NOTED_STATES: readonly TicketRound["state"][] = ["stopped", "failed", "interrupted"];
 
 function parseRound(value: unknown): TicketRound | undefined {
@@ -69,7 +74,8 @@ function parseRound(value: unknown): TicketRound | undefined {
   const usage = parseUsage(round.usage);
   const deliverable = round.state === "delivered" ? parseDeliverable(round.deliverable) : round.deliverable === null ? null : undefined;
   const outcomeNote = NOTED_STATES.includes(round.state as TicketRound["state"]) ? (typeof round.outcomeNote === "string" ? round.outcomeNote : undefined) : round.outcomeNote === null ? null : undefined;
-  if (!usage || deliverable === undefined || outcomeNote === undefined || !activity) return undefined;
+  const questions = parseQuestions(round.questions);
+  if (!usage || deliverable === undefined || outcomeNote === undefined || !activity || !questions) return undefined;
   const { id, name, kind } = round.agent;
   return {
     id: round.id,
@@ -84,6 +90,7 @@ function parseRound(value: unknown): TicketRound | undefined {
     earlierActivityCursor: round.earlierActivityCursor,
     usage,
     deliverable,
+    questions,
   };
 }
 

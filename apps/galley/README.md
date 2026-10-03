@@ -1704,8 +1704,8 @@ Precedence, highest first:
 | `starting` | the Round is `claimed` |
 | `working` | otherwise (`running`) |
 
-The reason is derived on read and never stored. Later slices add values
-to the same enum.
+The reason is derived on read and never stored. #163 adds
+`waiting_for_answer` and `resuming` below `stopping`.
 
 `GET /api/tickets/{id}/rounds` adds `earlierActivityCursor` per Round:
 opaque, and `null` once `activity` holds the Round's first note.
@@ -1724,6 +1724,61 @@ health window boundary, revoke and re-pair, Owner scoping, no writes),
 paging, malformed cursors, the shared `404`) and
 `TestWaitingReasonAndActivityPaging_ResponsesMatchContractAndMethod405`.
 Evidence: `docs/evidence/m5/162-active-order-slip.md`.
+
+## Questions and answers (issue #163)
+
+Migration `000020_questions_and_answers.up.sql` adds the open Round
+state `waiting_for_input` (started, not ended), the events
+`question_raised` and `resumed`, the `round_questions` table, and the
+command type `answer` (`round_commands.question_id`, set exactly for an
+`answer`, at most one per question). A Round has at most one unanswered
+question (`round_questions_one_unanswered_per_round`); text and answer
+are 1 to 2000 characters with the progress note's text rules.
+
+| Event | `data` | Accepted on | Effect |
+| --- | --- | --- | --- |
+| `question_raised` | `{"questionId", "text"}`, `idempotencyKey` = `questionId` | `running` | Round `waiting_for_input`, Ticket In Progress → Blocked, `askedAt` from Galley's clock |
+| `resumed` | `{"questionId"}` | `waiting_for_input` | Round `running`, Ticket Blocked → In Progress |
+
+`resumed` naming any question but the Round's latest, or one without an
+answer, is `409 answer_not_supplied`. While waiting, only `resumed` and
+`stop_confirmed` are accepted; every other event is
+`409 event_out_of_order`.
+`stop_confirmed` from `waiting_for_input` ends the Round as Stopped
+(Backlog, Stopped Badge) like a running one; the question stays listed,
+answered or not. The slot stays held and the open-Round lock stays on
+while waiting: Blocked → Ready is `round_open`, and recovery is not
+offered.
+
+`POST /api/tickets/{id}/rounds/{roundId}/questions/{questionId}/answer`
+takes `{"answer": "..."}` (strict decode, `400 invalid_request` when
+blank or too long). It locks the Ticket row, then the question row, and
+decides in order:
+
+| Check | Response |
+| --- | --- |
+| No such Ticket, Round of that Ticket, or question of that Round | `404 not_found` |
+| The question is answered | `400 question_already_answered` |
+| The Round has ended | `400 round_not_open` |
+| The Round is not waiting | `400 answer_not_available` |
+| Stop is requested | `400 stop_already_requested` |
+| Otherwise | `200`, the Ticket; records `answer`, `answeredAt` and one `answer` command |
+
+`allowedActions.answer` uses the same decision on the open Round's
+question. The first answer wins; concurrent answers record one.
+`openRound.question` is the waiting Round's latest question (`null`
+unless `waiting_for_input`); `TicketRound.questions` lists every
+question, oldest first. `waitingReason` adds `waiting_for_answer` and,
+once answered, `resuming`; `runner_disconnected` and `stopping` still
+outrank both. The runner's command list carries `answer: {questionId,
+text}` on an `answer` command and lists a Stop before any answer.
+
+Tests: `round_questions_test.go` (lifecycle, replay, validation,
+ladder, first answer wins, concurrency, races with Stop, lock order,
+constraints), the waiting row in `round_blocked_endings_test.go`, the
+lock-order test in `round_events_test.go`, `round_waiting_test.go` and
+`TestQuestionsAndAnswers_ResponsesMatchContractAndMethod405`. Evidence:
+`docs/evidence/m5/163-questions-answers.md`.
 
 ## Error shape
 

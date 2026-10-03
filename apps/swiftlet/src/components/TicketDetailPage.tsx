@@ -7,6 +7,7 @@ import {
   acceptTicket,
   requestTicketRework,
   requestTicketStop,
+  answerRoundQuestion,
   assignTicket,
   unassignTicket,
   createBadge,
@@ -22,6 +23,7 @@ import {
   type TicketUpdate,
 } from "../api/tickets";
 import { fetchAgents, type Agent } from "../api/agents";
+import { GalleyError } from "../api/http";
 import { fetchRoundActivity, fetchTicketRounds } from "../api/rounds";
 import { collectionPath, collectionQuery, fullPageReturnPath, navigate, useEditRequested } from "../router";
 import { Link } from "./Link";
@@ -166,6 +168,17 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
     return runCommand(() => requestTicketStop(ticketId));
   }
 
+  async function answer(roundId: string, questionId: string, text: string): Promise<Ticket> {
+    try {
+      const ticket = await runCommand(() => answerRoundQuestion(ticketId, roundId, questionId, text));
+      void loadRounds();
+      return ticket;
+    } catch (error) {
+      if (error instanceof GalleyError && error.code === "question_already_answered") void refreshTicket();
+      throw error;
+    }
+  }
+
   function assign(assignee: TicketAssignee): Promise<Ticket> {
     return runCommand(() => assignTicket(ticketId, assignee));
   }
@@ -231,6 +244,7 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
       runnerHealth={runnerHealth}
       roundRecords={roundRecords.ticketId === ticketId ? roundRecords : undefined}
       onLoadEarlierActivity={loadEarlierActivity}
+      onAnswer={answer}
       onArchived={() => (onArchiveSucceeded ? onArchiveSucceeded() : navigate(fullPageReturnPath()))}
     />
   );

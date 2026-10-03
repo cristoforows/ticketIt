@@ -1069,3 +1069,44 @@ Tests: `ActiveOrder.test.tsx` (list and board), `TicketBoard.test.tsx`,
 `TicketBoardMobile.test.tsx`, `TicketDetailPage.test.tsx` (paging and
 the shared health), `api/tickets.test.ts`, `api/rounds.test.ts`,
 `ui/time.test.ts`, `ui/slip.test.ts` (motion) and `ui/tokens.test.ts`.
+
+## Questions and answers (issue #163)
+
+A Round `waiting_for_input` keeps its Ticket Blocked and locked.
+Swiftlet renders Galley's question and answer state and decides
+nothing:
+
+- **Slip.** `waitingReasonLabels` adds **Waiting for your answer**
+  (`waiting_for_answer`) and **Resuming** (`resuming`, answered but not
+  yet resumed). The rider idles mid-road for both (`styles.css`).
+- **Question panel.** While `openRound.question` is set, the receipt's
+  Rounds section opens with a "Question from the Agent" region
+  (`QuestionPanel`, `ticket-detail-question`) showing the text and when
+  it was asked. While `allowedActions.answer.available`, a form
+  (`ticket-detail-answer-form`) takes **Your answer** (up to 2000
+  characters, **Send answer** disabled while blank or sending) and
+  calls `answerRoundQuestion` (`POST
+  /api/tickets/{id}/rounds/{roundId}/questions/{questionId}/answer`).
+  The answer is sent as typed; Galley trims nothing either. Galley's
+  returned Ticket replaces the receipt and the Round list is reloaded.
+  Otherwise the panel shows the recorded answer
+  (`ticket-detail-question-answered`) or Galley's reason
+  (`ticket-detail-answer-unavailable`, e.g. Stop requested).
+- **Rejections.** `question_already_answered` refreshes the receipt
+  and says the receipt now shows the answer Galley recorded; any other
+  refusal is shown in Galley's words, the draft kept. A `404` names the
+  Ticket, Round and question together, so its message is shown rather
+  than "not found".
+- **History.** Each Round entry lists its questions oldest first
+  (`ticket-detail-round-questions`), each with its answer, **Awaiting
+  your answer** while the Round waits, or **Not answered** once it has
+  ended without one. A waiting Round's summary reads **Waiting for your
+  answer**.
+- **Parsing.** `parseTicket` requires `allowedActions.answer`, accepts
+  `waiting_for_input` as an open state and requires `openRound.question`
+  exactly then (`null` otherwise). `parseRound` requires `questions`.
+
+Tests: `TicketDetail.test.tsx` ("a question from the Agent"),
+`TicketDetailPage.test.tsx` (the POST, the reload and the refresh on
+`question_already_answered`), `ActiveOrder.test.tsx` (both labels on
+list and board), `api/tickets.test.ts` and `api/rounds.test.ts`.

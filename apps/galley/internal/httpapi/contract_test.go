@@ -1266,3 +1266,79 @@ func TestWaitingReasonAndActivityPaging_ResponsesMatchContractAndMethod405(t *te
 		t.Fatalf("POST %s: Allow = %q, want GET", page.path, rec.Header().Get("Allow"))
 	}
 }
+
+func TestQuestionsAndAnswers_ResponsesMatchContractAndMethod405(t *testing.T) {
+	f := newClaimFixture(t)
+	router, err := legacy.NewRouter(loadContract(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate := func(call runnerCall, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(call.method, call.path, strings.NewReader(call.body))
+		if call.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if call.token != "" {
+			req.Header.Set("Authorization", "Bearer "+call.token)
+		}
+		if call.cookie != nil {
+			req.AddCookie(call.cookie)
+		}
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("%s %s: status=%d, want %d; body=%s", call.method, call.path, rec.Code, want, rec.Body.String())
+		}
+		validateAgainstContract(t, router, req, rec)
+		return rec
+	}
+	queued, claim := f.runningRound(t, "contract")
+	event := func(body string) runnerCall {
+		return runnerCall{method: http.MethodPost, path: "/api/runner/rounds/" + claim.RoundId + "/events", body: body, token: f.token}
+	}
+	reads := []runnerCall{
+		{method: http.MethodGet, path: "/api/tickets/" + queued.Id, cookie: f.cookie},
+		{method: http.MethodGet, path: "/api/tickets", cookie: f.cookie},
+		{method: http.MethodGet, path: "/api/tickets/" + queued.Id + "/rounds", cookie: f.cookie},
+		{method: http.MethodGet, path: "/api/runner/rounds/" + claim.RoundId + "/commands", token: f.token},
+	}
+	answer := func(questionID, body string) runnerCall {
+		return runnerCall{method: http.MethodPost, path: answerPath(queued.Id, claim.RoundId, questionID), body: body, cookie: f.cookie}
+	}
+	raise := questionEvent(t, questionA, claim.ClaimEpoch, questionA, questionText)
+	resume := resumedEvent(t, "resume", claim.ClaimEpoch, questionA)
+
+	assertErrorCode(t, validate(answer(questionA, `{"answer":"yes"}`), http.StatusNotFound), "not_found")
+	validate(event(raise), http.StatusCreated)
+	validate(event(raise), http.StatusOK)
+	for _, read := range reads {
+		validate(read, http.StatusOK)
+	}
+	assertErrorCode(t, validate(event(resume), http.StatusConflict), answerNotSuppliedCode)
+	validate(answer(questionA, `{"answer":""}`), http.StatusBadRequest)
+	validate(answer(questionA, `{"answer":"yes"}`), http.StatusOK)
+	assertErrorCode(t, validate(answer(questionA, `{"answer":"again"}`), http.StatusBadRequest), questionAlreadyAnsweredCode)
+	validate(runnerCall{method: http.MethodPost, path: answerPath(queued.Id, claim.RoundId, questionA), body: `{"answer":"yes"}`}, http.StatusUnauthorized)
+	for _, read := range reads {
+		validate(read, http.StatusOK)
+	}
+	validate(event(resume), http.StatusCreated)
+	for _, read := range reads {
+		validate(read, http.StatusOK)
+	}
+	validate(event(questionEvent(t, questionB, claim.ClaimEpoch, questionB, questionText)), http.StatusCreated)
+	f.mustStop(t, queued.Id)
+	for _, read := range reads {
+		validate(read, http.StatusOK)
+	}
+	assertErrorCode(t, validate(answer(questionB, `{"answer":"yes"}`), http.StatusBadRequest), stopAlreadyRequestedCode)
+	f.mustConfirmStop(t, claim)
+	assertErrorCode(t, validate(answer(questionB, `{"answer":"yes"}`), http.StatusBadRequest), roundNotOpenCode)
+	assertErrorCode(t, validate(event(resumedEvent(t, "late", claim.ClaimEpoch, questionB)), http.StatusConflict), roundNotOpenCode)
+
+	rec := f.expect(t, runnerCall{method: http.MethodGet, path: answerPath(queued.Id, claim.RoundId, questionA), cookie: f.cookie}, http.StatusMethodNotAllowed)
+	if rec.Header().Get("Allow") != "POST" {
+		t.Fatalf("GET answer: Allow = %q, want POST", rec.Header().Get("Allow"))
+	}
+}

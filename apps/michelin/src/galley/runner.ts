@@ -117,6 +117,7 @@ export type RoundEventReport = Timed<Outcome<RoundEventOutcome, RoundEventFailur
 export interface RoundEventExpectation {
   type: RoundEventRequest["type"];
   observationId?: string;
+  questionId?: string;
 }
 
 // The body arrives serialised so every retry of one event sends the same bytes.
@@ -138,11 +139,13 @@ export function reportRoundEvent(request: RunnerRequest, roundId: string, body: 
 
 const END_STATES: Partial<Record<RoundEventRequest["type"], RoundEventResult["state"]>> = { delivered: "delivered", stop_confirmed: "stopped", failed: "failed", interrupted: "interrupted" };
 
+const QUESTION_STATES: Partial<Record<RoundEventRequest["type"], RoundEventResult["state"]>> = { question_raised: "waiting_for_input", resumed: "running" };
+
 function parseRoundEventResult(payload: unknown, roundId: string, expected: RoundEventExpectation): RoundEventResult | string {
   if (!isRecord(payload)) {
     return "body is not a JSON object";
   }
-  const { roundId: reportedRound, type, state, startedAt, endedAt, seq, observationId } = payload;
+  const { roundId: reportedRound, type, state, startedAt, endedAt, seq, observationId, questionId } = payload;
   if (reportedRound !== roundId) {
     return "roundId is not the Round the event was sent for";
   }
@@ -153,7 +156,11 @@ function parseRoundEventResult(payload: unknown, roundId: string, expected: Roun
   if (endState !== undefined && state !== endState) {
     return `state is not ${endState}`;
   }
-  if (endState === undefined && state !== "claimed" && state !== "running") {
+  const questionState = QUESTION_STATES[expected.type];
+  if (questionState !== undefined && state !== questionState) {
+    return `state is not ${questionState}`;
+  }
+  if (endState === undefined && questionState === undefined && state !== "claimed" && state !== "running") {
     return "state is not claimed or running";
   }
   if (typeof startedAt !== "string" && !(type === "stop_confirmed" && startedAt === null)) {
@@ -168,9 +175,13 @@ function parseRoundEventResult(payload: unknown, roundId: string, expected: Roun
   if (type === "usage_observed" && observationId !== expected.observationId) {
     return "observationId is not the observation the event was sent for";
   }
+  if (questionState !== undefined && questionId !== expected.questionId) {
+    return "questionId is not the question the event was sent for";
+  }
   const result: RoundEventResult = { roundId: reportedRound, type: expected.type, state: state as RoundEventResult["state"], startedAt };
   if (type === "progress") result.seq = seq as number;
   if (type === "usage_observed") result.observationId = observationId as string;
+  if (questionState !== undefined) result.questionId = questionId as string;
   if (endState !== undefined) result.endedAt = endedAt as string;
   return result;
 }
@@ -216,11 +227,18 @@ function parseCommands(payload: unknown): PulledCommand[] | string {
     if (!isRecord(command)) {
       return "a command is not a JSON object";
     }
-    const { id, type, claimEpoch, issuedAt } = command;
+    const { id, type, claimEpoch, issuedAt, answer } = command;
     if (typeof id !== "string" || typeof type !== "string" || typeof issuedAt !== "string" || !Number.isSafeInteger(claimEpoch)) {
       return "a command lacks id, type, claimEpoch or issuedAt";
     }
-    commands.push({ id, type, claimEpoch: claimEpoch as number, issuedAt });
+    if (type !== "answer") {
+      commands.push({ id, type, claimEpoch: claimEpoch as number, issuedAt });
+      continue;
+    }
+    if (!isRecord(answer) || typeof answer["questionId"] !== "string" || typeof answer["text"] !== "string") {
+      return "an answer command lacks answer.questionId or answer.text";
+    }
+    commands.push({ id, type, claimEpoch: claimEpoch as number, issuedAt, answer: { questionId: answer["questionId"], text: answer["text"] } });
   }
   return commands;
 }

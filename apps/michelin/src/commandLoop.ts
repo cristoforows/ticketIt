@@ -21,8 +21,11 @@ export interface CommandLoopOptions {
   claim: RunnerClaim;
   signal: AbortSignal;
   onStop: (command: PulledCommand) => void;
+  onAnswer: (command: AnswerCommand) => void;
   requestTimeoutMs?: number;
 }
+
+export type AnswerCommand = PulledCommand & { answer: NonNullable<PulledCommand["answer"]> };
 
 export interface CommandLoop {
   stop(): Promise<void>;
@@ -61,13 +64,19 @@ async function run(options: CommandLoopOptions, signal: AbortSignal): Promise<vo
       }
       seen.add(command.id);
       const context = { roundId: claim.roundId, commandId: command.id, type: command.type, commandEpoch: command.claimEpoch, claimEpoch: claim.claimEpoch };
-      if (command.type !== "stop") {
+      if (command.type !== "stop" && command.type !== "answer") {
         logger.warn("unknown command left unacknowledged", context);
         continue;
       }
       if (command.claimEpoch !== claim.claimEpoch) {
         logger.warn("command for another claim epoch ignored", context);
         await acknowledgeCommand(request, logger, claim.roundId, command, "ignored");
+        continue;
+      }
+      if (command.type === "answer") {
+        const answer = command as AnswerCommand;
+        logger.info("answer received", { ...context, questionId: answer.answer.questionId });
+        options.onAnswer(answer);
         continue;
       }
       logger.info("stop requested", context);

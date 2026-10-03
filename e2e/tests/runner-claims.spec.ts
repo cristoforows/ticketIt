@@ -48,7 +48,7 @@ test("a paired runner's claim of the top queued Ticket leaves it Ready, shows it
     const round = claimed.openRound!;
     const lockCopy = `Locked while ${round.agent.name} works on Round ${round.sequence}`;
     const reason = claimed.allowedActions.accept.reason!;
-    expect(claimed.allowedActions).toEqual({ statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: { code: "round_open", message: reason.message, roundId: round.id } }, rework: { available: false, reason: { code: "rework_not_available", message: expect.any(String) } }, stop: { available: true } });
+    expect(claimed.allowedActions).toEqual({ statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: { code: "round_open", message: reason.message, roundId: round.id } }, rework: { available: false, reason: { code: "rework_not_available", message: expect.any(String) } }, stop: { available: true }, answer: { available: false, reason: { code: "answer_not_available", message: expect.any(String) } } });
 
     await page.goto("/board");
     const slip = page.getByTestId(`board-ticket-${queued.id}`);

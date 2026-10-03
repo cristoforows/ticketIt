@@ -484,6 +484,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tickets/{id}/rounds/{roundId}/questions/{questionId}/answer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                roundId: string;
+                questionId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Answer the question a Round waits on
+         * @description Records the Owner's answer once and one `answer` command for the runner to pull. Neither the Round nor the Ticket moves until the runner reports `resumed`. A question that already has an answer is `question_already_answered`; a Round that has ended is `round_not_open`; a Round with Stop requested is `stop_already_requested`. Each changes nothing. An unknown, malformed or foreign Ticket, Round or question id, or one not of that Ticket or Round, returns the shared 404.
+         */
+        post: operations["answerRoundQuestion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/session": {
         parameters: {
             query?: never;
@@ -625,7 +649,7 @@ export interface paths {
         put?: never;
         /**
          * Report an execution event for a Round
-         * @description An event is a fact the runner reports, recorded once per `(roundId, idempotencyKey)`. The same key with the same payload returns the original result with `200`; a different payload is `409 idempotency_key_conflict`. Checked in that order, then `409 stale_claim_epoch` for a `claimEpoch` other than the Round's, `409 round_not_open` for a Round that has ended, and `409 event_out_of_order` for a type the Round's state cannot take: `execution_started` needs a claimed Round; `progress`, `usage_observed`, `delivered`, `failed` and `interrupted` a running one; `stop_confirmed` either, and then `409 stop_not_requested` unless the Owner requested Stop. A `usage_observed` whose `observationId` is already recorded for another Round is `409 observation_id_conflict`. `delivered` retains the deliverable, ends the Round as `delivered`, frees the Owner's slot and moves the Ticket from In Progress to In Review, never Done. `stop_confirmed` ends the Round as `stopped` with its evidence, frees the slot and moves the Ticket to Backlog with the Stopped Badge. `failed` and `interrupted` end the Round as `failed` or `interrupted` with the explanation or evidence, free the slot and move the Ticket from In Progress to Blocked; no Round starts until the Owner moves it to Ready. A body over 8 MiB is `413 request_too_large`. A rejection changes nothing. An unknown, malformed or foreign Round id returns the shared 404. A runner that is not Connected is still accepted, and an event is not a heartbeat.
+         * @description An event is a fact the runner reports, recorded once per `(roundId, idempotencyKey)`. The same key with the same payload returns the original result with `200`; a different payload is `409 idempotency_key_conflict`. Checked in that order, then `409 stale_claim_epoch` for a `claimEpoch` other than the Round's, `409 round_not_open` for a Round that has ended, and `409 event_out_of_order` for a type the Round's state cannot take: `execution_started` needs a claimed Round; `progress`, `usage_observed`, `delivered`, `failed`, `interrupted` and `question_raised` a running one; `resumed` one waiting for input, and then `409 answer_not_supplied` unless its `questionId` is the waiting question and the Owner has answered it; `stop_confirmed` any open Round, and then `409 stop_not_requested` unless the Owner requested Stop. `question_raised` records the question, moves the Round to `waiting_for_input` and the Ticket from In Progress to Blocked, and keeps the Owner's slot; its `idempotencyKey` must equal `data.questionId`. `resumed` moves the Round back to `running` and the Ticket to In Progress. A `usage_observed` whose `observationId` is already recorded for another Round is `409 observation_id_conflict`. `delivered` retains the deliverable, ends the Round as `delivered`, frees the Owner's slot and moves the Ticket from In Progress to In Review, never Done. `stop_confirmed` ends the Round as `stopped` with its evidence, frees the slot and moves the Ticket to Backlog with the Stopped Badge. `failed` and `interrupted` end the Round as `failed` or `interrupted` with the explanation or evidence, free the slot and move the Ticket from In Progress to Blocked; no Round starts until the Owner moves it to Ready. A body over 8 MiB is `413 request_too_large`. A rejection changes nothing. An unknown, malformed or foreign Round id returns the shared 404. A runner that is not Connected is still accepted, and an event is not a heartbeat.
          */
         post: operations["reportRoundEvent"];
         delete?: never;
@@ -645,7 +669,7 @@ export interface paths {
         };
         /**
          * Pull a Round's unacknowledged commands
-         * @description The Round's unacknowledged commands, oldest `issuedAt` first; none once the Round has ended. A command stays listed until it is acknowledged. An unknown, malformed or foreign Round id returns the shared 404.
+         * @description The Round's unacknowledged commands: a Stop first, then the rest oldest `issuedAt` first; none once the Round has ended. A command stays listed until it is acknowledged. An unknown, malformed or foreign Round id returns the shared 404.
          */
         get: operations["listRoundCommands"];
         put?: never;
@@ -824,20 +848,40 @@ export interface components {
             updatedAt: string;
         };
         /**
-         * @description `claimed` and `running` are open. `delivered` has ended and moved the Ticket to In Review. `stopped` has ended and moved the Ticket to Backlog. `failed` and `interrupted` have ended and moved the Ticket to Blocked.
+         * @description `claimed`, `running` and `waiting_for_input` are open. `delivered` has ended and moved the Ticket to In Review. `stopped` has ended and moved the Ticket to Backlog. `failed` and `interrupted` have ended and moved the Ticket to Blocked.
          * @enum {string}
          */
-        RoundState: "claimed" | "running" | "delivered" | "stopped" | "failed" | "interrupted";
+        RoundState: "claimed" | "running" | "waiting_for_input" | "delivered" | "stopped" | "failed" | "interrupted";
         /**
-         * @description A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress.
+         * @description A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress; one waiting for input has moved it to Blocked and keeps the Owner's slot.
          * @enum {string}
          */
-        OpenRoundState: "claimed" | "running";
+        OpenRoundState: "claimed" | "running" | "waiting_for_input";
         /**
-         * @description What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `stopping` (Stop requested), `starting` (claimed) and `working` (running) applies.
+         * @description What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `stopping` (Stop requested), `waiting_for_answer` (waiting for input, its question unanswered), `resuming` (waiting for input, its question answered), `starting` (claimed) and `working` (running) applies.
          * @enum {string}
          */
-        RoundWaitingReason: "starting" | "working" | "stopping" | "runner_disconnected";
+        RoundWaitingReason: "starting" | "working" | "stopping" | "runner_disconnected" | "waiting_for_answer" | "resuming";
+        RoundQuestion: {
+            /**
+             * Format: uuid
+             * @description The runner's `questionId`.
+             */
+            id: string;
+            text: string;
+            /**
+             * Format: date-time
+             * @description Galley's clock.
+             */
+            askedAt: string;
+            answer: string | null;
+            /** Format: date-time */
+            answeredAt: string | null;
+        };
+        AnswerQuestionRequest: {
+            /** @description Counted in Unicode code points. Not blank; no control characters but tab and line feed. */
+            answer: string;
+        };
         TicketOpenRound: {
             /** Format: uuid */
             id: string;
@@ -855,6 +899,8 @@ export interface components {
              */
             stopRequestedAt: string | null;
             waitingReason: components["schemas"]["RoundWaitingReason"];
+            /** @description The question the Round waits on; set exactly when `state` is `waiting_for_input`. */
+            question: components["schemas"]["RoundQuestion"] | null;
         };
         TicketDelivery: {
             /** Format: uuid */
@@ -886,6 +932,8 @@ export interface components {
             deliverable: components["schemas"]["RoundDeliverable"] | null;
             /** @description Set exactly when `state` is `stopped`, `failed` or `interrupted`. */
             outcomeNote: string | null;
+            /** @description Every question the Round raised, oldest first. */
+            questions: components["schemas"]["RoundQuestion"][];
         };
         RoundDeliverable: {
             bodyMarkdown: string;
@@ -963,6 +1011,8 @@ export interface components {
             rework: components["schemas"]["TicketCommandAvailability"];
             /** @description Unavailable with `stop_already_requested` once Stop is requested. */
             stop: components["schemas"]["TicketCommandAvailability"];
+            /** @description Whether `openRound.question` can be answered. Unavailable with `answer_not_available` without one, `question_already_answered` once it is answered, and `stop_already_requested` once Stop is requested. */
+            answer: components["schemas"]["TicketCommandAvailability"];
         };
         TicketStatusChangeRejection: {
             status: components["schemas"]["TicketStatus"];
@@ -1114,7 +1164,7 @@ export interface components {
          * @description Grows by slice.
          * @enum {string}
          */
-        RoundEventType: "execution_started" | "progress" | "usage_observed" | "delivered" | "stop_confirmed" | "failed" | "interrupted";
+        RoundEventType: "execution_started" | "progress" | "usage_observed" | "delivered" | "stop_confirmed" | "failed" | "interrupted" | "question_raised" | "resumed";
         ExecutionStartedData: {
             /** @description Attached as the Round's current engine execution reference. */
             engineReference: string;
@@ -1163,6 +1213,22 @@ export interface components {
             /** @description The runner's own evidence that execution ceased, kept as the Round's `outcomeNote`. Counted in Unicode code points. Not blank; no control characters but tab and line feed. */
             evidence: string;
         };
+        QuestionRaisedData: {
+            /**
+             * Format: uuid
+             * @description The question's identity, generated by the runner, one per question instance. Lowercase canonical form, not the nil UUID, and equal to the event's `idempotencyKey`.
+             */
+            questionId: string;
+            /** @description Counted in Unicode code points. Not blank; no control characters but tab and line feed. */
+            text: string;
+        };
+        ResumedData: {
+            /**
+             * Format: uuid
+             * @description The answered question the runner acted on.
+             */
+            questionId: string;
+        };
         RoundEventRequest: {
             type: components["schemas"]["RoundEventType"];
             /** @description Taken verbatim; identity is never trimmed. */
@@ -1174,8 +1240,8 @@ export interface components {
              * @description The runner's clock; Galley keeps it and times the Round by its own.
              */
             occurredAt: string;
-            /** @description The payload for `type`: `ExecutionStartedData`, `ProgressData`, `UsageObservedData`, `DeliveredData`, `StopConfirmedData`, `FailedData` or `InterruptedData`. Not `oneOf`: `StopConfirmedData` and `InterruptedData` share a shape. */
-            data: components["schemas"]["ExecutionStartedData"] | components["schemas"]["ProgressData"] | components["schemas"]["UsageObservedData"] | components["schemas"]["DeliveredData"] | components["schemas"]["StopConfirmedData"] | components["schemas"]["FailedData"] | components["schemas"]["InterruptedData"];
+            /** @description The payload for `type`: `ExecutionStartedData`, `ProgressData`, `UsageObservedData`, `DeliveredData`, `StopConfirmedData`, `FailedData`, `InterruptedData`, `QuestionRaisedData` or `ResumedData`. Not `oneOf`: `StopConfirmedData` and `InterruptedData` share a shape. */
+            data: components["schemas"]["ExecutionStartedData"] | components["schemas"]["ProgressData"] | components["schemas"]["UsageObservedData"] | components["schemas"]["DeliveredData"] | components["schemas"]["StopConfirmedData"] | components["schemas"]["FailedData"] | components["schemas"]["InterruptedData"] | components["schemas"]["QuestionRaisedData"] | components["schemas"]["ResumedData"];
         };
         RoundEventResult: {
             /** Format: uuid */
@@ -1199,12 +1265,25 @@ export interface components {
              * @description For `usage_observed`, the observation recorded.
              */
             observationId?: string;
+            /**
+             * Format: uuid
+             * @description For `question_raised` and `resumed`, the question.
+             */
+            questionId?: string;
         };
         /**
          * @description Grows by slice.
          * @enum {string}
          */
-        RunnerCommandType: "stop";
+        RunnerCommandType: "stop" | "answer";
+        RunnerCommandAnswerData: {
+            /**
+             * Format: uuid
+             * @description The question answered.
+             */
+            questionId: string;
+            text: string;
+        };
         RunnerCommand: {
             /**
              * Format: uuid
@@ -1216,6 +1295,8 @@ export interface components {
             claimEpoch: number;
             /** Format: date-time */
             issuedAt: string;
+            /** @description Present exactly when `type` is `answer`. */
+            answer?: components["schemas"]["RunnerCommandAnswerData"];
         };
         RunnerCommandList: {
             commands: components["schemas"]["RunnerCommand"][];
@@ -2130,6 +2211,43 @@ export interface operations {
             };
         };
     };
+    answerRoundQuestion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                roundId: string;
+                questionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnswerQuestionRequest"];
+            };
+        };
+        responses: {
+            /** @description The Ticket, with the answer recorded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ticket"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. Includes `question_already_answered`, `round_not_open` and `stop_already_requested`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     getSession: {
         parameters: {
             query?: never;
@@ -2402,7 +2520,7 @@ export interface operations {
                     "application/json": components["schemas"]["RoundEventResult"];
                 };
             };
-            /** @description Error. See `ErrorBody`. Includes `idempotency_key_conflict`, `stale_claim_epoch`, `round_not_open`, `event_out_of_order`, `stop_not_requested`, `observation_id_conflict` and `request_too_large`. */
+            /** @description Error. See `ErrorBody`. Includes `idempotency_key_conflict`, `stale_claim_epoch`, `round_not_open`, `event_out_of_order`, `stop_not_requested`, `answer_not_supplied`, `observation_id_conflict` and `request_too_large`. */
             default: {
                 headers: {
                     [name: string]: unknown;

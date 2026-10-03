@@ -413,7 +413,9 @@ const ticketSelectColumns = `public_id::text, title, status, template, completio
 	(SELECT json_build_object('id', r.public_id, 'sequence', r.sequence, 'state', r.state,
 	          'agent', json_build_object('id', a.public_id, 'name', a.name, 'kind', a.kind),
 	          'claimedAt', r.claimed_at, 'startedAt', r.started_at,
-	          'stopRequestedAt', (SELECT c.issued_at FROM round_commands c WHERE c.owner_id = r.owner_id AND c.round_id = r.id AND c.type = 'stop'))
+	          'stopRequestedAt', (SELECT c.issued_at FROM round_commands c WHERE c.owner_id = r.owner_id AND c.round_id = r.id AND c.type = 'stop'),
+	          'question', (SELECT ` + roundQuestionJSON + ` FROM round_questions q
+	             WHERE q.owner_id = r.owner_id AND q.round_id = r.id AND r.state = 'waiting_for_input' ORDER BY q.id DESC LIMIT 1))
 	   FROM rounds r JOIN agents a ON a.owner_id = r.owner_id AND a.id = r.agent_id
 	  WHERE r.owner_id = tickets.owner_id AND r.ticket_id = tickets.id AND r.state IN ` + openRoundStatesSQL + `),
 	(SELECT json_build_object('roundId', r.public_id, 'sequence', r.sequence,
@@ -475,7 +477,10 @@ func scanTicketRow(row ticketRowScanner, now time.Time) (Ticket, error) {
 		ticket.OpenRound.ClaimedAt = ticket.OpenRound.ClaimedAt.UTC()
 		ticket.OpenRound.StartedAt = utcOrNil(ticket.OpenRound.StartedAt)
 		ticket.OpenRound.StopRequestedAt = utcOrNil(ticket.OpenRound.StopRequestedAt)
-		ticket.OpenRound.WaitingReason = decideWaitingReason(ticket.OpenRound.State, ticket.OpenRound.StopRequestedAt != nil, runnerConnected(now, runnerLastSeenAt))
+		if ticket.OpenRound.Question != nil {
+			normaliseQuestionTimes(ticket.OpenRound.Question)
+		}
+		ticket.OpenRound.WaitingReason = decideWaitingReason(ticket.OpenRound.State, ticket.OpenRound.Question, ticket.OpenRound.StopRequestedAt != nil, runnerConnected(now, runnerLastSeenAt))
 	}
 	if ticket.Delivery != nil {
 		ticket.Delivery.DeliveredAt = ticket.Delivery.DeliveredAt.UTC()

@@ -52,7 +52,7 @@ func (f *claimFixture) startRound(t *testing.T, claim RunnerClaim, key string) *
 func databaseSnapshot(t *testing.T, pool *pgxpool.Pool) string {
 	t.Helper()
 	var out strings.Builder
-	for _, table := range []string{"tickets", "rounds", "round_events", "round_engine_references", "round_activity", "usage_observations", "round_deliverables", "round_commands", "runners", "badges"} {
+	for _, table := range []string{"tickets", "rounds", "round_events", "round_engine_references", "round_activity", "usage_observations", "round_deliverables", "round_commands", "round_questions", "runners", "badges"} {
 		var rows string
 		if err := pool.QueryRow(context.Background(), `SELECT COALESCE(json_agg(row_to_json(x) ORDER BY x.id), '[]')::text FROM `+table+` x`).Scan(&rows); err != nil {
 			t.Fatal(err)
@@ -972,7 +972,20 @@ func TestDecideRoundEvent(t *testing.T) {
 		"an ended Round beats a missing Stop": {lockedRound{state: "delivered", epoch: 3}, RoundEventStopConfirmed, 3, roundNotOpenCode},
 		"a stop confirmation, stopped":        {lockedRound{state: "stopped", epoch: 3, stopRequested: true}, RoundEventStopConfirmed, 3, roundNotOpenCode},
 		"a stop confirmation, stale epoch":    {stopping(RoundRunning, 3), RoundEventStopConfirmed, 4, staleClaimEpochCode},
-		"waiting for input takes no stop":     {stopping("waiting_for_input", 3), RoundEventStopConfirmed, 3, eventOutOfOrderCode},
+		"a stop confirmation, waiting":        {stopping(RoundWaitingForInput, 3), RoundEventStopConfirmed, 3, ""},
+		"waiting, no Stop requested":          {open(RoundWaitingForInput, 3), RoundEventStopConfirmed, 3, stopNotRequestedCode},
+		"a question from a running Round":     {open(RoundRunning, 3), RoundEventQuestionRaised, 3, ""},
+		"a question while Stopping":           {stopping(RoundRunning, 3), RoundEventQuestionRaised, 3, ""},
+		"a question from a claimed Round":     {open(RoundClaimed, 3), RoundEventQuestionRaised, 3, eventOutOfOrderCode},
+		"a second question while waiting":     {open(RoundWaitingForInput, 3), RoundEventQuestionRaised, 3, eventOutOfOrderCode},
+		"a question at a stale epoch":         {open(RoundRunning, 3), RoundEventQuestionRaised, 2, staleClaimEpochCode},
+		"a question on an ended Round":        {lockedRound{state: "stopped", epoch: 3}, RoundEventQuestionRaised, 3, roundNotOpenCode},
+		"usage while waiting for input":       {open(RoundWaitingForInput, 3), RoundEventUsageObserved, 3, eventOutOfOrderCode},
+		"resumed while running":               {open(RoundRunning, 3), RoundEventResumed, 3, eventOutOfOrderCode},
+		"resumed while claimed":               {open(RoundClaimed, 3), RoundEventResumed, 3, eventOutOfOrderCode},
+		"resumed at a stale epoch":            {open(RoundWaitingForInput, 3), RoundEventResumed, 4, staleClaimEpochCode},
+		"resumed after Stop ended the Round":  {lockedRound{state: "stopped", epoch: 3, stopRequested: true}, RoundEventResumed, 3, roundNotOpenCode},
+		"resumed without an answer":           {open(RoundWaitingForInput, 3), RoundEventResumed, 3, answerNotSuppliedCode},
 		"progress on a stopped Round":         {lockedRound{state: "stopped", epoch: 3, stopRequested: true}, RoundEventProgress, 3, roundNotOpenCode},
 		"failed, running":                     {open(RoundRunning, 3), RoundEventFailed, 3, ""},
 		"interrupted, running":                {open(RoundRunning, 3), RoundEventInterrupted, 3, ""},
@@ -992,7 +1005,7 @@ func TestDecideRoundEvent(t *testing.T) {
 		"stop confirmation, interrupted":      {lockedRound{state: "interrupted", epoch: 3, stopRequested: true}, RoundEventStopConfirmed, 3, roundNotOpenCode},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got := decideRoundEvent(tc.round, tc.eventType, tc.epoch)
+			got := decideRoundEvent(tc.round, roundEvent{eventType: tc.eventType, claimEpoch: tc.epoch})
 			switch {
 			case tc.wantCode == "" && got != nil:
 				t.Fatalf("rejected with %+v", got)
@@ -1022,6 +1035,8 @@ func TestRoundEvent_TakesTheOwnersPriorityLockThenTheTicketRowThenTheRoundRow(t 
 		{"stop_confirmed", true, true, func(t *testing.T) string { return stopConfirmedEvent(t, "k", 1, stopEvidence) }},
 		{"failed", true, false, func(t *testing.T) string { return blockedEndings[0].event(t, "k", 1, failedExplanation) }},
 		{"interrupted", true, false, func(t *testing.T) string { return blockedEndings[1].event(t, "k", 1, interruptedEvidence) }},
+		{"question_raised", true, false, func(t *testing.T) string { return questionEvent(t, questionA, 1, questionA, questionText) }},
+		{"resumed", true, false, func(t *testing.T) string { return resumedEvent(t, "k", 1, questionA) }},
 	} {
 		for _, tc := range []step{
 			{"the Owner's priority lock comes first", "priority", "pg_advisory_xact_lock", `SELECT 1 FROM tickets WHERE public_id = $1::uuid FOR UPDATE NOWAIT`},
@@ -1035,6 +1050,10 @@ func TestRoundEvent_TakesTheOwnersPriorityLockThenTheTicketRowThenTheRoundRow(t 
 				}
 				if event.stopped {
 					f.mustStop(t, queued.Id)
+				}
+				if event.name == "resumed" {
+					f.mustReport(t, claim.RoundId, questionEvent(t, questionA, 1, questionA, questionText))
+					f.mustAnswer(t, queued.Id, claim.RoundId, questionA)
 				}
 				ctx := context.Background()
 				holder, err := f.pool.Begin(ctx)
