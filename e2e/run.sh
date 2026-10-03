@@ -532,8 +532,16 @@ log "running tests/runner-interrupted.spec.ts (a real michelin's Round ends Inte
   E2E_GITHUBFAKE_BASE_URL="$GITHUBFAKE_URL" \
   npx playwright test tests/runner-interrupted.spec.ts) || RUNNER_INTERRUPTED_EXIT=$?
 
-# tests/active-order-slip.spec.ts (issue #162) needs the Owner's slot free:
+# tests/runner-ask.spec.ts (issue #163) needs the Owner's slot free:
 # runner-interrupted.spec.ts leaves its Rounds ended and its Ticket Blocked.
+RUNNER_ASK_EXIT=0
+log "running tests/runner-ask.spec.ts (a real michelin's questions block the Ticket; answers resume the same Round to delivery; Stop while waiting) against the same galley"
+(cd "$SCRIPT_DIR" && E2E_BASE_URL="$SWIFTLET_BASE_URL" GALLEY_BASE_URL="$GALLEY_BASE_URL" \
+  E2E_GITHUBFAKE_BASE_URL="$GITHUBFAKE_URL" \
+  npx playwright test tests/runner-ask.spec.ts) || RUNNER_ASK_EXIT=$?
+
+# tests/active-order-slip.spec.ts (issue #162) needs the Owner's slot free:
+# runner-ask.spec.ts leaves one Round delivered and one stopped.
 # Its second test claims directly with the runner credential and leaves that
 # Round open with Stop requested, so it runs after every spec that needs the
 # slot, and no reset follows.
@@ -601,6 +609,7 @@ log "runner-rework.spec.ts exit code: $RUNNER_REWORK_EXIT"
 log "runner-stop.spec.ts exit code: $RUNNER_STOP_EXIT"
 log "runner-failed.spec.ts exit code: $RUNNER_FAILED_EXIT"
 log "runner-interrupted.spec.ts exit code: $RUNNER_INTERRUPTED_EXIT"
+log "runner-ask.spec.ts exit code: $RUNNER_ASK_EXIT"
 log "active-order-slip.spec.ts exit code: $ACTIVE_ORDER_SLIP_EXIT"
 log "status-failure.spec.ts exit code: $STATUS_FAILURE_EXIT"
 log "backend-failure.spec.ts exit code: $FAILURE_EXIT"
@@ -609,7 +618,7 @@ if [ "$STATUS_EXIT" -ne 0 ] || [ "$AUTH_EXIT" -ne 0 ] || [ "$RESTART_BEFORE_EXIT
   || [ "$LIFECYCLE_BEFORE_EXIT" -ne 0 ] || [ "$BADGES_BEFORE_EXIT" -ne 0 ] || [ "$RESTORE_BEFORE_EXIT" -ne 0 ] || [ "$TICKET_BEFORE_EXIT" -ne 0 ] || [ "$REFINEMENT_BEFORE_EXIT" -ne 0 ] \
   || [ "$RESTART_AFTER_EXIT" -ne 0 ] || [ "$BADGES_AFTER_EXIT" -ne 0 ] || [ "$RESTORE_AFTER_EXIT" -ne 0 ] || [ "$TICKET_AFTER_EXIT" -ne 0 ] || [ "$REFINEMENT_AFTER_EXIT" -ne 0 ] \
   || [ "$LIFECYCLE_AFTER_EXIT" -ne 0 ] || [ "$TICKET_DETAIL_EXIT" -ne 0 ] || [ "$REFINEMENT_EXIT" -ne 0 ] \
-  || [ "$TEMPLATES_EXIT" -ne 0 ] || [ "$LIFECYCLE_EXIT" -ne 0 ] || [ "$ALLOWED_ACTIONS_EXIT" -ne 0 ] || [ "$BOARD_EXIT" -ne 0 ] || [ "$BOARD_MOVES_EXIT" -ne 0 ] || [ "$BOARD_MOBILE_EXIT" -ne 0 ] || [ "$PRIORITY_ORDER_EXIT" -ne 0 ] || [ "$MODAL_EXIT" -ne 0 ] || [ "$BADGE_FILTER_EXIT" -ne 0 ] || [ "$ARCHIVE_EXIT" -ne 0 ] || [ "$CAPTURE_EXIT" -ne 0 ] || [ "$AGENTS_EXIT" -ne 0 ] || [ "$RUNNER_EXIT" -ne 0 ] || [ "$RUNNER_CLAIMS_EXIT" -ne 0 ] || [ "$RUNNER_ENGINE_EXIT" -ne 0 ] || [ "$RUNNER_ACTIVITY_EXIT" -ne 0 ] || [ "$RUNNER_DELIVERY_EXIT" -ne 0 ] || [ "$RUNNER_REWORK_EXIT" -ne 0 ] || [ "$RUNNER_STOP_EXIT" -ne 0 ] || [ "$RUNNER_FAILED_EXIT" -ne 0 ] || [ "$RUNNER_INTERRUPTED_EXIT" -ne 0 ] || [ "$ACTIVE_ORDER_SLIP_EXIT" -ne 0 ] || [ "$AGENT_READINESS_EXIT" -ne 0 ] || [ "$STATUS_FAILURE_EXIT" -ne 0 ] \
+  || [ "$TEMPLATES_EXIT" -ne 0 ] || [ "$LIFECYCLE_EXIT" -ne 0 ] || [ "$ALLOWED_ACTIONS_EXIT" -ne 0 ] || [ "$BOARD_EXIT" -ne 0 ] || [ "$BOARD_MOVES_EXIT" -ne 0 ] || [ "$BOARD_MOBILE_EXIT" -ne 0 ] || [ "$PRIORITY_ORDER_EXIT" -ne 0 ] || [ "$MODAL_EXIT" -ne 0 ] || [ "$BADGE_FILTER_EXIT" -ne 0 ] || [ "$ARCHIVE_EXIT" -ne 0 ] || [ "$CAPTURE_EXIT" -ne 0 ] || [ "$AGENTS_EXIT" -ne 0 ] || [ "$RUNNER_EXIT" -ne 0 ] || [ "$RUNNER_CLAIMS_EXIT" -ne 0 ] || [ "$RUNNER_ENGINE_EXIT" -ne 0 ] || [ "$RUNNER_ACTIVITY_EXIT" -ne 0 ] || [ "$RUNNER_DELIVERY_EXIT" -ne 0 ] || [ "$RUNNER_REWORK_EXIT" -ne 0 ] || [ "$RUNNER_STOP_EXIT" -ne 0 ] || [ "$RUNNER_FAILED_EXIT" -ne 0 ] || [ "$RUNNER_INTERRUPTED_EXIT" -ne 0 ] || [ "$RUNNER_ASK_EXIT" -ne 0 ] || [ "$ACTIVE_ORDER_SLIP_EXIT" -ne 0 ] || [ "$AGENT_READINESS_EXIT" -ne 0 ] || [ "$STATUS_FAILURE_EXIT" -ne 0 ] \
   || [ "$FAILURE_EXIT" -ne 0 ]; then
   log "SUITE FAILED"
   exit 1

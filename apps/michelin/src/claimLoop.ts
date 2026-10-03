@@ -1,3 +1,4 @@
+import { AnswerInbox } from "./answerInbox.ts";
 import { acknowledgeCommand, startCommandLoop } from "./commandLoop.ts";
 import type { RunnerCredential } from "./credentials.ts";
 import { runControlledEngine, type EngineDeps } from "./engine.ts";
@@ -70,6 +71,8 @@ async function runRound(options: ClaimLoopOptions, claim: RunnerClaim, signal: A
   const { galleyUrl, fetch, logger, credential, requestTimeoutMs } = options;
   const stop = new AbortController();
   let stopCommand: PulledCommand | undefined;
+  const answers = new AnswerInbox();
+  const request = { fetch, galleyUrl, signal, timeoutMs: requestTimeoutMs, credential };
   const commands = startCommandLoop({
     galleyUrl,
     intervalMs: options.commandIntervalMs,
@@ -83,6 +86,14 @@ async function runRound(options: ClaimLoopOptions, claim: RunnerClaim, signal: A
       stopCommand ??= command;
       stop.abort(stopCommand.id);
     },
+    onAnswer: (command) => {
+      answers.deliver(command.answer.questionId, {
+        text: command.answer.text,
+        acknowledge: async () => {
+          await acknowledgeCommand(request, logger, claim.roundId, command, "applied");
+        },
+      });
+    },
   });
   try {
     const outcome = await runControlledEngine({
@@ -94,12 +105,13 @@ async function runRound(options: ClaimLoopOptions, claim: RunnerClaim, signal: A
       script: options.engineScript,
       signal,
       stop: stop.signal,
+      awaitAnswer: answers.wait,
       requestTimeoutMs,
       deps: options.engineDeps,
     });
     await commands.stop();
     if (outcome === "stopped" && stopCommand !== undefined) {
-      await acknowledgeCommand({ fetch, galleyUrl, signal, timeoutMs: requestTimeoutMs, credential }, logger, claim.roundId, stopCommand, "applied");
+      await acknowledgeCommand(request, logger, claim.roundId, stopCommand, "applied");
     }
   } catch (error) {
     logger.error("engine failed unexpectedly", { roundId: claim.roundId, error: error instanceof Error ? error.message : String(error) });

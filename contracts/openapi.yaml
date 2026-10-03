@@ -949,6 +949,54 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorBody"
+  /api/tickets/{id}/rounds/{roundId}/questions/{questionId}/answer:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid, x-go-type: string}
+      - name: roundId
+        in: path
+        required: true
+        schema: {type: string, format: uuid, x-go-type: string}
+      - name: questionId
+        in: path
+        required: true
+        schema: {type: string, format: uuid, x-go-type: string}
+    post:
+      operationId: answerRoundQuestion
+      summary: Answer the question a Round waits on
+      tags: [tickets]
+      description: >-
+        Records the Owner's answer once and one `answer` command for the
+        runner to pull. Neither the Round nor the Ticket moves until the
+        runner reports `resumed`. A question that already has an answer
+        is `question_already_answered`; a Round that has ended is
+        `round_not_open`; a Round with Stop requested is
+        `stop_already_requested`. Each changes nothing. An unknown,
+        malformed or foreign Ticket, Round or question id, or one not of
+        that Ticket or Round, returns the shared 404.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnswerQuestionRequest"
+      responses:
+        "200":
+          description: The Ticket, with the answer recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        default:
+          description: >-
+            Error. See `ErrorBody`. Includes `question_already_answered`,
+            `round_not_open` and `stop_already_requested`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
   /api/session:
     get:
       operationId: getSession
@@ -1146,9 +1194,16 @@ paths:
         Round's, `409 round_not_open` for a Round that has ended, and
         `409 event_out_of_order` for a type the Round's state cannot
         take: `execution_started` needs a claimed Round; `progress`,
-        `usage_observed`, `delivered`, `failed` and `interrupted` a
-        running one; `stop_confirmed` either, and then
-        `409 stop_not_requested` unless the Owner requested Stop. A
+        `usage_observed`, `delivered`, `failed`, `interrupted` and
+        `question_raised` a running one; `resumed` one waiting for input,
+        and then `409 answer_not_supplied` unless its `questionId` is the
+        waiting question and the Owner has answered it; `stop_confirmed`
+        any open Round, and then `409 stop_not_requested` unless the
+        Owner requested Stop. `question_raised` records the question,
+        moves the Round to `waiting_for_input` and the Ticket from In
+        Progress to Blocked, and keeps the Owner's slot; its
+        `idempotencyKey` must equal `data.questionId`. `resumed` moves the
+        Round back to `running` and the Ticket to In Progress. A
         `usage_observed` whose `observationId` is already recorded for
         another Round is `409 observation_id_conflict`. `delivered`
         retains the deliverable, ends the Round as `delivered`, frees the
@@ -1188,8 +1243,8 @@ paths:
           description: >-
             Error. See `ErrorBody`. Includes `idempotency_key_conflict`,
             `stale_claim_epoch`, `round_not_open`, `event_out_of_order`,
-            `stop_not_requested`, `observation_id_conflict` and
-            `request_too_large`.
+            `stop_not_requested`, `answer_not_supplied`,
+            `observation_id_conflict` and `request_too_large`.
           content:
             application/json:
               schema:
@@ -1205,8 +1260,9 @@ paths:
       summary: Pull a Round's unacknowledged commands
       tags: [runner-api]
       description: >-
-        The Round's unacknowledged commands, oldest `issuedAt` first; none
-        once the Round has ended. A command stays listed until it is
+        The Round's unacknowledged commands: a Stop first, then the rest
+        oldest `issuedAt` first; none once the Round has ended. A command
+        stays listed until it is
         acknowledged. An unknown, malformed or foreign Round id returns
         the shared 404.
       security:
@@ -1585,33 +1641,64 @@ components:
     RoundState:
       type: string
       description: >-
-        `claimed` and `running` are open. `delivered` has ended and moved
-        the Ticket to In Review. `stopped` has ended and moved the Ticket
-        to Backlog. `failed` and `interrupted` have ended and moved the
-        Ticket to Blocked.
-      enum: [claimed, running, delivered, stopped, failed, interrupted]
-      x-enum-varnames: [RoundClaimed, RoundRunning, RoundDelivered, RoundStopped, RoundFailed, RoundInterrupted]
+        `claimed`, `running` and `waiting_for_input` are open.
+        `delivered` has ended and moved the Ticket to In Review.
+        `stopped` has ended and moved the Ticket to Backlog. `failed` and
+        `interrupted` have ended and moved the Ticket to Blocked.
+      enum: [claimed, running, waiting_for_input, delivered, stopped, failed, interrupted]
+      x-enum-varnames: [RoundClaimed, RoundRunning, RoundWaitingForInput, RoundDelivered, RoundStopped, RoundFailed, RoundInterrupted]
     OpenRoundState:
       type: string
       description: >-
         A claimed Round leaves the Ticket Ready; a running one has moved
-        it to In Progress.
-      enum: [claimed, running]
-      x-enum-varnames: [OpenRoundClaimed, OpenRoundRunning]
+        it to In Progress; one waiting for input has moved it to Blocked
+        and keeps the Owner's slot.
+      enum: [claimed, running, waiting_for_input]
+      x-enum-varnames: [OpenRoundClaimed, OpenRoundRunning, OpenRoundWaitingForInput]
     RoundWaitingReason:
       type: string
       description: >-
         What an open Round waits on, from Galley's state alone. When more
         than one holds, the first of `runner_disconnected` (the runner
         health window has lapsed or no runner is paired), `stopping`
-        (Stop requested), `starting` (claimed) and `working` (running)
-        applies.
-      enum: [starting, working, stopping, runner_disconnected]
-      x-enum-varnames: [WaitingStarting, WaitingWorking, WaitingStopping, WaitingRunnerDisconnected]
+        (Stop requested), `waiting_for_answer` (waiting for input, its
+        question unanswered), `resuming` (waiting for input, its question
+        answered), `starting` (claimed) and `working` (running) applies.
+      enum: [starting, working, stopping, runner_disconnected, waiting_for_answer, resuming]
+      x-enum-varnames: [WaitingStarting, WaitingWorking, WaitingStopping, WaitingRunnerDisconnected, WaitingForAnswer, WaitingResuming]
+    RoundQuestion:
+      type: object
+      additionalProperties: false
+      required: [id, text, askedAt, answer, answeredAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          x-go-type: string
+          description: The runner's `questionId`.
+        text: {type: string, minLength: 1, maxLength: 2000}
+        askedAt:
+          type: string
+          format: date-time
+          description: Galley's clock.
+        answer: {type: [string, "null"], minLength: 1, maxLength: 2000}
+        answeredAt: {type: [string, "null"], format: date-time}
+    AnswerQuestionRequest:
+      type: object
+      additionalProperties: false
+      required: [answer]
+      properties:
+        answer:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: >-
+            Counted in Unicode code points. Not blank; no control
+            characters but tab and line feed.
     TicketOpenRound:
       type: object
       additionalProperties: false
-      required: [id, sequence, state, agent, claimedAt, startedAt, stopRequestedAt, waitingReason]
+      required: [id, sequence, state, agent, claimedAt, startedAt, stopRequestedAt, waitingReason, question]
       properties:
         id: {type: string, format: uuid, x-go-type: string}
         sequence: {type: integer, minimum: 1}
@@ -1628,6 +1715,11 @@ components:
           description: When the Owner requested Stop; the Ticket shows Stopping. Not a Status.
         waitingReason:
           $ref: "#/components/schemas/RoundWaitingReason"
+        question:
+          description: The question the Round waits on; set exactly when `state` is `waiting_for_input`.
+          oneOf:
+            - $ref: "#/components/schemas/RoundQuestion"
+            - type: "null"
     TicketDelivery:
       type: object
       additionalProperties: false
@@ -1642,7 +1734,7 @@ components:
     TicketRound:
       type: object
       additionalProperties: false
-      required: [id, sequence, state, agent, claimedAt, startedAt, endedAt, activity, earlierActivityCursor, usage, deliverable, outcomeNote]
+      required: [id, sequence, state, agent, claimedAt, startedAt, endedAt, activity, earlierActivityCursor, usage, deliverable, outcomeNote, questions]
       properties:
         id: {type: string, format: uuid, x-go-type: string}
         sequence: {type: integer, minimum: 1}
@@ -1672,6 +1764,11 @@ components:
         outcomeNote:
           type: [string, "null"]
           description: Set exactly when `state` is `stopped`, `failed` or `interrupted`.
+        questions:
+          type: array
+          description: Every question the Round raised, oldest first.
+          items:
+            $ref: "#/components/schemas/RoundQuestion"
     RoundDeliverable:
       type: object
       additionalProperties: false
@@ -1804,7 +1901,7 @@ components:
     TicketAllowedActions:
       type: object
       additionalProperties: false
-      required: [statusChanges, statusChangeRejections, accept, rework, stop]
+      required: [statusChanges, statusChangeRejections, accept, rework, stop, answer]
       properties:
         statusChanges:
           type: array
@@ -1825,6 +1922,13 @@ components:
           $ref: "#/components/schemas/TicketCommandAvailability"
         stop:
           description: Unavailable with `stop_already_requested` once Stop is requested.
+          $ref: "#/components/schemas/TicketCommandAvailability"
+        answer:
+          description: >-
+            Whether `openRound.question` can be answered. Unavailable with
+            `answer_not_available` without one, `question_already_answered`
+            once it is answered, and `stop_already_requested` once Stop is
+            requested.
           $ref: "#/components/schemas/TicketCommandAvailability"
     TicketStatusChangeRejection:
       type: object
@@ -2151,8 +2255,8 @@ components:
     RoundEventType:
       type: string
       description: Grows by slice.
-      enum: [execution_started, progress, usage_observed, delivered, stop_confirmed, failed, interrupted]
-      x-enum-varnames: [RoundEventExecutionStarted, RoundEventProgress, RoundEventUsageObserved, RoundEventDelivered, RoundEventStopConfirmed, RoundEventFailed, RoundEventInterrupted]
+      enum: [execution_started, progress, usage_observed, delivered, stop_confirmed, failed, interrupted, question_raised, resumed]
+      x-enum-varnames: [RoundEventExecutionStarted, RoundEventProgress, RoundEventUsageObserved, RoundEventDelivered, RoundEventStopConfirmed, RoundEventFailed, RoundEventInterrupted, RoundEventQuestionRaised, RoundEventResumed]
     ExecutionStartedData:
       type: object
       additionalProperties: false
@@ -2270,6 +2374,36 @@ components:
             The runner's own evidence that execution ceased, kept as the
             Round's `outcomeNote`. Counted in Unicode code points. Not
             blank; no control characters but tab and line feed.
+    QuestionRaisedData:
+      type: object
+      additionalProperties: false
+      required: [questionId, text]
+      properties:
+        questionId:
+          type: string
+          format: uuid
+          x-go-type: string
+          description: >-
+            The question's identity, generated by the runner, one per
+            question instance. Lowercase canonical form, not the nil UUID,
+            and equal to the event's `idempotencyKey`.
+        text:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: >-
+            Counted in Unicode code points. Not blank; no control
+            characters but tab and line feed.
+    ResumedData:
+      type: object
+      additionalProperties: false
+      required: [questionId]
+      properties:
+        questionId:
+          type: string
+          format: uuid
+          x-go-type: string
+          description: The answered question the runner acted on.
     RoundEventRequest:
       type: object
       additionalProperties: false
@@ -2296,9 +2430,9 @@ components:
           description: >-
             The payload for `type`: `ExecutionStartedData`,
             `ProgressData`, `UsageObservedData`, `DeliveredData`,
-            `StopConfirmedData`, `FailedData` or `InterruptedData`. Not
-            `oneOf`: `StopConfirmedData` and `InterruptedData` share a
-            shape.
+            `StopConfirmedData`, `FailedData`, `InterruptedData`,
+            `QuestionRaisedData` or `ResumedData`. Not `oneOf`:
+            `StopConfirmedData` and `InterruptedData` share a shape.
           anyOf:
             - $ref: "#/components/schemas/ExecutionStartedData"
             - $ref: "#/components/schemas/ProgressData"
@@ -2307,6 +2441,8 @@ components:
             - $ref: "#/components/schemas/StopConfirmedData"
             - $ref: "#/components/schemas/FailedData"
             - $ref: "#/components/schemas/InterruptedData"
+            - $ref: "#/components/schemas/QuestionRaisedData"
+            - $ref: "#/components/schemas/ResumedData"
     RoundEventResult:
       type: object
       additionalProperties: false
@@ -2334,11 +2470,27 @@ components:
           format: uuid
           x-go-type: string
           description: For `usage_observed`, the observation recorded.
+        questionId:
+          type: string
+          format: uuid
+          x-go-type: string
+          description: For `question_raised` and `resumed`, the question.
     RunnerCommandType:
       type: string
       description: Grows by slice.
-      enum: [stop]
-      x-enum-varnames: [RunnerCommandStop]
+      enum: [stop, answer]
+      x-enum-varnames: [RunnerCommandStop, RunnerCommandAnswer]
+    RunnerCommandAnswerData:
+      type: object
+      additionalProperties: false
+      required: [questionId, text]
+      properties:
+        questionId:
+          type: string
+          format: uuid
+          x-go-type: string
+          description: The question answered.
+        text: {type: string, minLength: 1, maxLength: 2000}
     RunnerCommand:
       type: object
       additionalProperties: false
@@ -2358,6 +2510,9 @@ components:
             The claim epoch the command targets. A runner holding another
             epoch acknowledges it `ignored` and does not act on it.
         issuedAt: {type: string, format: date-time}
+        answer:
+          description: Present exactly when `type` is `answer`.
+          $ref: "#/components/schemas/RunnerCommandAnswerData"
     RunnerCommandList:
       type: object
       additionalProperties: false

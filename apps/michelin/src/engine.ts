@@ -1,13 +1,14 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import type { AwaitAnswer } from "./answerInbox.ts";
 import type { RunnerCredential } from "./credentials.ts";
-import type { EngineScript } from "./engineScript.ts";
+import { NOTE_MAX_LENGTH, type EngineScript } from "./engineScript.ts";
 import type { FetchFn } from "./galley/client.ts";
 import { reportRoundEvent, type RoundEventFailure, type RoundEventRequest, type RunnerClaim } from "./galley/runner.ts";
 import type { Logger } from "./logger.ts";
 import { sleep } from "./statusLoop.ts";
 
 interface PendingEvent {
-  step: "start" | "progress" | "usage" | "deliver" | "fail" | "interrupt" | "stop";
+  step: "start" | "progress" | "usage" | "deliver" | "fail" | "interrupt" | "stop" | "ask" | "resume";
   stepIndex: number;
   event: RoundEventRequest;
   reported: string;
@@ -32,6 +33,7 @@ export interface EngineOptions {
   script: EngineScript;
   signal: AbortSignal;
   stop: AbortSignal;
+  awaitAnswer?: AwaitAnswer;
   requestTimeoutMs?: number;
   deps?: Partial<EngineDeps>;
 }
@@ -57,6 +59,23 @@ export function isRetryable(failure: RoundEventFailure): boolean {
   }
 }
 
+// RFC 9562 version 5 with the Round as namespace: a restarted engine raises the same question under the same id, so Galley's replay
+// check, keyed on it, never records a second question.
+export function questionIdFor(roundId: string, stepIndex: number): string {
+  const namespace = Buffer.from(roundId.replaceAll("-", ""), "hex");
+  const hash = createHash("sha1").update(namespace).update(`ask:${stepIndex}`).digest();
+  hash[6] = (hash[6]! & 0x0f) | 0x50;
+  hash[8] = (hash[8]! & 0x3f) | 0x80;
+  const hex = hash.subarray(0, 16).toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+const ANSWER_NOTE_PREFIX = "Owner's answer: ";
+
+export function answerNote(answer: string): string {
+  return [...`${ANSWER_NOTE_PREFIX}${answer}`].slice(0, NOTE_MAX_LENGTH).join("");
+}
+
 export async function runControlledEngine(options: EngineOptions): Promise<EngineOutcome> {
   const { logger, signal, stop, claim } = options;
   const deps: EngineDeps = {
@@ -76,11 +95,17 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
   });
   const halt = AbortSignal.any([signal, stop]);
   const steps = options.script.steps;
+  const awaitAnswer: AwaitAnswer = options.awaitAnswer ?? ((_questionId, until) => untilAborted(until).then(() => undefined));
+  let waitingForAnswer = false;
   // Sent only once the engine has ceased: Galley ends the Round on this event alone.
   const stopped = async (): Promise<EngineOutcome> => {
     const commandId = typeof stop.reason === "string" ? stop.reason : undefined;
     logger.info("engine stopped", { roundId, stepIndex, ...(commandId === undefined ? {} : { commandId }) });
-    const position = stepIndex < steps.length ? `before step ${stepIndex + 1}` : `after step ${steps.length}`;
+    const position = waitingForAnswer
+      ? `while waiting for the answer to step ${stepIndex + 1}`
+      : stepIndex < steps.length
+        ? `before step ${stepIndex + 1}`
+        : `after step ${steps.length}`;
     const evidence = `Stopped ${position} of ${steps.length}${commandId === undefined ? "" : ` on Stop command ${commandId}`}`;
     const outcome = await sendEvent(options, deps, {
       step: "stop",
@@ -136,6 +161,48 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
       case "wait":
         await deps.sleep(step.ms, halt);
         break;
+      case "ask": {
+        const questionId = questionIdFor(roundId, stepIndex);
+        const raised = await sendEvent(options, deps, {
+          step: "ask",
+          stepIndex,
+          event: envelope("question_raised", questionId, { questionId, text: step.question }),
+          reported: "question raised",
+          context: { questionId },
+        });
+        if (raised !== "sent") {
+          return raised;
+        }
+        waitingForAnswer = true;
+        logger.info("engine waiting for an answer", { roundId, stepIndex, questionId });
+        const answer = await awaitAnswer(questionId, halt);
+        if (signal.aborted) {
+          return "aborted";
+        }
+        if (stop.aborted || answer === undefined) {
+          return stopped();
+        }
+        waitingForAnswer = false;
+        const resumed = await sendEvent(options, deps, {
+          step: "resume",
+          stepIndex,
+          event: envelope("resumed", `${roundId}:${stepIndex}`, { questionId }),
+          reported: "resume reported",
+          context: { questionId },
+        });
+        if (resumed !== "sent") {
+          return resumed;
+        }
+        await answer.acknowledge();
+        pending = {
+          step: "progress",
+          stepIndex,
+          event: envelope("progress", `${roundId}:${stepIndex}:answer`, { note: answerNote(answer.text) }),
+          reported: "progress reported",
+          context: { questionId },
+        };
+        break;
+      }
       case "hold":
         logger.info("engine holding", { roundId });
         await untilAborted(halt);
@@ -175,7 +242,11 @@ async function sendEvent(options: EngineOptions, deps: EngineDeps, pending: Pend
   const { logger, signal, claim } = options;
   const request = { fetch: options.fetch, galleyUrl: options.galleyUrl, signal, timeoutMs: options.requestTimeoutMs, credential: options.credential };
   const body = JSON.stringify(pending.event);
-  const expected = { type: pending.event.type, observationId: pending.step === "usage" ? pending.event.idempotencyKey : undefined };
+  const expected = {
+    type: pending.event.type,
+    observationId: pending.step === "usage" ? pending.event.idempotencyKey : undefined,
+    questionId: pending.step === "ask" || pending.step === "resume" ? (pending.context["questionId"] as string) : undefined,
+  };
   for (let attempt = 1; ; attempt++) {
     const report = await reportRoundEvent(request, claim.roundId, body, expected);
     const context = { roundId: claim.roundId, step: pending.step, stepIndex: pending.stepIndex, attempt };

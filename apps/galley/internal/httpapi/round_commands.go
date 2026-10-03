@@ -113,11 +113,12 @@ func (s *server) ListRoundCommands(w http.ResponseWriter, r *http.Request, round
 }
 
 func pendingRoundCommands(ctx context.Context, pool *pgxpool.Pool, ownerID int64, roundID string) ([]RunnerCommand, bool, error) {
-	rows, err := pool.Query(ctx, `SELECT c.public_id::text, c.type, c.claim_epoch, c.issued_at
+	rows, err := pool.Query(ctx, `SELECT c.public_id::text, c.type, c.claim_epoch, c.issued_at, q.question_id::text, q.answer
 		FROM rounds r
 		LEFT JOIN round_commands c ON c.owner_id = r.owner_id AND c.round_id = r.id AND c.acknowledged_at IS NULL AND r.state IN `+openRoundStatesSQL+`
+		LEFT JOIN round_questions q ON q.owner_id = c.owner_id AND q.id = c.question_id
 		WHERE r.owner_id = $1 AND r.public_id = $2::uuid
-		ORDER BY c.issued_at, c.id`, ownerID, roundID)
+		ORDER BY c.type = $3 DESC, c.issued_at, c.id`, ownerID, roundID, string(RunnerCommandStop))
 	if err != nil {
 		return nil, false, err
 	}
@@ -126,15 +127,20 @@ func pendingRoundCommands(ctx context.Context, pool *pgxpool.Pool, ownerID int64
 	commands := []RunnerCommand{}
 	for rows.Next() {
 		found = true
-		var id, commandType *string
+		var id, commandType, questionID, answer *string
 		var epoch *int
 		var issuedAt *time.Time
-		if err := rows.Scan(&id, &commandType, &epoch, &issuedAt); err != nil {
+		if err := rows.Scan(&id, &commandType, &epoch, &issuedAt, &questionID, &answer); err != nil {
 			return nil, false, err
 		}
-		if id != nil {
-			commands = append(commands, RunnerCommand{Id: *id, Type: RunnerCommandType(*commandType), ClaimEpoch: *epoch, IssuedAt: issuedAt.UTC()})
+		if id == nil {
+			continue
 		}
+		command := RunnerCommand{Id: *id, Type: RunnerCommandType(*commandType), ClaimEpoch: *epoch, IssuedAt: issuedAt.UTC()}
+		if questionID != nil {
+			command.Answer = &RunnerCommandAnswerData{QuestionId: *questionID, Text: *answer}
+		}
+		commands = append(commands, command)
 	}
 	return commands, found, rows.Err()
 }

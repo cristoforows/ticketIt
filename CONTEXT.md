@@ -109,8 +109,16 @@ The **Status** of a **Ticket** that cannot proceed without intervention, includi
 _Avoid_: Ready when intervention is still required.
 
 **Waiting for Input**:
-The condition of an open **Round** paused because its **Agent** needs a human answer to proceed; answering continues the same round. Agents are expected to work autonomously and seek input only when necessary, with waiting time distinguished from active work time.
+The condition of an open **Round** paused on one unanswered **Question** from its **Agent**; the **Answer** continues the same round. The **Ticket** is **Blocked** yet stays locked to the round, and Stop still ends it as **Stopped**. Agents are expected to work autonomously and seek input only when necessary, with waiting time distinguished from active work time.
 _Avoid_: Interrupted, finished when the round is still open for continuation.
+
+**Question**:
+What an **Agent** asks the owner during a **Round**, putting that round in **Waiting for Input**. A round asks one at a time and may ask several; each stays in the round's history with its **Answer**, or with none if the round ended first.
+_Avoid_: Clarification interview when referring to a question raised during a round.
+
+**Answer**:
+The owner's reply to a **Question**. The first one recorded is the answer; it is delivered to the round's runner, which resumes the same **Round**.
+_Avoid_: Feedback or rework when referring to a reply that continues an open round.
 
 **Interrupted**:
 The terminal outcome of a **Round** whose runner reported, with its own evidence, that the work stopped unexpectedly before delivery; lost contact alone never makes a round Interrupted. The **Ticket** becomes **Blocked**, and the round's activity, usage and the runner's evidence remain part of its history. Returning execution capacity does not start another round; only the owner's explicit move back to **Ready** does.
@@ -121,7 +129,7 @@ The condition of an open **Round** after the owner has requested Stop and before
 _Avoid_: Stopped while the round is still open.
 
 **Waiting Reason**:
-What an open **Round** is waiting on, as the owner sees it: Starting, Working, **Stopping**, or Runner disconnected. Lost contact with the runner outranks the others but never ends the round. It is not a **Status**.
+What an open **Round** is waiting on, as the owner sees it: Starting, Working, Waiting for your answer, Resuming, **Stopping**, or Runner disconnected. Lost contact with the runner outranks the others but never ends the round. It is not a **Status**.
 _Avoid_: Status, round state when referring to this owner-facing reason.
 
 **Stopped**:

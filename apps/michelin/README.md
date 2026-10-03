@@ -114,6 +114,11 @@ Three loops run side by side, and a fourth while a Round is held:
     step boundary (see "Stop" below).
   - `stop` with another `claimEpoch` is acknowledged `ignored`; the
     engine keeps running.
+  - `answer` with the claim's `claimEpoch` hands `answer.text` to the
+    `ask` step waiting on `answer.questionId` (see "Questions" below);
+    with another `claimEpoch` it is acknowledged `ignored`. A listing
+    with an `answer` lacking `answer.questionId` or `answer.text` is an
+    `invalid_body` poll failure.
   - Any other type is logged once and left unacknowledged.
 
 Requests in one loop never overlap. The status and runner loops keep
@@ -149,6 +154,7 @@ makes no model or provider call. Each reporting step sends one event to
 | `deliver` | `delivered` | `<roundId>:<step index>` | Deliver the result: `bodyMarkdown` (1 to 1048576 bytes of UTF-8), `summary` (1 to 2000 characters) and `criteriaAssessment` (1 to 10000 characters), each not blank, with no control characters but tab and line feed. Galley moves the Ticket to In Review and frees the slot; the engine returns and the claim loop polls again. Only the last step. |
 | `fail` | `failed` | `<roundId>:<step index>` | End the Round as Failed with `explanation` (the progress note's limits). Galley moves the Ticket to Blocked, keeps the activity and usage, and frees the slot; the engine returns and the claim loop polls again. Only the last step. |
 | `interrupt` | `interrupted` | `<roundId>:<step index>` | End the Round as Interrupted with `evidence` (the progress note's limits), otherwise as `fail`. Only the last step. |
+| `ask` | `question_raised`, then `resumed` | the `questionId`; then `<roundId>:<step index>` | Raise `question` (the progress note's limits) and wait for the Owner's answer. `questionId` is a UUID v5 of `ask:<step index>` in the Round's id, so a restarted engine raises the same question under the same id. See "Questions" below. |
 | `hold` | none | none | Wait until Michelin stops. Only the last step, so a script ends with at most one of `hold`, `deliver`, `fail` and `interrupt`. |
 
 With `MICHELIN_ENGINE_SCRIPT` unset, the script is: `start`; progress
@@ -199,8 +205,24 @@ acknowledged; a Stop that arrives before a `fail` or `interrupt` step
 wins, and that step is never sent. Claim
 polling resumes once the acknowledgement is answered.
 
-Stopping Michelin aborts a wait, a hold, a backoff and an in-flight
-request at once.
+**Questions.** Galley answers `question_raised` with the Round
+`waiting_for_input` (the Ticket Blocked); the engine logs `engine
+waiting for an answer` and sends nothing until the `answer` command for
+that `questionId` arrives. It then sends `resumed` (Galley moves the
+Round back to `running`), acknowledges the command `applied` only after
+that, and appends the progress note `Owner's answer: <answer>`
+(truncated to 2000 characters) with key `<roundId>:<step index>:answer`
+before the next step. Only the first answer for a question is used. A
+Stop while waiting wins over an answer that arrives with it: the engine
+confirms the Stop with the evidence `Stopped while waiting for the
+answer to step <step index + 1> of <step count> on Stop command
+<commandId>`, and the answer is never acknowledged, because Galley
+stops listing an ended Round's commands. A Michelin restarted while a
+Round waits does not pick it up again: Galley holds the slot, so the
+claim answers `204` until reconciliation (M5) recovers it.
+
+Stopping Michelin aborts a wait, a hold, an `ask`'s wait for its answer,
+a backoff and an in-flight request at once.
 
 ## Logs
 
@@ -226,6 +248,10 @@ context fields. The credential is never logged.
 | `failure reported`, `engine failed`; `interruption reported`, `engine interrupted` | `info` | As above, plus Galley's `endedAt`; then the engine returns and polling resumes. |
 | `round event failed; retrying` | `warn` | `roundId`, `step`, `attempt`, `reason`, `httpStatus`, `errorCode`, `retryInMs`. |
 | `round event refused; round abandoned locally` | `error` | `roundId`, `step`, `attempt`, `httpStatus`, Galley's `errorCode`. |
+| `question raised` | `info` | `roundId`, `step` `ask`, `stepIndex`, `attempt`, `questionId`, `httpStatus`. |
+| `engine waiting for an answer` | `info` | `roundId`, `stepIndex`, `questionId`. |
+| `answer received` | `info` | An `answer` for the claim's epoch arrived: as `stop requested`, plus `questionId`. The text is not logged. |
+| `resume reported` | `info` | As `question raised`, `step` `resume`. |
 | `engine holding`, `engine script finished` | `info` | The script reached `hold`, or its last step. |
 | `stop requested` | `info` | A `stop` for the claim's epoch arrived: `roundId`, `commandId`, `type`, `commandEpoch`, `claimEpoch`. |
 | `engine stopped` | `info` | The engine halted at `stepIndex` for the Stop `commandId`. |
@@ -277,7 +303,8 @@ src/
 ├── heartbeatLoop.ts  # register, then heartbeat; owns the shared registration flag
 ├── claimLoop.ts      # claim poll while registered; runs each claimed Round's script
 ├── commandLoop.ts    # the held Round's command poll and acknowledgements
-├── engine.ts         # the controlled engine: script steps, event retry, abandonment, Stop
+├── answerInbox.ts    # answers delivered by the command loop, awaited by the ask step
+├── engine.ts         # the controlled engine: script steps, event retry, abandonment, Stop, questions
 ├── engineScript.ts   # the script format, its parser and the built-in default
 ├── galley/client.ts  # request helper and GET /api/status
 ├── galley/runner.ts  # register, heartbeat, claim, Round event and command requests

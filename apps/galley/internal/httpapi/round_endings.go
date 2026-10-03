@@ -19,7 +19,7 @@ const (
 	stoppedBadgeName = "Stopped"
 )
 
-var errEndingTicketNotActive = errors.New("the Ticket of an ending Round is not Ready while claimed or In Progress while running")
+var errEndingTicketNotActive = errors.New("the Ticket of an ending Round is not Ready while claimed, In Progress while running or Blocked while waiting for input")
 
 type roundEnding struct {
 	state              RoundState
@@ -32,6 +32,16 @@ var roundEndings = map[RoundEventType]roundEnding{
 	RoundEventStopConfirmed: {state: RoundStopped, ticketStatus: Backlog, attachStoppedBadge: true},
 	RoundEventFailed:        {state: RoundFailed, ticketStatus: Blocked},
 	RoundEventInterrupted:   {state: RoundInterrupted, ticketStatus: Blocked},
+}
+
+func ticketStatusHeldBy(state RoundState) TicketStatus {
+	switch state {
+	case RoundClaimed:
+		return Ready
+	case RoundWaitingForInput:
+		return Blocked
+	}
+	return InProgress
 }
 
 func validateOutcomeNoteData(raw []byte, field string) (string, string) {
@@ -50,22 +60,17 @@ func validateOutcomeNoteData(raw []byte, field string) (string, string) {
 	return note, ""
 }
 
-// A claimed Round's Ticket is Ready and a running one's In Progress; any other Status is a broken invariant, refused rather than moved.
-func endRound(ctx context.Context, tx pgx.Tx, ownerID int64, ticketID string, roundID int64, ending roundEnding, now time.Time) (time.Time, error) {
+// Any Status but the one the Round's open state holds is a broken invariant, refused rather than moved.
+func endRound(ctx context.Context, tx pgx.Tx, ownerID int64, ticketID string, roundID int64, from RoundState, ending roundEnding, now time.Time) (time.Time, error) {
 	var endedAt time.Time
-	var started bool
 	if err := tx.QueryRow(ctx, `UPDATE rounds SET state = $3, outcome_note = $4, ended_at = GREATEST($5::timestamptz, COALESCE(started_at, claimed_at))
-		WHERE id = $1 AND owner_id = $2 RETURNING ended_at, started_at IS NOT NULL`, roundID, ownerID, string(ending.state), ending.note, now).Scan(&endedAt, &started); err != nil {
+		WHERE id = $1 AND owner_id = $2 RETURNING ended_at`, roundID, ownerID, string(ending.state), ending.note, now).Scan(&endedAt); err != nil {
 		return time.Time{}, err
-	}
-	from := Ready
-	if started {
-		from = InProgress
 	}
 	var ticketRowID int64
 	err := tx.QueryRow(ctx, `UPDATE tickets SET status = $3, updated_at = now()
 		WHERE owner_id = $1 AND public_id = $2::uuid AND status = $4 RETURNING id`,
-		ownerID, ticketID, string(ending.ticketStatus), string(from)).Scan(&ticketRowID)
+		ownerID, ticketID, string(ending.ticketStatus), string(ticketStatusHeldBy(from))).Scan(&ticketRowID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return time.Time{}, errEndingTicketNotActive
 	}

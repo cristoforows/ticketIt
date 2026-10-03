@@ -22,6 +22,7 @@ type ticketWorkflowState struct {
 	// Empty unless the Ticket is Agent-assigned.
 	agentKind                         AgentKind
 	goal, successCriteria, repository string
+	waitingQuestion                   *RoundQuestion
 }
 
 func workflowStateOf(ticket Ticket) ticketWorkflowState {
@@ -35,6 +36,7 @@ func workflowStateOf(ticket Ticket) ticketWorkflowState {
 	if ticket.OpenRound != nil {
 		state.openRoundID = ticket.OpenRound.Id
 		state.stopRequested = ticket.OpenRound.StopRequestedAt != nil
+		state.waitingQuestion = ticket.OpenRound.Question
 	}
 	if ticket.AssigneeAgent != nil {
 		state.agentKind = ticket.AssigneeAgent.Kind

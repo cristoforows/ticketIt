@@ -419,8 +419,27 @@ receipt's notice and the header pill must all show the runner as
 disconnected, with no animation. Re-registering restores Starting. On a
 phone the active slip has no status toggle. Stop on the phone list shows
 Stopping, with no Stop control, on both views. `run.sh` runs it after
-`runner-interrupted.spec.ts` with no reset. It leaves a Round open, but
-no later spec needs the slot.
+`runner-ask.spec.ts` with no reset. It leaves a Round open, but no later
+spec needs the slot.
+
+`tests/runner-ask.spec.ts` (issue #163) has two tests. The first drives
+a real Michelin whose script asks two questions between notes, then
+delivers. After the first `question_raised` the Ticket must be Blocked
+with the Round `waiting_for_input`, Waiting for your answer on the list
+row and the board slip, and the question on the receipt. Answering in
+the receipt answers `200` with Resuming; Michelin must log the answer,
+`resumed` with `201` and only then the `applied` ack. The second
+question is raised on the same Round, and its answer leads to delivery:
+In Review, one Round, both questions with their answers, the
+`Owner's answer: …` notes in the activity, one claim, and a late
+answer refused with `question_already_answered`. The second test Stops
+a Round waiting for an answer from the receipt: the answer form gives
+way to Galley's `stop_already_requested` reason, Michelin confirms with
+`Stopped while waiting for the answer to step 2 of 3 …` and never
+resumes, and the Round ends Stopped in Backlog with its question listed
+as Not answered; a late answer is `400 round_not_open`. `run.sh` runs it
+after `runner-interrupted.spec.ts` with no reset, and it leaves no Round
+open.
 
 `tests/ticket-priority-order.spec.ts` reorders three Ready Tickets by
 dragging onto the upper and lower halves of board slips, then with Move

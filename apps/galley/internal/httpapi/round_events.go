@@ -30,6 +30,8 @@ const (
 	eventOutOfOrderCode           = "event_out_of_order"
 	stopNotRequestedCode          = "stop_not_requested"
 	stopNotRequestedMessage       = "stop_confirmed needs the Owner's Stop request for this Round"
+	answerNotSuppliedCode         = "answer_not_supplied"
+	answerNotSuppliedMessage      = "resumed needs the Owner's answer to the question this Round waits on"
 	observationIDConflictCode     = "observation_id_conflict"
 	observationIDConflictMessage  = "this observationId is already recorded for another Round"
 	roundNotFoundMessage          = "no round with that identifier"
@@ -49,6 +51,7 @@ type roundEvent struct {
 	usage           usageObservation
 	deliverable     RoundDeliverable
 	outcomeNote     string
+	question        raisedQuestion
 }
 
 type lockedRound struct {
@@ -58,6 +61,9 @@ type lockedRound struct {
 	open          bool
 	startedAt     *time.Time
 	stopRequested bool
+	// The Round's latest question, empty when it raised none.
+	questionID       string
+	questionAnswered bool
 }
 
 type roundEventRejection struct {
@@ -76,7 +82,7 @@ type recordedRoundEvent struct {
 var errRoundEventTicketNotReady = errors.New("the Ticket of a claimed Round is not Ready")
 
 func isTicketGuardFailure(err error) bool {
-	return errors.Is(err, errRoundEventTicketNotReady) || errors.Is(err, errDeliveredTicketNotInProgress) || errors.Is(err, errEndingTicketNotActive)
+	return errors.Is(err, errRoundEventTicketNotReady) || errors.Is(err, errDeliveredTicketNotInProgress) || errors.Is(err, errEndingTicketNotActive) || errors.Is(err, errWaitingTicketNotMatched)
 }
 
 func writeRoundNotFound(w http.ResponseWriter) {
@@ -138,7 +144,7 @@ func (s *server) ReportRoundEvent(w http.ResponseWriter, r *http.Request, roundI
 
 func validateRoundEvent(req RoundEventRequest) (roundEvent, string) {
 	if !req.Type.Valid() {
-		return roundEvent{}, `"type" must be one of: execution_started, progress, usage_observed, delivered, stop_confirmed, failed, interrupted`
+		return roundEvent{}, `"type" must be one of: execution_started, progress, usage_observed, delivered, stop_confirmed, failed, interrupted, question_raised, resumed`
 	}
 	if !validEventText(req.IdempotencyKey, idempotencyKeyMaxLength) {
 		return roundEvent{}, fmt.Sprintf(`"idempotencyKey" must be 1 to %d characters without control characters`, idempotencyKeyMaxLength)
@@ -172,6 +178,13 @@ func validateRoundEvent(req RoundEventRequest) (roundEvent, string) {
 		event.outcomeNote, problem = validateOutcomeNoteData(data, "evidence")
 	case RoundEventFailed:
 		event.outcomeNote, problem = validateOutcomeNoteData(data, "explanation")
+	case RoundEventQuestionRaised:
+		event.question, problem = validateQuestionRaisedData(data)
+		if problem == "" && event.question.id != req.IdempotencyKey {
+			problem = `"idempotencyKey" must equal "data.questionId" for question_raised`
+		}
+	case RoundEventResumed:
+		event.question.id, problem = validateResumedData(data)
 	}
 	if problem != "" {
 		return roundEvent{}, problem
@@ -230,9 +243,12 @@ func recordRoundEvent(ctx context.Context, pool *pgxpool.Pool, ownerID int64, ro
 	}
 	var round lockedRound
 	err = tx.QueryRow(ctx, `SELECT r.id, r.state, r.claim_epoch, r.state IN `+openRoundStatesSQL+`, r.started_at,
-			EXISTS (SELECT 1 FROM round_commands c WHERE c.owner_id = r.owner_id AND c.round_id = r.id AND c.type = $3)
-		FROM rounds r WHERE r.owner_id = $1 AND r.public_id = $2::uuid FOR UPDATE OF r`, ownerID, roundID, string(RunnerCommandStop)).
-		Scan(&round.id, &round.state, &round.epoch, &round.open, &round.startedAt, &round.stopRequested)
+			EXISTS (SELECT 1 FROM round_commands c WHERE c.owner_id = r.owner_id AND c.round_id = r.id AND c.type = $3),
+			COALESCE(q.question_id::text, ''), COALESCE(q.answered_at IS NOT NULL, false)
+		FROM rounds r
+		LEFT JOIN LATERAL (SELECT question_id, answered_at FROM round_questions WHERE owner_id = r.owner_id AND round_id = r.id ORDER BY id DESC LIMIT 1) q ON true
+		WHERE r.owner_id = $1 AND r.public_id = $2::uuid FOR UPDATE OF r`, ownerID, roundID, string(RunnerCommandStop)).
+		Scan(&round.id, &round.state, &round.epoch, &round.open, &round.startedAt, &round.stopRequested, &round.questionID, &round.questionAnswered)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return recordedRoundEvent{}, nil
 	}
@@ -252,7 +268,7 @@ func recordRoundEvent(ctx context.Context, pool *pgxpool.Pool, ownerID int64, ro
 	case !errors.Is(err, pgx.ErrNoRows):
 		return recordedRoundEvent{}, err
 	}
-	if rejection := decideRoundEvent(round, event.eventType, event.claimEpoch); rejection != nil {
+	if rejection := decideRoundEvent(round, event); rejection != nil {
 		return recordedRoundEvent{found: true, rejection: rejection}, nil
 	}
 
@@ -289,12 +305,22 @@ func recordRoundEvent(ctx context.Context, pool *pgxpool.Pool, ownerID int64, ro
 	case RoundEventStopConfirmed, RoundEventFailed, RoundEventInterrupted:
 		ending := roundEndings[event.eventType]
 		ending.note = event.outcomeNote
-		endedAt, err := endRound(ctx, tx, ownerID, ticketID, round.id, ending, now)
+		endedAt, err := endRound(ctx, tx, ownerID, ticketID, round.id, RoundState(round.state), ending, now)
 		if err != nil {
 			return recordedRoundEvent{}, err
 		}
 		endedAt = endedAt.UTC()
 		result.State, result.StartedAt, result.EndedAt = ending.state, utcOrNil(round.startedAt), &endedAt
+	case RoundEventQuestionRaised:
+		if err := raiseQuestion(ctx, tx, ownerID, ticketID, round.id, event.question, now); err != nil {
+			return recordedRoundEvent{}, err
+		}
+		result.State, result.StartedAt, result.QuestionId = RoundWaitingForInput, utcOrNil(round.startedAt), &event.question.id
+	case RoundEventResumed:
+		if err := resumeRound(ctx, tx, ownerID, ticketID, round.id); err != nil {
+			return recordedRoundEvent{}, err
+		}
+		result.StartedAt, result.QuestionId = utcOrNil(round.startedAt), &event.question.id
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil {
@@ -311,9 +337,10 @@ func recordRoundEvent(ctx context.Context, pool *pgxpool.Pool, ownerID int64, ro
 	return recordedRoundEvent{found: true, result: result}, nil
 }
 
-func decideRoundEvent(round lockedRound, eventType RoundEventType, claimEpoch int) *roundEventRejection {
+func decideRoundEvent(round lockedRound, event roundEvent) *roundEventRejection {
+	eventType := event.eventType
 	switch {
-	case claimEpoch != round.epoch:
+	case event.claimEpoch != round.epoch:
 		return &roundEventRejection{http.StatusConflict, staleClaimEpochCode, staleClaimEpochMessage}
 	case !round.open:
 		return &roundEventRejection{http.StatusConflict, roundNotOpenCode, roundNotOpenMessage}
@@ -321,6 +348,8 @@ func decideRoundEvent(round lockedRound, eventType RoundEventType, claimEpoch in
 		return &roundEventRejection{http.StatusConflict, eventOutOfOrderCode, eventOutOfOrderMessage(eventType, RoundState(round.state))}
 	case eventType == RoundEventStopConfirmed && !round.stopRequested:
 		return &roundEventRejection{http.StatusConflict, stopNotRequestedCode, stopNotRequestedMessage}
+	case eventType == RoundEventResumed && (event.question.id != round.questionID || !round.questionAnswered):
+		return &roundEventRejection{http.StatusConflict, answerNotSuppliedCode, answerNotSuppliedMessage}
 	}
 	return nil
 }
@@ -330,10 +359,12 @@ func roundStateTakes(state RoundState, eventType RoundEventType) bool {
 	switch eventType {
 	case RoundEventExecutionStarted:
 		return state == RoundClaimed
-	case RoundEventProgress, RoundEventUsageObserved, RoundEventDelivered, RoundEventFailed, RoundEventInterrupted:
+	case RoundEventProgress, RoundEventUsageObserved, RoundEventDelivered, RoundEventFailed, RoundEventInterrupted, RoundEventQuestionRaised:
 		return state == RoundRunning
+	case RoundEventResumed:
+		return state == RoundWaitingForInput
 	case RoundEventStopConfirmed:
-		return state == RoundClaimed || state == RoundRunning
+		return state == RoundClaimed || state == RoundRunning || state == RoundWaitingForInput
 	}
 	return false
 }

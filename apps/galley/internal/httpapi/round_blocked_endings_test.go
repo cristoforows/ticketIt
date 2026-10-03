@@ -671,6 +671,7 @@ func TestDecidePlainStatusChange_RecoveryFromBlocked(t *testing.T) {
 	}{
 		{"a research Agent's Ticket to Ready", research, Ready, ""},
 		{"a coding Agent's Ticket to Ready", coding, Ready, ""},
+		{"an Agent's Ticket whose Round waits for input to Ready", ticketWorkflowState{ticketLock: ticketLock{openRoundID: "r"}, status: Blocked, agentKind: AgentKindResearch, goal: "g", successCriteria: "s"}, Ready, invalidTransitionCode},
 		{"an Agent's Ticket to Ready without a goal", ticketWorkflowState{status: Blocked, agentKind: AgentKindResearch, successCriteria: "s"}, Ready, agentReadinessIncompleteCode},
 		{"a coding Agent's Ticket to Ready without a repository", ticketWorkflowState{status: Blocked, agentKind: AgentKindCoding, goal: "g", successCriteria: "s"}, Ready, agentReadinessIncompleteCode},
 		{"a human Ticket to Ready", human, Ready, invalidTransitionCode},

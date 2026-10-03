@@ -31,6 +31,7 @@ var knownPublicTables = []string{
 	"round_deliverables",
 	"round_engine_references",
 	"round_events",
+	"round_questions",
 	"rounds",
 	"runners",
 	"schema_migrations",
@@ -114,6 +115,10 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 	}
 	if resp := doLifecycleRequest(t, client, http.MethodPost, baseURL+"/api/tickets/"+created.Id+"/stop", nil); resp.status != http.StatusBadRequest || resp.errBody.Error.Code != stopNotAvailableCode {
 		t.Fatalf("stop without an open Round: status = %d, want 400 %s; error=%+v", resp.status, stopNotAvailableCode, resp.errBody)
+	}
+	answerPath := baseURL + "/api/tickets/" + created.Id + "/rounds/" + uuid.NewString() + "/questions/" + uuid.NewString() + "/answer"
+	if resp := doLifecycleRequest(t, client, http.MethodPost, answerPath, AnswerQuestionRequest{Answer: "yes"}); resp.status != http.StatusNotFound {
+		t.Fatalf("answer without a question: status = %d, want 404; error=%+v", resp.status, resp.errBody)
 	}
 	for _, to := range []TicketStatus{Backlog, Ready} {
 		if resp := changeStatus(t, client, baseURL, created.Id, to); resp.status != http.StatusOK || len(resp.ticket.Badges) != 0 {
@@ -230,9 +235,13 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 			if after != before[table] {
 				t.Errorf("%s row count changed from %d to %d -- a manual move to Backlog created or attached a Badge; only a confirmed Stop attaches the Stopped Badge", table, before[table], after)
 			}
+		case "round_questions":
+			if after != before[table] {
+				t.Errorf("%s row count changed from %d to %d -- a manual action recorded a question; only a runner's question_raised event may", table, before[table], after)
+			}
 		case "round_commands":
 			if after != before[table] {
-				t.Errorf("%s row count changed from %d to %d -- a manual lifecycle action recorded a Round command; only a Stop request on an open Round may", table, before[table], after)
+				t.Errorf("%s row count changed from %d to %d -- a manual lifecycle action recorded a Round command; only a Stop request on an open Round or an answer to its question may", table, before[table], after)
 			}
 		default:
 			if after != before[table] {

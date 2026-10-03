@@ -10,6 +10,7 @@ import { authenticatedFetch, errorMessage, GalleyError, parseErrorDetail } from 
 export type Ticket = components["schemas"]["Ticket"];
 export type Badge = components["schemas"]["Badge"];
 export type TicketAssignee = components["schemas"]["AssignTicketRequest"];
+export type RoundQuestion = components["schemas"]["RoundQuestion"];
 
 /**
  * Manual refinement (issue #58): a genuine partial update. A field
@@ -55,7 +56,27 @@ export class TicketNotFoundError extends Error {
 }
 
 type WaitingReason = NonNullable<Ticket["openRound"]>["waitingReason"];
-const WAITING_REASONS: readonly WaitingReason[] = ["starting", "working", "stopping", "runner_disconnected"];
+const WAITING_REASONS: readonly WaitingReason[] = ["starting", "working", "waiting_for_answer", "resuming", "stopping", "runner_disconnected"];
+type OpenRoundState = NonNullable<Ticket["openRound"]>["state"];
+const OPEN_ROUND_STATES: readonly OpenRoundState[] = ["claimed", "running", "waiting_for_input"];
+
+export function parseRoundQuestion(value: unknown): RoundQuestion | undefined {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const question = value as Record<string, unknown>;
+  if (
+    typeof question.id !== "string" ||
+    typeof question.text !== "string" ||
+    typeof question.askedAt !== "string" ||
+    !(question.answer === null || typeof question.answer === "string") ||
+    !(question.answeredAt === null || typeof question.answeredAt === "string") ||
+    (question.answer === null) !== (question.answeredAt === null)
+  ) {
+    return undefined;
+  }
+  return { id: question.id, text: question.text, askedAt: question.askedAt, answer: question.answer, answeredAt: question.answeredAt };
+}
 
 function parseOpenRound(value: unknown): Ticket["openRound"] | undefined {
   if (value === null) {
@@ -68,26 +89,31 @@ function parseOpenRound(value: unknown): Ticket["openRound"] | undefined {
   if (
     typeof round.id !== "string" ||
     typeof round.sequence !== "number" ||
-    (round.state !== "claimed" && round.state !== "running") ||
+    !OPEN_ROUND_STATES.includes(round.state as OpenRoundState) ||
     !isAgentSummary(round.agent) ||
     typeof round.claimedAt !== "string" ||
-    (round.state === "running") !== (typeof round.startedAt === "string") ||
+    (round.state !== "claimed") !== (typeof round.startedAt === "string") ||
     !(round.startedAt === null || typeof round.startedAt === "string") ||
     !(round.stopRequestedAt === null || typeof round.stopRequestedAt === "string") ||
     !WAITING_REASONS.includes(round.waitingReason as WaitingReason)
   ) {
     return undefined;
   }
+  const question = round.state === "waiting_for_input" ? parseRoundQuestion(round.question) : round.question === null ? null : undefined;
+  if (question === undefined) {
+    return undefined;
+  }
   const agent = round.agent;
   return {
     id: round.id,
     sequence: round.sequence,
-    state: round.state,
+    state: round.state as OpenRoundState,
     agent: { id: agent.id, name: agent.name, kind: agent.kind },
     claimedAt: round.claimedAt,
     startedAt: round.startedAt,
     stopRequestedAt: round.stopRequestedAt,
     waitingReason: round.waitingReason as WaitingReason,
+    question,
   };
 }
 
@@ -127,6 +153,7 @@ function parseTicket(payload: unknown): Ticket {
   const accept = parseCommandAvailability(actions?.accept);
   const rework = parseCommandAvailability(actions?.rework);
   const stop = parseCommandAvailability(actions?.stop);
+  const answer = parseCommandAvailability(actions?.answer);
   const agent = record.assigneeAgent;
   const openRound = parseOpenRound(record.openRound);
   const delivery = parseDelivery(record.delivery);
@@ -168,7 +195,8 @@ function parseTicket(payload: unknown): Ticket {
     !rejections.every((rejection) => rejection !== undefined) ||
     !accept ||
     !rework ||
-    !stop
+    !stop ||
+    !answer
   ) {
     throw new Error("Galley's Ticket response was missing a required field.");
   }
@@ -182,6 +210,7 @@ function parseTicket(payload: unknown): Ticket {
       accept,
       rework,
       stop,
+      answer,
     },
     template: record.template as Ticket["template"],
     completionCondition: record.completionCondition as Ticket["completionCondition"],
@@ -371,6 +400,12 @@ export async function requestTicketRework(id: string): Promise<Ticket> {
 
 export async function requestTicketStop(id: string): Promise<Ticket> {
   return ticketCommand(`${TICKETS_ENDPOINT}/${encodeURIComponent(id)}/stop`, { method: "POST" });
+}
+
+/** A 404 here names the Ticket, Round or question together, so Galley's own message is shown. */
+export async function answerRoundQuestion(id: string, roundId: string, questionId: string, answer: string): Promise<Ticket> {
+  const path = `${TICKETS_ENDPOINT}/${encodeURIComponent(id)}/rounds/${encodeURIComponent(roundId)}/questions/${encodeURIComponent(questionId)}/answer`;
+  return ticketCommand(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answer }) }, "response");
 }
 
 /** An Agent id Galley cannot find for this Owner shares the Ticket's 404, so its message is shown rather than "not found". */

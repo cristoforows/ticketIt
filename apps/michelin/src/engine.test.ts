@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { retryDelayMs, runControlledEngine, type EngineOutcome } from "./engine.ts";
+import { AnswerInbox, type AwaitAnswer } from "./answerInbox.ts";
+import { answerNote, questionIdFor, retryDelayMs, runControlledEngine, type EngineOutcome } from "./engine.ts";
 import { DEFAULT_ENGINE_SCRIPT, type DeliverStep, type EngineStep } from "./engineScript.ts";
 import { resolveRunnerCredential } from "./credentials.ts";
 import type { FetchFn } from "./galley/client.ts";
@@ -60,7 +61,7 @@ interface Harness {
   run: Promise<EngineOutcome>;
 }
 
-function start(steps: EngineStep[], fetchFn: FetchFn, options: { instantSleep?: boolean; claim?: RunnerClaim } = {}): Harness {
+function start(steps: EngineStep[], fetchFn: FetchFn, options: { instantSleep?: boolean; claim?: RunnerClaim; awaitAnswer?: AwaitAnswer } = {}): Harness {
   const controller = new AbortController();
   const stopper = new AbortController();
   const lines: string[] = [];
@@ -79,6 +80,7 @@ function start(steps: EngineStep[], fetchFn: FetchFn, options: { instantSleep?: 
     script: { steps },
     signal: controller.signal,
     stop: stopper.signal,
+    awaitAnswer: options.awaitAnswer,
     requestTimeoutMs: 300,
     deps: {
       now: () => {
@@ -817,5 +819,174 @@ describe.each([
     resolve(endedResult(201)());
     expect(await harness.run).toBe(state);
     expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("the ask step", () => {
+  const QUESTION = "Which region should the report cover?";
+  const ASK: EngineStep = { step: "ask", question: QUESTION };
+  const questionId = questionIdFor(ROUND_ID, 1);
+  const raised = () => json({ roundId: ROUND_ID, type: "question_raised", state: "waiting_for_input", startedAt: "2026-10-01T12:00:00Z", questionId }, 201);
+  const resumed = () => json({ roundId: ROUND_ID, type: "resumed", state: "running", startedAt: "2026-10-01T12:00:00Z", questionId }, 201);
+  const noted = (seq: number) => () => json({ roundId: ROUND_ID, type: "progress", state: "running", startedAt: "2026-10-01T12:00:00Z", seq }, 201);
+  const stopped = () => json({ roundId: ROUND_ID, type: "stop_confirmed", state: "stopped", startedAt: "2026-10-01T12:00:00Z", endedAt: "2026-10-01T12:00:09Z" }, 201);
+  const bodies = (fetchFn: ReturnType<typeof sequence>) => fetchFn.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+
+  it("derives a stable version 5 questionId from the Round and the step index", () => {
+    expect(questionIdFor(ROUND_ID, 1)).toBe(questionId);
+    expect(questionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(questionIdFor(ROUND_ID, 2)).not.toBe(questionId);
+    expect(questionIdFor("77777777-7777-4777-8777-777777777778", 1)).not.toBe(questionId);
+  });
+
+  it("raises the question keyed by its id, waits for the answer, resumes the same Round, acknowledges, notes the answer and continues", async () => {
+    const inbox = new AnswerInbox();
+    const acknowledged: string[] = [];
+    const fetchFn = sequence(created, raised, resumed, noted(1), noted(2));
+    const harness = start([START, ASK, { step: "progress", note: "after the answer" }], fetchFn, { awaitAnswer: inbox.wait });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(bodies(fetchFn).map((body) => body["type"])).toEqual(["execution_started", "question_raised"]);
+    expect(bodies(fetchFn)[1]).toMatchObject({ idempotencyKey: questionId, claimEpoch: 3, data: { questionId, text: QUESTION } });
+    expect(harness.records().map((record) => record["msg"])).toContain("engine waiting for an answer");
+
+    inbox.deliver(questionId, { text: "Only the EU", acknowledge: async () => void acknowledged.push(questionId) });
+    expect(await harness.run).toBe("completed");
+    const sent = bodies(fetchFn);
+    expect(sent.map((body) => body["type"])).toEqual(["execution_started", "question_raised", "resumed", "progress", "progress"]);
+    expect(sent[2]).toMatchObject({ idempotencyKey: `${ROUND_ID}:1`, data: { questionId } });
+    expect(sent[3]).toMatchObject({ idempotencyKey: `${ROUND_ID}:1:answer`, data: { note: "Owner's answer: Only the EU" } });
+    expect(sent[4]).toMatchObject({ idempotencyKey: `${ROUND_ID}:2`, data: { note: "after the answer" } });
+    expect(acknowledged).toEqual([questionId]);
+  });
+
+  it("acknowledges the answer only after Galley records the resume", async () => {
+    const inbox = new AnswerInbox();
+    const order: string[] = [];
+    const fetchFn = vi.fn<FetchFn>(async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as { type: string };
+      order.push(body.type);
+      return { execution_started: created, question_raised: raised, resumed, progress: noted(1) }[body.type as "resumed"]();
+    });
+    inbox.deliver(questionId, { text: "yes", acknowledge: async () => void order.push("ack") });
+    const harness = start([START, ASK], fetchFn, { awaitAnswer: inbox.wait });
+    expect(await harness.run).toBe("completed");
+    expect(order).toEqual(["execution_started", "question_raised", "resumed", "ack", "progress"]);
+  });
+
+  it("truncates the answer note to Galley's note limit", () => {
+    expect([...answerNote("界".repeat(2000))]).toHaveLength(2000);
+    expect(answerNote("yes")).toBe("Owner's answer: yes");
+  });
+
+  it("confirms a Stop that arrives while waiting, without resuming", async () => {
+    const inbox = new AnswerInbox();
+    const fetchFn = sequence(created, raised, stopped);
+    const harness = start([START, ASK, { step: "progress", note: "never" }], fetchFn, { awaitAnswer: inbox.wait });
+    await vi.advanceTimersByTimeAsync(5_000);
+    harness.stopper.abort("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    expect(await harness.run).toBe("stopped");
+    const sent = bodies(fetchFn);
+    expect(sent.map((body) => body["type"])).toEqual(["execution_started", "question_raised", "stop_confirmed"]);
+    expect(sent[2]).toMatchObject({
+      idempotencyKey: `${ROUND_ID}:stop`,
+      data: { evidence: "Stopped while waiting for the answer to step 2 of 3 on Stop command aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
+    });
+  });
+
+  it("prefers a Stop delivered beside the answer and leaves the answer unacknowledged", async () => {
+    const inbox = new AnswerInbox();
+    let acknowledged = false;
+    const fetchFn = sequence(created, raised, stopped);
+    const harness = start([START, ASK], fetchFn, { awaitAnswer: inbox.wait });
+    await vi.advanceTimersByTimeAsync(1_000);
+    harness.stopper.abort("stop");
+    inbox.deliver(questionId, { text: "late", acknowledge: async () => void (acknowledged = true) });
+    expect(await harness.run).toBe("stopped");
+    expect(bodies(fetchFn).map((body) => body["type"])).not.toContain("resumed");
+    expect(acknowledged).toBe(false);
+  });
+
+  it("prefers a Stop that lands in the same tick as an answer already handed over", async () => {
+    const inbox = new AnswerInbox();
+    let acknowledged = false;
+    const fetchFn = sequence(created, raised, stopped);
+    const harness = start([START, ASK], fetchFn, { awaitAnswer: inbox.wait });
+    await vi.advanceTimersByTimeAsync(1_000);
+    inbox.deliver(questionId, { text: "just in time", acknowledge: async () => void (acknowledged = true) });
+    harness.stopper.abort("stop");
+    expect(await harness.run).toBe("stopped");
+    expect(bodies(fetchFn).map((body) => body["type"])).toEqual(["execution_started", "question_raised", "stop_confirmed"]);
+    expect(acknowledged).toBe(false);
+  });
+
+  it("answers shutdown while waiting with aborted and reports nothing more", async () => {
+    const inbox = new AnswerInbox();
+    const fetchFn = sequence(created, raised);
+    const harness = start([START, ASK], fetchFn, { awaitAnswer: inbox.wait });
+    await vi.advanceTimersByTimeAsync(1_000);
+    harness.controller.abort();
+    expect(await harness.run).toBe("aborted");
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it("waits until stopped when no answer channel is wired", async () => {
+    const fetchFn = sequence(created, raised, stopped);
+    const harness = start([START, ASK], fetchFn);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    harness.stopper.abort("stop");
+    expect(await harness.run).toBe("stopped");
+  });
+
+  it.each([
+    ["a state other than waiting_for_input", { state: "running" }],
+    ["another questionId", { questionId: questionIdFor(ROUND_ID, 9) }],
+    ["no questionId", { questionId: undefined }],
+  ])("retries rather than waits when the question result carries %s", async (_name, change) => {
+    const inbox = new AnswerInbox();
+    inbox.deliver(questionId, { text: "yes", acknowledge: async () => {} });
+    const fetchFn = sequence(created, () => json({ roundId: ROUND_ID, type: "question_raised", state: "waiting_for_input", startedAt: "2026-10-01T12:00:00Z", questionId, ...change }, 201));
+    const harness = start([START, ASK], fetchFn, { awaitAnswer: inbox.wait });
+    await vi.advanceTimersByTimeAsync(3_500);
+    harness.controller.abort();
+    expect(await harness.run).toBe("aborted");
+    expect(bodies(fetchFn).map((body) => body["type"])).toEqual(["execution_started", "question_raised", "question_raised", "question_raised"]);
+    expect(harness.records().some((record) => record["msg"] === "round event failed; retrying" && record["reason"] === "invalid_body")).toBe(true);
+  });
+
+  it("abandons the Round when Galley refuses the resume, without acknowledging the answer", async () => {
+    const inbox = new AnswerInbox();
+    let acknowledged = false;
+    inbox.deliver(questionId, { text: "yes", acknowledge: async () => void (acknowledged = true) });
+    const fetchFn = sequence(created, raised, error(409, "answer_not_supplied"));
+    const harness = start([START, ASK], fetchFn, { awaitAnswer: inbox.wait });
+    expect(await harness.run).toBe("abandoned");
+    expect(acknowledged).toBe(false);
+  });
+
+  it("raises a fresh question for a second ask step", async () => {
+    const inbox = new AnswerInbox();
+    const second = questionIdFor(ROUND_ID, 2);
+    inbox.deliver(questionId, { text: "one", acknowledge: async () => {} });
+    inbox.deliver(second, { text: "two", acknowledge: async () => {} });
+    const fetchFn = vi.fn<FetchFn>(async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as { type: string; data: { questionId?: string } };
+      const id = body.data.questionId;
+      switch (body.type) {
+        case "question_raised":
+          return json({ roundId: ROUND_ID, type: "question_raised", state: "waiting_for_input", startedAt: "2026-10-01T12:00:00Z", questionId: id }, 201);
+        case "resumed":
+          return json({ roundId: ROUND_ID, type: "resumed", state: "running", startedAt: "2026-10-01T12:00:00Z", questionId: id }, 201);
+        case "progress":
+          return noted(1)();
+        default:
+          return created();
+      }
+    });
+    const harness = start([START, ASK, { step: "ask", question: "And the year?" }], fetchFn, { awaitAnswer: inbox.wait });
+    expect(await harness.run).toBe("completed");
+    const raisedIds = bodies(fetchFn).filter((body) => body["type"] === "question_raised").map((body) => (body["data"] as { questionId: string }).questionId);
+    expect(raisedIds).toEqual([questionId, second]);
   });
 });

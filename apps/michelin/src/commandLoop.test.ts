@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startClaimLoop } from "./claimLoop.ts";
 import { resolveRunnerCredential } from "./credentials.ts";
+import { questionIdFor } from "./engine.ts";
 import type { EngineScript } from "./engineScript.ts";
 import type { FetchFn } from "./galley/client.ts";
 import { createLogger } from "./logger.ts";
@@ -273,5 +274,73 @@ describe("command loop", () => {
     expect(vi.getTimerCount()).toBe(0);
     expect(messages()).not.toContain("round commands poll failed");
     expect(messages()).not.toContain("engine stopped");
+  });
+});
+
+describe("answers", () => {
+  const ASK: EngineScript = { steps: [{ step: "start" }, { step: "ask", question: "Which region?" }, { step: "hold" }] };
+  const questionId = questionIdFor(CLAIM.roundId, 1);
+  const ANSWER = { id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", type: "answer", claimEpoch: 2, issuedAt: "2026-10-02T12:00:01Z", answer: { questionId, text: "Only the EU" } };
+  const STALE_ANSWER = { ...ANSWER, id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", claimEpoch: 1 };
+  const raised = () => json({ roundId: CLAIM.roundId, type: "question_raised", state: "waiting_for_input", startedAt: "2026-10-02T11:59:00Z", questionId }, 201);
+  const resumed = () => json({ roundId: CLAIM.roundId, type: "resumed", state: "running", startedAt: "2026-10-02T11:59:00Z", questionId }, 201);
+  const noted = () => json({ roundId: CLAIM.roundId, type: "progress", state: "running", startedAt: "2026-10-02T11:59:00Z", seq: 1 }, 201);
+  const eventTypes = (fetchFn: ReturnType<typeof galley>) => calls(fetchFn, eventPath).map(([, init]) => (JSON.parse(String(init?.body)) as { type: string }).type);
+
+  it("hands the answer to the waiting engine, which resumes the same Round and then acknowledges it applied", async () => {
+    const fetchFn = galley({ commands: [listing(), listing(ANSWER), listing()], events: [created, raised, resumed, noted, stopConfirmed] });
+    const { loop, messages } = setup(fetchFn, ASK);
+
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(eventTypes(fetchFn)).toEqual(["execution_started", "question_raised"]);
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(eventTypes(fetchFn)).toEqual(["execution_started", "question_raised", "resumed", "progress"]);
+    expect(ackBodies(fetchFn, ANSWER.id)).toEqual([{ outcome: "applied" }]);
+    const resumedAt = fetchFn.mock.calls.findIndex(([input, init]) => new URL(String(input)).pathname === eventPath && String(init?.body).includes('"resumed"'));
+    const ackAt = fetchFn.mock.calls.findIndex(([input]) => new URL(String(input)).pathname === ackPath(ANSWER.id));
+    expect(ackAt).toBeGreaterThan(resumedAt);
+    expect(messages()).toEqual(expect.arrayContaining(["question raised", "engine waiting for an answer", "answer received", "resume reported", "command acknowledged", "engine holding"]));
+    expect(calls(fetchFn, claimsPath)).toHaveLength(2);
+    await loop.stop();
+  });
+
+  it("acknowledges an answer for another claim epoch as ignored and keeps waiting", async () => {
+    const fetchFn = galley({ commands: [listing(STALE_ANSWER)], events: [created, raised] });
+    const { loop, messages } = setup(fetchFn, ASK);
+
+    await vi.advanceTimersByTimeAsync(6000);
+
+    expect(ackBodies(fetchFn, STALE_ANSWER.id)).toEqual([{ outcome: "ignored" }]);
+    expect(eventTypes(fetchFn)).toEqual(["execution_started", "question_raised"]);
+    expect(messages()).not.toContain("answer received");
+    await loop.stop();
+  });
+
+  it("stops while waiting when Stop is listed beside the answer, confirms it, and leaves the answer unacknowledged", async () => {
+    const fetchFn = galley({ commands: [listing(), listing(STOP, ANSWER), listing()], events: [created, raised, stopConfirmed] });
+    const { loop, records } = setup(fetchFn, ASK);
+
+    await vi.advanceTimersByTimeAsync(6000);
+
+    expect(eventTypes(fetchFn)).toEqual(["execution_started", "question_raised", "stop_confirmed"]);
+    const confirmation = calls(fetchFn, eventPath).map(([, init]) => JSON.parse(String(init?.body)) as { data: { evidence?: string } })[2];
+    expect(confirmation?.data.evidence).toBe(`Stopped while waiting for the answer to step 2 of 3 on Stop command ${STOP.id}`);
+    expect(ackBodies(fetchFn, STOP.id)).toEqual([{ outcome: "applied" }]);
+    expect(calls(fetchFn, ackPath(ANSWER.id))).toHaveLength(0);
+    expect(records().some((record) => record["msg"] === "engine stopped")).toBe(true);
+    await loop.stop();
+  });
+
+  it("treats an answer command without its payload as a malformed listing", async () => {
+    const { answer: _answer, ...bare } = ANSWER;
+    const fetchFn = galley({ commands: [listing(bare)], events: [created, raised] });
+    const { loop, records } = setup(fetchFn, ASK);
+
+    await vi.advanceTimersByTimeAsync(4000);
+
+    expect(records().find((record) => record["msg"] === "round commands poll failed")).toMatchObject({ reason: "invalid_body" });
+    expect(calls(fetchFn, ackPath(ANSWER.id))).toHaveLength(0);
+    await loop.stop();
   });
 });

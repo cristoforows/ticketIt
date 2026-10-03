@@ -96,6 +96,7 @@ func newHandler(cfg config.Config, logger *slog.Logger, srv *server) http.Handle
 	mux.HandleFunc("/api/tickets/{id}/position", methodNotAllowedHandler("POST"))
 	mux.HandleFunc("/api/tickets/{id}/rounds", methodNotAllowedHandler("GET"))
 	mux.HandleFunc("/api/tickets/{id}/rounds/{roundId}/activity", methodNotAllowedHandler("GET"))
+	mux.HandleFunc("/api/tickets/{id}/rounds/{roundId}/questions/{questionId}/answer", methodNotAllowedHandler("POST"))
 	mux.HandleFunc("/api/runner-credential", methodNotAllowedHandler("POST", "DELETE"))
 	mux.HandleFunc("/api/runner-health", methodNotAllowedHandler("GET"))
 	mux.HandleFunc("/api/runner/register", methodNotAllowedHandler("POST"))

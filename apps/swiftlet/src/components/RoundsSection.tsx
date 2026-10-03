@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { RoundActivityNote, RoundActivityPage, RoundDeliverable, TicketRound } from "../api/rounds";
 import type { Ticket } from "../api/tickets";
+import { QuestionHistory, QuestionPanel, type AnswerQuestion } from "./QuestionPanel";
 import type { HealthView } from "./RunnerHealthPill";
 import { activeTime, costFigure, countFigure, type UsageFigure } from "./roundUsage";
 import { Disclosure, EstimateTag, SecondaryButton, FailedTag, FieldLabel, FieldNote, InlineError, InterruptedTag, LocalTime, Markdown, ReceiptLine, StoppedTag } from "./ui";
@@ -13,7 +14,15 @@ export interface RoundRecords {
 
 export type LoadEarlierActivity = (roundId: string, before: string) => Promise<RoundActivityPage>;
 
-export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEarlierActivity }: { openRound: Ticket["openRound"]; runnerHealth: HealthView; records?: RoundRecords; onLoadEarlierActivity?: LoadEarlierActivity }) {
+export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEarlierActivity, answer, onAnswer, onAnswered = () => {} }: {
+  openRound: Ticket["openRound"];
+  runnerHealth: HealthView;
+  records?: RoundRecords;
+  onLoadEarlierActivity?: LoadEarlierActivity;
+  answer?: Ticket["allowedActions"]["answer"];
+  onAnswer?: AnswerQuestion;
+  onAnswered?: (ticket: Ticket) => void;
+}) {
   const runnerLost = openRound !== null && runnerHealth.kind === "loaded" && runnerHealth.health.state !== "connected";
   const awaitingOpenRound = openRound !== null && !records.rounds?.some((candidate) => candidate.id === openRound.id);
   return (
@@ -23,6 +32,9 @@ export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEar
         <p role="status" data-testid="ticket-detail-runner-disconnected" className="my-2 border-2 border-status-blocked-deep p-2 text-status-blocked-deep">
           <span className="font-bold tracking-label uppercase">Runner disconnected</span> Lost contact does not mean the Round stopped. It stays open and the Ticket stays locked.
         </p>
+      )}
+      {openRound?.question && answer && (
+        <QuestionPanel roundId={openRound.id} question={openRound.question} availability={answer} onAnswer={onAnswer} onAnswered={onAnswered} />
       )}
       {records.error && (
         <InlineError data-testid="ticket-detail-round-records-error" className="my-2">
@@ -53,6 +65,8 @@ function outcomeOf(round: TicketRound): ReactNode {
       return <InterruptedTag data-testid="ticket-detail-round-interrupted">Interrupted</InterruptedTag>;
     case "running":
       return "Running";
+    case "waiting_for_input":
+      return "Waiting for your answer";
     case "claimed":
       return "Claimed, waiting for the runner to start";
   }
@@ -87,7 +101,8 @@ function RoundEntry({ round, defaultOpen, onLoadEarlierActivity }: { round: Tick
           </section>
         )}
         {round.deliverable && <Deliverable deliverable={round.deliverable} />}
-        <RoundRecordDetails round={round} onLoadEarlierActivity={onLoadEarlierActivity} usageLabel={round.state === "claimed" || round.state === "running" ? "Usage so far" : "Usage"} />
+        <QuestionHistory questions={round.questions} awaiting={round.state === "waiting_for_input"} />
+        <RoundRecordDetails round={round} onLoadEarlierActivity={onLoadEarlierActivity} usageLabel={round.state === "claimed" || round.state === "running" || round.state === "waiting_for_input" ? "Usage so far" : "Usage"} />
       </Disclosure>
     </li>
   );

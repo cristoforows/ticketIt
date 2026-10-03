@@ -92,8 +92,9 @@ func (e DatabaseStatusStatus) Valid() bool {
 
 // Defines values for OpenRoundState.
 const (
-	OpenRoundClaimed OpenRoundState = "claimed"
-	OpenRoundRunning OpenRoundState = "running"
+	OpenRoundClaimed         OpenRoundState = "claimed"
+	OpenRoundRunning         OpenRoundState = "running"
+	OpenRoundWaitingForInput OpenRoundState = "waiting_for_input"
 )
 
 // Valid indicates whether the value is a known member of the OpenRoundState enum.
@@ -102,6 +103,8 @@ func (e OpenRoundState) Valid() bool {
 	case OpenRoundClaimed:
 		return true
 	case OpenRoundRunning:
+		return true
+	case OpenRoundWaitingForInput:
 		return true
 	default:
 		return false
@@ -115,6 +118,8 @@ const (
 	RoundEventFailed           RoundEventType = "failed"
 	RoundEventInterrupted      RoundEventType = "interrupted"
 	RoundEventProgress         RoundEventType = "progress"
+	RoundEventQuestionRaised   RoundEventType = "question_raised"
+	RoundEventResumed          RoundEventType = "resumed"
 	RoundEventStopConfirmed    RoundEventType = "stop_confirmed"
 	RoundEventUsageObserved    RoundEventType = "usage_observed"
 )
@@ -132,6 +137,10 @@ func (e RoundEventType) Valid() bool {
 		return true
 	case RoundEventProgress:
 		return true
+	case RoundEventQuestionRaised:
+		return true
+	case RoundEventResumed:
+		return true
 	case RoundEventStopConfirmed:
 		return true
 	case RoundEventUsageObserved:
@@ -143,12 +152,13 @@ func (e RoundEventType) Valid() bool {
 
 // Defines values for RoundState.
 const (
-	RoundClaimed     RoundState = "claimed"
-	RoundDelivered   RoundState = "delivered"
-	RoundFailed      RoundState = "failed"
-	RoundInterrupted RoundState = "interrupted"
-	RoundRunning     RoundState = "running"
-	RoundStopped     RoundState = "stopped"
+	RoundClaimed         RoundState = "claimed"
+	RoundDelivered       RoundState = "delivered"
+	RoundFailed          RoundState = "failed"
+	RoundInterrupted     RoundState = "interrupted"
+	RoundRunning         RoundState = "running"
+	RoundStopped         RoundState = "stopped"
+	RoundWaitingForInput RoundState = "waiting_for_input"
 )
 
 // Valid indicates whether the value is a known member of the RoundState enum.
@@ -166,6 +176,8 @@ func (e RoundState) Valid() bool {
 		return true
 	case RoundStopped:
 		return true
+	case RoundWaitingForInput:
+		return true
 	default:
 		return false
 	}
@@ -173,6 +185,8 @@ func (e RoundState) Valid() bool {
 
 // Defines values for RoundWaitingReason.
 const (
+	WaitingForAnswer          RoundWaitingReason = "waiting_for_answer"
+	WaitingResuming           RoundWaitingReason = "resuming"
 	WaitingRunnerDisconnected RoundWaitingReason = "runner_disconnected"
 	WaitingStarting           RoundWaitingReason = "starting"
 	WaitingStopping           RoundWaitingReason = "stopping"
@@ -182,6 +196,10 @@ const (
 // Valid indicates whether the value is a known member of the RoundWaitingReason enum.
 func (e RoundWaitingReason) Valid() bool {
 	switch e {
+	case WaitingForAnswer:
+		return true
+	case WaitingResuming:
+		return true
 	case WaitingRunnerDisconnected:
 		return true
 	case WaitingStarting:
@@ -215,12 +233,15 @@ func (e RunnerCommandAckOutcome) Valid() bool {
 
 // Defines values for RunnerCommandType.
 const (
-	RunnerCommandStop RunnerCommandType = "stop"
+	RunnerCommandAnswer RunnerCommandType = "answer"
+	RunnerCommandStop   RunnerCommandType = "stop"
 )
 
 // Valid indicates whether the value is a known member of the RunnerCommandType enum.
 func (e RunnerCommandType) Valid() bool {
 	switch e {
+	case RunnerCommandAnswer:
+		return true
 	case RunnerCommandStop:
 		return true
 	default:
@@ -433,6 +454,12 @@ type AgentList struct {
 // AgentReadinessInput A Ticket field an Agent-assigned Ticket needs before Ready (D3 S1): `goal` and `successCriteria` always, `repository` for a `coding` Agent.
 type AgentReadinessInput string
 
+// AnswerQuestionRequest defines model for AnswerQuestionRequest.
+type AnswerQuestionRequest struct {
+	// Answer Counted in Unicode code points. Not blank; no control characters but tab and line feed.
+	Answer string `json:"answer"`
+}
+
 // AssignTicketRequest `agentId` is required when `type` is `agent` and rejected otherwise.
 type AssignTicketRequest struct {
 	AgentId *string                 `json:"agentId,omitempty"`
@@ -596,7 +623,7 @@ type InterruptedData struct {
 	Evidence string `json:"evidence"`
 }
 
-// OpenRoundState A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress.
+// OpenRoundState A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress; one waiting for input has moved it to Blocked and keeps the Owner's slot.
 type OpenRoundState string
 
 // Owner ticketIt's stable internal Owner identity -- independent of any GitHub identifier (docs/deployment.md, "Ownership and sign-in"). `login` is the linked GitHub identity's most recently observed login, shown for display only: matching a sign-in to this Owner always uses the immutable provider account id, never this field.
@@ -614,6 +641,15 @@ type ProgressData struct {
 	Note string `json:"note"`
 }
 
+// QuestionRaisedData defines model for QuestionRaisedData.
+type QuestionRaisedData struct {
+	// QuestionId The question's identity, generated by the runner, one per question instance. Lowercase canonical form, not the nil UUID, and equal to the event's `idempotencyKey`.
+	QuestionId string `json:"questionId"`
+
+	// Text Counted in Unicode code points. Not blank; no control characters but tab and line feed.
+	Text string `json:"text"`
+}
+
 // RegisterRunnerRequest defines model for RegisterRunnerRequest.
 type RegisterRunnerRequest struct {
 	Hostname        string `json:"hostname"`
@@ -629,6 +665,12 @@ type RenameAgentRequest struct {
 type ReorderTicketRequest struct {
 	After  *string `json:"after,omitempty"`
 	Before *string `json:"before,omitempty"`
+}
+
+// ResumedData defines model for ResumedData.
+type ResumedData struct {
+	// QuestionId The answered question the runner acted on.
+	QuestionId string `json:"questionId"`
 }
 
 // RoundActivityNote defines model for RoundActivityNote.
@@ -670,7 +712,7 @@ type RoundEventRequest struct {
 	// ClaimEpoch The fencing token from the claim.
 	ClaimEpoch int `json:"claimEpoch"`
 
-	// Data The payload for `type`: `ExecutionStartedData`, `ProgressData`, `UsageObservedData`, `DeliveredData`, `StopConfirmedData`, `FailedData` or `InterruptedData`. Not `oneOf`: `StopConfirmedData` and `InterruptedData` share a shape.
+	// Data The payload for `type`: `ExecutionStartedData`, `ProgressData`, `UsageObservedData`, `DeliveredData`, `StopConfirmedData`, `FailedData`, `InterruptedData`, `QuestionRaisedData` or `ResumedData`. Not `oneOf`: `StopConfirmedData` and `InterruptedData` share a shape.
 	Data RoundEventRequest_Data `json:"data"`
 
 	// IdempotencyKey Taken verbatim; identity is never trimmed.
@@ -683,7 +725,7 @@ type RoundEventRequest struct {
 	Type RoundEventType `json:"type"`
 }
 
-// RoundEventRequest_Data The payload for `type`: `ExecutionStartedData`, `ProgressData`, `UsageObservedData`, `DeliveredData`, `StopConfirmedData`, `FailedData` or `InterruptedData`. Not `oneOf`: `StopConfirmedData` and `InterruptedData` share a shape.
+// RoundEventRequest_Data The payload for `type`: `ExecutionStartedData`, `ProgressData`, `UsageObservedData`, `DeliveredData`, `StopConfirmedData`, `FailedData`, `InterruptedData`, `QuestionRaisedData` or `ResumedData`. Not `oneOf`: `StopConfirmedData` and `InterruptedData` share a shape.
 type RoundEventRequest_Data struct {
 	union json.RawMessage
 }
@@ -695,7 +737,10 @@ type RoundEventResult struct {
 
 	// ObservationId For `usage_observed`, the observation recorded.
 	ObservationId *string `json:"observationId,omitempty"`
-	RoundId       string  `json:"roundId"`
+
+	// QuestionId For `question_raised` and `resumed`, the question.
+	QuestionId *string `json:"questionId,omitempty"`
+	RoundId    string  `json:"roundId"`
 
 	// Seq For `progress`, the note's place in the Round's activity.
 	Seq *int `json:"seq,omitempty"`
@@ -703,7 +748,7 @@ type RoundEventResult struct {
 	// StartedAt Null only for a Round stopped before it started.
 	StartedAt *time.Time `json:"startedAt"`
 
-	// State `claimed` and `running` are open. `delivered` has ended and moved the Ticket to In Review. `stopped` has ended and moved the Ticket to Backlog. `failed` and `interrupted` have ended and moved the Ticket to Blocked.
+	// State `claimed`, `running` and `waiting_for_input` are open. `delivered` has ended and moved the Ticket to In Review. `stopped` has ended and moved the Ticket to Backlog. `failed` and `interrupted` have ended and moved the Ticket to Blocked.
 	State RoundState `json:"state"`
 
 	// Type Grows by slice.
@@ -713,7 +758,20 @@ type RoundEventResult struct {
 // RoundEventType Grows by slice.
 type RoundEventType string
 
-// RoundState `claimed` and `running` are open. `delivered` has ended and moved the Ticket to In Review. `stopped` has ended and moved the Ticket to Backlog. `failed` and `interrupted` have ended and moved the Ticket to Blocked.
+// RoundQuestion defines model for RoundQuestion.
+type RoundQuestion struct {
+	Answer     *string    `json:"answer"`
+	AnsweredAt *time.Time `json:"answeredAt"`
+
+	// AskedAt Galley's clock.
+	AskedAt time.Time `json:"askedAt"`
+
+	// Id The runner's `questionId`.
+	Id   string `json:"id"`
+	Text string `json:"text"`
+}
+
+// RoundState `claimed`, `running` and `waiting_for_input` are open. `delivered` has ended and moved the Ticket to In Review. `stopped` has ended and moved the Ticket to Backlog. `failed` and `interrupted` have ended and moved the Ticket to Blocked.
 type RoundState string
 
 // RoundUsage Sums of the known values. Unknown is never counted as zero.
@@ -738,7 +796,7 @@ type RoundUsage struct {
 	OutputTokens UsageCount `json:"outputTokens"`
 }
 
-// RoundWaitingReason What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `stopping` (Stop requested), `starting` (claimed) and `working` (running) applies.
+// RoundWaitingReason What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `stopping` (Stop requested), `waiting_for_answer` (waiting for input, its question unanswered), `resuming` (waiting for input, its question answered), `starting` (claimed) and `working` (running) applies.
 type RoundWaitingReason string
 
 // RunnerClaim defines model for RunnerClaim.
@@ -754,6 +812,9 @@ type RunnerClaim struct {
 
 // RunnerCommand defines model for RunnerCommand.
 type RunnerCommand struct {
+	// Answer Present exactly when `type` is `answer`.
+	Answer *RunnerCommandAnswerData `json:"answer,omitempty"`
+
 	// ClaimEpoch The claim epoch the command targets. A runner holding another epoch acknowledges it `ignored` and does not act on it.
 	ClaimEpoch int `json:"claimEpoch"`
 
@@ -767,6 +828,13 @@ type RunnerCommand struct {
 
 // RunnerCommandAckOutcome defines model for RunnerCommandAckOutcome.
 type RunnerCommandAckOutcome string
+
+// RunnerCommandAnswerData defines model for RunnerCommandAnswerData.
+type RunnerCommandAnswerData struct {
+	// QuestionId The question answered.
+	QuestionId string `json:"questionId"`
+	Text       string `json:"text"`
+}
 
 // RunnerCommandList defines model for RunnerCommandList.
 type RunnerCommandList struct {
@@ -907,6 +975,9 @@ type Ticket struct {
 // TicketAllowedActions defines model for TicketAllowedActions.
 type TicketAllowedActions struct {
 	Accept TicketCommandAvailability `json:"accept"`
+
+	// Answer Whether `openRound.question` can be answered. Unavailable with `answer_not_available` without one, `question_already_answered` once it is answered, and `stop_already_requested` once Stop is requested.
+	Answer TicketCommandAvailability `json:"answer"`
 	Rework TicketCommandAvailability `json:"rework"`
 
 	// StatusChangeRejections Targets D3 S2's table permits from the current Status that this Ticket's Agent assignment or missing inputs rule out, each with the status command's error.
@@ -968,16 +1039,19 @@ type TicketOpenRound struct {
 	Agent     TicketAssigneeAgent `json:"agent"`
 	ClaimedAt time.Time           `json:"claimedAt"`
 	Id        string              `json:"id"`
-	Sequence  int                 `json:"sequence"`
-	StartedAt *time.Time          `json:"startedAt"`
 
-	// State A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress.
+	// Question The question the Round waits on; set exactly when `state` is `waiting_for_input`.
+	Question  *RoundQuestion `json:"question"`
+	Sequence  int            `json:"sequence"`
+	StartedAt *time.Time     `json:"startedAt"`
+
+	// State A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress; one waiting for input has moved it to Blocked and keeps the Owner's slot.
 	State OpenRoundState `json:"state"`
 
 	// StopRequestedAt When the Owner requested Stop; the Ticket shows Stopping. Not a Status.
 	StopRequestedAt *time.Time `json:"stopRequestedAt"`
 
-	// WaitingReason What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `stopping` (Stop requested), `starting` (claimed) and `working` (running) applies.
+	// WaitingReason What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `stopping` (Stop requested), `waiting_for_answer` (waiting for input, its question unanswered), `resuming` (waiting for input, its question answered), `starting` (claimed) and `working` (running) applies.
 	WaitingReason RoundWaitingReason `json:"waitingReason"`
 }
 
@@ -999,11 +1073,14 @@ type TicketRound struct {
 	Id                    string                 `json:"id"`
 
 	// OutcomeNote Set exactly when `state` is `stopped`, `failed` or `interrupted`.
-	OutcomeNote *string    `json:"outcomeNote"`
-	Sequence    int        `json:"sequence"`
-	StartedAt   *time.Time `json:"startedAt"`
+	OutcomeNote *string `json:"outcomeNote"`
 
-	// State `claimed` and `running` are open. `delivered` has ended and moved the Ticket to In Review. `stopped` has ended and moved the Ticket to Backlog. `failed` and `interrupted` have ended and moved the Ticket to Blocked.
+	// Questions Every question the Round raised, oldest first.
+	Questions []RoundQuestion `json:"questions"`
+	Sequence  int             `json:"sequence"`
+	StartedAt *time.Time      `json:"startedAt"`
+
+	// State `claimed`, `running` and `waiting_for_input` are open. `delivered` has ended and moved the Ticket to In Review. `stopped` has ended and moved the Ticket to Backlog. `failed` and `interrupted` have ended and moved the Ticket to Blocked.
 	State RoundState `json:"state"`
 
 	// Usage Sums of the known values. Unknown is never counted as zero.
@@ -1143,6 +1220,9 @@ type AssignTicketJSONRequestBody = AssignTicketRequest
 
 // ReorderTicketJSONRequestBody defines body for ReorderTicket for application/json ContentType.
 type ReorderTicketJSONRequestBody = ReorderTicketRequest
+
+// AnswerRoundQuestionJSONRequestBody defines body for AnswerRoundQuestion for application/json ContentType.
+type AnswerRoundQuestionJSONRequestBody = AnswerQuestionRequest
 
 // ChangeTicketStatusJSONRequestBody defines body for ChangeTicketStatus for application/json ContentType.
 type ChangeTicketStatusJSONRequestBody = ChangeTicketStatusRequest
@@ -1329,6 +1409,58 @@ func (t *RoundEventRequest_Data) MergeInterruptedData(v InterruptedData) error {
 	return err
 }
 
+// AsQuestionRaisedData returns the union data inside the RoundEventRequest_Data as a QuestionRaisedData
+func (t RoundEventRequest_Data) AsQuestionRaisedData() (QuestionRaisedData, error) {
+	var body QuestionRaisedData
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromQuestionRaisedData overwrites any union data inside the RoundEventRequest_Data as the provided QuestionRaisedData
+func (t *RoundEventRequest_Data) FromQuestionRaisedData(v QuestionRaisedData) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeQuestionRaisedData performs a merge with any union data inside the RoundEventRequest_Data, using the provided QuestionRaisedData
+func (t *RoundEventRequest_Data) MergeQuestionRaisedData(v QuestionRaisedData) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsResumedData returns the union data inside the RoundEventRequest_Data as a ResumedData
+func (t RoundEventRequest_Data) AsResumedData() (ResumedData, error) {
+	var body ResumedData
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromResumedData overwrites any union data inside the RoundEventRequest_Data as the provided ResumedData
+func (t *RoundEventRequest_Data) FromResumedData(v ResumedData) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeResumedData performs a merge with any union data inside the RoundEventRequest_Data, using the provided ResumedData
+func (t *RoundEventRequest_Data) MergeResumedData(v ResumedData) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
 func (t RoundEventRequest_Data) MarshalJSON() ([]byte, error) {
 	b, err := t.union.MarshalJSON()
 	return b, err
@@ -1452,6 +1584,9 @@ type ServerInterface interface {
 	// ListRoundActivity Page through a Round's activity
 	// (GET /api/tickets/{id}/rounds/{roundId}/activity)
 	ListRoundActivity(w http.ResponseWriter, r *http.Request, id string, roundId string, params ListRoundActivityParams)
+	// AnswerRoundQuestion Answer the question a Round waits on
+	// (POST /api/tickets/{id}/rounds/{roundId}/questions/{questionId}/answer)
+	AnswerRoundQuestion(w http.ResponseWriter, r *http.Request, id string, roundId string, questionId string)
 	// ChangeTicketStatus Change a Ticket's Status
 	// (POST /api/tickets/{id}/status)
 	ChangeTicketStatus(w http.ResponseWriter, r *http.Request, id string)
@@ -2320,6 +2455,50 @@ func (siw *ServerInterfaceWrapper) ListRoundActivity(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// AnswerRoundQuestion operation middleware
+func (siw *ServerInterfaceWrapper) AnswerRoundQuestion(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "roundId" -------------
+	var roundId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "roundId", r.PathValue("roundId"), &roundId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "roundId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "questionId" -------------
+	var questionId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "questionId", r.PathValue("questionId"), &questionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "questionId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AnswerRoundQuestion(w, r, id, roundId, questionId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ChangeTicketStatus operation middleware
 func (siw *ServerInterfaceWrapper) ChangeTicketStatus(w http.ResponseWriter, r *http.Request) {
 
@@ -2519,6 +2698,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/position", wrapper.ReorderTicket)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/tickets/{id}/rounds", wrapper.ListTicketRounds)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/tickets/{id}/rounds/{roundId}/activity", wrapper.ListRoundActivity)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/rounds/{roundId}/questions/{questionId}/answer", wrapper.AnswerRoundQuestion)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/session", wrapper.SignOut)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/session", wrapper.GetSession)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/runner-credential", wrapper.RevokeRunner)
