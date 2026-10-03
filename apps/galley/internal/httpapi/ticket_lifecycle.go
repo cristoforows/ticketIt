@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -203,9 +204,10 @@ func applyTicketTransition(
 	pool *pgxpool.Pool,
 	ownerID int64,
 	publicID string,
+	now time.Time,
 	decide func(state ticketWorkflowState, condition TicketCompletionCondition) (nextStatus TicketStatus, rejection *transitionRejection),
 ) (Ticket, bool, *transitionRejection, error) {
-	return transitionLockedTicket(ctx, pool, ownerID, publicID,
+	return transitionLockedTicket(ctx, pool, ownerID, publicID, now,
 		func(locked Ticket) (TicketStatus, *transitionRejection) {
 			state := workflowStateOf(locked)
 			if rejection := decideTicketMutation(state.ticketLock, false); rejection != nil {
@@ -236,6 +238,7 @@ func transitionLockedTicket(
 	pool *pgxpool.Pool,
 	ownerID int64,
 	publicID string,
+	now time.Time,
 	decide lockedTicketDecision,
 ) (ticket Ticket, found bool, rejection *transitionRejection, err error) {
 	tx, err := pool.Begin(ctx)
@@ -251,7 +254,7 @@ func transitionLockedTicket(
 	if err != nil || !found {
 		return Ticket{}, false, nil, err
 	}
-	locked, err := readLockedTicket(ctx, tx, ownerID, publicID)
+	locked, err := readLockedTicket(ctx, tx, ownerID, publicID, now)
 	if err != nil {
 		return Ticket{}, false, nil, fmt.Errorf("failed to read the ticket's current status: %w", err)
 	}
@@ -272,7 +275,7 @@ func transitionLockedTicket(
 		  RETURNING `+ticketSelectColumns,
 		ownerID, publicID, string(nextStatus),
 	)
-	ticket, err = scanTicketRow(row)
+	ticket, err = scanTicketRow(row, now)
 	if err != nil {
 		return Ticket{}, true, nil, fmt.Errorf("failed to apply the ticket's new status: %w", err)
 	}
@@ -315,7 +318,7 @@ func (s *server) ChangeTicketStatus(w http.ResponseWriter, r *http.Request, id s
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
 
-	ticket, found, rejection, err := applyTicketTransition(ctx, s.pool, owner.ID, id,
+	ticket, found, rejection, err := applyTicketTransition(ctx, s.pool, owner.ID, id, s.clockNow(),
 		func(state ticketWorkflowState, _ TicketCompletionCondition) (TicketStatus, *transitionRejection) {
 			if rej := decidePlainStatusChange(state, req.Status); rej != nil {
 				return "", rej
@@ -355,7 +358,7 @@ func (s *server) AcceptTicket(w http.ResponseWriter, r *http.Request, id string)
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
 
-	ticket, found, rejection, err := applyTicketTransition(ctx, s.pool, owner.ID, id,
+	ticket, found, rejection, err := applyTicketTransition(ctx, s.pool, owner.ID, id, s.clockNow(),
 		func(state ticketWorkflowState, condition TicketCompletionCondition) (TicketStatus, *transitionRejection) {
 			if rej := decideAccept(state.status, condition); rej != nil {
 				return "", rej
@@ -392,7 +395,7 @@ func (s *server) RequestTicketRework(w http.ResponseWriter, r *http.Request, id 
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
 
-	ticket, found, rejection, err := transitionLockedTicket(ctx, s.pool, owner.ID, id,
+	ticket, found, rejection, err := transitionLockedTicket(ctx, s.pool, owner.ID, id, s.clockNow(),
 		func(locked Ticket) (TicketStatus, *transitionRejection) {
 			if rej := decideRework(workflowStateOf(locked)); rej != nil {
 				return "", rej
@@ -421,7 +424,7 @@ type ticketAssignee struct {
 }
 
 // D3 places no Template precondition on assignment.
-func setTicketAssigneeForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, publicID string, assignee ticketAssignee) (Ticket, bool, *transitionRejection, error) {
+func setTicketAssigneeForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, publicID string, assignee ticketAssignee, now time.Time) (Ticket, bool, *transitionRejection, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return Ticket{}, false, nil, err
@@ -440,7 +443,7 @@ func setTicketAssigneeForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID 
 		}
 		agentRowID, agentKind = &id, kind
 	}
-	locked, err := readLockedTicket(ctx, tx, ownerID, publicID)
+	locked, err := readLockedTicket(ctx, tx, ownerID, publicID, now)
 	if err != nil {
 		return Ticket{}, false, nil, err
 	}
@@ -458,7 +461,7 @@ func setTicketAssigneeForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID 
 		  RETURNING `+ticketSelectColumns,
 		ownerID, publicID, assigneeType, agentRowID,
 	)
-	ticket, err := scanTicketRow(row)
+	ticket, err := scanTicketRow(row, now)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Ticket{}, false, nil, nil
 	}
@@ -520,7 +523,7 @@ func (s *server) AssignTicket(w http.ResponseWriter, r *http.Request, id string)
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
 
-	ticket, found, rejection, err := setTicketAssigneeForOwner(ctx, s.pool, owner.ID, id, assignee)
+	ticket, found, rejection, err := setTicketAssigneeForOwner(ctx, s.pool, owner.ID, id, assignee, s.clockNow())
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to assign the ticket")
 		return
@@ -550,7 +553,7 @@ func (s *server) UnassignTicket(w http.ResponseWriter, r *http.Request, id strin
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
 
-	ticket, found, rejection, err := setTicketAssigneeForOwner(ctx, s.pool, owner.ID, id, ticketAssignee{})
+	ticket, found, rejection, err := setTicketAssigneeForOwner(ctx, s.pool, owner.ID, id, ticketAssignee{}, s.clockNow())
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to unassign the ticket")
 		return

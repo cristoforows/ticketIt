@@ -1,9 +1,9 @@
-import type { ReactNode } from "react";
-import type { RoundDeliverable, TicketRound } from "../api/rounds";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import type { RoundActivityNote, RoundActivityPage, RoundDeliverable, TicketRound } from "../api/rounds";
 import type { Ticket } from "../api/tickets";
 import type { HealthView } from "./RunnerHealthPill";
 import { activeTime, costFigure, countFigure, type UsageFigure } from "./roundUsage";
-import { Disclosure, EstimateTag, FailedTag, FieldLabel, FieldNote, InlineError, InterruptedTag, Markdown, ReceiptLine, StoppedTag } from "./ui";
+import { Disclosure, EstimateTag, SecondaryButton, FailedTag, FieldLabel, FieldNote, InlineError, InterruptedTag, LocalTime, Markdown, ReceiptLine, StoppedTag } from "./ui";
 
 /** `rounds` is the last list Galley returned; `error` is the latest refresh's failure. */
 export interface RoundRecords {
@@ -11,7 +11,9 @@ export interface RoundRecords {
   error?: string;
 }
 
-export function RoundsSection({ openRound, runnerHealth, records = {} }: { openRound: Ticket["openRound"]; runnerHealth: HealthView; records?: RoundRecords }) {
+export type LoadEarlierActivity = (roundId: string, before: string) => Promise<RoundActivityPage>;
+
+export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEarlierActivity }: { openRound: Ticket["openRound"]; runnerHealth: HealthView; records?: RoundRecords; onLoadEarlierActivity?: LoadEarlierActivity }) {
   const runnerLost = openRound !== null && runnerHealth.kind === "loaded" && runnerHealth.health.state !== "connected";
   const awaitingOpenRound = openRound !== null && !records.rounds?.some((candidate) => candidate.id === openRound.id);
   return (
@@ -32,7 +34,7 @@ export function RoundsSection({ openRound, runnerHealth, records = {} }: { openR
       )}
       {records.rounds && (
         <ol className="m-0 flex list-none flex-col p-0">
-          {records.rounds.map((round, index) => <RoundEntry key={round.id} round={round} defaultOpen={index === 0} />)}
+          {records.rounds.map((round, index) => <RoundEntry key={round.id} round={round} defaultOpen={index === 0} onLoadEarlierActivity={onLoadEarlierActivity} />)}
         </ol>
       )}
     </section>
@@ -56,7 +58,7 @@ function outcomeOf(round: TicketRound): ReactNode {
   }
 }
 
-function RoundEntry({ round, defaultOpen }: { round: TicketRound; defaultOpen: boolean }) {
+function RoundEntry({ round, defaultOpen, onLoadEarlierActivity }: { round: TicketRound; defaultOpen: boolean; onLoadEarlierActivity?: LoadEarlierActivity }) {
   return (
     <li data-testid="ticket-detail-round" data-round-id={round.id} data-state={round.state}>
       <Disclosure
@@ -71,12 +73,12 @@ function RoundEntry({ round, defaultOpen }: { round: TicketRound; defaultOpen: b
       >
         <dl className="m-0 mt-2 flex flex-col gap-1">
           <ReceiptLine label="Agent" data-testid="ticket-detail-round-agent">{round.agent.name}</ReceiptLine>
-          <ReceiptLine label="Claimed at" data-testid="ticket-detail-round-claimed-at">{round.claimedAt}</ReceiptLine>
-          {round.startedAt !== null && <ReceiptLine label="Started at" data-testid="ticket-detail-round-started">{round.startedAt}</ReceiptLine>}
-          {round.state === "delivered" && <ReceiptLine label="Delivered at" data-testid="ticket-detail-round-delivered-at">{round.endedAt}</ReceiptLine>}
-          {round.state === "stopped" && <ReceiptLine label="Stopped at" data-testid="ticket-detail-round-stopped-at">{round.endedAt}</ReceiptLine>}
-          {round.state === "failed" && <ReceiptLine label="Failed at" data-testid="ticket-detail-round-failed-at">{round.endedAt}</ReceiptLine>}
-          {round.state === "interrupted" && <ReceiptLine label="Interrupted at" data-testid="ticket-detail-round-interrupted-at">{round.endedAt}</ReceiptLine>}
+          <ReceiptLine label="Claimed at" data-testid="ticket-detail-round-claimed-at"><LocalTime iso={round.claimedAt} /></ReceiptLine>
+          {round.startedAt !== null && <ReceiptLine label="Started at" data-testid="ticket-detail-round-started"><LocalTime iso={round.startedAt} /></ReceiptLine>}
+          {round.state === "delivered" && <ReceiptLine label="Delivered at" data-testid="ticket-detail-round-delivered-at">{round.endedAt && <LocalTime iso={round.endedAt} />}</ReceiptLine>}
+          {round.state === "stopped" && <ReceiptLine label="Stopped at" data-testid="ticket-detail-round-stopped-at">{round.endedAt && <LocalTime iso={round.endedAt} />}</ReceiptLine>}
+          {round.state === "failed" && <ReceiptLine label="Failed at" data-testid="ticket-detail-round-failed-at">{round.endedAt && <LocalTime iso={round.endedAt} />}</ReceiptLine>}
+          {round.state === "interrupted" && <ReceiptLine label="Interrupted at" data-testid="ticket-detail-round-interrupted-at">{round.endedAt && <LocalTime iso={round.endedAt} />}</ReceiptLine>}
         </dl>
         {round.outcomeNote !== null && (
           <section aria-label="Outcome" className="mt-3">
@@ -85,7 +87,7 @@ function RoundEntry({ round, defaultOpen }: { round: TicketRound; defaultOpen: b
           </section>
         )}
         {round.deliverable && <Deliverable deliverable={round.deliverable} />}
-        <RoundRecordDetails round={round} usageLabel={round.state === "claimed" || round.state === "running" ? "Usage so far" : "Usage"} />
+        <RoundRecordDetails round={round} onLoadEarlierActivity={onLoadEarlierActivity} usageLabel={round.state === "claimed" || round.state === "running" ? "Usage so far" : "Usage"} />
       </Disclosure>
     </li>
   );
@@ -110,18 +112,89 @@ function Deliverable({ deliverable }: { deliverable: RoundDeliverable }) {
   );
 }
 
-function RoundRecordDetails({ round, usageLabel }: { round: TicketRound; usageLabel: string }) {
+function mergeNotes(known: RoundActivityNote[], more: RoundActivityNote[]): RoundActivityNote[] {
+  const bySeq = new Map(known.map((note) => [note.seq, note]));
+  for (const note of more) bySeq.set(note.seq, note);
+  return [...bySeq.values()].sort((a, b) => a.seq - b.seq);
+}
+
+// A refresh moves Galley's latest-50 window forward, so shown notes are kept; a window that
+// skipped past them is back-filled through its own cursor.
+function useRoundActivity(round: TicketRound, onLoadEarlierActivity?: LoadEarlierActivity) {
+  const [notes, setNotes] = useState(round.activity);
+  const [oldestCursor, setOldestCursor] = useState(round.earlierActivityCursor);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const shown = useRef(notes);
+  shown.current = notes;
+
+  useEffect(() => {
+    const latest = round.activity;
+    const newestShown = shown.current.at(-1)?.seq ?? 0;
+    setNotes((current) => mergeNotes(current, latest));
+    if (shown.current.length === 0) setOldestCursor(round.earlierActivityCursor);
+    if (!onLoadEarlierActivity || newestShown === 0 || latest.length === 0 || latest[0].seq <= newestShown + 1) return;
+    let cancelled = false;
+    void (async () => {
+      let cursor = round.earlierActivityCursor;
+      while (cursor && !cancelled) {
+        const page = await onLoadEarlierActivity(round.id, cursor).catch((failure: unknown) => {
+          if (!cancelled) setError(failure instanceof Error ? failure.message : "Unknown error loading earlier activity.");
+          return undefined;
+        });
+        if (!page || cancelled) return;
+        setNotes((current) => mergeNotes(current, page.activity));
+        cursor = (page.activity[0]?.seq ?? 0) > newestShown + 1 ? page.earlierActivityCursor : null;
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [round.activity, round.earlierActivityCursor, round.id, onLoadEarlierActivity]);
+
+  async function loadEarlier() {
+    if (!oldestCursor || !onLoadEarlierActivity || loading) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const page = await onLoadEarlierActivity(round.id, oldestCursor);
+      setNotes((current) => mergeNotes(current, page.activity));
+      setOldestCursor(page.earlierActivityCursor);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : "Unknown error loading earlier activity.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return { notes, canLoadEarlier: oldestCursor !== null && onLoadEarlierActivity !== undefined, loadEarlier, loading, error };
+}
+
+function RoundRecordDetails({ round, usageLabel, onLoadEarlierActivity }: { round: TicketRound; usageLabel: string; onLoadEarlierActivity?: LoadEarlierActivity }) {
+  const activity = useRoundActivity(round, onLoadEarlierActivity);
   return (
     <>
       <section aria-label="Activity" data-testid="ticket-detail-round-activity" className="mt-3">
         <FieldLabel as="h4">Activity</FieldLabel>
-        {round.activity.length === 0 ? (
+        {activity.canLoadEarlier && (
+          <SecondaryButton
+            size="sm"
+            data-testid="ticket-detail-round-load-earlier"
+            aria-label={`Load earlier activity for Round ${round.sequence}`}
+            disabled={activity.loading}
+            onClick={() => void activity.loadEarlier()}
+          >
+            {activity.loading ? "Loading earlier…" : "Load earlier"}
+          </SecondaryButton>
+        )}
+        {activity.error && (
+          <InlineError data-testid="ticket-detail-round-load-earlier-error" className="my-2">Unable to load earlier activity: {activity.error}</InlineError>
+        )}
+        {activity.notes.length === 0 ? (
           <FieldNote data-testid="ticket-detail-round-activity-empty">No activity yet.</FieldNote>
         ) : (
           <ol className="my-1 flex list-none flex-col gap-1 p-0">
-            {round.activity.map((note) => (
-              <li key={note.seq} data-testid="ticket-detail-round-note" className="mt-0 flex items-baseline gap-3 border-t-0 pt-0">
-                <time dateTime={note.occurredAt} className="shrink-0 text-label text-muted">{note.occurredAt}</time>
+            {activity.notes.map((note) => (
+              <li key={note.seq} data-testid="ticket-detail-round-note" data-seq={note.seq} className="mt-0 flex items-baseline gap-3 border-t-0 pt-0">
+                <LocalTime iso={note.occurredAt} className="shrink-0 text-label text-muted" />
                 <span className="min-w-0 break-words whitespace-pre-wrap">{note.note}</span>
               </li>
             ))}

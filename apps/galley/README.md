@@ -1689,6 +1689,42 @@ race in `agent_readiness_test.go` and the recovery step in
 `no_execution_side_effects_test.go`. Evidence:
 `docs/evidence/m5/161-failed-interrupted.md`.
 
+## Waiting reason and activity paging (issue #162)
+
+Every `openRound` carries `waitingReason`, which `decideWaitingReason`
+(`round_waiting.go`) computes on each read from the Round's state, its
+Stop request and the Owner's runner health. The health is the same
+`runnerConnected` check as `GET /api/runner-health`, on the same clock.
+Precedence, highest first:
+
+| `waitingReason` | When |
+| --- | --- |
+| `runner_disconnected` | the runner is not connected: not paired, never registered, or no heartbeat for 30 s |
+| `stopping` | `stopRequestedAt` is set |
+| `starting` | the Round is `claimed` |
+| `working` | otherwise (`running`) |
+
+The reason is derived on read and never stored. Later slices add values
+to the same enum.
+
+`GET /api/tickets/{id}/rounds` adds `earlierActivityCursor` per Round:
+opaque, and `null` once `activity` holds the Round's first note.
+`GET /api/tickets/{id}/rounds/{roundId}/activity?before=<cursor>`
+answers `{activity, earlierActivityCursor}` with up to 50 notes before
+the cursor, oldest first. Without `before` it answers the same latest
+page the Round list embeds. Notes have gap-free `seq` and are never
+removed, so a page is stable while new notes are appended. A `before`
+that is not a cursor is `400 invalid_cursor`. An unknown, malformed or
+foreign Ticket or Round, or a Round of another Ticket, is the shared
+Round `404`.
+
+Tests: `round_waiting_test.go` (decision table, the lifecycle, the
+health window boundary, revoke and re-pair, Owner scoping, no writes),
+`round_activity_paging_test.go` (0/1/50/51/100/101 notes, appends while
+paging, malformed cursors, the shared `404`) and
+`TestWaitingReasonAndActivityPaging_ResponsesMatchContractAndMethod405`.
+Evidence: `docs/evidence/m5/162-active-order-slip.md`.
+
 ## Error shape
 
 `ErrorBody`/`ErrorDetail` are generated from
@@ -1971,9 +2007,10 @@ apps/galley/
         ├── round_events.go # issue #134: event ingestion, the decision ladder, engine references
         ├── round_event_hash.go  # issue #134: canonical JSON and the payload hash
         ├── ticket_rounds.go     # issue #134: GET /api/tickets/{id}/rounds
-        ├── round_activity.go    # issue #135: progress notes, seq, the 50-note window
+        ├── round_activity.go    # issue #135: progress notes, seq, the 50-note window; issue #162: activity paging
         ├── usage_observations.go  # issue #135: usage observations and the Round summary
         ├── round_commands.go      # issue #159: Stop request, the runner's command list and acks
+        ├── round_waiting.go       # issue #162: decideWaitingReason
         ├── round_endings.go       # issues #160, #161: endRound for stop_confirmed, failed and interrupted; the Stopped Badge
         ├── devclock.go     # issue #130: development-only clock advance for the browser suite
         └── no_execution_side_effects_test.go   # issue #60: the no-Round/queue/work-request guardrail

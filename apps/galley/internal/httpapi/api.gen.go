@@ -171,6 +171,30 @@ func (e RoundState) Valid() bool {
 	}
 }
 
+// Defines values for RoundWaitingReason.
+const (
+	WaitingRunnerDisconnected RoundWaitingReason = "runner_disconnected"
+	WaitingStarting           RoundWaitingReason = "starting"
+	WaitingStopping           RoundWaitingReason = "stopping"
+	WaitingWorking            RoundWaitingReason = "working"
+)
+
+// Valid indicates whether the value is a known member of the RoundWaitingReason enum.
+func (e RoundWaitingReason) Valid() bool {
+	switch e {
+	case WaitingRunnerDisconnected:
+		return true
+	case WaitingStarting:
+		return true
+	case WaitingStopping:
+		return true
+	case WaitingWorking:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RunnerCommandAckOutcome.
 const (
 	RunnerCommandApplied RunnerCommandAckOutcome = "applied"
@@ -531,6 +555,9 @@ type DiagnosticNoteList struct {
 	Notes []DiagnosticNote `json:"notes"`
 }
 
+// EarlierActivityCursor Opaque. Passed as `before` to `listRoundActivity`, it reads the notes older than this page's first. Null when there are none.
+type EarlierActivityCursor = string
+
 // ErrorBody The shared JSON error shape used by every Galley error response.
 type ErrorBody struct {
 	Error ErrorDetail `json:"error"`
@@ -613,6 +640,15 @@ type RoundActivityNote struct {
 
 	// Seq Galley's arrival order within the Round, without gaps.
 	Seq int `json:"seq"`
+}
+
+// RoundActivityPage defines model for RoundActivityPage.
+type RoundActivityPage struct {
+	// Activity Oldest first.
+	Activity []RoundActivityNote `json:"activity"`
+
+	// EarlierActivityCursor Opaque. Passed as `before` to `listRoundActivity`, it reads the notes older than this page's first. Null when there are none.
+	EarlierActivityCursor *EarlierActivityCursor `json:"earlierActivityCursor"`
 }
 
 // RoundCommandAcknowledgement defines model for RoundCommandAcknowledgement.
@@ -701,6 +737,9 @@ type RoundUsage struct {
 	// OutputTokens `complete` and `estimated` mean for this figure what they mean for the cost in `RoundUsage`.
 	OutputTokens UsageCount `json:"outputTokens"`
 }
+
+// RoundWaitingReason What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `stopping` (Stop requested), `starting` (claimed) and `working` (running) applies.
+type RoundWaitingReason string
 
 // RunnerClaim defines model for RunnerClaim.
 type RunnerClaim struct {
@@ -937,6 +976,9 @@ type TicketOpenRound struct {
 
 	// StopRequestedAt When the Owner requested Stop; the Ticket shows Stopping. Not a Status.
 	StopRequestedAt *time.Time `json:"stopRequestedAt"`
+
+	// WaitingReason What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `stopping` (Stop requested), `starting` (claimed) and `working` (running) applies.
+	WaitingReason RoundWaitingReason `json:"waitingReason"`
 }
 
 // TicketRound defines model for TicketRound.
@@ -950,8 +992,11 @@ type TicketRound struct {
 
 	// Deliverable Set exactly when `state` is `delivered`.
 	Deliverable *RoundDeliverable `json:"deliverable"`
-	EndedAt     *time.Time        `json:"endedAt"`
-	Id          string            `json:"id"`
+
+	// EarlierActivityCursor Opaque. Passed as `before` to `listRoundActivity`, it reads the notes older than this page's first. Null when there are none.
+	EarlierActivityCursor *EarlierActivityCursor `json:"earlierActivityCursor"`
+	EndedAt               *time.Time             `json:"endedAt"`
+	Id                    string                 `json:"id"`
 
 	// OutcomeNote Set exactly when `state` is `stopped`, `failed` or `interrupted`.
 	OutcomeNote *string    `json:"outcomeNote"`
@@ -1055,6 +1100,12 @@ type ListTicketsParams struct {
 
 	// BadgeId Repeat to match any selected Badge; omit for all Tickets.
 	BadgeId *[]string `form:"badgeId,omitempty" json:"badgeId,omitempty"`
+}
+
+// ListRoundActivityParams defines parameters for ListRoundActivity.
+type ListRoundActivityParams struct {
+	// Before An `earlierActivityCursor` from this Round. Omitted, the page is the latest 50 notes, the same as the Round's `activity`.
+	Before *string `form:"before,omitempty" json:"before,omitempty"`
 }
 
 // CreateAgentJSONRequestBody defines body for CreateAgent for application/json ContentType.
@@ -1398,6 +1449,9 @@ type ServerInterface interface {
 	// ListTicketRounds List a Ticket's Rounds
 	// (GET /api/tickets/{id}/rounds)
 	ListTicketRounds(w http.ResponseWriter, r *http.Request, id string)
+	// ListRoundActivity Page through a Round's activity
+	// (GET /api/tickets/{id}/rounds/{roundId}/activity)
+	ListRoundActivity(w http.ResponseWriter, r *http.Request, id string, roundId string, params ListRoundActivityParams)
 	// ChangeTicketStatus Change a Ticket's Status
 	// (POST /api/tickets/{id}/status)
 	ChangeTicketStatus(w http.ResponseWriter, r *http.Request, id string)
@@ -2215,6 +2269,57 @@ func (siw *ServerInterfaceWrapper) ListTicketRounds(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// ListRoundActivity operation middleware
+func (siw *ServerInterfaceWrapper) ListRoundActivity(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "roundId" -------------
+	var roundId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "roundId", r.PathValue("roundId"), &roundId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "roundId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListRoundActivityParams
+
+	// ------------- Optional query parameter "before" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "before", r.URL.Query(), &params.Before, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "before"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "before", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListRoundActivity(w, r, id, roundId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ChangeTicketStatus operation middleware
 func (siw *ServerInterfaceWrapper) ChangeTicketStatus(w http.ResponseWriter, r *http.Request) {
 
@@ -2413,6 +2518,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/restore", wrapper.RestoreTicket)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/position", wrapper.ReorderTicket)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/tickets/{id}/rounds", wrapper.ListTicketRounds)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/tickets/{id}/rounds/{roundId}/activity", wrapper.ListRoundActivity)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/session", wrapper.SignOut)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/session", wrapper.GetSession)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/runner-credential", wrapper.RevokeRunner)

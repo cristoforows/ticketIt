@@ -22,7 +22,7 @@ import {
   type TicketUpdate,
 } from "../api/tickets";
 import { fetchAgents, type Agent } from "../api/agents";
-import { fetchTicketRounds } from "../api/rounds";
+import { fetchRoundActivity, fetchTicketRounds } from "../api/rounds";
 import { collectionPath, collectionQuery, fullPageReturnPath, navigate, useEditRequested } from "../router";
 import { Link } from "./Link";
 import type { RoundRecords } from "./RoundsSection";
@@ -192,6 +192,15 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
     }
   }, [onUnauthenticated]);
 
+  const loadEarlierActivity = useCallback(async (roundId: string, before: string) => {
+    try {
+      return await fetchRoundActivity(ticketId, roundId, before);
+    } catch (error) {
+      if (error instanceof UnauthenticatedError) onUnauthenticated();
+      throw error;
+    }
+  }, [ticketId, onUnauthenticated]);
+
   const loadAgents = useCallback(async (): Promise<Agent[]> => {
     try {
       return await fetchAgents();
@@ -221,6 +230,7 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
       editRequested={editRequested}
       runnerHealth={runnerHealth}
       roundRecords={roundRecords.ticketId === ticketId ? roundRecords : undefined}
+      onLoadEarlierActivity={loadEarlierActivity}
       onArchived={() => (onArchiveSucceeded ? onArchiveSucceeded() : navigate(fullPageReturnPath()))}
     />
   );

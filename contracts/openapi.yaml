@@ -911,6 +911,44 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorBody"
+  /api/tickets/{id}/rounds/{roundId}/activity:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid, x-go-type: string}
+      - name: roundId
+        in: path
+        required: true
+        schema: {type: string, format: uuid, x-go-type: string}
+      - name: before
+        in: query
+        required: false
+        description: >-
+          An `earlierActivityCursor` from this Round. Omitted, the page is
+          the latest 50 notes, the same as the Round's `activity`.
+        schema: {type: string}
+    get:
+      operationId: listRoundActivity
+      summary: Page through a Round's activity
+      tags: [tickets]
+      description: >-
+        Up to 50 notes before the cursor, oldest first. A malformed cursor
+        is `400 invalid_cursor`. An unknown, malformed or foreign Ticket
+        or Round id, or a Round of another Ticket, returns the shared 404.
+      responses:
+        "200":
+          description: One page of the Round's activity.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoundActivityPage"
+        default:
+          description: Error. See `ErrorBody`. Includes `invalid_cursor`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
   /api/session:
     get:
       operationId: getSession
@@ -1560,10 +1598,20 @@ components:
         it to In Progress.
       enum: [claimed, running]
       x-enum-varnames: [OpenRoundClaimed, OpenRoundRunning]
+    RoundWaitingReason:
+      type: string
+      description: >-
+        What an open Round waits on, from Galley's state alone. When more
+        than one holds, the first of `runner_disconnected` (the runner
+        health window has lapsed or no runner is paired), `stopping`
+        (Stop requested), `starting` (claimed) and `working` (running)
+        applies.
+      enum: [starting, working, stopping, runner_disconnected]
+      x-enum-varnames: [WaitingStarting, WaitingWorking, WaitingStopping, WaitingRunnerDisconnected]
     TicketOpenRound:
       type: object
       additionalProperties: false
-      required: [id, sequence, state, agent, claimedAt, startedAt, stopRequestedAt]
+      required: [id, sequence, state, agent, claimedAt, startedAt, stopRequestedAt, waitingReason]
       properties:
         id: {type: string, format: uuid, x-go-type: string}
         sequence: {type: integer, minimum: 1}
@@ -1578,6 +1626,8 @@ components:
           type: [string, "null"]
           format: date-time
           description: When the Owner requested Stop; the Ticket shows Stopping. Not a Status.
+        waitingReason:
+          $ref: "#/components/schemas/RoundWaitingReason"
     TicketDelivery:
       type: object
       additionalProperties: false
@@ -1592,7 +1642,7 @@ components:
     TicketRound:
       type: object
       additionalProperties: false
-      required: [id, sequence, state, agent, claimedAt, startedAt, endedAt, activity, usage, deliverable, outcomeNote]
+      required: [id, sequence, state, agent, claimedAt, startedAt, endedAt, activity, earlierActivityCursor, usage, deliverable, outcomeNote]
       properties:
         id: {type: string, format: uuid, x-go-type: string}
         sequence: {type: integer, minimum: 1}
@@ -1610,6 +1660,8 @@ components:
           description: The latest 50 notes, oldest first.
           items:
             $ref: "#/components/schemas/RoundActivityNote"
+        earlierActivityCursor:
+          $ref: "#/components/schemas/EarlierActivityCursor"
         usage:
           $ref: "#/components/schemas/RoundUsage"
         deliverable:
@@ -1628,6 +1680,24 @@ components:
         bodyMarkdown: {type: string, minLength: 1}
         summary: {type: string, minLength: 1, maxLength: 2000}
         criteriaAssessment: {type: string, minLength: 1, maxLength: 10000}
+    EarlierActivityCursor:
+      type: [string, "null"]
+      description: >-
+        Opaque. Passed as `before` to `listRoundActivity`, it reads the
+        notes older than this page's first. Null when there are none.
+    RoundActivityPage:
+      type: object
+      additionalProperties: false
+      required: [activity, earlierActivityCursor]
+      properties:
+        activity:
+          type: array
+          maxItems: 50
+          description: Oldest first.
+          items:
+            $ref: "#/components/schemas/RoundActivityNote"
+        earlierActivityCursor:
+          $ref: "#/components/schemas/EarlierActivityCursor"
     RoundActivityNote:
       type: object
       additionalProperties: false

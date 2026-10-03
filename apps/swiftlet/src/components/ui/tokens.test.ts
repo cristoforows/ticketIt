@@ -47,6 +47,14 @@ const textPairs: Array<[string, string, string]> = [
   ["Report blockquote: muted on paper", "muted", "paper"],
   ["estimate tag: muted on paper", "muted", "paper"],
   ["lock notice and lock glyph: ink on paper", "ink", "paper"],
+  ["active order slip text, waiting reason and lock glyph: ink on rule", "ink", "rule"],
+  ["active order slip View and Stop: ink on paper", "ink", "paper"],
+  ["active order slip badge: paper on ink", "paper", "ink"],
+];
+
+// The delivery indicator is a graphic beside the always-present text label (WCAG 1.4.11).
+const graphicPairs: Array<[string, string, string]> = [
+  ["active order slip delivery indicator: ink on rule", "ink", "rule"],
 ];
 
 // Every foreground each HealthPill variant paints (text, dot and border share it) over the surface it sits on.
@@ -65,6 +73,14 @@ const healthPillPairs: Array<[string, string, string]> = [
 describe("token contrast (WCAG AA)", () => {
   it.each(textPairs)("%s is at least 4.5:1", (_label, fg, bg) => {
     expect(contrast(token(fg), token(bg))).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it.each(graphicPairs)("%s is at least 3:1", (_label, fg, bg) => {
+    expect(contrast(token(fg), token(bg))).toBeGreaterThanOrEqual(3);
+  });
+
+  it("does not keep muted text on the greyed active slip, where it falls below AA", () => {
+    expect(contrast(token("muted"), token("rule"))).toBeLessThan(4.5);
   });
 
   it.each(healthPillPairs)("%s is at least 4.5:1", (_label, fg, bg) => {

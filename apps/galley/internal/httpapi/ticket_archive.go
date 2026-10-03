@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -71,7 +72,7 @@ func (s *server) ArchiveTicket(w http.ResponseWriter, r *http.Request, id string
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
-	ticket, found, rejection, err := archiveTicketForOwner(ctx, s.pool, owner.ID, id)
+	ticket, found, rejection, err := archiveTicketForOwner(ctx, s.pool, owner.ID, id, s.clockNow())
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to archive the ticket")
 		return
@@ -87,7 +88,7 @@ func (s *server) ArchiveTicket(w http.ResponseWriter, r *http.Request, id string
 	writeJSON(w, http.StatusOK, ticket)
 }
 
-func archiveTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, id string) (Ticket, bool, *transitionRejection, error) {
+func archiveTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, id string, now time.Time) (Ticket, bool, *transitionRejection, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return Ticket{}, false, nil, err
@@ -99,7 +100,7 @@ func archiveTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int6
 	}
 	row := tx.QueryRow(ctx, `UPDATE tickets SET archived_at = now(), updated_at = now()
 		WHERE owner_id = $1 AND public_id = $2::uuid RETURNING `+ticketSelectColumns, ownerID, id)
-	ticket, err := scanTicketRow(row)
+	ticket, err := scanTicketRow(row, now)
 	if err != nil {
 		return Ticket{}, true, nil, err
 	}
@@ -124,7 +125,7 @@ func (s *server) RestoreTicket(w http.ResponseWriter, r *http.Request, id string
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
-	ticket, found, rejection, err := restoreTicketForOwner(ctx, s.pool, owner.ID, id)
+	ticket, found, rejection, err := restoreTicketForOwner(ctx, s.pool, owner.ID, id, s.clockNow())
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to restore the ticket")
 		return
@@ -140,7 +141,7 @@ func (s *server) RestoreTicket(w http.ResponseWriter, r *http.Request, id string
 	writeJSON(w, http.StatusOK, ticket)
 }
 
-func restoreTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, id string) (Ticket, bool, *transitionRejection, error) {
+func restoreTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, id string, now time.Time) (Ticket, bool, *transitionRejection, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return Ticket{}, false, nil, err
@@ -165,7 +166,7 @@ func restoreTicketForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int6
 		next = Backlog
 	}
 	ticket, err := scanTicketRow(tx.QueryRow(ctx, `UPDATE tickets SET status = $3, archived_at = NULL, updated_at = now()
-		WHERE owner_id = $1 AND public_id = $2::uuid RETURNING `+ticketSelectColumns, ownerID, id, next))
+		WHERE owner_id = $1 AND public_id = $2::uuid RETURNING `+ticketSelectColumns, ownerID, id, next), now)
 	if err != nil {
 		return Ticket{}, true, nil, err
 	}

@@ -86,10 +86,8 @@ func listRoundsForTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64,
 		return nil, false, err
 	}
 	for i, id := range ids {
-		rounds[i].Activity = activity[id]
-		if rounds[i].Activity == nil {
-			rounds[i].Activity = []RoundActivityNote{}
-		}
+		rounds[i].Activity = activity[id].Activity
+		rounds[i].EarlierActivityCursor = activity[id].EarlierActivityCursor
 		rounds[i].Usage = usage[id]
 	}
 	return rounds, true, nil

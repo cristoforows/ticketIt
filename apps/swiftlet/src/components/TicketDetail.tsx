@@ -6,8 +6,8 @@ import { assigneeLabel } from "./assignee";
 import { refinementGuidance } from "./refinementGuidance";
 import type { HealthView } from "./RunnerHealthPill";
 import { lockedLabel } from "./roundLock";
-import { RoundsSection, type RoundRecords } from "./RoundsSection";
-import { BadgeTag, ClaimedTag, DeliveredTag, ErrorMessage, FieldHint, FieldLabel, FieldNote, FieldValue, InlineError, LockGlyph, PrimaryButton, QueuedTag, ReceiptLine, Rule, SecondaryButton, Select, StatusTag, statusLabel, StoppingTag, TextInput, Textarea, ticketSerial } from "./ui";
+import { RoundsSection, type LoadEarlierActivity, type RoundRecords } from "./RoundsSection";
+import { BadgeTag, ClaimedTag, DeliveredTag, ErrorMessage, FieldHint, FieldLabel, FieldNote, FieldValue, InlineError, LocalTime, LockGlyph, PrimaryButton, QueuedTag, ReceiptLine, Rule, SecondaryButton, Select, StatusTag, statusLabel, StoppingTag, TextInput, Textarea, ticketSerial } from "./ui";
 
 interface TicketDetailProps {
   ticket: Ticket;
@@ -29,6 +29,7 @@ interface TicketDetailProps {
   editRequested?: boolean;
   runnerHealth?: HealthView;
   roundRecords?: RoundRecords;
+  onLoadEarlierActivity?: LoadEarlierActivity;
 }
 
 interface EditableFields {
@@ -62,7 +63,7 @@ function completionConditionLabel(condition: Ticket["completionCondition"]): str
   return condition === "reviewedPrMerge" ? "Reviewed pull request merged" : "Human acceptance";
 }
 
-export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onRework, onStop, onAssign, onUnassign, onLoadAgents, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge, onArchive, onRestore, onArchived, editRequested = false, runnerHealth = { kind: "loading" }, roundRecords }: TicketDetailProps) {
+export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onRework, onStop, onAssign, onUnassign, onLoadAgents, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge, onArchive, onRestore, onArchived, editRequested = false, runnerHealth = { kind: "loading" }, roundRecords, onLoadEarlierActivity }: TicketDetailProps) {
   const previousTicket = useRef(ticket);
   const [current, setCurrent] = useState(ticket);
   const [mode, setMode] = useState<"view" | "editing">(editRequested && !ticket.archivedAt && !ticket.openRound ? "editing" : "view");
@@ -196,7 +197,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onRewor
           </div>
           {archived && (
             <p data-testid="ticket-detail-archived" className="mt-3 border-2 border-status-blocked-deep p-2 text-status-blocked-deep">
-              <span className="font-bold tracking-label uppercase">Archived</span> {current.archivedAt}. {readOnlyReason}
+              <span className="font-bold tracking-label uppercase">Archived</span> {current.archivedAt && <LocalTime iso={current.archivedAt} />}. {readOnlyReason}
             </p>
           )}
           {current.openRound && (
@@ -226,13 +227,13 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onRewor
             <ReceiptLine label="Assignee" data-testid="ticket-detail-assignee">
               {assigneeLabel(current)}
             </ReceiptLine>
-            <ReceiptLine label="Created" data-testid="ticket-detail-created-at">{current.createdAt}</ReceiptLine>
-            <ReceiptLine label="Updated" data-testid="ticket-detail-updated-at">{current.updatedAt}</ReceiptLine>
+            <ReceiptLine label="Created" data-testid="ticket-detail-created-at"><LocalTime iso={current.createdAt} /></ReceiptLine>
+            <ReceiptLine label="Updated" data-testid="ticket-detail-updated-at"><LocalTime iso={current.updatedAt} /></ReceiptLine>
           </dl>
           {(current.openRound || current.delivery || (roundRecords?.rounds?.length ?? 0) > 0) && (
             <>
               <Rule />
-              <RoundsSection openRound={current.openRound} runnerHealth={runnerHealth} records={roundRecords} />
+              <RoundsSection openRound={current.openRound} runnerHealth={runnerHealth} records={roundRecords} onLoadEarlierActivity={onLoadEarlierActivity} />
             </>
           )}
           <Rule />

@@ -34,6 +34,8 @@ export default defineConfig(({ mode }) => {
     test: {
       environment: "jsdom",
       setupFiles: ["./src/test/setup.ts"],
+      // A half-hour offset east of UTC, so a timestamp rendered in UTC or with the wrong minutes fails.
+      env: { TZ: "Asia/Kolkata" },
       css: false,
     },
   };

@@ -29,11 +29,27 @@ export interface Round {
   endedAt: string | null;
   /** Michelin's evidence or explanation, set exactly when `state` is `stopped` (issue #160), `failed` or `interrupted` (issue #161). */
   outcomeNote: string | null;
-  activity: { seq: number; note: string; occurredAt: string }[];
+  /** Galley's latest 50 notes, oldest first (issue #162). */
+  activity: RoundActivityNote[];
+  /** Opaque: pass to listRoundActivity for the 50 before `activity`; null once nothing is earlier. */
+  earlierActivityCursor: string | null;
   usage: RoundUsage;
   /** Set exactly when `state` is `delivered` (issue #136). */
   deliverable: { bodyMarkdown: string; summary: string; criteriaAssessment: string } | null;
 }
+
+export interface RoundActivityNote {
+  seq: number;
+  note: string;
+  occurredAt: string;
+}
+
+export interface RoundActivityPage {
+  activity: RoundActivityNote[];
+  earlierActivityCursor: string | null;
+}
+
+export type WaitingReason = "starting" | "working" | "stopping" | "runner_disconnected";
 
 export interface UsageCount {
   sum: number | null;
@@ -80,6 +96,8 @@ export interface Ticket {
     startedAt: string | null;
     /** Set once the Owner requests Stop (issue #159); not a Status. */
     stopRequestedAt: string | null;
+    /** Galley's reason the Round is still open (issue #162). */
+    waitingReason: WaitingReason;
   } | null;
   /** The latest Round, when it was delivered (issue #136). */
   delivery: {
@@ -252,4 +270,11 @@ export async function listRounds(from: Api, ticketId: string): Promise<Round[]> 
   const response = await apiOf(from).get(`/api/tickets/${ticketId}/rounds`);
   if (!response.ok()) throw new Error(`failed to list Rounds of ${ticketId}: ${response.status()} ${await response.text()}`);
   return (await response.json() as { rounds: Round[] }).rounds;
+}
+
+export async function listRoundActivity(from: Api, ticketId: string, roundId: string, before?: string): Promise<RoundActivityPage> {
+  const query = before === undefined ? "" : `?before=${encodeURIComponent(before)}`;
+  const response = await apiOf(from).get(`/api/tickets/${ticketId}/rounds/${roundId}/activity${query}`);
+  if (!response.ok()) throw new Error(`failed to page activity of Round ${roundId}: ${response.status()} ${await response.text()}`);
+  return response.json() as Promise<RoundActivityPage>;
 }

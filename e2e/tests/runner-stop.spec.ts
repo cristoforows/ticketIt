@@ -123,7 +123,7 @@ test("the Owner's Stop ends a real Michelin's Round as Stopped: Backlog with the
     await page.goto("/board");
     const slip = page.getByTestId("board-status-Backlog").getByTestId(`board-ticket-${queued.id}`);
     await expect(slip.getByText("Stopped", { exact: true })).toBeVisible();
-    await expect(slip.getByTestId("board-stopping")).toHaveCount(0);
+    await expect(slip.getByTestId("board-active-order")).toHaveCount(0);
 
     await page.goto(`/tickets/${queued.id}`);
     const [detached] = await Promise.all([

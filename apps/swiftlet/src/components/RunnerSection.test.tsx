@@ -76,6 +76,14 @@ describe("RunnerSection", () => {
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
 
+  it("shows when the runner was paired and last seen in the viewer's local time", async () => {
+    stubGalley().setHealth(CONNECTED);
+    renderSection();
+    expect(await screen.findByTestId("runner-paired-at")).toHaveTextContent("01 Oct 2026 17:30:00 UTC+05:30");
+    expect(screen.getByTestId("runner-last-seen")).toHaveTextContent("01 Oct 2026 17:30:02 UTC+05:30");
+    expect(screen.getByTestId("runner-health-pill")).toHaveAttribute("title", "Last heartbeat 01 Oct 2026 17:30:02 UTC+05:30");
+  });
+
   it("selects the credential for manual copy when the clipboard is unavailable", async () => {
     stubGalley();
     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: vi.fn(async () => { throw new Error("denied"); }) } });

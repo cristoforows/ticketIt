@@ -54,6 +54,9 @@ export class TicketNotFoundError extends Error {
   }
 }
 
+type WaitingReason = NonNullable<Ticket["openRound"]>["waitingReason"];
+const WAITING_REASONS: readonly WaitingReason[] = ["starting", "working", "stopping", "runner_disconnected"];
+
 function parseOpenRound(value: unknown): Ticket["openRound"] | undefined {
   if (value === null) {
     return null;
@@ -70,7 +73,8 @@ function parseOpenRound(value: unknown): Ticket["openRound"] | undefined {
     typeof round.claimedAt !== "string" ||
     (round.state === "running") !== (typeof round.startedAt === "string") ||
     !(round.startedAt === null || typeof round.startedAt === "string") ||
-    !(round.stopRequestedAt === null || typeof round.stopRequestedAt === "string")
+    !(round.stopRequestedAt === null || typeof round.stopRequestedAt === "string") ||
+    !WAITING_REASONS.includes(round.waitingReason as WaitingReason)
   ) {
     return undefined;
   }
@@ -83,6 +87,7 @@ function parseOpenRound(value: unknown): Ticket["openRound"] | undefined {
     claimedAt: round.claimedAt,
     startedAt: round.startedAt,
     stopRequestedAt: round.stopRequestedAt,
+    waitingReason: round.waitingReason as WaitingReason,
   };
 }
 

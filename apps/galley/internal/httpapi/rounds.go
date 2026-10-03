@@ -75,7 +75,7 @@ func claimRoundForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, 
 		if !found {
 			continue
 		}
-		locked, err := readLockedTicket(ctx, tx, ownerID, id)
+		locked, err := readLockedTicket(ctx, tx, ownerID, id, now)
 		if err != nil {
 			return RunnerClaim{}, false, err
 		}

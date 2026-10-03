@@ -104,6 +104,31 @@
   .archive-zone[data-over="true"] .archive-spike {
     animation: spike-jab 300ms ease-in-out infinite alternate;
   }
+  .delivery .delivery-rider {
+    inset-inline-start: calc(50% - 0.625rem);
+  }
+  .delivery[data-reason="starting"] .delivery-rider {
+    inset-inline-start: 0;
+    animation: delivery-idle 600ms ease-in-out infinite alternate;
+  }
+  .delivery[data-reason="working"] .delivery-rider {
+    animation: delivery-ride 2400ms linear infinite;
+  }
+  .delivery[data-reason="stopping"] .delivery-rider {
+    scale: -1 1;
+    animation: delivery-return 2400ms linear infinite;
+  }
+  @keyframes delivery-idle {
+    to { translate: 0 -0.125rem; }
+  }
+  @keyframes delivery-ride {
+    from { inset-inline-start: 0; }
+    to { inset-inline-start: calc(100% - 1.25rem); }
+  }
+  @keyframes delivery-return {
+    from { inset-inline-start: calc(100% - 1.25rem); }
+    to { inset-inline-start: 0; }
+  }
   @keyframes spike-rise {
     from { translate: 0 1.5rem; opacity: 0; }
   }
@@ -118,6 +143,9 @@
     .archive-zone .archive-spike {
       animation: none !important;
       rotate: none;
+    }
+    .delivery .delivery-rider {
+      animation: none !important;
     }
     .slip,
     .slip:hover,

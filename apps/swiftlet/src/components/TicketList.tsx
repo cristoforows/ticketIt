@@ -2,10 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { UnauthenticatedError } from "../api/session";
 import { fetchTickets, reorderTicket, type Ticket, type TicketPlacement } from "../api/tickets";
 import { focusReorderButton, ReorderButtons, type ReorderDirection } from "./ReorderButtons";
+import { ActiveOrder } from "./ActiveOrder";
 import { lockedLabel } from "./roundLock";
 import { awaitsExecution, sameData, useExecutionRefresh } from "./useExecutionRefresh";
 import { refocusTicketRowIfFocusLost, TicketModalLink, ticketRowTestId } from "./TicketModalLink";
-import { BadgeList, EmptyMessage, ErrorMessage, LoadingMessage, LockGlyph, LogRow, LogRowMain, LogStatus, Paper, PendingTag, ReceiptTitle, Rule, ticketSerial } from "./ui";
+import { BadgeList, cn, EmptyMessage, ErrorMessage, LoadingMessage, LockGlyph, LogRow, LogRowMain, LogStatus, Paper, PendingTag, ReceiptTitle, Rule, ticketSerial } from "./ui";
 
 type ListState =
   | { kind: "loading" }
@@ -110,6 +111,11 @@ export function TicketList({ onUnauthenticated, refreshKey = 0, focusTicketId, b
     await load(true);
   }
 
+  const replaceTicket = (updated: Ticket) => {
+    requestId.current++;
+    setState((current) => (current.kind === "loaded" ? { ...current, tickets: current.tickets.map((ticket) => (ticket.id === updated.id ? updated : ticket)) } : current));
+  };
+
   const count = state.kind === "loaded" ? state.tickets.length : 0;
 
   return (
@@ -132,16 +138,25 @@ export function TicketList({ onUnauthenticated, refreshKey = 0, focusTicketId, b
         <>
           <ul data-testid="ticket-list-items" className="m-0 list-none p-0">
             {state.tickets.map((ticket) => (
-              <LogRow key={ticket.id} data-testid={ticketRowTestId("backlog", ticket.id)} aria-busy={pendingId === ticket.id}>
+              <LogRow key={ticket.id} data-testid={ticketRowTestId("backlog", ticket.id)} data-active={ticket.openRound ? true : undefined} aria-busy={pendingId === ticket.id} className={cn(ticket.openRound && "bg-rule")}>
                 <LogRowMain>
-                  <span className="shrink-0 text-muted">{ticketSerial(ticket.id)}</span>
+                  <span className={cn("shrink-0", ticket.openRound ? "text-ink" : "text-muted")}>{ticketSerial(ticket.id)}</span>
                   {ticket.openRound && <LockGlyph data-testid="ticket-locked" label={lockedLabel(ticket.openRound)} className="self-center text-ink" />}
                   <TicketModalLink ticketId={ticket.id} view="backlog" variant="log" data-testid="ticket-title" title={ticket.title}>
                     {ticket.title}
                   </TicketModalLink>
                 </LogRowMain>
                 <BadgeList as="span" data-testid="ticket-badges" badges={ticket.badges} />
-                <LogStatus data-testid="ticket-status" status={ticket.status} />
+                <LogStatus data-testid="ticket-status" status={ticket.status} className={cn(ticket.openRound && "text-ink")} />
+                {ticket.openRound && (
+                  <ActiveOrder
+                    ticket={{ ...ticket, openRound: ticket.openRound }}
+                    view="backlog"
+                    className="flex-[1_1_100%]"
+                    onStopped={replaceTicket}
+                    onUnauthenticated={onUnauthenticated}
+                  />
+                )}
                 {!archived && !ticket.openRound && (
                   <ReorderButtons
                     ticket={ticket}

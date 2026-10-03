@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { RunnerHealthPill } from "./RunnerHealthPill";
 import { TicketDetailPage } from "./TicketDetailPage";
 
 type MockResponse = Pick<Response, "ok" | "status" | "statusText" | "json">;
@@ -253,7 +254,7 @@ describe("TicketDetailPage", () => {
 
   describe("an open Round", () => {
     const agent = { id: AGENTS[0].id, name: "atlas", kind: "research" };
-    const claimedRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null };
+    const claimedRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null, waitingReason: "starting" };
     const claimed = { ...TICKET, status: "Ready", assigneeType: "agent", assigneeAgent: agent, successCriteria: "done", openRound: claimedRound };
 
     it("shows Claimed by runner from Galley's openRound", async () => {
@@ -306,10 +307,10 @@ describe("TicketDetailPage", () => {
 
   describe("refreshing while execution may change the Ticket", () => {
     const agent = { id: AGENTS[0].id, name: "atlas", kind: "research" };
-    const round = { id: "66666666-6666-4666-8666-666666666666", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null };
+    const round = { id: "66666666-6666-4666-8666-666666666666", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null, waitingReason: "starting" };
     const lockedActions = { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: round.id } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } } };
     const claimed = { ...TICKET, status: "Ready", assigneeType: "agent", assigneeAgent: agent, openRound: round, allowedActions: lockedActions };
-    const running = { ...claimed, status: "InProgress", openRound: { ...round, state: "running", startedAt: "2026-10-01T10:00:05Z" }, updatedAt: "2026-10-01T10:00:05Z" };
+    const running = { ...claimed, status: "InProgress", openRound: { ...round, state: "running", startedAt: "2026-10-01T10:00:05Z", waitingReason: "working" }, updatedAt: "2026-10-01T10:00:05Z" };
     const closed = { ...TICKET, status: "InReview", assigneeType: "agent", assigneeAgent: agent, updatedAt: "2026-10-01T10:05:00Z" };
     const CONNECTED = { state: "connected", checkedAt: "2026-10-01T10:00:10Z", pairedAt: "2026-10-01T09:00:00Z", registeredAt: "2026-10-01T09:00:00Z", lastSeenAt: "2026-10-01T10:00:05Z", michelinVersion: "0.1.0", hostname: "runner-host" };
 
@@ -329,13 +330,14 @@ describe("TicketDetailPage", () => {
       endedAt: null,
       outcomeNote: null,
       activity,
+      earlierActivityCursor: null,
       usage,
       deliverable: null,
     });
     const claimedRecord = { ...record(), state: "claimed", startedAt: null };
     const roundsOf = (...records: unknown[]) => () => Promise.resolve(jsonResponse({ rounds: records }));
 
-    function stubRound(tickets: (() => Promise<MockResponse>)[], health: () => MockResponse = () => jsonResponse(CONNECTED), rounds: (() => Promise<MockResponse>)[] = [roundsOf(record())]) {
+    function stubRound(tickets: (() => Promise<MockResponse>)[], health: () => MockResponse = () => jsonResponse(CONNECTED), rounds: (() => Promise<MockResponse>)[] = [roundsOf(record())], activity?: (before: string) => Promise<MockResponse>) {
       const queue = [...tickets];
       const roundQueue = [...rounds];
       const fetchMock = vi.fn((input: RequestInfo | URL) => {
@@ -344,6 +346,7 @@ describe("TicketDetailPage", () => {
         if (path === "/api/runner-health") return Promise.resolve(health());
         if (path === `/api/tickets/${TICKET_ID}/rounds`) return (roundQueue.length > 1 ? roundQueue.shift() : roundQueue[0])!();
         if (path === `/api/tickets/${TICKET_ID}`) return (queue.length > 1 ? queue.shift() : queue[0])!();
+        if (activity && path.startsWith(`/api/tickets/${TICKET_ID}/rounds/${round.id}/activity?before=`)) return activity(decodeURIComponent(path.split("before=")[1]));
         throw new Error(`unexpected fetch ${path}`);
       });
       vi.stubGlobal("fetch", fetchMock);
@@ -368,7 +371,7 @@ describe("TicketDetailPage", () => {
       expect(ticketFetches(fetchMock)).toBe(2);
       expect(screen.queryByTestId("ticket-detail-loading")).not.toBeInTheDocument();
       expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("In Progress");
-      expect(screen.getByTestId("ticket-detail-round-started")).toHaveTextContent("2026-10-01T10:00:05Z");
+      expect(screen.getByTestId("ticket-detail-round-started")).toHaveTextContent("01 Oct 2026 15:30:05 UTC+05:30");
       expect(screen.queryByTestId("ticket-detail-claimed")).not.toBeInTheDocument();
       expect(screen.getByTestId("ticket-detail-round-state")).toHaveTextContent("Running");
 
@@ -434,7 +437,7 @@ describe("TicketDetailPage", () => {
 
     it("requests Stop through POST /api/tickets/:id/stop, shows Stopping, and keeps refreshing the still-open Round", async () => {
       const stoppable = { ...running, allowedActions: { ...lockedActions, stop: { available: true } } };
-      const stopping = { ...running, openRound: { ...running.openRound, stopRequestedAt: "2026-10-01T10:00:07Z" }, allowedActions: { ...lockedActions, stop: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } } } };
+      const stopping = { ...running, openRound: { ...running.openRound, stopRequestedAt: "2026-10-01T10:00:07Z", waitingReason: "stopping" }, allowedActions: { ...lockedActions, stop: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } } } };
       const fetchMock = stubRound([answer(stoppable), answer(stopping)]);
       const posts = vi.fn();
       vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -503,12 +506,12 @@ describe("TicketDetailPage", () => {
         const receipt = within(screen.getByTestId("ticket-detail-round"));
         expect(receipt.getByTestId("ticket-detail-round-state")).toHaveTextContent("Delivered by atlas");
         expect(receipt.getByTestId("ticket-detail-round-agent")).toHaveTextContent("atlas");
-        expect(receipt.getByTestId("ticket-detail-round-delivered-at")).toHaveTextContent("2026-10-01T10:00:09Z");
+        expect(receipt.getByTestId("ticket-detail-round-delivered-at")).toHaveTextContent("01 Oct 2026 15:30:09 UTC+05:30");
         expect(receipt.getByTestId("ticket-detail-round-summary")).toHaveTextContent("Found the cause.");
         expect(receipt.getByTestId("ticket-detail-round-assessment")).toHaveTextContent("A written cause: met.");
         await reportRendererLoaded();
         expect(within(receipt.getByTestId("ticket-detail-round-body")).getByRole("heading", { level: 1, name: "Result" })).toBeInTheDocument();
-        expect(receipt.getAllByTestId("ticket-detail-round-note").map((item) => item.textContent)).toEqual(["2026-10-01T10:00:06ZReading the Ticket"]);
+        expect(receipt.getAllByTestId("ticket-detail-round-note").map((item) => item.textContent)).toEqual(["01 Oct 2026 15:30:06 UTC+05:30Reading the Ticket"]);
         expect(screen.getByTestId("ticket-detail-accept-button")).toBeEnabled();
 
         await flush(120_000);
@@ -557,7 +560,7 @@ describe("TicketDetailPage", () => {
         const queuedAgain = { ...delivered, status: "Ready", requestingAgentWork: true, allowedActions: { statusChanges: [], statusChangeRejections: [], accept: delivered.allowedActions.accept, rework: delivered.allowedActions.rework, stop: delivered.allowedActions.stop } };
         const round2 = { ...round, id: "88888888-8888-4888-8888-888888888888", sequence: 2 };
         const claimed2 = { ...queuedAgain, requestingAgentWork: false, delivery: null, openRound: round2, allowedActions: lockedActions };
-        const running2 = { ...claimed2, status: "InProgress", openRound: { ...round2, state: "running", startedAt: "2026-10-01T10:10:05Z" } };
+        const running2 = { ...claimed2, status: "InProgress", openRound: { ...round2, state: "running", startedAt: "2026-10-01T10:10:05Z", waitingReason: "working" } };
         const deliveredTwo = { ...reviewable, delivery: { ...delivery, roundId: round2.id, sequence: 2, deliveredAt: "2026-10-01T10:10:09Z" } };
         const record2 = (fields: Record<string, unknown>) => ({ ...record(), ...round2, state: "running", startedAt: "2026-10-01T10:10:05Z", ...fields });
         const delivered2 = record2({ state: "delivered", endedAt: "2026-10-01T10:10:09Z", deliverable: { ...deliverable, summary: "Second pass." } });
@@ -663,6 +666,71 @@ describe("TicketDetailPage", () => {
       const usageText = (figure: string) => screen.getByTestId(`ticket-detail-round-usage-${figure}`).textContent;
       const notes = () => screen.queryAllByTestId("ticket-detail-round-note").map((item) => item.textContent);
 
+      const seqNotes = (first: number, last: number) => Array.from({ length: last - first + 1 }, (_, index) => ({ seq: first + index, note: `note ${first + index}`, occurredAt: "2026-10-01T10:00:00Z" }));
+      const shownSeqs = () => screen.queryAllByTestId("ticket-detail-round-note").map((item) => Number(item.getAttribute("data-seq")));
+      const range = (first: number, last: number) => seqNotes(first, last).map((item) => item.seq);
+      const windowOf = (first: number, last: number, cursor: string | null) => ({ ...record(seqNotes(first, last)), earlierActivityCursor: cursor });
+      const pageOf = (first: number, last: number, cursor: string | null) => Promise.resolve(jsonResponse({ activity: seqNotes(first, last), earlierActivityCursor: cursor }));
+      const loadEarlier = () => act(async () => { fireEvent.click(screen.getByRole("button", { name: "Load earlier activity for Round 1" })); await vi.advanceTimersByTimeAsync(0); });
+
+      it("pages back past the latest 50 notes with Load earlier until Galley has no earlier page", async () => {
+        const pages: Record<string, () => Promise<MockResponse>> = { c71: () => pageOf(21, 70, "c21"), c21: () => pageOf(1, 20, null) };
+        const asked: string[] = [];
+        stubRound([answer(running)], undefined, [roundsOf(windowOf(71, 120, "c71"))], (before) => { asked.push(before); return pages[before]!(); });
+        render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+        await flush();
+        expect(shownSeqs()).toEqual(range(71, 120));
+
+        await loadEarlier();
+        expect(shownSeqs()).toEqual(range(21, 120));
+        await loadEarlier();
+        expect(shownSeqs()).toEqual(range(1, 120));
+        expect(asked).toEqual(["c71", "c21"]);
+        expect(screen.queryByTestId("ticket-detail-round-load-earlier")).not.toBeInTheDocument();
+      });
+
+      it("keeps earlier notes when a refresh moves the latest window forward, and pages on from the oldest shown", async () => {
+        const asked: string[] = [];
+        stubRound([answer(running)], undefined, [roundsOf(windowOf(71, 120, "c71")), roundsOf(windowOf(76, 125, "c76"))], (before) => {
+          asked.push(before);
+          return before === "c71" ? pageOf(21, 70, "c21") : pageOf(1, 20, null);
+        });
+        render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+        await flush();
+        await loadEarlier();
+        await flush(3000);
+        expect(shownSeqs()).toEqual(range(21, 125));
+        await loadEarlier();
+        expect(asked).toEqual(["c71", "c21"]);
+        expect(shownSeqs()).toEqual(range(1, 125));
+      });
+
+      it("back-fills the notes a refresh skipped when more than 50 arrived between refreshes", async () => {
+        const asked: string[] = [];
+        stubRound([answer(running)], undefined, [roundsOf(windowOf(1, 50, null)), roundsOf(windowOf(111, 160, "c111"))], (before) => {
+          asked.push(before);
+          return before === "c111" ? pageOf(61, 110, "c61") : pageOf(11, 60, "c11");
+        });
+        render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+        await flush();
+        expect(screen.queryByTestId("ticket-detail-round-load-earlier")).not.toBeInTheDocument();
+        await flush(3000);
+        await flush();
+        expect(asked).toEqual(["c111", "c61"]);
+        expect(shownSeqs()).toEqual(range(1, 160));
+        expect(screen.queryByTestId("ticket-detail-round-load-earlier")).not.toBeInTheDocument();
+      });
+
+      it("says Load earlier failed and keeps the notes and the control", async () => {
+        stubRound([answer(running)], undefined, [roundsOf(windowOf(71, 120, "c71"))], () => Promise.resolve(jsonResponse({ error: { code: "database_unavailable", message: "x" } }, 503)));
+        render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+        await flush();
+        await loadEarlier();
+        expect(screen.getByTestId("ticket-detail-round-load-earlier-error")).toHaveTextContent("Unable to load earlier activity");
+        expect(shownSeqs()).toEqual(range(71, 120));
+        expect(screen.getByRole("button", { name: "Load earlier activity for Round 1" })).toBeEnabled();
+      });
+
       it("loads with the Ticket and shows no activity and usage as Unknown, never as zero", async () => {
         const fetchMock = stubRound([answer(running)]);
         render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
@@ -683,14 +751,14 @@ describe("TicketDetailPage", () => {
         ]);
         render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
         await flush();
-        expect(notes()).toEqual(["2026-10-01T10:00:01ZReading the Ticket"]);
+        expect(notes()).toEqual(["01 Oct 2026 15:30:01 UTC+05:30Reading the Ticket"]);
 
         await flush(2999);
         expect(roundFetches(fetchMock)).toBe(1);
         await flush(1);
         expect(roundFetches(fetchMock)).toBe(2);
         expect(ticketFetches(fetchMock)).toBe(2);
-        expect(notes()).toEqual(["2026-10-01T10:00:01ZReading the Ticket", "2026-10-01T10:00:02ZWorking towards the goal"]);
+        expect(notes()).toEqual(["01 Oct 2026 15:30:01 UTC+05:30Reading the Ticket", "01 Oct 2026 15:30:02 UTC+05:30Working towards the goal"]);
         expect(usageText("cost")).toBe("$0.0045");
         expect(usageText("input-tokens")).toBe("1,200");
         expect(usageText("output-tokens")).toBe("300");
@@ -721,8 +789,8 @@ describe("TicketDetailPage", () => {
         render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
         await flush();
         const [current, earlier] = screen.getAllByTestId("ticket-detail-round");
-        expect(within(current).getAllByTestId("ticket-detail-round-note").map((item) => item.textContent)).toEqual(["2026-10-01T10:00:01ZThis Round"]);
-        expect(within(earlier).getAllByTestId("ticket-detail-round-note").map((item) => item.textContent)).toEqual(["2026-10-01T10:00:01ZAn earlier Round"]);
+        expect(within(current).getAllByTestId("ticket-detail-round-note").map((item) => item.textContent)).toEqual(["01 Oct 2026 15:30:01 UTC+05:30This Round"]);
+        expect(within(earlier).getAllByTestId("ticket-detail-round-note").map((item) => item.textContent)).toEqual(["01 Oct 2026 15:30:01 UTC+05:30An earlier Round"]);
       });
 
       it("keeps the last activity when a refresh fails, says so, and clears the note once one succeeds", async () => {
@@ -813,6 +881,24 @@ describe("TicketDetailPage", () => {
         expect(screen.queryByTestId("ticket-detail-runner-disconnected")).not.toBeInTheDocument();
         await flush(10_000);
         expect(screen.getByTestId("ticket-detail-runner-disconnected")).toBeInTheDocument();
+      });
+
+      it("shows Runner disconnected on the same check as the header, even when the receipt opens between checks", async () => {
+        const states = [CONNECTED, { ...CONNECTED, state: "disconnected" }];
+        const fetchMock = stubRound([answer(running)], () => jsonResponse(states.length > 1 ? states.shift() : states[0]));
+        const header = <RunnerHealthPill onUnauthenticated={onUnauthenticated} />;
+        const { rerender } = render(header);
+        await flush(5_000);
+        rerender(<>{header}<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} /></>);
+        await flush();
+        expect(screen.getByTestId("runner-health-pill")).toHaveAttribute("data-health", "connected");
+        expect(screen.queryByTestId("ticket-detail-runner-disconnected")).not.toBeInTheDocument();
+        expect(healthFetches(fetchMock)).toBe(1);
+
+        await flush(5_000);
+        expect(screen.getByTestId("runner-health-pill")).toHaveAttribute("data-health", "disconnected");
+        expect(screen.getByTestId("ticket-detail-runner-disconnected")).toBeInTheDocument();
+        expect(healthFetches(fetchMock)).toBe(2);
       });
 
       it("reuses the header's runner health request and shows no overlay when it fails", async () => {

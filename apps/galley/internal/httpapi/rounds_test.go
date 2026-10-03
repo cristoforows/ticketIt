@@ -204,7 +204,7 @@ func TestClaim_CreatesOneRoundAndLeavesTheTicketReady(t *testing.T) {
 	}
 
 	ticket := f.ticket(t, queued.Id)
-	wantRound := &TicketOpenRound{Id: claim.RoundId, Sequence: 1, State: OpenRoundClaimed, Agent: want.Agent, ClaimedAt: runnerEpoch}
+	wantRound := &TicketOpenRound{Id: claim.RoundId, Sequence: 1, State: OpenRoundClaimed, Agent: want.Agent, ClaimedAt: runnerEpoch, WaitingReason: WaitingStarting}
 	if ticket.Status != Ready || ticket.RequestingAgentWork || ticket.OpenRound == nil || *ticket.OpenRound != *wantRound {
 		t.Fatalf("claimed Ticket: status=%s requestingAgentWork=%t openRound=%+v, want Ready, false, %+v", ticket.Status, ticket.RequestingAgentWork, ticket.OpenRound, wantRound)
 	}

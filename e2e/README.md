@@ -401,6 +401,27 @@ Michelin claims Round 2 (a new id, sequence 2, claim epoch 2), which
 ends the same way while Round 1 stays unchanged. `run.sh` runs them after
 `runner-stop.spec.ts` with no reset, since ended Rounds hold no slot.
 
+`tests/active-order-slip.spec.ts` (issue #162) has two tests. The first
+drives a real Michelin through 55 notes, then holds. Galley's activity
+read must page 50 then 5, and refuse a bad cursor with `400
+invalid_cursor`. The list row and the board slip must be greyed and show
+Working with the riding animation. The browser runs in `Asia/Kolkata`,
+so the receipt's times must read in that zone. View opens the receipt
+with 50 notes, and Load earlier, pressed from the keyboard, brings 55.
+Under `emulateMedia({ reducedMotion: 'reduce' })` the animation stops on
+both views and the label stays. Stop on the board slip answers Stopping,
+then the Ticket returns to Backlog, unlocked and draggable.
+
+The second test claims directly with the runner credential and no
+Michelin, so Starting and Stopping hold still. It must show Starting on
+both views. After the dev clock passes 30 seconds, the slip, the
+receipt's notice and the header pill must all show the runner as
+disconnected, with no animation. Re-registering restores Starting. On a
+phone the active slip has no status toggle. Stop on the phone list shows
+Stopping, with no Stop control, on both views. `run.sh` runs it after
+`runner-interrupted.spec.ts` with no reset. It leaves a Round open, but
+no later spec needs the slot.
+
 `tests/ticket-priority-order.spec.ts` reorders three Ready Tickets by
 dragging onto the upper and lower halves of board slips, then with Move
 up and Move down in the list. After each step the rendered order must

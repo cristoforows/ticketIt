@@ -3,18 +3,24 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
+	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const (
 	activityNoteMaxLength = 2000
 	activityWindow        = 50
+	invalidCursorCode     = "invalid_cursor"
 )
 
 func validateProgressData(raw []byte) (string, string) {
@@ -65,16 +71,16 @@ func appendActivity(ctx context.Context, tx pgx.Tx, ownerID, roundID int64, note
 	return seq, err
 }
 
-func latestActivity(ctx context.Context, tx pgx.Tx, ownerID int64, roundIDs []int64) (map[int64][]RoundActivityNote, error) {
+func latestActivity(ctx context.Context, tx pgx.Tx, ownerID int64, roundIDs []int64) (map[int64]RoundActivityPage, error) {
 	rows, err := tx.Query(ctx, `SELECT round_id, seq, note, occurred_at FROM (
 			SELECT round_id, seq, note, occurred_at, row_number() OVER (PARTITION BY round_id ORDER BY seq DESC) AS newest
 			FROM round_activity WHERE owner_id = $1 AND round_id = ANY($2)
-		) latest WHERE newest <= $3 ORDER BY round_id, seq`, ownerID, roundIDs, activityWindow)
+		) latest WHERE newest <= $3 ORDER BY round_id, seq DESC`, ownerID, roundIDs, activityWindow+1)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	activity := map[int64][]RoundActivityNote{}
+	newestFirst := map[int64][]RoundActivityNote{}
 	for rows.Next() {
 		var roundID int64
 		var note RoundActivityNote
@@ -82,7 +88,94 @@ func latestActivity(ctx context.Context, tx pgx.Tx, ownerID int64, roundIDs []in
 			return nil, err
 		}
 		note.OccurredAt = note.OccurredAt.UTC()
-		activity[roundID] = append(activity[roundID], note)
+		newestFirst[roundID] = append(newestFirst[roundID], note)
 	}
-	return activity, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	pages := make(map[int64]RoundActivityPage, len(roundIDs))
+	for _, roundID := range roundIDs {
+		pages[roundID] = activityPage(newestFirst[roundID])
+	}
+	return pages, nil
+}
+
+// newestFirst holds up to one note more than the window; that note only
+// shows an earlier page exists.
+func activityPage(newestFirst []RoundActivityNote) RoundActivityPage {
+	page := RoundActivityPage{Activity: []RoundActivityNote{}}
+	if len(newestFirst) > activityWindow {
+		newestFirst = newestFirst[:activityWindow]
+		cursor := strconv.Itoa(newestFirst[activityWindow-1].Seq)
+		page.EarlierActivityCursor = &cursor
+	}
+	for i := len(newestFirst) - 1; i >= 0; i-- {
+		page.Activity = append(page.Activity, newestFirst[i])
+	}
+	return page
+}
+
+func parseActivityCursor(raw string) (int, bool) {
+	seq, err := strconv.Atoi(raw)
+	return seq, err == nil && seq >= 1 && strconv.Itoa(seq) == raw
+}
+
+func (s *server) ListRoundActivity(w http.ResponseWriter, r *http.Request, id string, roundId string, params ListRoundActivityParams) {
+	owner, ok := s.requireSession(w, r)
+	if !ok {
+		return
+	}
+	ticketID, ticketOK := canonicalPublicID(id)
+	roundID, roundOK := canonicalPublicID(roundId)
+	if !ticketOK || !roundOK {
+		writeRoundNotFound(w)
+		return
+	}
+	before := math.MaxInt32
+	if params.Before != nil {
+		if before, ok = parseActivityCursor(*params.Before); !ok {
+			writeError(w, http.StatusBadRequest, invalidCursorCode, `"before" must be an earlierActivityCursor from this Round`)
+			return
+		}
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
+	defer cancel()
+	page, found, err := activityBefore(ctx, s.pool, owner.ID, ticketID, roundID, before)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to read the round's activity")
+		return
+	}
+	if !found {
+		writeRoundNotFound(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
+}
+
+func activityBefore(ctx context.Context, pool *pgxpool.Pool, ownerID int64, ticketID, roundID string, before int) (RoundActivityPage, bool, error) {
+	var internalID int64
+	err := pool.QueryRow(ctx, `SELECT r.id FROM rounds r JOIN tickets t ON t.owner_id = r.owner_id AND t.id = r.ticket_id
+		WHERE r.owner_id = $1 AND t.public_id = $2::uuid AND r.public_id = $3::uuid`, ownerID, ticketID, roundID).Scan(&internalID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return RoundActivityPage{}, false, nil
+	}
+	if err != nil {
+		return RoundActivityPage{}, false, err
+	}
+	rows, err := pool.Query(ctx, `SELECT seq, note, occurred_at FROM round_activity
+		WHERE owner_id = $1 AND round_id = $2 AND seq < $3 ORDER BY seq DESC LIMIT $4`, ownerID, internalID, before, activityWindow+1)
+	if err != nil {
+		return RoundActivityPage{}, false, err
+	}
+	defer rows.Close()
+	var newestFirst []RoundActivityNote
+	for rows.Next() {
+		var note RoundActivityNote
+		if err := rows.Scan(&note.Seq, &note.Note, &note.OccurredAt); err != nil {
+			return RoundActivityPage{}, false, err
+		}
+		note.OccurredAt = note.OccurredAt.UTC()
+		newestFirst = append(newestFirst, note)
+	}
+	return activityPage(newestFirst), true, rows.Err()
 }

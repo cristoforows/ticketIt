@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { lastSeenLabel, pairRunner, revokeRunner, type RunnerHealth } from "../api/runner";
 import { RunnerHealthIndicator, useRunnerHealth } from "./RunnerHealthPill";
-import { ErrorMessage, FieldHint, FieldLabel, FieldValue, Paper, PrimaryButton, ReceiptLine, ReceiptTitle, Rule, SecondaryButton, TextInput } from "./ui";
+import { ErrorMessage, FieldHint, FieldLabel, FieldValue, localTimestamp, Paper, PrimaryButton, ReceiptLine, ReceiptTitle, Rule, SecondaryButton, TextInput } from "./ui";
 
 type Confirming = "revoke" | "repair" | null;
 
@@ -102,8 +102,8 @@ export function RunnerSection({ onUnauthenticated, onFailed }: { onUnauthenticat
 
 function RunnerDetails({ health }: { health: RunnerHealth }) {
   const rows: Array<[string, string, string]> = [
-    ["Paired", "runner-paired-at", health.pairedAt ? new Date(health.pairedAt).toLocaleString() : "—"],
-    ["Last seen", "runner-last-seen", health.lastSeenAt ? `${new Date(health.lastSeenAt).toLocaleString()} (${lastSeenLabel(health)})` : "Never connected"],
+    ["Paired", "runner-paired-at", health.pairedAt ? localTimestamp(health.pairedAt) : "—"],
+    ["Last seen", "runner-last-seen", health.lastSeenAt ? `${localTimestamp(health.lastSeenAt)} (${lastSeenLabel(health)})` : "Never connected"],
     ["Michelin", "runner-version", health.michelinVersion ?? "Not registered yet"],
     ["Host", "runner-hostname", health.hostname ?? "Not registered yet"],
   ];

@@ -110,30 +110,47 @@ describe("TicketBoard", () => {
     expect(within(screen.getByTestId("board-ticket-not-requested")).queryByTestId("board-queued")).not.toBeInTheDocument();
   });
 
-  it("shows Claimed by runner only on slips whose open Round Galley reports as claimed", async () => {
+  it("shows the active slip with Galley's waiting reason only on slips with an open Round", async () => {
     const agent = { id: "a1", name: "Builder", kind: "coding" };
-    const round = { id: "r1", sequence: 1, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null };
+    const round = { id: "r1", sequence: 1, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null, waitingReason: "starting" };
     stubTickets([
       { ...ticket("claimed", "Ready"), assigneeType: "agent", assigneeAgent: agent, openRound: { ...round, state: "claimed" } },
-      { ...ticket("running", "Ready"), assigneeType: "agent", assigneeAgent: agent, openRound: { ...round, state: "running", startedAt: "2026-10-01T10:01:00Z" } },
+      { ...ticket("running", "Ready"), assigneeType: "agent", assigneeAgent: agent, openRound: { ...round, state: "running", startedAt: "2026-10-01T10:01:00Z", waitingReason: "working" } },
       { ...ticket("queued", "Ready"), assigneeType: "agent", assigneeAgent: agent, requestingAgentWork: true },
     ]);
 
     render(<TicketBoard onUnauthenticated={() => {}} />);
 
     const claimed = within(await screen.findByTestId("board-ticket-claimed"));
-    expect(claimed.getByTestId("board-claimed")).toHaveTextContent("Claimed by runner");
+    expect(claimed.getByTestId("board-waiting-reason")).toHaveTextContent("Starting");
     expect(claimed.queryByTestId("board-queued")).not.toBeInTheDocument();
-    expect(within(screen.getByTestId("board-ticket-running")).queryByTestId("board-claimed")).not.toBeInTheDocument();
-    expect(within(screen.getByTestId("board-ticket-queued")).queryByTestId("board-claimed")).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("board-ticket-running")).getByTestId("board-waiting-reason")).toHaveTextContent("Working");
+    expect(screen.getByTestId("board-ticket-claimed")).toHaveAttribute("data-active", "true");
+    const queued = screen.getByTestId("board-ticket-queued");
+    expect(within(queued).queryByTestId("board-active-order")).not.toBeInTheDocument();
+    expect(queued).not.toHaveAttribute("data-active");
+  });
+
+  it("shows the waiting reason Galley publishes rather than one derived from the Round", async () => {
+    const agent = { id: "a1", name: "Builder", kind: "coding" };
+    const round = { id: "r1", sequence: 1, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: "2026-10-01T10:01:00Z", state: "running", stopRequestedAt: null };
+    stubTickets([
+      { ...ticket("lost", "InProgress"), assigneeType: "agent", assigneeAgent: agent, openRound: { ...round, waitingReason: "runner_disconnected" } },
+      { ...ticket("told", "InProgress"), assigneeType: "agent", assigneeAgent: agent, openRound: { ...round, waitingReason: "stopping" } },
+      { ...ticket("claimed", "Ready"), assigneeType: "agent", assigneeAgent: agent, openRound: { ...round, state: "claimed", startedAt: null, waitingReason: "working" } },
+    ]);
+    render(<TicketBoard onUnauthenticated={() => {}} />);
+    expect(within(await screen.findByTestId("board-ticket-lost")).getByTestId("board-waiting-reason")).toHaveTextContent("Runner disconnected");
+    expect(within(screen.getByTestId("board-ticket-told")).getByTestId("board-waiting-reason")).toHaveTextContent("Stopping");
+    expect(within(screen.getByTestId("board-ticket-claimed")).getByTestId("board-waiting-reason")).toHaveTextContent("Working");
   });
 
   it("marks a Ticket with an open Round, claimed or running, with a named lock glyph and keeps it from being dragged", async () => {
     const agent = { id: "a1", name: "Builder", kind: "coding" };
-    const round = { id: "r1", sequence: 3, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null };
+    const round = { id: "r1", sequence: 3, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null, waitingReason: "starting" };
     stubTickets([
       { ...ticket("claimed", "Ready"), assigneeType: "agent", assigneeAgent: agent, openRound: { ...round, state: "claimed" } },
-      { ...ticket("running", "Ready"), assigneeType: "agent", assigneeAgent: agent, openRound: { ...round, state: "running", startedAt: "2026-10-01T10:01:00Z" } },
+      { ...ticket("running", "Ready"), assigneeType: "agent", assigneeAgent: agent, openRound: { ...round, state: "running", startedAt: "2026-10-01T10:01:00Z", waitingReason: "working" } },
       { ...ticket("open", "Ready"), assigneeType: "agent", assigneeAgent: agent },
     ]);
 
@@ -407,9 +424,9 @@ describe("TicketBoard", () => {
 
 describe("TicketBoard refreshing while a Ticket awaits execution", () => {
   const agent = { id: "a1", name: "Builder", kind: "coding" };
-  const round = { id: "r1", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null };
+  const round = { id: "r1", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null, waitingReason: "starting" };
   const claimed = { ...ticket("work", "Ready"), assigneeType: "agent", assigneeAgent: agent, openRound: round };
-  const running = { ...claimed, status: "InProgress", openRound: { ...round, state: "running", startedAt: "2026-10-01T10:00:05Z" } };
+  const running = { ...claimed, status: "InProgress", openRound: { ...round, state: "running", startedAt: "2026-10-01T10:00:05Z", waitingReason: "working" } };
   const settled = { ...claimed, openRound: null };
   const queued = { ...settled, requestingAgentWork: true };
   const other = ticket("other", "Backlog");
@@ -455,12 +472,12 @@ describe("TicketBoard refreshing while a Ticket awaits execution", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("refetches every 3 seconds and moves the slip to In Progress with its Agent, locked and without the claimed tag", async () => {
+  it("refetches every 3 seconds and moves the slip to In Progress with its Agent, locked and Working", async () => {
     const fetchMock = stubLists([list(claimed, other), list(running, other)]);
     render(<TicketBoard onUnauthenticated={() => {}} />);
     await flush();
     expect(within(screen.getByTestId("board-status-Ready")).getByTestId("board-ticket-work")).toBeInTheDocument();
-    expect(within(screen.getByTestId("board-ticket-work")).getByTestId("board-claimed")).toBeInTheDocument();
+    expect(within(screen.getByTestId("board-ticket-work")).getByTestId("board-waiting-reason")).toHaveTextContent("Starting");
 
     await flush(2999);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -470,24 +487,24 @@ describe("TicketBoard refreshing while a Ticket awaits execution", () => {
     const slip = within(screen.getByTestId("board-status-InProgress")).getByTestId("board-ticket-work");
     expect(within(slip).getByTestId("board-assignee")).toHaveTextContent("Assignee: Builder");
     expect(within(slip).getByRole("img", { name: "Locked while Builder works on Round 1" })).toBeInTheDocument();
-    expect(within(slip).queryByTestId("board-claimed")).not.toBeInTheDocument();
+    expect(within(slip).getByTestId("board-waiting-reason")).toHaveTextContent("Working");
     expect(slip).toHaveAttribute("draggable", "false");
     expect(within(screen.getByTestId("board-status-Ready")).queryByTestId("board-ticket-work")).not.toBeInTheDocument();
   });
 
   it("shows Stopping on the locked slip once Galley reports the Stop request, still in its Status column", async () => {
-    const stopping = { ...running, openRound: { ...running.openRound, stopRequestedAt: "2026-10-01T10:00:07Z" } };
+    const stopping = { ...running, openRound: { ...running.openRound, stopRequestedAt: "2026-10-01T10:00:07Z", waitingReason: "stopping" } };
     stubLists([list(running, other), list(stopping, other)]);
     render(<TicketBoard onUnauthenticated={() => {}} />);
     await flush();
-    expect(within(screen.getByTestId("board-ticket-work")).queryByTestId("board-stopping")).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("board-ticket-work")).getByTestId("board-waiting-reason")).toHaveTextContent("Working");
 
     await flush(3000);
     const slip = within(screen.getByTestId("board-status-InProgress")).getByTestId("board-ticket-work");
-    expect(within(slip).getByTestId("board-stopping")).toHaveTextContent("Stopping…");
+    expect(within(slip).getByTestId("board-waiting-reason")).toHaveTextContent("Stopping");
     expect(within(slip).getByTestId("board-locked")).toBeInTheDocument();
     expect(slip).toHaveAttribute("draggable", "false");
-    expect(within(screen.getByTestId("board-ticket-other")).queryByTestId("board-stopping")).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("board-ticket-other")).queryByTestId("board-active-order")).not.toBeInTheDocument();
   });
 
   it("keeps the board on screen while a refetch is pending and never overlaps refetches", async () => {

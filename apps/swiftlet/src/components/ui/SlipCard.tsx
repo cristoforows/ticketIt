@@ -3,11 +3,12 @@ import type { ComponentPropsWithRef, CSSProperties } from "react";
 import { cn } from "./cn";
 import { statusTone, type TicketStatus } from "./status";
 
-type SlipProps = ComponentPropsWithRef<"li"> & { tilt: number; stacked?: boolean; dragging?: boolean; selected?: boolean; dropPosition?: "before" | "after" };
+type SlipProps = ComponentPropsWithRef<"li"> & { tilt: number; stacked?: boolean; dragging?: boolean; selected?: boolean; active?: boolean; dropPosition?: "before" | "after" };
 
-export function Slip({ tilt, stacked, dragging, selected, dropPosition, className, style, ...rest }: SlipProps) {
+export function Slip({ tilt, stacked, dragging, selected, active, dropPosition, className, style, ...rest }: SlipProps) {
   return (
     <li
+      data-active={active || undefined}
       data-stacked={stacked || undefined}
       data-dragging={dragging || undefined}
       data-selected={selected || undefined}
@@ -28,15 +29,20 @@ const slipPaper = cva("slip-paper col-start-1 row-start-1 flex flex-col gap-2 bo
   variants: {
     kind: {
       ticket:
-        "bg-paper group-data-dragging/slip:outline-2 group-data-dragging/slip:-outline-offset-4 group-data-dragging/slip:outline-ink group-data-dragging/slip:outline-dashed group-aria-busy/slip:opacity-70 group-data-selected/slip:opacity-40 group-data-selected/slip:grayscale",
+        "group-data-dragging/slip:outline-2 group-data-dragging/slip:-outline-offset-4 group-data-dragging/slip:outline-ink group-data-dragging/slip:outline-dashed group-aria-busy/slip:opacity-70 group-data-selected/slip:opacity-40 group-data-selected/slip:grayscale",
       actions: "pointer-events-none z-20 justify-center bg-rail",
     },
+    active: { true: "", false: "" },
   },
-  defaultVariants: { kind: "ticket" },
+  compoundVariants: [
+    { kind: "ticket", active: false, className: "bg-paper" },
+    { kind: "ticket", active: true, className: "bg-rule" },
+  ],
+  defaultVariants: { kind: "ticket", active: false },
 });
 
-export function SlipPaper({ status, kind, className, ...rest }: ComponentPropsWithRef<"div"> & VariantProps<typeof slipPaper> & { status: TicketStatus }) {
-  return <div data-surface="paper" {...statusTone(status)} className={cn(slipPaper({ kind }), className)} {...rest} />;
+export function SlipPaper({ status, kind, active, className, ...rest }: ComponentPropsWithRef<"div"> & VariantProps<typeof slipPaper> & { status: TicketStatus }) {
+  return <div data-surface="paper" {...statusTone(status)} className={cn(slipPaper({ kind, active }), className)} {...rest} />;
 }
 
 export function SlipToggle({ className, ...rest }: ComponentPropsWithRef<"button">) {
