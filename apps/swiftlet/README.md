@@ -1299,3 +1299,17 @@ that state for the `ticket` form only. `grant_ended` is explained if a
 stale receipt posts a revoke.
 
 Tests: `TicketDetail.test.tsx` and `api/tickets.test.ts`.
+
+## Reconcile on reconnect (issue #170)
+
+Two waiting reasons join the strict parser, the slip and the receipt:
+`reconciling` (**Reconciling with the runner**) and `execution_unknown`
+(**Runner cannot confirm execution**). The rider stays still for both.
+On the receipt, `execution_unknown` shows a notice styled like Runner
+disconnected (`ticket-detail-execution-unknown`, `role="status"`):
+"The runner reconnected but cannot confirm this Round is running. It
+stays open and the Ticket stays locked." `reconciling` shows a field
+note (`ticket-detail-reconciling`). Runner disconnected outranks both.
+
+Tests: `TicketDetail.test.tsx`, `ActiveOrder.test.tsx`,
+`ui/slip.test.ts` and `api/tickets.test.ts`.

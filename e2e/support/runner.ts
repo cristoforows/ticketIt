@@ -39,7 +39,7 @@ function writeEngineScript(steps: EngineScriptStep[]): string {
   return file;
 }
 
-export function startMichelin(token: string, claimIntervalMs: number, engineScript?: EngineScriptStep[]): RunningMichelin {
+export function startMichelin(token: string, claimIntervalMs: number, engineScript?: EngineScriptStep[], options: { commandIntervalMs?: number } = {}): RunningMichelin {
   const galleyUrl = process.env.GALLEY_BASE_URL;
   if (!galleyUrl) throw new Error("GALLEY_BASE_URL is required: run.sh points Michelin at the real Galley");
   const child = spawn(process.execPath, [MICHELIN_MAIN], {
@@ -50,6 +50,7 @@ export function startMichelin(token: string, claimIntervalMs: number, engineScri
       MICHELIN_HEARTBEAT_INTERVAL_MS: "500",
       MICHELIN_STATUS_INTERVAL_MS: "5000",
       MICHELIN_CLAIM_INTERVAL_MS: String(claimIntervalMs),
+      ...(options.commandIntervalMs === undefined ? {} : { MICHELIN_COMMAND_INTERVAL_MS: String(options.commandIntervalMs) }),
       ...(engineScript ? { MICHELIN_ENGINE_SCRIPT: writeEngineScript(engineScript) } : {}),
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -103,6 +104,14 @@ export interface RunnerClaim {
   agent: { id: string; name: string; kind: string };
 }
 
+export interface ReconciledRound {
+  roundId: string;
+  claimEpoch: number;
+  disposition: "continue" | "stop" | "report_cessation" | "hold";
+  cessationEvent?: "stop_confirmed" | "interrupted";
+  commands: RunnerCommand[];
+}
+
 export interface RunnerCommand {
   id: string;
   type: string;
@@ -118,9 +127,15 @@ export interface RunnerCommand {
 export function runnerCalls(runner: APIRequestContext, token: string) {
   const headers = { authorization: `Bearer ${token}` };
   return {
-    async register(): Promise<void> {
+    async register(): Promise<{ reconcileRequired: boolean }> {
       const response = await runner.post("/api/runner/register", { headers, data: { michelinVersion: "e2e-direct", hostname: "e2e-direct" } });
       expect(response.status()).toBe(200);
+      return response.json();
+    },
+    async reconcile(held: Array<{ roundId: string; claimEpoch: number; execution: "running" | "stopped" | "unknown" }>): Promise<ReconciledRound | null> {
+      const response = await runner.post("/api/runner/reconcile", { headers, data: { held } });
+      expect(response.status()).toBe(200);
+      return (await response.json() as { round: ReconciledRound | null }).round;
     },
     async claim(): Promise<RunnerClaim> {
       const response = await runner.post("/api/runner/claims", { headers });

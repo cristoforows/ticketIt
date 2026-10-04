@@ -1278,9 +1278,11 @@ paths:
       summary: Register a runner
       tags: [runner-api]
       description: >-
-        Called by Michelin on start. Also counts as a heartbeat. Every
-        `/api/runner/` route requires the runner credential as a bearer
-        token and rejects an Owner session cookie with the shared `401`.
+        Called by Michelin on start. Also counts as a heartbeat, and
+        flags the Owner's open Round, if any, as needing a Reconcile.
+        Every `/api/runner/` route requires the runner credential as a
+        bearer token and rejects an Owner session cookie with the shared
+        `401`.
       security:
         - runnerBearer: []
       requestBody:
@@ -1308,8 +1310,11 @@ paths:
       summary: Runner heartbeat
       tags: [runner-api]
       description: >-
-        Records last-seen. A credential that has not registered since it
-        was issued returns `409 runner_not_registered`.
+        Records last-seen. When the previous last-seen is absent or at
+        least the 30 s health window old by Galley's clock, the Owner's
+        open Round, if any, is flagged as needing a Reconcile. A
+        credential that has not registered since it was issued returns
+        `409 runner_not_registered`.
       security:
         - runnerBearer: []
       responses:
@@ -1321,6 +1326,47 @@ paths:
                 $ref: "#/components/schemas/RunnerHeartbeat"
         default:
           description: Error. See `ErrorBody`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+  /api/runner/reconcile:
+    post:
+      operationId: reconcileRunner
+      summary: Reconcile what the runner holds with Galley
+      tags: [runner-api]
+      description: >-
+        The runner states the Round it holds, its claim epoch and what it
+        believes about execution, or that it holds nothing. Galley answers
+        the Round's state, one disposition and the Round's unacknowledged
+        commands, Stop first. It never ends a Round or changes its state,
+        its Ticket's Status or the Owner's slot. With nothing held it
+        answers about the Owner's open Round, or `round: null` when there
+        is none. Checked in order: more than one `held` entry, or an
+        invalid `claimEpoch` or `execution`, is `400 invalid_request`; an
+        unknown, malformed or foreign `roundId` returns the shared 404;
+        then `409 stale_claim_epoch` for a `claimEpoch` other than the
+        Round's and `409 round_not_open` for a Round that has ended. A
+        rejection changes nothing, and so does a repeat. Not a heartbeat.
+      security:
+        - runnerBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReconcileRequest"
+      responses:
+        "200":
+          description: Galley's answer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReconcileResult"
+        default:
+          description: >-
+            Error. See `ErrorBody`. Includes `stale_claim_epoch` and
+            `round_not_open`.
           content:
             application/json:
               schema:
@@ -1462,10 +1508,12 @@ paths:
         does not declare is `400 capability_not_supported`, whatever the
         grants.
         Then `409 stale_claim_epoch` for an `epoch` other than the
-        Round's, `409 round_not_open` for a Round that has ended, and `409
-        round_not_running` for one claimed or waiting for input. A
-        rejection records nothing. An unknown, malformed or foreign Round
-        id returns the shared 404.
+        Round's, `409 round_not_open` for a Round that has ended, `409
+        runner_disconnected` while the runner is not connected by
+        Galley's clock, `409 reconcile_required` while the Round awaits a
+        Reconcile, and `409 round_not_running` for one claimed or waiting
+        for input. A rejection records nothing and is not a deny. An
+        unknown, malformed or foreign Round id returns the shared 404.
       security:
         - runnerBearer: []
       requestBody:
@@ -1484,7 +1532,8 @@ paths:
         default:
           description: >-
             Error. See `ErrorBody`. Includes `capability_not_supported`,
-            `stale_claim_epoch`, `round_not_open` and `round_not_running`.
+            `stale_claim_epoch`, `round_not_open`, `runner_disconnected`,
+            `reconcile_required` and `round_not_running`.
           content:
             application/json:
               schema:
@@ -1915,15 +1964,18 @@ components:
       description: >-
         What an open Round waits on, from Galley's state alone. When more
         than one holds, the first of `runner_disconnected` (the runner
-        health window has lapsed or no runner is paired), `stopping`
+        health window has lapsed or no runner is paired),
+        `execution_unknown` (the Round awaits a Reconcile and the last
+        Reconcile could not confirm execution), `reconciling` (the Round
+        awaits a Reconcile otherwise), `stopping`
         (Stop requested), `resuming` (waiting for input, its question
         answered or its Permission request approved),
         `waiting_for_answer` (waiting on an unanswered question),
         `waiting_for_permission` (waiting on a Permission request not
         approved, declined included), `starting` (claimed) and `working`
         (running) applies.
-      enum: [starting, working, stopping, runner_disconnected, waiting_for_answer, resuming, waiting_for_permission]
-      x-enum-varnames: [WaitingStarting, WaitingWorking, WaitingStopping, WaitingRunnerDisconnected, WaitingForAnswer, WaitingResuming, WaitingForPermission]
+      enum: [starting, working, stopping, runner_disconnected, waiting_for_answer, resuming, waiting_for_permission, reconciling, execution_unknown]
+      x-enum-varnames: [WaitingStarting, WaitingWorking, WaitingStopping, WaitingRunnerDisconnected, WaitingForAnswer, WaitingResuming, WaitingForPermission, WaitingReconciling, WaitingExecutionUnknown]
     RoundQuestion:
       type: object
       additionalProperties: false
@@ -2745,15 +2797,108 @@ components:
     RunnerRegistration:
       type: object
       additionalProperties: false
-      required: [registeredAt]
+      required: [registeredAt, reconcileRequired]
       properties:
         registeredAt: {type: string, format: date-time}
+        reconcileRequired:
+          $ref: "#/components/schemas/ReconcileRequired"
     RunnerHeartbeat:
       type: object
       additionalProperties: false
-      required: [lastSeenAt]
+      required: [lastSeenAt, reconcileRequired]
       properties:
         lastSeenAt: {type: string, format: date-time}
+        reconcileRequired:
+          $ref: "#/components/schemas/ReconcileRequired"
+    ReconcileRequired:
+      type: boolean
+      description: True while the Owner's open Round awaits a Reconcile.
+    HeldExecution:
+      type: string
+      description: >-
+        What the runner believes about the Round's execution. `unknown`
+        is answered as if nothing were held.
+      enum: [running, stopped, unknown]
+      x-enum-varnames: [HeldRunning, HeldStopped, HeldUnknown]
+    HeldRound:
+      type: object
+      additionalProperties: false
+      required: [roundId, claimEpoch, execution]
+      properties:
+        roundId: {type: string, format: uuid, x-go-type: string}
+        claimEpoch:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
+          description: The fencing token the runner holds.
+        execution:
+          $ref: "#/components/schemas/HeldExecution"
+    ReconcileRequest:
+      type: object
+      additionalProperties: false
+      required: [held]
+      properties:
+        held:
+          type: array
+          maxItems: 1
+          description: Empty when the runner holds no Round.
+          items:
+            $ref: "#/components/schemas/HeldRound"
+    ReconcileDisposition:
+      type: string
+      description: >-
+        `continue`: execution is intact at the current epoch with no Stop
+        requested; resume the same Round. `stop`: a Stop is requested and
+        not confirmed; halt before the next step, then confirm it.
+        `report_cessation`: belief is not evidence; send
+        `cessationEvent`, which alone can end the Round. `hold`:
+        execution cannot be confirmed; execute nothing for this Round,
+        which stays open and locked.
+      enum: [continue, stop, report_cessation, hold]
+      x-enum-varnames: [ReconcileContinue, ReconcileStop, ReconcileReportCessation, ReconcileHold]
+    CessationEvent:
+      type: string
+      enum: [stop_confirmed, interrupted]
+      x-enum-varnames: [CessationStopConfirmed, CessationInterrupted]
+    ReconciledRound:
+      type: object
+      additionalProperties: false
+      required: [roundId, state, ticketStatus, claimEpoch, disposition, commands]
+      properties:
+        roundId: {type: string, format: uuid, x-go-type: string}
+        state:
+          $ref: "#/components/schemas/OpenRoundState"
+        ticketStatus:
+          $ref: "#/components/schemas/TicketStatus"
+        claimEpoch:
+          type: integer
+          minimum: 1
+          description: The current claim epoch for later events.
+        disposition:
+          $ref: "#/components/schemas/ReconcileDisposition"
+        cessationEvent:
+          description: >-
+            Present exactly when `disposition` is `report_cessation`:
+            `stop_confirmed` when the Owner requested Stop, else
+            `interrupted`.
+          $ref: "#/components/schemas/CessationEvent"
+        commands:
+          type: array
+          description: >-
+            As `GET /api/runner/rounds/{roundId}/commands` lists them. No
+            grants: authority is checked per action.
+          items:
+            $ref: "#/components/schemas/RunnerCommand"
+    ReconcileResult:
+      type: object
+      additionalProperties: false
+      required: [round]
+      properties:
+        round:
+          description: Null when nothing was held and the Owner has no open Round.
+          oneOf:
+            - $ref: "#/components/schemas/ReconciledRound"
+            - type: "null"
     RunnerClaim:
       type: object
       additionalProperties: false

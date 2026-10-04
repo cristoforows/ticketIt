@@ -46,7 +46,7 @@ func TestDecideWaitingReason(t *testing.T) {
 		{OpenRoundWaitingForInput, nil, undecidedRequest, false, false, WaitingRunnerDisconnected},
 		{OpenRoundWaitingForInput, nil, approvedRequest, true, false, WaitingRunnerDisconnected},
 	} {
-		got := decideWaitingReason(tc.state, tc.question, tc.request, tc.stopRequested, tc.runnerConnected)
+		got := decideWaitingReason(tc.state, tc.question, tc.request, tc.stopRequested, tc.runnerConnected, false, nil)
 		if got != tc.want {
 			t.Errorf("decideWaitingReason(%s, question=%+v, request=%+v, stopRequested=%t, connected=%t) = %s, want %s", tc.state, tc.question, tc.request, tc.stopRequested, tc.runnerConnected, got, tc.want)
 		}
@@ -116,15 +116,19 @@ func TestWaitingReason_RunnerDisconnectedFollowsRunnerHealthExactly(t *testing.T
 	f.mustStop(t, queued.Id)
 	f.assertWaitingReason(t, queued.Id, WaitingRunnerDisconnected)
 	f.heartbeat(t, f.token, http.StatusOK)
+	f.assertWaitingReason(t, queued.Id, WaitingReconciling)
+	f.mustReconcile(t, reconcileBody(t, heldRound(claim, HeldRunning)))
 	f.assertWaitingReason(t, queued.Id, WaitingStopping)
 }
 
 func TestWaitingReason_AClaimedRoundLosingItsRunnerIsRunnerDisconnected(t *testing.T) {
 	f := newClaimFixture(t)
-	queued, _ := f.claimTicket(t, "Never started")
+	queued, claim := f.claimTicket(t, "Never started")
 	f.clock.Set(runnerEpoch.Add(runnerHealthWindow))
 	f.assertWaitingReason(t, queued.Id, WaitingRunnerDisconnected)
 	f.heartbeat(t, f.token, http.StatusOK)
+	f.assertWaitingReason(t, queued.Id, WaitingReconciling)
+	f.mustReconcile(t, reconcileBody(t, heldRound(claim, HeldRunning)))
 	f.assertWaitingReason(t, queued.Id, WaitingStarting)
 }
 
@@ -141,6 +145,9 @@ func TestWaitingReason_NoPairedRunnerIsRunnerDisconnected(t *testing.T) {
 	repaired := f.pair(t).Token
 	f.assertWaitingReason(t, queued.Id, WaitingRunnerDisconnected)
 	f.register(t, repaired, http.StatusOK)
+	f.assertWaitingReason(t, queued.Id, WaitingReconciling)
+	f.token = repaired
+	f.mustReconcile(t, reconcileBody(t, heldRound(claim, HeldRunning)))
 	f.assertWaitingReason(t, queued.Id, WaitingWorking)
 }
 

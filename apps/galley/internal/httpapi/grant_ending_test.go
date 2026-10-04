@@ -203,6 +203,7 @@ func TestDone_AFreshGrantAfterReopeningWorksAndTheEndedOneStaysEnded(t *testing.
 	}
 
 	f.clock.Set(doneAt.Add(time.Minute))
+	f.reconnect(t, second)
 	_, fresh := f.mustApproveWith(t, queued.Id, second.RoundId, requestB, `{"form":"ticket"}`)
 	f.mustResumeApproval(t, second, requestB)
 	if fresh == oldGrant {

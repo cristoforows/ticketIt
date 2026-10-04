@@ -681,7 +681,7 @@ export interface paths {
         put?: never;
         /**
          * Register a runner
-         * @description Called by Michelin on start. Also counts as a heartbeat. Every `/api/runner/` route requires the runner credential as a bearer token and rejects an Owner session cookie with the shared `401`.
+         * @description Called by Michelin on start. Also counts as a heartbeat, and flags the Owner's open Round, if any, as needing a Reconcile. Every `/api/runner/` route requires the runner credential as a bearer token and rejects an Owner session cookie with the shared `401`.
          */
         post: operations["registerRunner"];
         delete?: never;
@@ -701,9 +701,29 @@ export interface paths {
         put?: never;
         /**
          * Runner heartbeat
-         * @description Records last-seen. A credential that has not registered since it was issued returns `409 runner_not_registered`.
+         * @description Records last-seen. When the previous last-seen is absent or at least the 30 s health window old by Galley's clock, the Owner's open Round, if any, is flagged as needing a Reconcile. A credential that has not registered since it was issued returns `409 runner_not_registered`.
          */
         post: operations["runnerHeartbeat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runner/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reconcile what the runner holds with Galley
+         * @description The runner states the Round it holds, its claim epoch and what it believes about execution, or that it holds nothing. Galley answers the Round's state, one disposition and the Round's unacknowledged commands, Stop first. It never ends a Round or changes its state, its Ticket's Status or the Owner's slot. With nothing held it answers about the Owner's open Round, or `round: null` when there is none. Checked in order: more than one `held` entry, or an invalid `claimEpoch` or `execution`, is `400 invalid_request`; an unknown, malformed or foreign `roundId` returns the shared 404; then `409 stale_claim_epoch` for a `claimEpoch` other than the Round's and `409 round_not_open` for a Round that has ended. A rejection changes nothing, and so does a repeat. Not a heartbeat.
+         */
+        post: operations["reconcileRunner"];
         delete?: never;
         options?: never;
         head?: never;
@@ -765,7 +785,7 @@ export interface paths {
         put?: never;
         /**
          * Check whether the Round's Agent holds authority for a scope
-         * @description Answers from the grants Galley holds when the check runs, and records the check, allow or deny, in the Round's history. `allow` needs an active grant for the Round's Agent that is either `ticket` form for the Round's Ticket or `time` form whose `expiresAt` is after Galley's clock at the check, and that holds either the same `account`, `action` and `resource`, or full access to the same `account`; anything else is `deny`, including a Connected Account with no grant. A grant for the exact scope is named before a full-access grant. A scope the Connected Account does not declare is `400 capability_not_supported`, whatever the grants. Then `409 stale_claim_epoch` for an `epoch` other than the Round's, `409 round_not_open` for a Round that has ended, and `409 round_not_running` for one claimed or waiting for input. A rejection records nothing. An unknown, malformed or foreign Round id returns the shared 404.
+         * @description Answers from the grants Galley holds when the check runs, and records the check, allow or deny, in the Round's history. `allow` needs an active grant for the Round's Agent that is either `ticket` form for the Round's Ticket or `time` form whose `expiresAt` is after Galley's clock at the check, and that holds either the same `account`, `action` and `resource`, or full access to the same `account`; anything else is `deny`, including a Connected Account with no grant. A grant for the exact scope is named before a full-access grant. A scope the Connected Account does not declare is `400 capability_not_supported`, whatever the grants. Then `409 stale_claim_epoch` for an `epoch` other than the Round's, `409 round_not_open` for a Round that has ended, `409 runner_disconnected` while the runner is not connected by Galley's clock, `409 reconcile_required` while the Round awaits a Reconcile, and `409 round_not_running` for one claimed or waiting for input. A rejection records nothing and is not a deny. An unknown, malformed or foreign Round id returns the shared 404.
          */
         post: operations["checkRoundAuthority"];
         delete?: never;
@@ -978,10 +998,10 @@ export interface components {
          */
         OpenRoundState: "claimed" | "running" | "waiting_for_input";
         /**
-         * @description What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `stopping` (Stop requested), `resuming` (waiting for input, its question answered or its Permission request approved), `waiting_for_answer` (waiting on an unanswered question), `waiting_for_permission` (waiting on a Permission request not approved, declined included), `starting` (claimed) and `working` (running) applies.
+         * @description What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `execution_unknown` (the Round awaits a Reconcile and the last Reconcile could not confirm execution), `reconciling` (the Round awaits a Reconcile otherwise), `stopping` (Stop requested), `resuming` (waiting for input, its question answered or its Permission request approved), `waiting_for_answer` (waiting on an unanswered question), `waiting_for_permission` (waiting on a Permission request not approved, declined included), `starting` (claimed) and `working` (running) applies.
          * @enum {string}
          */
-        RoundWaitingReason: "starting" | "working" | "stopping" | "runner_disconnected" | "waiting_for_answer" | "resuming" | "waiting_for_permission";
+        RoundWaitingReason: "starting" | "working" | "stopping" | "runner_disconnected" | "waiting_for_answer" | "resuming" | "waiting_for_permission" | "reconciling" | "execution_unknown";
         RoundQuestion: {
             /**
              * Format: uuid
@@ -1428,10 +1448,54 @@ export interface components {
         RunnerRegistration: {
             /** Format: date-time */
             registeredAt: string;
+            reconcileRequired: components["schemas"]["ReconcileRequired"];
         };
         RunnerHeartbeat: {
             /** Format: date-time */
             lastSeenAt: string;
+            reconcileRequired: components["schemas"]["ReconcileRequired"];
+        };
+        /** @description True while the Owner's open Round awaits a Reconcile. */
+        ReconcileRequired: boolean;
+        /**
+         * @description What the runner believes about the Round's execution. `unknown` is answered as if nothing were held.
+         * @enum {string}
+         */
+        HeldExecution: "running" | "stopped" | "unknown";
+        HeldRound: {
+            /** Format: uuid */
+            roundId: string;
+            /** @description The fencing token the runner holds. */
+            claimEpoch: number;
+            execution: components["schemas"]["HeldExecution"];
+        };
+        ReconcileRequest: {
+            /** @description Empty when the runner holds no Round. */
+            held: components["schemas"]["HeldRound"][];
+        };
+        /**
+         * @description `continue`: execution is intact at the current epoch with no Stop requested; resume the same Round. `stop`: a Stop is requested and not confirmed; halt before the next step, then confirm it. `report_cessation`: belief is not evidence; send `cessationEvent`, which alone can end the Round. `hold`: execution cannot be confirmed; execute nothing for this Round, which stays open and locked.
+         * @enum {string}
+         */
+        ReconcileDisposition: "continue" | "stop" | "report_cessation" | "hold";
+        /** @enum {string} */
+        CessationEvent: "stop_confirmed" | "interrupted";
+        ReconciledRound: {
+            /** Format: uuid */
+            roundId: string;
+            state: components["schemas"]["OpenRoundState"];
+            ticketStatus: components["schemas"]["TicketStatus"];
+            /** @description The current claim epoch for later events. */
+            claimEpoch: number;
+            disposition: components["schemas"]["ReconcileDisposition"];
+            /** @description Present exactly when `disposition` is `report_cessation`: `stop_confirmed` when the Owner requested Stop, else `interrupted`. */
+            cessationEvent?: components["schemas"]["CessationEvent"];
+            /** @description As `GET /api/runner/rounds/{roundId}/commands` lists them. No grants: authority is checked per action. */
+            commands: components["schemas"]["RunnerCommand"][];
+        };
+        ReconcileResult: {
+            /** @description Null when nothing was held and the Owner has no open Round. */
+            round: components["schemas"]["ReconciledRound"] | null;
         };
         RunnerClaim: {
             /** Format: uuid */
@@ -2957,6 +3021,39 @@ export interface operations {
             };
         };
     };
+    reconcileRunner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReconcileRequest"];
+            };
+        };
+        responses: {
+            /** @description Galley's answer. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconcileResult"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. Includes `stale_claim_epoch` and `round_not_open`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     claimWork: {
         parameters: {
             query?: never;
@@ -3061,7 +3158,7 @@ export interface operations {
                     "application/json": components["schemas"]["AuthorityCheckResult"];
                 };
             };
-            /** @description Error. See `ErrorBody`. Includes `capability_not_supported`, `stale_claim_epoch`, `round_not_open` and `round_not_running`. */
+            /** @description Error. See `ErrorBody`. Includes `capability_not_supported`, `stale_claim_epoch`, `round_not_open`, `runner_disconnected`, `reconcile_required` and `round_not_running`. */
             default: {
                 headers: {
                     [name: string]: unknown;

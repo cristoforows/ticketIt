@@ -2132,6 +2132,62 @@ accepts, accept against revoke, another Ticket's checks, constraints)
 and `TestEndedGrants_ResponsesMatchContract`.
 Evidence: `docs/evidence/m5/169-grants-end-at-done.md`.
 
+## Reconcile on reconnect (issue #170)
+
+Migration `000027_reconcile_rounds.up.sql` adds to `rounds`
+`reconcile_required` (default false), `reconcile_execution`
+(`running | stopped | unknown`) and `reconciled_at`, set exactly with
+the execution. `unknown` implies the flag.
+
+**The flag.** Register flags the Owner's open Round. A heartbeat flags
+it when the runner's previous `last_seen_at` was absent or at least the
+30 s health window old by Galley's clock; the previous value is read in
+the same `UPDATE`. Both responses carry `reconcileRequired`: whether the
+Owner's open Round is flagged after the call.
+
+`POST /api/runner/reconcile` (runner bearer) takes `{"held": []}` or one
+`{roundId, claimEpoch, execution}`. Missing or extra fields, more than
+one Round, an empty `roundId`, an epoch outside 1–2147483647 or an
+unknown execution is `400`. A malformed, unknown or another Owner's
+`roundId` is the shared `404`. Then `409 stale_claim_epoch`, then
+`409 round_not_open`. `held: []` reconciles the Owner's open Round with
+execution `unknown`, or answers `{"round": null}` when there is none.
+
+| Belief | Stop pending | Disposition | Flag |
+|--------|--------------|-------------|------|
+| `running` | no | `continue` | cleared |
+| `running` | yes | `stop` | cleared |
+| `stopped` | no | `report_cessation`, `interrupted` | unchanged |
+| `stopped` | yes | `report_cessation`, `stop_confirmed` | unchanged |
+| `unknown` | either | `hold` | set |
+
+A Reconcile never changes the Round's state, the Ticket's Status, the
+slot or the lock; the named cessation event goes through the event
+ladder like any other. It records the execution, and appends one
+activity note only when the recorded execution changes. The answer
+lists the Round's pending commands, Stop first, as
+`GET /api/runner/rounds/{roundId}/commands` does. Lock order is the
+event ladder's: the Owner's priority lock, the Ticket row, then the
+Round row.
+
+**Authority checks** refuse, after the epoch and open checks,
+`409 runner_disconnected` while the runner is outside the health window
+and then `409 reconcile_required` while the Round is flagged. Both are
+logged (`authority check refused`), not recorded, and create no request.
+Round events are not gated.
+
+**Waiting reasons.** Runner disconnected, then `execution_unknown`
+(flagged and recorded `unknown`), then `reconciling` (flagged), then the
+existing reasons.
+
+Tests: `reconcile_test.go` (the decision and waiting-reason tables, the
+400/404/409 ladder, DB snapshots proving no state change, commands,
+the cessation event, held-nothing, the flag lifecycle and the exact
+health-window boundary, notes, authority refusals and their logs,
+ungated events, lock order and concurrency) and
+`TestReconcile_ResponsesMatchContractAndMethod405`.
+Evidence: `docs/evidence/m5/170-reconcile.md`.
+
 ## Error shape
 
 `ErrorBody`/`ErrorDetail` are generated from

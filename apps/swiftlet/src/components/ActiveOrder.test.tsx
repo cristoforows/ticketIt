@@ -72,6 +72,8 @@ describe.each(views)("the active order slip on the $name", ({ prefix, row, query
     ["working", "Working"],
     ["stopping", "Stopping"],
     ["runner_disconnected", "Runner disconnected"],
+    ["reconciling", "Reconciling with the runner"],
+    ["execution_unknown", "Runner cannot confirm execution"],
   ])("labels the Galley reason %s as %s, beside a decorative delivery indicator", async (waitingReason, label) => {
     stubGalley([{ ...ACTIVE, openRound: { ...openRound, waitingReason } }]);
     renderView();

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { startClaimLoop } from "./claimLoop.ts";
 import { ConfigError, loadConfig } from "./config.ts";
-import { startHeartbeatLoop } from "./heartbeatLoop.ts";
+import { newRegistration, startHeartbeatLoop } from "./heartbeatLoop.ts";
 import { stdoutLogger } from "./logger.ts";
 import { startStatusLoop } from "./statusLoop.ts";
 
@@ -23,7 +23,7 @@ try {
     ...identity,
   });
 
-  const registration = { registered: false };
+  const registration = newRegistration();
   const loops = [
     startStatusLoop({ galleyUrl: config.galleyUrl, intervalMs: config.statusIntervalMs, fetch, logger }),
     startHeartbeatLoop({

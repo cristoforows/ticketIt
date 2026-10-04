@@ -853,6 +853,42 @@ describe("the Rounds section", () => {
     expect(screen.queryByTestId("ticket-detail-runner-disconnected")).not.toBeInTheDocument();
   });
 
+  it("notices a Round the reconnected runner cannot confirm, styled like Runner disconnected", () => {
+    const unknown = { ...runningRound, waitingReason: "execution_unknown" as const };
+    render(<TicketDetail ticket={roundTicket(unknown, "InProgress")} onSave={vi.fn()} {...noopActions()} runnerHealth={health("connected")} roundRecords={{ rounds: [recordOf(unknown)] }} />);
+    const notice = within(screen.getByTestId("ticket-detail-rounds")).getByTestId("ticket-detail-execution-unknown");
+    expect(notice).toHaveAttribute("role", "status");
+    expect(notice).toHaveTextContent(/^Runner cannot confirm execution The runner reconnected but cannot confirm this Round is running\. It stays open and the Ticket stays locked\.$/);
+    expect(notice).toHaveClass("border-2", "border-status-blocked-deep", "p-2", "text-status-blocked-deep");
+    expect(screen.queryByTestId("ticket-detail-reconciling")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("ticket-detail-runner-disconnected")).not.toBeInTheDocument();
+    expect(screen.getByTestId("ticket-detail-locked")).toBeInTheDocument();
+  });
+
+  it("notes a Round awaiting its Reconcile", () => {
+    const reconciling = { ...runningRound, waitingReason: "reconciling" as const };
+    render(<TicketDetail ticket={roundTicket(reconciling, "InProgress")} onSave={vi.fn()} {...noopActions()} runnerHealth={health("connected")} roundRecords={{ rounds: [recordOf(reconciling)] }} />);
+    const note = within(screen.getByTestId("ticket-detail-rounds")).getByTestId("ticket-detail-reconciling");
+    expect(note).toHaveAttribute("role", "status");
+    expect(note).toHaveTextContent(/^Reconciling with the runner$/);
+    expect(screen.queryByTestId("ticket-detail-execution-unknown")).not.toBeInTheDocument();
+  });
+
+  it.each(["execution_unknown", "reconciling"] as const)("lets Runner disconnected outrank %s on the receipt", (waitingReason) => {
+    const round = { ...runningRound, waitingReason };
+    render(<TicketDetail ticket={roundTicket(round, "InProgress")} onSave={vi.fn()} {...noopActions()} runnerHealth={health("disconnected")} roundRecords={{ rounds: [recordOf(round)] }} />);
+    expect(screen.getByTestId("ticket-detail-runner-disconnected")).toBeInTheDocument();
+    expect(screen.queryByTestId("ticket-detail-execution-unknown")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("ticket-detail-reconciling")).not.toBeInTheDocument();
+  });
+
+  it.each(["working", "starting", "stopping", "runner_disconnected"] as const)("shows no Reconcile notice for %s", (waitingReason) => {
+    const round = { ...runningRound, waitingReason };
+    render(<TicketDetail ticket={roundTicket(round, "InProgress")} onSave={vi.fn()} {...noopActions()} runnerHealth={health("connected")} roundRecords={{ rounds: [recordOf(round)] }} />);
+    expect(screen.queryByTestId("ticket-detail-execution-unknown")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("ticket-detail-reconciling")).not.toBeInTheDocument();
+  });
+
   it("shows no overlay when the runner health is not supplied", () => {
     render(<TicketDetail ticket={roundTicket(runningRound, "InProgress")} onSave={vi.fn()} {...noopActions()} />);
     expect(screen.queryByTestId("ticket-detail-runner-disconnected")).not.toBeInTheDocument();

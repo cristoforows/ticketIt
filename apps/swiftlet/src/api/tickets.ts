@@ -58,7 +58,7 @@ export class TicketNotFoundError extends Error {
 }
 
 type WaitingReason = NonNullable<Ticket["openRound"]>["waitingReason"];
-const WAITING_REASONS: readonly WaitingReason[] = ["starting", "working", "waiting_for_answer", "waiting_for_permission", "resuming", "stopping", "runner_disconnected"];
+const WAITING_REASONS: readonly WaitingReason[] = ["starting", "working", "waiting_for_answer", "waiting_for_permission", "resuming", "stopping", "runner_disconnected", "reconciling", "execution_unknown"];
 type OpenRoundState = NonNullable<Ticket["openRound"]>["state"];
 const OPEN_ROUND_STATES: readonly OpenRoundState[] = ["claimed", "running", "waiting_for_input"];
 

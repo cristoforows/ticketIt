@@ -17,7 +17,12 @@ export type RunnerFailure =
   | { reason: "http_status"; httpStatus: number }
   | { reason: "invalid_body"; error: string };
 
-export type RunnerResult = Timed<Outcome<string, RunnerFailure>>;
+export interface RunnerAck {
+  at: string;
+  reconcileRequired: boolean;
+}
+
+export type RunnerResult = Timed<Outcome<RunnerAck, RunnerFailure>>;
 
 export type ClaimFailure = Exclude<RunnerFailure, { reason: "not_registered" }>;
 
@@ -40,7 +45,7 @@ async function runnerCall(request: RunnerRequest, path: string, body: string | u
   if (body !== undefined) {
     headers["content-type"] = "application/json";
   }
-  return callGalley<string, RunnerFailure>(request, path, { method: "POST", headers, body }, async (response, readJson) => {
+  return callGalley<RunnerAck, RunnerFailure>(request, path, { method: "POST", headers, body }, async (response, readJson) => {
     if (response.status === 401) {
       await response.body?.cancel();
       return { ok: false, failure: { reason: "credential_rejected", httpStatus: 401 } };
@@ -60,7 +65,11 @@ async function runnerCall(request: RunnerRequest, path: string, body: string | u
     if (typeof value !== "string") {
       return { ok: false, failure: { reason: "invalid_body", error: `${field} is not a string` } };
     }
-    return { ok: true, value };
+    const reconcileRequired = isRecord(payload) ? payload["reconcileRequired"] : undefined;
+    if (typeof reconcileRequired !== "boolean") {
+      return { ok: false, failure: { reason: "invalid_body", error: "reconcileRequired is not a boolean" } };
+    }
+    return { ok: true, value: { at: value, reconcileRequired } };
   });
 }
 
@@ -324,4 +333,74 @@ export function checkAuthority(request: RunnerRequest, roundId: string, body: Au
     }
     return { ok: false, failure: { reason: "invalid_body", error: "body is not an allow naming its grant or a deny naming at most an expired grant" } };
   });
+}
+
+export type HeldRound = components["schemas"]["HeldRound"];
+export type ReconcileDisposition = components["schemas"]["ReconcileDisposition"];
+export type CessationEvent = components["schemas"]["CessationEvent"];
+
+export interface ReconciledRound {
+  roundId: string;
+  claimEpoch: number;
+  disposition: ReconcileDisposition;
+  cessationEvent?: CessationEvent;
+  commands: PulledCommand[];
+}
+
+export type ReconcileFailure = RoundEventFailure;
+
+export type ReconcileReport = Timed<Outcome<ReconciledRound | null, ReconcileFailure>>;
+
+const DISPOSITIONS: readonly string[] = ["continue", "stop", "report_cessation", "hold"] satisfies ReconcileDisposition[];
+const CESSATION_EVENTS: readonly string[] = ["stop_confirmed", "interrupted"] satisfies CessationEvent[];
+
+export function reconcile(request: RunnerRequest, held: HeldRound[]): Promise<ReconcileReport> {
+  const headers = { accept: "application/json", "content-type": "application/json", authorization: request.credential.authorizationHeader() };
+  return callGalley<ReconciledRound | null, ReconcileFailure>(request, "api/runner/reconcile", { method: "POST", headers, body: JSON.stringify({ held }) }, async (response, readJson) => {
+    const payload = await readJson();
+    if (response.status !== 200) {
+      return { ok: false, failure: { reason: "http_status", httpStatus: response.status, errorCode: errorCodeOf(payload) } };
+    }
+    if (payload === INVALID_JSON) {
+      return { ok: false, failure: { reason: "invalid_body", error: "response is not valid JSON" } };
+    }
+    const round = parseReconciledRound(payload, held[0]);
+    return typeof round === "string" ? { ok: false, failure: { reason: "invalid_body", error: round } } : { ok: true, value: round };
+  });
+}
+
+function parseReconciledRound(payload: unknown, held: HeldRound | undefined): ReconciledRound | null | string {
+  if (!isRecord(payload) || !("round" in payload)) {
+    return "body lacks round";
+  }
+  const round = payload["round"];
+  if (round === null) {
+    return held === undefined ? null : "round is null for a held Round";
+  }
+  if (!isRecord(round)) {
+    return "round is not a JSON object";
+  }
+  const { roundId, claimEpoch, disposition, cessationEvent } = round;
+  if (typeof roundId !== "string" || !Number.isSafeInteger(claimEpoch)) {
+    return "round lacks roundId or claimEpoch";
+  }
+  if (held !== undefined && (roundId !== held.roundId || claimEpoch !== held.claimEpoch)) {
+    return "round is not the held Round";
+  }
+  if (typeof disposition !== "string" || !DISPOSITIONS.includes(disposition)) {
+    return "disposition is not a known disposition";
+  }
+  if (held === undefined && disposition !== "hold") {
+    return "a Round reconciled while holding nothing is not held";
+  }
+  if ((disposition === "report_cessation") !== (typeof cessationEvent === "string" && CESSATION_EVENTS.includes(cessationEvent))) {
+    return "cessationEvent does not match the disposition";
+  }
+  const commands = parseCommands(round);
+  if (typeof commands === "string") {
+    return commands;
+  }
+  const parsed: ReconciledRound = { roundId, claimEpoch: claimEpoch as number, disposition: disposition as ReconcileDisposition, commands };
+  if (disposition === "report_cessation") parsed.cessationEvent = cessationEvent as CessationEvent;
+  return parsed;
 }

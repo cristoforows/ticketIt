@@ -1561,6 +1561,7 @@ func TestTimeGrantsAndRenewals_ResponsesMatchContract(t *testing.T) {
 	readAll()
 
 	f.clock.Set(until)
+	f.reconnect(t, claim)
 	rec := validate(check, http.StatusOK)
 	var denied AuthorityCheckResult
 	if err := json.Unmarshal(rec.Body.Bytes(), &denied); err != nil || denied.ExpiredGrantId == nil {
@@ -1636,6 +1637,7 @@ func TestFullAccess_ResponsesMatchContract(t *testing.T) {
 	readAll()
 
 	f.clock.Set(until)
+	f.reconnect(t, claim)
 	var denied AuthorityCheckResult
 	if err := json.Unmarshal(validate(check(readReport), http.StatusOK).Body.Bytes(), &denied); err != nil || denied.ExpiredGrantId == nil {
 		t.Fatalf("check after expiry = %+v, want a deny naming the expired full grant", denied)
@@ -1734,4 +1736,68 @@ func TestEndedGrants_ResponsesMatchContract(t *testing.T) {
 	validate(runnerCall{method: http.MethodGet, path: "/api/tickets/" + queued.Id}, http.StatusOK)
 	validate(runnerCall{method: http.MethodGet, path: "/api/tickets"}, http.StatusOK)
 	assertErrorCode(t, validate(runnerCall{method: http.MethodPost, path: revokePath(grantID)}, http.StatusBadRequest), grantEndedCode)
+}
+
+func TestReconcile_ResponsesMatchContractAndMethod405(t *testing.T) {
+	f := newClaimFixture(t)
+	router, err := legacy.NewRouter(loadContract(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate := func(call runnerCall, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(call.method, call.path, strings.NewReader(call.body))
+		if call.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if call.token != "" {
+			req.Header.Set("Authorization", "Bearer "+call.token)
+		}
+		if call.cookie != nil {
+			req.AddCookie(call.cookie)
+		}
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("%s %s: status=%d, want %d; body=%s", call.method, call.path, rec.Code, want, rec.Body.String())
+		}
+		validateAgainstContract(t, router, req, rec)
+		return rec
+	}
+	reconcile := func(body string) runnerCall {
+		return runnerCall{method: http.MethodPost, path: "/api/runner/reconcile", body: body, token: f.token}
+	}
+	register := runnerCall{method: http.MethodPost, path: "/api/runner/register", body: registerBody, token: f.token}
+	heartbeat := runnerCall{method: http.MethodPost, path: "/api/runner/heartbeat", token: f.token}
+
+	validate(reconcile(reconcileBody(t)), http.StatusOK)
+	queued, claim, _ := f.fullGrantRound(t, "contract", PermissionGrantFormTicket, time.Time{})
+	ticket := runnerCall{method: http.MethodGet, path: "/api/tickets/" + queued.Id, cookie: f.cookie}
+	check := runnerCall{method: http.MethodPost, path: authorityCheckPath(claim.RoundId), body: authorityCheckBody(t, writeReport, claim.ClaimEpoch), token: f.token}
+	validate(heartbeat, http.StatusOK)
+	validate(register, http.StatusOK)
+	validate(ticket, http.StatusOK)
+	assertErrorCode(t, validate(check, http.StatusConflict), reconcileRequiredCode)
+	validate(reconcile(reconcileBody(t)), http.StatusOK)
+	validate(ticket, http.StatusOK)
+	validate(reconcile(reconcileBody(t, heldRound(claim, HeldStopped))), http.StatusOK)
+	validate(reconcile(reconcileBody(t, heldRound(claim, HeldRunning))), http.StatusOK)
+	validate(check, http.StatusOK)
+	f.clock.Set(runnerEpoch.Add(time.Hour))
+	assertErrorCode(t, validate(check, http.StatusConflict), runnerDisconnectedCode)
+	validate(heartbeat, http.StatusOK)
+	f.mustStop(t, queued.Id)
+	validate(reconcile(reconcileBody(t, heldRound(claim, HeldRunning))), http.StatusOK)
+	validate(reconcile(reconcileBody(t, heldRound(claim, HeldStopped))), http.StatusOK)
+	validate(reconcile(`{"held":null}`), http.StatusBadRequest)
+	validate(reconcile(reconcileBody(t, map[string]any{"roundId": uuid.NewString(), "claimEpoch": 1, "execution": "running"})), http.StatusNotFound)
+	assertErrorCode(t, validate(reconcile(reconcileBody(t, map[string]any{"roundId": claim.RoundId, "claimEpoch": 2, "execution": "running"})), http.StatusConflict), staleClaimEpochCode)
+	f.mustConfirmStop(t, claim)
+	assertErrorCode(t, validate(reconcile(reconcileBody(t, heldRound(claim, HeldRunning))), http.StatusConflict), roundNotOpenCode)
+	validate(runnerCall{method: http.MethodPost, path: "/api/runner/reconcile", body: reconcileBody(t), cookie: f.cookie}, http.StatusUnauthorized)
+
+	rec := f.expect(t, runnerCall{method: http.MethodGet, path: "/api/runner/reconcile", token: f.token}, http.StatusMethodNotAllowed)
+	if rec.Header().Get("Allow") != "POST" {
+		t.Fatalf("Allow = %q, want POST", rec.Header().Get("Allow"))
+	}
 }

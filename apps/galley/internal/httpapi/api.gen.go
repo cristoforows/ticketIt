@@ -90,6 +90,24 @@ func (e AuthorityDecision) Valid() bool {
 	}
 }
 
+// Defines values for CessationEvent.
+const (
+	CessationInterrupted   CessationEvent = "interrupted"
+	CessationStopConfirmed CessationEvent = "stop_confirmed"
+)
+
+// Valid indicates whether the value is a known member of the CessationEvent enum.
+func (e CessationEvent) Valid() bool {
+	switch e {
+	case CessationInterrupted:
+		return true
+	case CessationStopConfirmed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DatabaseStatusStatus.
 const (
 	DatabaseStatusStatusError DatabaseStatusStatus = "error"
@@ -102,6 +120,27 @@ func (e DatabaseStatusStatus) Valid() bool {
 	case DatabaseStatusStatusError:
 		return true
 	case DatabaseStatusStatusOk:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for HeldExecution.
+const (
+	HeldRunning HeldExecution = "running"
+	HeldStopped HeldExecution = "stopped"
+	HeldUnknown HeldExecution = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the HeldExecution enum.
+func (e HeldExecution) Valid() bool {
+	switch e {
+	case HeldRunning:
+		return true
+	case HeldStopped:
+		return true
+	case HeldUnknown:
 		return true
 	default:
 		return false
@@ -207,6 +246,30 @@ func (e PermissionRequestDecision) Valid() bool {
 	}
 }
 
+// Defines values for ReconcileDisposition.
+const (
+	ReconcileContinue        ReconcileDisposition = "continue"
+	ReconcileHold            ReconcileDisposition = "hold"
+	ReconcileReportCessation ReconcileDisposition = "report_cessation"
+	ReconcileStop            ReconcileDisposition = "stop"
+)
+
+// Valid indicates whether the value is a known member of the ReconcileDisposition enum.
+func (e ReconcileDisposition) Valid() bool {
+	switch e {
+	case ReconcileContinue:
+		return true
+	case ReconcileHold:
+		return true
+	case ReconcileReportCessation:
+		return true
+	case ReconcileStop:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RoundEventType.
 const (
 	RoundEventDelivered           RoundEventType = "delivered"
@@ -284,8 +347,10 @@ func (e RoundState) Valid() bool {
 
 // Defines values for RoundWaitingReason.
 const (
+	WaitingExecutionUnknown   RoundWaitingReason = "execution_unknown"
 	WaitingForAnswer          RoundWaitingReason = "waiting_for_answer"
 	WaitingForPermission      RoundWaitingReason = "waiting_for_permission"
+	WaitingReconciling        RoundWaitingReason = "reconciling"
 	WaitingResuming           RoundWaitingReason = "resuming"
 	WaitingRunnerDisconnected RoundWaitingReason = "runner_disconnected"
 	WaitingStarting           RoundWaitingReason = "starting"
@@ -296,9 +361,13 @@ const (
 // Valid indicates whether the value is a known member of the RoundWaitingReason enum.
 func (e RoundWaitingReason) Valid() bool {
 	switch e {
+	case WaitingExecutionUnknown:
+		return true
 	case WaitingForAnswer:
 		return true
 	case WaitingForPermission:
+		return true
+	case WaitingReconciling:
 		return true
 	case WaitingResuming:
 		return true
@@ -637,6 +706,9 @@ type BadgeList struct {
 	Badges []Badge `json:"badges"`
 }
 
+// CessationEvent defines model for CessationEvent.
+type CessationEvent string
+
 // ChangeTicketStatusRequest `status` names the requested target Status, validated against the Ticket's persisted current Status per D3 S2. `Done` is always rejected here -- see `POST /api/tickets/{id}/accept`.
 type ChangeTicketStatusRequest struct {
 	// Status A Ticket's lifecycle stage (CONTEXT.md, "Status"). Moves between these values are validated against the persisted current Status per D3 S2 (docs/decisions/d3-agent-template-compatibility.md). `Done` is reachable only through explicit Accept.
@@ -786,6 +858,19 @@ type FailedData struct {
 	Explanation string `json:"explanation"`
 }
 
+// HeldExecution What the runner believes about the Round's execution. `unknown` is answered as if nothing were held.
+type HeldExecution string
+
+// HeldRound defines model for HeldRound.
+type HeldRound struct {
+	// ClaimEpoch The fencing token the runner holds.
+	ClaimEpoch int `json:"claimEpoch"`
+
+	// Execution What the runner believes about the Round's execution. `unknown` is answered as if nothing were held.
+	Execution HeldExecution `json:"execution"`
+	RoundId   string        `json:"roundId"`
+}
+
 // InterruptedData defines model for InterruptedData.
 type InterruptedData struct {
 	// Evidence The runner's own evidence that execution ceased, kept as the Round's `outcomeNote`. Counted in Unicode code points. Not blank; no control characters but tab and line feed.
@@ -928,6 +1013,46 @@ type QuestionRaisedData struct {
 
 	// Text Counted in Unicode code points. Not blank; no control characters but tab and line feed.
 	Text string `json:"text"`
+}
+
+// ReconcileDisposition `continue`: execution is intact at the current epoch with no Stop requested; resume the same Round. `stop`: a Stop is requested and not confirmed; halt before the next step, then confirm it. `report_cessation`: belief is not evidence; send `cessationEvent`, which alone can end the Round. `hold`: execution cannot be confirmed; execute nothing for this Round, which stays open and locked.
+type ReconcileDisposition string
+
+// ReconcileRequest defines model for ReconcileRequest.
+type ReconcileRequest struct {
+	// Held Empty when the runner holds no Round.
+	Held []HeldRound `json:"held"`
+}
+
+// ReconcileRequired True while the Owner's open Round awaits a Reconcile.
+type ReconcileRequired = bool
+
+// ReconcileResult defines model for ReconcileResult.
+type ReconcileResult struct {
+	// Round Null when nothing was held and the Owner has no open Round.
+	Round *ReconciledRound `json:"round"`
+}
+
+// ReconciledRound defines model for ReconciledRound.
+type ReconciledRound struct {
+	// CessationEvent Present exactly when `disposition` is `report_cessation`: `stop_confirmed` when the Owner requested Stop, else `interrupted`.
+	CessationEvent *CessationEvent `json:"cessationEvent,omitempty"`
+
+	// ClaimEpoch The current claim epoch for later events.
+	ClaimEpoch int `json:"claimEpoch"`
+
+	// Commands As `GET /api/runner/rounds/{roundId}/commands` lists them. No grants: authority is checked per action.
+	Commands []RunnerCommand `json:"commands"`
+
+	// Disposition `continue`: execution is intact at the current epoch with no Stop requested; resume the same Round. `stop`: a Stop is requested and not confirmed; halt before the next step, then confirm it. `report_cessation`: belief is not evidence; send `cessationEvent`, which alone can end the Round. `hold`: execution cannot be confirmed; execute nothing for this Round, which stays open and locked.
+	Disposition ReconcileDisposition `json:"disposition"`
+	RoundId     string               `json:"roundId"`
+
+	// State A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress; one waiting for input has moved it to Blocked and keeps the Owner's slot.
+	State OpenRoundState `json:"state"`
+
+	// TicketStatus A Ticket's lifecycle stage (CONTEXT.md, "Status"). Moves between these values are validated against the persisted current Status per D3 S2 (docs/decisions/d3-agent-template-compatibility.md). `Done` is reachable only through explicit Accept.
+	TicketStatus TicketStatus `json:"ticketStatus"`
 }
 
 // RegisterRunnerRequest defines model for RegisterRunnerRequest.
@@ -1114,7 +1239,7 @@ type RoundUsage struct {
 	OutputTokens UsageCount `json:"outputTokens"`
 }
 
-// RoundWaitingReason What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `stopping` (Stop requested), `resuming` (waiting for input, its question answered or its Permission request approved), `waiting_for_answer` (waiting on an unanswered question), `waiting_for_permission` (waiting on a Permission request not approved, declined included), `starting` (claimed) and `working` (running) applies.
+// RoundWaitingReason What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `execution_unknown` (the Round awaits a Reconcile and the last Reconcile could not confirm execution), `reconciling` (the Round awaits a Reconcile otherwise), `stopping` (Stop requested), `resuming` (waiting for input, its question answered or its Permission request approved), `waiting_for_answer` (waiting on an unanswered question), `waiting_for_permission` (waiting on a Permission request not approved, declined included), `starting` (claimed) and `working` (running) applies.
 type RoundWaitingReason string
 
 // RunnerClaim defines model for RunnerClaim.
@@ -1192,6 +1317,9 @@ type RunnerHealthState string
 // RunnerHeartbeat defines model for RunnerHeartbeat.
 type RunnerHeartbeat struct {
 	LastSeenAt time.Time `json:"lastSeenAt"`
+
+	// ReconcileRequired True while the Owner's open Round awaits a Reconcile.
+	ReconcileRequired ReconcileRequired `json:"reconcileRequired"`
 }
 
 // RunnerPairing defines model for RunnerPairing.
@@ -1202,7 +1330,9 @@ type RunnerPairing struct {
 
 // RunnerRegistration defines model for RunnerRegistration.
 type RunnerRegistration struct {
-	RegisteredAt time.Time `json:"registeredAt"`
+	// ReconcileRequired True while the Owner's open Round awaits a Reconcile.
+	ReconcileRequired ReconcileRequired `json:"reconcileRequired"`
+	RegisteredAt      time.Time         `json:"registeredAt"`
 }
 
 // SessionResponse defines model for SessionResponse.
@@ -1396,7 +1526,7 @@ type TicketOpenRound struct {
 	// StopRequestedAt When the Owner requested Stop; the Ticket shows Stopping. Not a Status.
 	StopRequestedAt *time.Time `json:"stopRequestedAt"`
 
-	// WaitingReason What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `stopping` (Stop requested), `resuming` (waiting for input, its question answered or its Permission request approved), `waiting_for_answer` (waiting on an unanswered question), `waiting_for_permission` (waiting on a Permission request not approved, declined included), `starting` (claimed) and `working` (running) applies.
+	// WaitingReason What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `execution_unknown` (the Round awaits a Reconcile and the last Reconcile could not confirm execution), `reconciling` (the Round awaits a Reconcile otherwise), `stopping` (Stop requested), `resuming` (waiting for input, its question answered or its Permission request approved), `waiting_for_answer` (waiting on an unanswered question), `waiting_for_permission` (waiting on a Permission request not approved, declined included), `starting` (claimed) and `working` (running) applies.
 	WaitingReason RoundWaitingReason `json:"waitingReason"`
 }
 
@@ -1556,6 +1686,9 @@ type AdvanceDevClockJSONRequestBody = AdvanceDevClockRequest
 
 // CreateDiagnosticNoteJSONRequestBody defines body for CreateDiagnosticNote for application/json ContentType.
 type CreateDiagnosticNoteJSONRequestBody = CreateDiagnosticNoteRequest
+
+// ReconcileRunnerJSONRequestBody defines body for ReconcileRunner for application/json ContentType.
+type ReconcileRunnerJSONRequestBody = ReconcileRequest
 
 // RegisterRunnerJSONRequestBody defines body for RegisterRunner for application/json ContentType.
 type RegisterRunnerJSONRequestBody = RegisterRunnerRequest
@@ -1939,6 +2072,9 @@ type ServerInterface interface {
 	// RunnerHeartbeat Runner heartbeat
 	// (POST /api/runner/heartbeat)
 	RunnerHeartbeat(w http.ResponseWriter, r *http.Request)
+	// ReconcileRunner Reconcile what the runner holds with Galley
+	// (POST /api/runner/reconcile)
+	ReconcileRunner(w http.ResponseWriter, r *http.Request)
 	// RegisterRunner Register a runner
 	// (POST /api/runner/register)
 	RegisterRunner(w http.ResponseWriter, r *http.Request)
@@ -2321,6 +2457,20 @@ func (siw *ServerInterfaceWrapper) RunnerHeartbeat(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RunnerHeartbeat(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReconcileRunner operation middleware
+func (siw *ServerInterfaceWrapper) ReconcileRunner(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReconcileRunner(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3318,6 +3468,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/runner-health", wrapper.GetRunnerHealth)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner/register", wrapper.RegisterRunner)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner/heartbeat", wrapper.RunnerHeartbeat)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner/reconcile", wrapper.ReconcileRunner)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner/claims", wrapper.ClaimWork)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner/rounds/{roundId}/events", wrapper.ReportRoundEvent)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner/rounds/{roundId}/authority-checks", wrapper.CheckRoundAuthority)

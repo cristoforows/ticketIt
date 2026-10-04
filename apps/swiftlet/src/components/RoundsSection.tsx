@@ -43,6 +43,14 @@ export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEar
           <span className="font-bold tracking-label uppercase">Runner disconnected</span> Lost contact does not mean the Round stopped. It stays open and the Ticket stays locked.
         </p>
       )}
+      {!runnerLost && openRound?.waitingReason === "execution_unknown" && (
+        <p role="status" data-testid="ticket-detail-execution-unknown" className="my-2 border-2 border-status-blocked-deep p-2 text-status-blocked-deep">
+          <span className="font-bold tracking-label uppercase">Runner cannot confirm execution</span> The runner reconnected but cannot confirm this Round is running. It stays open and the Ticket stays locked.
+        </p>
+      )}
+      {!runnerLost && openRound?.waitingReason === "reconciling" && (
+        <FieldNote role="status" data-testid="ticket-detail-reconciling">Reconciling with the runner</FieldNote>
+      )}
       {openRound?.question && answer && (
         <QuestionPanel roundId={openRound.id} question={openRound.question} availability={answer} onAnswer={onAnswer} onAnswered={onAnswered} />
       )}

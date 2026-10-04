@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/cristoforows/ticketIt/apps/galley/internal/auth"
 )
@@ -234,17 +235,38 @@ func (s *server) RegisterRunner(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), runnerTimeout)
 	defer cancel()
 	now := s.clockNow()
-	tag, err := s.pool.Exec(ctx, `UPDATE runners SET registered_at = $2, last_seen_at = $2, michelin_version = $3, hostname = $4
-		WHERE id = $1`, runner.id, now, version, hostname)
+	required, found, err := registerRunner(ctx, s.pool, runner, now, version, hostname)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to register the runner")
 		return
 	}
-	if tag.RowsAffected() == 0 {
+	if !found {
 		writeUnauthenticated(w)
 		return
 	}
-	writeJSON(w, http.StatusOK, RunnerRegistration{RegisteredAt: now})
+	writeJSON(w, http.StatusOK, RunnerRegistration{RegisteredAt: now, ReconcileRequired: required})
+}
+
+// A registration is a new runner process, which cannot know what the previous one left running (#170).
+func registerRunner(ctx context.Context, pool *pgxpool.Pool, runner authenticatedRunner, now time.Time, version, hostname string) (bool, bool, error) {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return false, false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	tag, err := tx.Exec(ctx, `UPDATE runners SET registered_at = $2, last_seen_at = $2, michelin_version = $3, hostname = $4
+		WHERE id = $1`, runner.id, now, version, hostname)
+	if err != nil || tag.RowsAffected() == 0 {
+		return false, false, err
+	}
+	if err := flagOwnerOpenRound(ctx, tx, runner.ownerID); err != nil {
+		return false, false, err
+	}
+	required, err := ownerOpenRoundAwaitsReconcile(ctx, tx, runner.ownerID)
+	if err != nil {
+		return false, false, err
+	}
+	return required, true, tx.Commit(ctx)
 }
 
 func (s *server) RunnerHeartbeat(w http.ResponseWriter, r *http.Request) {
@@ -259,14 +281,47 @@ func (s *server) RunnerHeartbeat(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), runnerTimeout)
 	defer cancel()
 	now := s.clockNow()
-	tag, err := s.pool.Exec(ctx, `UPDATE runners SET last_seen_at = $2 WHERE id = $1`, runner.id, now)
+	required, found, err := recordHeartbeat(ctx, s.pool, runner, now)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to record the heartbeat")
 		return
 	}
-	if tag.RowsAffected() == 0 {
+	if !found {
 		writeUnauthenticated(w)
 		return
 	}
-	writeJSON(w, http.StatusOK, RunnerHeartbeat{LastSeenAt: now})
+	writeJSON(w, http.StatusOK, RunnerHeartbeat{LastSeenAt: now, ReconcileRequired: required})
+}
+
+// A heartbeat after a gap the health window already called disconnected cannot vouch for what ran in the gap (#170).
+func heartbeatAfterAGap(now time.Time, previous *time.Time) bool {
+	return !runnerConnected(now, previous)
+}
+
+func recordHeartbeat(ctx context.Context, pool *pgxpool.Pool, runner authenticatedRunner, now time.Time) (bool, bool, error) {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return false, false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var previous *time.Time
+	err = tx.QueryRow(ctx, `UPDATE runners r SET last_seen_at = $2
+		FROM (SELECT id, last_seen_at FROM runners WHERE id = $1 FOR UPDATE) old
+		WHERE r.id = old.id RETURNING old.last_seen_at`, runner.id, now).Scan(&previous)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	if heartbeatAfterAGap(now, previous) {
+		if err := flagOwnerOpenRound(ctx, tx, runner.ownerID); err != nil {
+			return false, false, err
+		}
+	}
+	required, err := ownerOpenRoundAwaitsReconcile(ctx, tx, runner.ownerID)
+	if err != nil {
+		return false, false, err
+	}
+	return required, true, tx.Commit(ctx)
 }

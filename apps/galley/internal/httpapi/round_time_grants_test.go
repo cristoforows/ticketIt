@@ -314,6 +314,7 @@ func TestAuthorityCheck_ATimeGrantAuthorizesItsAgentAndScopeOnEveryTicketUntilEx
 		again := f.mustClaim(t)
 		f.startRound(t, again, again.RoundId+":start")
 		f.clock.Set(until)
+		f.reconnect(t, again)
 		assertExpiredDeny(t, f.mustCheck(t, again, writeReport), timeGrant)
 	})
 }
@@ -324,10 +325,12 @@ func TestAuthorityCheck_ATimeGrantExpiresAtItsInstantByGalleysClockBetweenTwoChe
 	queued, claim, grantID := f.timeGrantRound(t, "Expiring", writeReport, until)
 
 	f.clock.Set(until.Add(-time.Microsecond))
+	f.reconnect(t, claim)
 	assertDecision(t, f.mustCheck(t, claim, writeReport), AuthorityAllow, grantID)
 	f.clock.Set(until)
 	assertExpiredDeny(t, f.mustCheck(t, claim, writeReport), grantID)
 	f.clock.Set(until.Add(time.Hour))
+	f.reconnect(t, claim)
 	assertExpiredDeny(t, f.mustCheck(t, claim, writeReport), grantID)
 
 	round := f.roundOf(t, queued.Id)
@@ -377,6 +380,7 @@ func TestRenewal_NamesTheExpiredGrantAndItsApprovalCreatesANewGrantLeavingTheOld
 			until := runnerEpoch.Add(time.Minute)
 			queued, claim, expired := f.timeGrantRound(t, "Renew", writeReport, until)
 			f.clock.Set(until.Add(time.Second))
+			f.reconnect(t, claim)
 			assertExpiredDeny(t, f.mustCheck(t, claim, writeReport), expired)
 			oldRow := grantRow(t, f, expired)
 

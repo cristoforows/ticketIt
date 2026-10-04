@@ -122,7 +122,7 @@ export interface RoundActivityPage {
   earlierActivityCursor: string | null;
 }
 
-export type WaitingReason = "starting" | "working" | "waiting_for_answer" | "waiting_for_permission" | "resuming" | "stopping" | "runner_disconnected";
+export type WaitingReason = "starting" | "working" | "waiting_for_answer" | "waiting_for_permission" | "resuming" | "stopping" | "runner_disconnected" | "reconciling" | "execution_unknown";
 
 export interface UsageCount {
   sum: number | null;
