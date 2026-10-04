@@ -23,6 +23,7 @@ type ticketWorkflowState struct {
 	agentKind                         AgentKind
 	goal, successCriteria, repository string
 	waitingQuestion                   *RoundQuestion
+	waitingPermissionRequest          *PermissionRequest
 	// The latest Round's id when it delivered.
 	deliveredRoundID string
 }
@@ -39,6 +40,7 @@ func workflowStateOf(ticket Ticket) ticketWorkflowState {
 		state.openRoundID = ticket.OpenRound.Id
 		state.stopRequested = ticket.OpenRound.StopRequestedAt != nil
 		state.waitingQuestion = ticket.OpenRound.Question
+		state.waitingPermissionRequest = ticket.OpenRound.PermissionRequest
 	}
 	if ticket.Delivery != nil {
 		state.deliveredRoundID = ticket.Delivery.RoundId

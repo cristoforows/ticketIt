@@ -25,6 +25,9 @@ const STOPPED = {
   earlierActivityCursor: null,
   questions: [],
   feedback: [],
+  permissionRequests: [],
+  authorityChecks: [],
+  authorityCheckCount: 0,
   usage,
   deliverable: null,
 };
@@ -32,6 +35,11 @@ const STOPPED = {
 const QUESTION = { id: "99999999-9999-5999-8999-999999999999", text: "Which region?", askedAt: "2026-10-01T10:00:10Z", answer: null, answeredAt: null };
 
 const FEEDBACK = { id: "13131313-1313-4313-8313-131313131313", body: "Cover Asia too", createdAt: "2026-10-01T10:01:00Z", consumedBy: null };
+
+const REQUEST = { id: "99999999-9999-5999-8999-999999999990", account: "controlled", action: "write_note", resource: "notes/weekly-report", substituteAccount: true, requestedAt: "2026-10-01T10:00:10Z", decision: "approved", decidedAt: "2026-10-01T10:00:12Z", grantId: "12121212-1212-4121-8121-121212121212" };
+
+const DENY = { account: "controlled", action: "write_note", resource: "notes/weekly-report", decision: "deny", grantId: null, checkedAt: "2026-10-01T10:00:09Z" };
+const ALLOW = { ...DENY, decision: "allow", grantId: REQUEST.grantId, checkedAt: "2026-10-01T10:00:13Z" };
 
 const answer = (rounds: unknown[]) => vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => ({ rounds }) }));
 
@@ -64,6 +72,12 @@ describe("fetchTicketRounds", () => {
     expect(await fetchTicketRounds("t")).toEqual([delivered]);
   });
 
+  it("keeps a Round's Permission requests, its latest authority checks and their count", async () => {
+    const withChecks = { ...STOPPED, permissionRequests: [REQUEST], authorityChecks: [DENY, ALLOW], authorityCheckCount: 60 };
+    answer([withChecks]);
+    expect(await fetchTicketRounds("t")).toEqual([withChecks]);
+  });
+
   it.each([
     ["failed", "The repository is gone."],
     ["interrupted", "The engine process exited with signal 9."],
@@ -92,6 +106,16 @@ describe("fetchTicketRounds", () => {
     ["feedback without its body", { ...STOPPED, feedback: [{ ...FEEDBACK, body: undefined }] }],
     ["feedback with no consumedBy field", { ...STOPPED, feedback: [{ ...FEEDBACK, consumedBy: undefined }] }],
     ["feedback consumed by a Round without its sequence", { ...STOPPED, feedback: [{ ...FEEDBACK, consumedBy: { roundId: "77777777-7777-4777-8777-777777777777" } }] }],
+    ["no permissionRequests field", { ...STOPPED, permissionRequests: undefined }],
+    ["a Permission request approved without its grant", { ...STOPPED, permissionRequests: [{ ...REQUEST, grantId: null }] }],
+    ["no authorityChecks field", { ...STOPPED, authorityChecks: undefined }],
+    ["an allow without its grant", { ...STOPPED, authorityChecks: [{ ...ALLOW, grantId: null }], authorityCheckCount: 1 }],
+    ["a deny with a grant", { ...STOPPED, authorityChecks: [{ ...DENY, grantId: REQUEST.grantId }], authorityCheckCount: 1 }],
+    ["an unknown decision", { ...STOPPED, authorityChecks: [{ ...DENY, decision: "maybe" }], authorityCheckCount: 1 }],
+    ["a check without checkedAt", { ...STOPPED, authorityChecks: [{ ...DENY, checkedAt: undefined }], authorityCheckCount: 1 }],
+    ["no authorityCheckCount field", { ...STOPPED, authorityCheckCount: undefined }],
+    ["a count below the checks listed", { ...STOPPED, authorityChecks: [DENY, ALLOW], authorityCheckCount: 1 }],
+    ["a fractional count", { ...STOPPED, authorityCheckCount: 0.5 }],
   ])("refuses %s", async (_name, round) => {
     answer([round]);
     await expect(fetchTicketRounds("t")).rejects.toThrow("Galley's Round list was missing a required field.");

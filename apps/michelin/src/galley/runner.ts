@@ -7,6 +7,8 @@ export type RunnerClaim = components["schemas"]["RunnerClaim"];
 export type ClaimedFeedback = components["schemas"]["ClaimedFeedback"];
 export type RoundEventRequest = components["schemas"]["RoundEventRequest"];
 export type RoundEventResult = components["schemas"]["RoundEventResult"];
+export type AuthorityCheckRequest = components["schemas"]["AuthorityCheckRequest"];
+export type AuthorityCheckResult = components["schemas"]["AuthorityCheckResult"];
 
 export type RunnerFailure =
   | TransportFailure
@@ -134,6 +136,7 @@ export interface RoundEventExpectation {
   type: RoundEventRequest["type"];
   observationId?: string;
   questionId?: string;
+  requestId?: string;
 }
 
 // The body arrives serialised so every retry of one event sends the same bytes.
@@ -155,13 +158,17 @@ export function reportRoundEvent(request: RunnerRequest, roundId: string, body: 
 
 const END_STATES: Partial<Record<RoundEventRequest["type"], RoundEventResult["state"]>> = { delivered: "delivered", stop_confirmed: "stopped", failed: "failed", interrupted: "interrupted" };
 
-const QUESTION_STATES: Partial<Record<RoundEventRequest["type"], RoundEventResult["state"]>> = { question_raised: "waiting_for_input", resumed: "running" };
+const QUESTION_STATES: Partial<Record<RoundEventRequest["type"], RoundEventResult["state"]>> = {
+  question_raised: "waiting_for_input",
+  permission_requested: "waiting_for_input",
+  resumed: "running",
+};
 
 function parseRoundEventResult(payload: unknown, roundId: string, expected: RoundEventExpectation): RoundEventResult | string {
   if (!isRecord(payload)) {
     return "body is not a JSON object";
   }
-  const { roundId: reportedRound, type, state, startedAt, endedAt, seq, observationId, questionId } = payload;
+  const { roundId: reportedRound, type, state, startedAt, endedAt, seq, observationId, questionId, requestId } = payload;
   if (reportedRound !== roundId) {
     return "roundId is not the Round the event was sent for";
   }
@@ -191,13 +198,17 @@ function parseRoundEventResult(payload: unknown, roundId: string, expected: Roun
   if (type === "usage_observed" && observationId !== expected.observationId) {
     return "observationId is not the observation the event was sent for";
   }
-  if (questionState !== undefined && questionId !== expected.questionId) {
+  if (questionState !== undefined && expected.requestId !== undefined && requestId !== expected.requestId) {
+    return "requestId is not the Permission request the event was sent for";
+  }
+  if (questionState !== undefined && expected.requestId === undefined && questionId !== expected.questionId) {
     return "questionId is not the question the event was sent for";
   }
   const result: RoundEventResult = { roundId: reportedRound, type: expected.type, state: state as RoundEventResult["state"], startedAt };
   if (type === "progress") result.seq = seq as number;
   if (type === "usage_observed") result.observationId = observationId as string;
-  if (questionState !== undefined) result.questionId = questionId as string;
+  if (questionState !== undefined && expected.requestId !== undefined) result.requestId = requestId as string;
+  if (questionState !== undefined && expected.requestId === undefined) result.questionId = questionId as string;
   if (endState !== undefined) result.endedAt = endedAt as string;
   return result;
 }
@@ -243,9 +254,16 @@ function parseCommands(payload: unknown): PulledCommand[] | string {
     if (!isRecord(command)) {
       return "a command is not a JSON object";
     }
-    const { id, type, claimEpoch, issuedAt, answer } = command;
+    const { id, type, claimEpoch, issuedAt, answer, approval } = command;
     if (typeof id !== "string" || typeof type !== "string" || typeof issuedAt !== "string" || !Number.isSafeInteger(claimEpoch)) {
       return "a command lacks id, type, claimEpoch or issuedAt";
+    }
+    if (type === "approval") {
+      if (!isRecord(approval) || typeof approval["requestId"] !== "string" || typeof approval["grantId"] !== "string") {
+        return "an approval command lacks approval.requestId or approval.grantId";
+      }
+      commands.push({ id, type, claimEpoch: claimEpoch as number, issuedAt, approval: { requestId: approval["requestId"], grantId: approval["grantId"] } });
+      continue;
     }
     if (type !== "answer") {
       commands.push({ id, type, claimEpoch: claimEpoch as number, issuedAt });
@@ -274,5 +292,30 @@ export function acknowledgeRoundCommand(request: RunnerRequest, roundId: string,
       return { ok: false, failure: { reason: "invalid_body", error: "body is not the acknowledgement of this command and outcome" } };
     }
     return { ok: true, value: { id: commandId, outcome, acknowledgedAt: payload["acknowledgedAt"] } };
+  });
+}
+
+export type AuthorityCheckFailure = RoundEventFailure;
+
+export type AuthorityCheckReport = Timed<Outcome<AuthorityCheckResult, AuthorityCheckFailure>>;
+
+export function checkAuthority(request: RunnerRequest, roundId: string, body: AuthorityCheckRequest): Promise<AuthorityCheckReport> {
+  const headers = { accept: "application/json", "content-type": "application/json", authorization: request.credential.authorizationHeader() };
+  const path = `api/runner/rounds/${encodeURIComponent(roundId)}/authority-checks`;
+  return callGalley<AuthorityCheckResult, AuthorityCheckFailure>(request, path, { method: "POST", headers, body: JSON.stringify(body) }, async (response, readJson) => {
+    const payload = await readJson();
+    if (response.status !== 200) {
+      return { ok: false, failure: { reason: "http_status", httpStatus: response.status, errorCode: errorCodeOf(payload) } };
+    }
+    if (payload === INVALID_JSON) {
+      return { ok: false, failure: { reason: "invalid_body", error: "response is not valid JSON" } };
+    }
+    if (isRecord(payload) && payload["decision"] === "allow" && typeof payload["grantId"] === "string") {
+      return { ok: true, value: { decision: "allow", grantId: payload["grantId"] } };
+    }
+    if (isRecord(payload) && payload["decision"] === "deny" && payload["grantId"] === undefined) {
+      return { ok: true, value: { decision: "deny" } };
+    }
+    return { ok: false, failure: { reason: "invalid_body", error: "body is not an allow naming its grant or a deny" } };
   });
 }

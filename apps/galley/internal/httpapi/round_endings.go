@@ -63,7 +63,8 @@ func validateOutcomeNoteData(raw []byte, field string) (string, string) {
 // Any Status but the one the Round's open state holds is a broken invariant, refused rather than moved.
 func endRound(ctx context.Context, tx pgx.Tx, ownerID int64, ticketID string, roundID int64, from RoundState, ending roundEnding, now time.Time) (time.Time, error) {
 	var endedAt time.Time
-	if err := tx.QueryRow(ctx, `UPDATE rounds SET state = $3, outcome_note = $4, ended_at = GREATEST($5::timestamptz, COALESCE(started_at, claimed_at))
+	if err := tx.QueryRow(ctx, `UPDATE rounds SET state = $3, outcome_note = $4, ended_at = GREATEST($5::timestamptz, COALESCE(started_at, claimed_at)),
+			waiting_question_id = NULL, waiting_permission_request_id = NULL
 		WHERE id = $1 AND owner_id = $2 RETURNING ended_at`, roundID, ownerID, string(ending.state), ending.note, now).Scan(&endedAt); err != nil {
 		return time.Time{}, err
 	}

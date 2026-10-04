@@ -41,16 +41,24 @@ Reusable instructions assigned to an **Agent** for performing a type of work. A 
 _Avoid_: Recipe when referring to reusable work instructions.
 
 **Connected Account**:
-An external-service identity authenticated by the user and made available for explicitly permitted **Agent** work. An agent using a connected account acts through that identity, such as the user's GitHub account.
+An external-service identity authenticated by the user and made available for explicitly permitted **Agent** work. An agent using a connected account acts through that identity, such as the user's GitHub account. Its existence authorizes nothing. Until real accounts arrive, the controlled account is a labelled substitute with a fixed set of actions and resource patterns.
 _Avoid_: Agent, model provider when referring to the external identity used for work.
 
 **Permission**:
-Authorization for an **Agent** to perform actions within a resource scope, including granular grants or explicit full access through a **Connected Account**. Full access covers the actions and resources available through that connection, not capabilities beyond the account's authenticated access.
+Authorization for an **Agent** to perform actions within a resource scope, including granular grants or explicit full access through a **Connected Account**. Full access covers the actions and resources available through that connection, not capabilities beyond the account's authenticated access. Authority is read live before each action, never carried from the start of a **Round**; with no matching grant the answer is deny, and a denied agent may ask through a **Permission Request**.
 _Avoid_: Skill when referring to authorization rather than instructions.
 
 **Temporary Permission**:
 A **Permission** for an **Agent** of one of two distinct kinds: ticket-based, ending when its specified **Ticket** reaches **Done**, or time-based, ending at its configured expiry independently of ticket completion. It authorizes repeated uses within its account, action, and resource scope; ticket and time limits are not combined in one grant.
 _Avoid_: One-time permission when referring to a ticket-bound or time-bound grant.
+
+**Permission Request**:
+An **Agent**'s ask, during a **Round**, for one account, action and resource it was denied, putting that round in **Waiting for Input**. The owner's first decision stands: an **Approval**, or a decline that leaves the round waiting until the owner stops it.
+_Avoid_: Question when referring to an ask for authority rather than information.
+
+**Approval**:
+The owner's acceptance of a **Permission Request**, which creates a **Temporary Permission** for exactly that agent, ticket and scope and resumes the same **Round**. Later actions in that scope, in this or a later round of the ticket, need no new request.
+_Avoid_: Answer when referring to granting authority.
 
 **Grill Mode**:
 An optional guided interview during **Ticket** creation that helps the person adding the ticket clarify its intended outcome and supply information needed to carry out the work. People can instead fill in the ticket themselves using simple guidance.
@@ -105,11 +113,11 @@ The **Status** of a **Ticket** whose completion condition has been met, through 
 _Avoid_: Agent finished when referring to acceptance of the ticket's outcome.
 
 **Blocked**:
-The **Status** of a **Ticket** that cannot proceed without intervention, including an obstacle reported by its human **Assignee** or a **Round** that is **Waiting for Input**, **Interrupted**, or **Failed**. Answering a waiting round resumes it in **In Progress**; recovery after an interrupted or failed round requires a person to return the ticket to **Ready** for another round.
+The **Status** of a **Ticket** that cannot proceed without intervention, including an obstacle reported by its human **Assignee** or a **Round** that is **Waiting for Input**, **Interrupted**, or **Failed**. Answering or approving a waiting round resumes it in **In Progress**; recovery after an interrupted or failed round requires a person to return the ticket to **Ready** for another round.
 _Avoid_: Ready when intervention is still required.
 
 **Waiting for Input**:
-The condition of an open **Round** paused on one unanswered **Question** from its **Agent**; the **Answer** continues the same round. The **Ticket** is **Blocked** yet stays locked to the round, and Stop still ends it as **Stopped**. Agents are expected to work autonomously and seek input only when necessary, with waiting time distinguished from active work time.
+The condition of an open **Round** paused on one unanswered **Question** or undecided or declined **Permission Request** from its **Agent**; the **Answer** or **Approval** continues the same round. The **Ticket** is **Blocked** yet stays locked to the round, and Stop still ends it as **Stopped**. Agents are expected to work autonomously and seek input only when necessary, with waiting time distinguished from active work time.
 _Avoid_: Interrupted, finished when the round is still open for continuation.
 
 **Question**:
@@ -133,7 +141,7 @@ The condition of an open **Round** after the owner has requested Stop and before
 _Avoid_: Stopped while the round is still open.
 
 **Waiting Reason**:
-What an open **Round** is waiting on, as the owner sees it: Starting, Working, Waiting for your answer, Resuming, **Stopping**, or Runner disconnected. Lost contact with the runner outranks the others but never ends the round. It is not a **Status**.
+What an open **Round** is waiting on, as the owner sees it: Starting, Working, Waiting for your answer, Waiting for a Permission, Resuming, **Stopping**, or Runner disconnected. Lost contact with the runner outranks the others but never ends the round. It is not a **Status**.
 _Avoid_: Status, round state when referring to this owner-facing reason.
 
 **Stopped**:

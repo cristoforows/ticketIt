@@ -1142,3 +1142,57 @@ Tests: `TicketDetail.test.tsx` ("feedback for the next Round"),
 `TicketDetailPage.test.tsx` (the POST, the reload and the refresh on
 `feedback_not_available`), `api/tickets.test.ts` and
 `api/rounds.test.ts`.
+
+## Permission requests and grants (issue #165)
+
+Swiftlet renders Galley's Permission state and decides nothing:
+
+- **Request panel.** While `openRound.permissionRequest` is set, the
+  receipt's Rounds section shows a bordered "Permission request" region
+  (`PermissionPanel`, `ticket-detail-permission`). It shows the account,
+  action and resource as receipt lines and when the request was made.
+  The `controlled` account carries a **Substitute account** tag
+  whenever `substituteAccount` is true, here, in the history and on
+  grants.
+- **Decisions.** **Allow for this Ticket**
+  (`ticket-detail-permission-approve`) and **Decline**
+  (`ticket-detail-permission-decline`) show only while
+  `allowedActions.permissionDecision.available`; otherwise Galley's
+  reason is shown. Both are disabled while either is sending. Allow
+  calls `approvePermissionRequest` (`POST
+  .../permission-requests/{requestId}/approve` with `{"form":
+  "ticket"}`), Decline calls `declinePermissionRequest` (`.../decline`,
+  no body). Each reloads the Round list. Once decided the panel reads
+  **Allowed for this Ticket. The Round resumes.** or **Declined. The
+  Round still waits for a Permission; Stop ends it.**
+- **Rejections.** Any Galley refusal refreshes the receipt.
+  `permission_already_decided` and `permission_decision_not_available`
+  say the receipt now shows Galley's state; any other refusal is shown
+  in Galley's words.
+- **Grants.** `permissionGrants` render as "Permissions for this
+  Ticket" (`ticket-detail-permission-grant`): `<Agent> may <action> on
+  <resource> (<account>)` and when it was allowed. They stay on the
+  receipt after the Round ends.
+- **History.** Each Round entry lists its Permission requests
+  (`ticket-detail-round-permission-request`, `data-decision`
+  `pending | approved | declined`) and its authority checks
+  (`ticket-detail-round-authority-check`, **Allowed** or **Denied**,
+  oldest first). When `authorityCheckCount` exceeds the 50 listed, it
+  says **Showing the latest 50 of N checks.** A waiting Round whose
+  questions are all answered and that holds an unapproved request reads
+  **Waiting for a Permission**.
+- **Slip.** `waitingReason` `waiting_for_permission` is labelled
+  **Waiting for a Permission**, with the rider idle as for an answer.
+- **Parsing.** `parseTicket` requires `allowedActions.permissionDecision`
+  and `permissionGrants` (form `ticket`, state `active`). A waiting
+  Round must hold exactly one of `question` and `permissionRequest`;
+  any other open Round holds neither. A request's `decision` and
+  `decidedAt` are set together, and `grantId` is set exactly when
+  approved. `parseRound` requires `permissionRequests`,
+  `authorityChecks` (a `grantId` exactly on `allow`) and an integer
+  `authorityCheckCount` no smaller than the list.
+
+Tests: `TicketDetail.test.tsx` ("a Permission request from the Agent"),
+`TicketDetailPage.test.tsx` (approve, reload and the refresh on
+`permission_already_decided`), `api/tickets.test.ts` and
+`api/rounds.test.ts`.

@@ -1407,3 +1407,101 @@ func TestRoundFeedback_ResponsesMatchContractAndMethod405(t *testing.T) {
 		t.Fatalf("GET feedback: Allow = %q, want POST", rec.Header().Get("Allow"))
 	}
 }
+
+func TestPermissionsAndAuthorityChecks_ResponsesMatchContractAndMethod405(t *testing.T) {
+	f := newClaimFixture(t)
+	router, err := legacy.NewRouter(loadContract(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate := func(call runnerCall, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(call.method, call.path, strings.NewReader(call.body))
+		if call.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if call.token != "" {
+			req.Header.Set("Authorization", "Bearer "+call.token)
+		}
+		if call.cookie != nil {
+			req.AddCookie(call.cookie)
+		}
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("%s %s: status=%d, want %d; body=%s", call.method, call.path, rec.Code, want, rec.Body.String())
+		}
+		validateAgainstContract(t, router, req, rec)
+		return rec
+	}
+	queued, claim := f.runningRound(t, "contract")
+	event := func(body string) runnerCall {
+		return runnerCall{method: http.MethodPost, path: "/api/runner/rounds/" + claim.RoundId + "/events", body: body, token: f.token}
+	}
+	check := func(scope permissionScope, epoch int) runnerCall {
+		return runnerCall{method: http.MethodPost, path: authorityCheckPath(claim.RoundId), body: authorityCheckBody(t, scope, epoch), token: f.token}
+	}
+	decide := func(decision, body string) runnerCall {
+		return runnerCall{method: http.MethodPost, path: permissionPath(queued.Id, claim.RoundId, requestA, decision), body: body, cookie: f.cookie}
+	}
+	reads := []runnerCall{
+		{method: http.MethodGet, path: "/api/tickets/" + queued.Id, cookie: f.cookie},
+		{method: http.MethodGet, path: "/api/tickets", cookie: f.cookie},
+		{method: http.MethodGet, path: "/api/tickets/" + queued.Id + "/rounds", cookie: f.cookie},
+		{method: http.MethodGet, path: "/api/runner/rounds/" + claim.RoundId + "/commands", token: f.token},
+	}
+	readAll := func() {
+		t.Helper()
+		for _, read := range reads {
+			validate(read, http.StatusOK)
+		}
+	}
+	request := permissionEvent(t, requestA, claim.ClaimEpoch, requestA, writeReport)
+	resume := approvalResumedEvent(t, "resume", claim.ClaimEpoch, requestA)
+
+	assertErrorCode(t, validate(decide("approve", `{"form":"ticket"}`), http.StatusNotFound), "not_found")
+	validate(check(writeReport, claim.ClaimEpoch), http.StatusOK)
+	assertErrorCode(t, validate(check(permissionScope{"github", "push", "repo"}, claim.ClaimEpoch), http.StatusBadRequest), unsupportedScopeCode)
+	validate(check(permissionScope{"", "push", "repo"}, claim.ClaimEpoch), http.StatusBadRequest)
+	assertErrorCode(t, validate(check(writeReport, claim.ClaimEpoch+1), http.StatusConflict), staleClaimEpochCode)
+	validate(runnerCall{method: http.MethodPost, path: authorityCheckPath(uuid.NewString()), body: authorityCheckBody(t, writeReport, 1), token: f.token}, http.StatusNotFound)
+	validate(runnerCall{method: http.MethodPost, path: authorityCheckPath(claim.RoundId), body: authorityCheckBody(t, writeReport, 1)}, http.StatusUnauthorized)
+	assertErrorCode(t, validate(event(permissionEvent(t, requestA, claim.ClaimEpoch, requestA, permissionScope{"github", "push", "repo"})), http.StatusBadRequest), unsupportedScopeCode)
+	validate(event(request), http.StatusCreated)
+	validate(event(request), http.StatusOK)
+	readAll()
+	assertErrorCode(t, validate(check(writeReport, claim.ClaimEpoch), http.StatusConflict), roundNotRunningCode)
+	assertErrorCode(t, validate(event(resume), http.StatusConflict), approvalNotSuppliedCode)
+	validate(decide("approve", `{"form":"time"}`), http.StatusBadRequest)
+	validate(decide("approve", `{"form":"ticket"}`), http.StatusOK)
+	assertErrorCode(t, validate(decide("decline", ""), http.StatusBadRequest), permissionAlreadyDecidedCode)
+	validate(runnerCall{method: http.MethodPost, path: permissionPath(queued.Id, claim.RoundId, requestA, "decline")}, http.StatusUnauthorized)
+	readAll()
+	validate(event(resume), http.StatusCreated)
+	validate(check(writeReport, claim.ClaimEpoch), http.StatusOK)
+	readAll()
+
+	validate(event(permissionEvent(t, requestB, claim.ClaimEpoch, requestB, permissionScope{controlledAccount, "post_message", "channels/general"})), http.StatusCreated)
+	other := func(decision, body string) runnerCall {
+		return runnerCall{method: http.MethodPost, path: permissionPath(queued.Id, claim.RoundId, requestB, decision), body: body, cookie: f.cookie}
+	}
+	validate(other("decline", ""), http.StatusOK)
+	readAll()
+	f.mustStop(t, queued.Id)
+	readAll()
+	assertErrorCode(t, validate(other("approve", `{"form":"ticket"}`), http.StatusBadRequest), permissionAlreadyDecidedCode)
+	f.mustConfirmStop(t, claim)
+	assertErrorCode(t, validate(check(writeReport, claim.ClaimEpoch), http.StatusConflict), roundNotOpenCode)
+	readAll()
+
+	for _, path := range []string{
+		permissionPath(queued.Id, claim.RoundId, requestA, "approve"),
+		permissionPath(queued.Id, claim.RoundId, requestA, "decline"),
+		authorityCheckPath(claim.RoundId),
+	} {
+		rec := f.expect(t, runnerCall{method: http.MethodGet, path: path, cookie: f.cookie}, http.StatusMethodNotAllowed)
+		if rec.Header().Get("Allow") != "POST" {
+			t.Fatalf("GET %s: Allow = %q, want POST", path, rec.Header().Get("Allow"))
+		}
+	}
+}

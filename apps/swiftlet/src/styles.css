@@ -115,6 +115,7 @@
     animation: delivery-ride 2400ms linear infinite;
   }
   .delivery[data-reason="waiting_for_answer"] .delivery-rider,
+  .delivery[data-reason="waiting_for_permission"] .delivery-rider,
   .delivery[data-reason="resuming"] .delivery-rider {
     animation: delivery-idle 600ms ease-in-out infinite alternate;
   }

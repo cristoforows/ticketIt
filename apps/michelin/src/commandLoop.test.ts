@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startClaimLoop } from "./claimLoop.ts";
 import { resolveRunnerCredential } from "./credentials.ts";
-import { questionIdFor } from "./engine.ts";
+import { questionIdFor, requestIdFor } from "./engine.ts";
 import type { EngineScript } from "./engineScript.ts";
 import type { FetchFn } from "./galley/client.ts";
 import { createLogger } from "./logger.ts";
@@ -41,13 +41,26 @@ const alreadyAcknowledged = () => json({ error: { code: "command_already_acknowl
 
 type Route = (() => Response)[];
 
-function galley(routes: { claims?: Route; commands: Route; ack?: Route; events?: Route }) {
+const checksPath = `/api/runner/rounds/${CLAIM.roundId}/authority-checks`;
+
+function galley(routes: { claims?: Route; commands: Route; ack?: Route; events?: Route; checks?: Route }) {
   const claims = routes.claims ?? [noWork, claimed, noWork];
   const acks = routes.ack ?? [];
   const events = routes.events ?? [created, stopConfirmed];
   return vi.fn<FetchFn>(async (input, init) => {
     const path = new URL(String(input)).pathname;
-    const queue = path === claimsPath ? claims : path === eventPath ? events : path === commandsPath ? routes.commands : path.startsWith(`${commandsPath}/`) ? acks : undefined;
+    const queue =
+      path === claimsPath
+        ? claims
+        : path === eventPath
+          ? events
+          : path === commandsPath
+            ? routes.commands
+            : path.startsWith(`${commandsPath}/`)
+              ? acks
+              : path === checksPath
+                ? routes.checks
+                : undefined;
     if (!queue) throw new Error(`unexpected ${String(input)}`);
     const next = queue.length > 1 ? queue.shift() : queue[0];
     if (next) return next();
@@ -341,6 +354,77 @@ describe("answers", () => {
 
     expect(records().find((record) => record["msg"] === "round commands poll failed")).toMatchObject({ reason: "invalid_body" });
     expect(calls(fetchFn, ackPath(ANSWER.id))).toHaveLength(0);
+    await loop.stop();
+  });
+});
+
+describe("approvals", () => {
+  const ACT: EngineScript = { steps: [{ step: "start" }, { step: "act", account: "controlled", action: "write_note", resource: "notes/weekly-report" }, { step: "hold" }] };
+  const requestId = requestIdFor(CLAIM.roundId, 1);
+  const grantId = "12121212-1212-4212-8212-121212121212";
+  const APPROVAL = { id: "f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f0", type: "approval", claimEpoch: 2, issuedAt: "2026-10-02T12:00:01Z", approval: { requestId, grantId } };
+  const STALE_APPROVAL = { ...APPROVAL, id: "e1e1e1e1-e1e1-4e1e-8e1e-e1e1e1e1e1e1", claimEpoch: 1 };
+  const requested = () => json({ roundId: CLAIM.roundId, type: "permission_requested", state: "waiting_for_input", startedAt: "2026-10-02T11:59:00Z", requestId }, 201);
+  const resumed = () => json({ roundId: CLAIM.roundId, type: "resumed", state: "running", startedAt: "2026-10-02T11:59:00Z", requestId }, 201);
+  const performed = () => json({ roundId: CLAIM.roundId, type: "progress", state: "running", startedAt: "2026-10-02T11:59:00Z", seq: 1 }, 201);
+  const deny = () => json({ decision: "deny" });
+  const allow = () => json({ decision: "allow", grantId });
+  const eventTypes = (fetchFn: ReturnType<typeof galley>) => calls(fetchFn, eventPath).map(([, init]) => (JSON.parse(String(init?.body)) as { type: string }).type);
+
+  it("hands the approval to the waiting engine, which resumes, acknowledges it applied, checks again and performs", async () => {
+    const fetchFn = galley({ commands: [listing(), listing(APPROVAL), listing()], events: [created, requested, resumed, performed, stopConfirmed], checks: [deny, allow] });
+    const { loop, messages } = setup(fetchFn, ACT);
+
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(eventTypes(fetchFn)).toEqual(["execution_started", "permission_requested"]);
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(eventTypes(fetchFn)).toEqual(["execution_started", "permission_requested", "resumed", "progress"]);
+    expect(ackBodies(fetchFn, APPROVAL.id)).toEqual([{ outcome: "applied" }]);
+    const index = (match: (path: string, body: string) => boolean) => fetchFn.mock.calls.findIndex(([input, init]) => match(new URL(String(input)).pathname, String(init?.body)));
+    const resumedAt = index((path, body) => path === eventPath && body.includes('"resumed"'));
+    const ackAt = index((path) => path === ackPath(APPROVAL.id));
+    const checks = fetchFn.mock.calls.map(([input], i) => (new URL(String(input)).pathname === checksPath ? i : -1)).filter((i) => i >= 0);
+    expect(checks).toHaveLength(2);
+    expect(ackAt).toBeGreaterThan(resumedAt);
+    expect(checks[1]).toBeGreaterThan(ackAt);
+    expect(messages()).toEqual(expect.arrayContaining(["permission requested", "engine waiting for an approval", "approval received", "resume reported", "command acknowledged", "action performed"]));
+    await loop.stop();
+  });
+
+  it("acknowledges an approval for another claim epoch as ignored and keeps waiting", async () => {
+    const fetchFn = galley({ commands: [listing(STALE_APPROVAL)], events: [created, requested], checks: [deny] });
+    const { loop, messages } = setup(fetchFn, ACT);
+
+    await vi.advanceTimersByTimeAsync(6000);
+
+    expect(ackBodies(fetchFn, STALE_APPROVAL.id)).toEqual([{ outcome: "ignored" }]);
+    expect(eventTypes(fetchFn)).toEqual(["execution_started", "permission_requested"]);
+    expect(messages()).not.toContain("approval received");
+    await loop.stop();
+  });
+
+  it("stops while waiting when Stop is listed beside the approval, and leaves the approval unacknowledged", async () => {
+    const fetchFn = galley({ commands: [listing(), listing(STOP, APPROVAL), listing()], events: [created, requested, stopConfirmed], checks: [deny] });
+    const { loop } = setup(fetchFn, ACT);
+
+    await vi.advanceTimersByTimeAsync(6000);
+
+    expect(eventTypes(fetchFn)).toEqual(["execution_started", "permission_requested", "stop_confirmed"]);
+    expect(ackBodies(fetchFn, STOP.id)).toEqual([{ outcome: "applied" }]);
+    expect(calls(fetchFn, ackPath(APPROVAL.id))).toHaveLength(0);
+    await loop.stop();
+  });
+
+  it("treats an approval command without its payload as a malformed listing", async () => {
+    const { approval: _approval, ...bare } = APPROVAL;
+    const fetchFn = galley({ commands: [listing(bare)], events: [created, requested], checks: [deny] });
+    const { loop, records } = setup(fetchFn, ACT);
+
+    await vi.advanceTimersByTimeAsync(4000);
+
+    expect(records().find((record) => record["msg"] === "round commands poll failed")).toMatchObject({ reason: "invalid_body" });
+    expect(calls(fetchFn, ackPath(APPROVAL.id))).toHaveLength(0);
     await loop.stop();
   });
 });

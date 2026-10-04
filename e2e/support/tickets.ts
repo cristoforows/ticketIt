@@ -30,6 +30,11 @@ export interface Round {
   questions: RoundQuestion[];
   /** The Owner's feedback on this Round, oldest first (issue #164). */
   feedback: RoundFeedback[];
+  /** Oldest first (issue #165). */
+  permissionRequests: PermissionRequest[];
+  /** Galley's latest 50, oldest first; `authorityCheckCount` counts them all (issue #165). */
+  authorityChecks: AuthorityCheck[];
+  authorityCheckCount: number;
   /** Michelin's evidence or explanation, set exactly when `state` is `stopped` (issue #160), `failed` or `interrupted` (issue #161). */
   outcomeNote: string | null;
   /** Galley's latest 50 notes, oldest first (issue #162). */
@@ -47,6 +52,41 @@ export interface RoundQuestion {
   askedAt: string;
   answer: string | null;
   answeredAt: string | null;
+}
+
+export interface PermissionRequest {
+  id: string;
+  account: string;
+  action: string;
+  resource: string;
+  substituteAccount: boolean;
+  requestedAt: string;
+  decision: "approved" | "declined" | null;
+  decidedAt: string | null;
+  grantId: string | null;
+}
+
+export interface PermissionGrant {
+  id: string;
+  agent: { id: string; name: string; kind: AgentKind };
+  account: string;
+  action: string;
+  resource: string;
+  substituteAccount: boolean;
+  form: "ticket";
+  state: "active";
+  roundId: string;
+  createdAt: string;
+  approvedAt: string;
+}
+
+export interface AuthorityCheck {
+  account: string;
+  action: string;
+  resource: string;
+  decision: "allow" | "deny";
+  grantId: string | null;
+  checkedAt: string;
 }
 
 export interface RoundFeedback {
@@ -67,7 +107,7 @@ export interface RoundActivityPage {
   earlierActivityCursor: string | null;
 }
 
-export type WaitingReason = "starting" | "working" | "waiting_for_answer" | "resuming" | "stopping" | "runner_disconnected";
+export type WaitingReason = "starting" | "working" | "waiting_for_answer" | "waiting_for_permission" | "resuming" | "stopping" | "runner_disconnected";
 
 export interface UsageCount {
   sum: number | null;
@@ -103,6 +143,7 @@ export interface Ticket {
     stop: { available: boolean; reason?: ErrorDetail };
     answer: { available: boolean; reason?: ErrorDetail };
     feedback: { available: boolean; reason?: ErrorDetail };
+    permissionDecision: { available: boolean; reason?: ErrorDetail };
     statusChangeRejections: { status: TicketStatus; reason: ErrorDetail }[];
   };
   requestingAgentWork: boolean;
@@ -120,7 +161,11 @@ export interface Ticket {
     waitingReason: WaitingReason;
     /** Set exactly while `state` is `waiting_for_input` (issue #163). */
     question: RoundQuestion | null;
+    /** Set exactly while `state` is `waiting_for_input` and no question is (issue #165). */
+    permissionRequest: PermissionRequest | null;
   } | null;
+  /** The Ticket's active ticket-form grants (issue #165). */
+  permissionGrants: PermissionGrant[];
   /** The latest Round, when it was delivered (issue #136). */
   delivery: {
     roundId: string;
@@ -248,6 +293,11 @@ export async function answerQuestionDirect(from: Api, id: string, roundId: strin
 /** Same purpose as changeTicketStatusDirect, for feedback on a delivered Round. */
 export async function addFeedbackDirect(from: Api, id: string, roundId: string, body: string): Promise<TicketCommandResult> {
   return ticketCommand(from, "POST", `/api/tickets/${id}/rounds/${roundId}/feedback`, { body });
+}
+
+/** Same purpose as changeTicketStatusDirect, for the Owner's Permission decision. */
+export async function decidePermissionDirect(from: Api, id: string, roundId: string, requestId: string, decision: "approve" | "decline"): Promise<TicketCommandResult> {
+  return ticketCommand(from, "POST", `/api/tickets/${id}/rounds/${roundId}/permission-requests/${requestId}/${decision}`, decision === "approve" ? { form: "ticket" } : undefined);
 }
 
 export type TicketAssignee = { type: "owner" } | { type: "agent"; agentId: string };

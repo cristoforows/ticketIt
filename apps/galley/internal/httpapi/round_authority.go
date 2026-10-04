@@ -1,0 +1,157 @@
+package httpapi
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+const (
+	authorityChecksShown = 50
+
+	roundNotRunningCode    = "round_not_running"
+	roundNotRunningMessage = "authority is checked only while the Round is running"
+	authorityCheckShape    = `request body must be JSON matching {"account", "action", "resource", "epoch"}`
+)
+
+type checkedRound struct {
+	id, ticketID, agentID int64
+	state                 RoundState
+	epoch                 int
+}
+
+func (s *server) CheckRoundAuthority(w http.ResponseWriter, r *http.Request, roundId string) {
+	runner, ok := s.requireRunner(w, r)
+	if !ok {
+		return
+	}
+	roundID, ok := canonicalPublicID(roundId)
+	if !ok {
+		writeRoundNotFound(w)
+		return
+	}
+	var req AuthorityCheckRequest
+	if !decodeStrictJSON(w, r, &req, authorityCheckShape) {
+		return
+	}
+	scope := permissionScope{account: req.Account, action: req.Action, resource: req.Resource}
+	if problem := validateScopeFields(scope); problem != "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", problem)
+		return
+	}
+	if req.Epoch < 1 || req.Epoch > claimEpochMax {
+		writeError(w, http.StatusBadRequest, "invalid_request", `"epoch" must be a positive integer`)
+		return
+	}
+	if reason := unsupportedScope(scope); reason != "" {
+		writeError(w, http.StatusBadRequest, unsupportedScopeCode, reason)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
+	defer cancel()
+	result, found, rejection, err := checkAuthority(ctx, s.pool, runner.ownerID, roundID, scope, req.Epoch, s.clockNow())
+	switch {
+	case err != nil:
+		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to check authority")
+	case !found:
+		writeRoundNotFound(w)
+	case rejection != nil:
+		writeError(w, rejection.status, rejection.code, rejection.message)
+	default:
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+func decideAuthorityCheck(round checkedRound, epoch int) *roundEventRejection {
+	switch {
+	case epoch != round.epoch:
+		return &roundEventRejection{http.StatusConflict, staleClaimEpochCode, staleClaimEpochMessage}
+	case !OpenRoundState(round.state).Valid():
+		return &roundEventRejection{http.StatusConflict, roundNotOpenCode, roundNotOpenMessage}
+	case round.state != RoundRunning:
+		return &roundEventRejection{http.StatusConflict, roundNotRunningCode, roundNotRunningMessage}
+	}
+	return nil
+}
+
+// The grant is read in the check's own transaction, never from the claim: a grant committed before the check is honoured.
+// The Round row is share-locked so it cannot end or change epoch between the decision and its record.
+func checkAuthority(ctx context.Context, pool *pgxpool.Pool, ownerID int64, roundID string, scope permissionScope, epoch int, now time.Time) (AuthorityCheckResult, bool, *roundEventRejection, error) {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return AuthorityCheckResult{}, false, nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var round checkedRound
+	err = tx.QueryRow(ctx, `SELECT id, ticket_id, agent_id, state, claim_epoch FROM rounds WHERE owner_id = $1 AND public_id = $2::uuid FOR SHARE`,
+		ownerID, roundID).Scan(&round.id, &round.ticketID, &round.agentID, &round.state, &round.epoch)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return AuthorityCheckResult{}, false, nil, nil
+	}
+	if err != nil {
+		return AuthorityCheckResult{}, false, nil, err
+	}
+	if rejection := decideAuthorityCheck(round, epoch); rejection != nil {
+		return AuthorityCheckResult{}, true, rejection, nil
+	}
+	var grantRowID *int64
+	var grantID *string
+	err = tx.QueryRow(ctx, `SELECT id, public_id::text FROM permission_grants
+		WHERE owner_id = $1 AND agent_id = $2 AND ticket_id = $3 AND account = $4 AND action = $5 AND resource = $6 AND state = $7
+		ORDER BY id LIMIT 1`, ownerID, round.agentID, round.ticketID, scope.account, scope.action, scope.resource, string(PermissionGrantActive)).
+		Scan(&grantRowID, &grantID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return AuthorityCheckResult{}, true, nil, err
+	}
+	result := AuthorityCheckResult{Decision: AuthorityDeny}
+	if grantID != nil {
+		result = AuthorityCheckResult{Decision: AuthorityAllow, GrantId: grantID}
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO round_authority_checks (owner_id, round_id, account, action, resource, claim_epoch, decision, grant_id, checked_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		ownerID, round.id, scope.account, scope.action, scope.resource, epoch, string(result.Decision), grantRowID, now); err != nil {
+		return AuthorityCheckResult{}, true, nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return AuthorityCheckResult{}, true, nil, err
+	}
+	return result, true, nil, nil
+}
+
+type roundAuthorityHistory struct {
+	checks []RoundAuthorityCheck
+	count  int
+}
+
+func roundAuthorityChecks(ctx context.Context, tx pgx.Tx, ownerID int64, roundIDs []int64) (map[int64]roundAuthorityHistory, error) {
+	rows, err := tx.Query(ctx, `SELECT c.round_id, c.account, c.action, c.resource, c.decision, g.public_id::text, c.checked_at, c.total
+		FROM (SELECT *, row_number() OVER (PARTITION BY round_id ORDER BY id DESC) AS newest, count(*) OVER (PARTITION BY round_id) AS total
+			FROM round_authority_checks WHERE owner_id = $1 AND round_id = ANY($2)) c
+		LEFT JOIN permission_grants g ON g.owner_id = c.owner_id AND g.id = c.grant_id
+		WHERE c.newest <= $3 ORDER BY c.round_id, c.id`, ownerID, roundIDs, authorityChecksShown)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	history := map[int64]roundAuthorityHistory{}
+	for rows.Next() {
+		var roundID int64
+		var check RoundAuthorityCheck
+		var decision string
+		var total int
+		if err := rows.Scan(&roundID, &check.Account, &check.Action, &check.Resource, &decision, &check.GrantId, &check.CheckedAt, &total); err != nil {
+			return nil, err
+		}
+		check.Decision = AuthorityDecision(decision)
+		check.CheckedAt = check.CheckedAt.UTC()
+		entry := history[roundID]
+		entry.checks = append(entry.checks, check)
+		entry.count = total
+		history[roundID] = entry
+	}
+	return history, rows.Err()
+}

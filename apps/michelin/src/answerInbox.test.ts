@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AnswerInbox, type ReceivedAnswer } from "./answerInbox.ts";
+import { AnswerInbox, ApprovalInbox, type ReceivedAnswer } from "./answerInbox.ts";
 
 const answer = (text: string): ReceivedAnswer => ({ text, acknowledge: async () => {} });
 
@@ -35,5 +35,18 @@ describe("AnswerInbox", () => {
     expect(await pending).toBeUndefined();
     inbox.deliver("q1", answer("late"));
     expect((await inbox.wait("q1", new AbortController().signal))?.text).toBe("late");
+  });
+});
+
+describe("ApprovalInbox", () => {
+  it("resolves a waiting Permission request only with its own approval, once", async () => {
+    const inbox = new ApprovalInbox();
+    const pending = inbox.wait("r1", new AbortController().signal);
+    inbox.deliver("r2", { grantId: "g2", acknowledge: async () => {} });
+    inbox.deliver("r1", { grantId: "g1", acknowledge: async () => {} });
+    inbox.deliver("r1", { grantId: "again", acknowledge: async () => {} });
+    expect((await pending)?.grantId).toBe("g1");
+    expect((await inbox.wait("r2", new AbortController().signal))?.grantId).toBe("g2");
+    expect((await inbox.wait("r1", new AbortController().signal))?.grantId).toBe("again");
   });
 });

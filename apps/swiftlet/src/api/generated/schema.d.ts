@@ -508,6 +508,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tickets/{id}/rounds/{roundId}/permission-requests/{requestId}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                roundId: string;
+                requestId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve the Permission request a Round waits on
+         * @description Records the Owner's approval once, a grant for the Round's Agent, this Ticket and the requested scope in the chosen `form`, and one `approval` command for the runner to pull. Neither the Round nor the Ticket moves until the runner reports `resumed`. A request already approved or declined is `permission_already_decided`; a Round that has ended is `round_not_open`; a Round with Stop requested is `stop_already_requested`. Each changes nothing and creates no grant. An unknown, malformed or foreign Ticket, Round or request id, or one not of that Ticket or Round, returns the shared 404.
+         */
+        post: operations["approvePermissionRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tickets/{id}/rounds/{roundId}/permission-requests/{requestId}/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                roundId: string;
+                requestId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decline the Permission request a Round waits on
+         * @description Records the Owner's decline once. No grant and no command: the Round stays waiting for input and the Ticket Blocked until the Owner Stops it. Rejected as `approvePermissionRequest` is. An unknown, malformed or foreign Ticket, Round or request id, or one not of that Ticket or Round, returns the shared 404.
+         */
+        post: operations["declinePermissionRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tickets/{id}/rounds/{roundId}/feedback": {
         parameters: {
             query?: never;
@@ -672,9 +720,31 @@ export interface paths {
         put?: never;
         /**
          * Report an execution event for a Round
-         * @description An event is a fact the runner reports, recorded once per `(roundId, idempotencyKey)`. The same key with the same payload returns the original result with `200`; a different payload is `409 idempotency_key_conflict`. Checked in that order, then `409 stale_claim_epoch` for a `claimEpoch` other than the Round's, `409 round_not_open` for a Round that has ended, and `409 event_out_of_order` for a type the Round's state cannot take: `execution_started` needs a claimed Round; `progress`, `usage_observed`, `delivered`, `failed`, `interrupted` and `question_raised` a running one; `resumed` one waiting for input, and then `409 answer_not_supplied` unless its `questionId` is the waiting question and the Owner has answered it; `stop_confirmed` any open Round, and then `409 stop_not_requested` unless the Owner requested Stop. `question_raised` records the question, moves the Round to `waiting_for_input` and the Ticket from In Progress to Blocked, and keeps the Owner's slot; its `idempotencyKey` must equal `data.questionId`. `resumed` moves the Round back to `running` and the Ticket to In Progress. A `usage_observed` whose `observationId` is already recorded for another Round is `409 observation_id_conflict`. `delivered` retains the deliverable, ends the Round as `delivered`, frees the Owner's slot and moves the Ticket from In Progress to In Review, never Done. `stop_confirmed` ends the Round as `stopped` with its evidence, frees the slot and moves the Ticket to Backlog with the Stopped Badge. `failed` and `interrupted` end the Round as `failed` or `interrupted` with the explanation or evidence, free the slot and move the Ticket from In Progress to Blocked; no Round starts until the Owner moves it to Ready. A body over 8 MiB is `413 request_too_large`. A rejection changes nothing. An unknown, malformed or foreign Round id returns the shared 404. A runner that is not Connected is still accepted, and an event is not a heartbeat.
+         * @description An event is a fact the runner reports, recorded once per `(roundId, idempotencyKey)`. The same key with the same payload returns the original result with `200`; a different payload is `409 idempotency_key_conflict`. Checked in that order, then `409 stale_claim_epoch` for a `claimEpoch` other than the Round's, `409 round_not_open` for a Round that has ended, and `409 event_out_of_order` for a type the Round's state cannot take: `execution_started` needs a claimed Round; `progress`, `usage_observed`, `delivered`, `failed`, `interrupted`, `question_raised` and `permission_requested` a running one; `resumed` one waiting for input, and then `409 answer_not_supplied` unless its `questionId` is the question the Round waits on and the Owner has answered it, or `409 approval_not_supplied` unless its `requestId` is the Permission request the Round waits on and the Owner has approved it; `stop_confirmed` any open Round, and then `409 stop_not_requested` unless the Owner requested Stop. `question_raised` records the question, moves the Round to `waiting_for_input` and the Ticket from In Progress to Blocked, and keeps the Owner's slot; its `idempotencyKey` must equal `data.questionId`. `permission_requested` does the same for a Permission request; its `idempotencyKey` must equal `data.requestId`, and a scope the Connected Account does not declare is `400 unsupported_scope`. `resumed` moves the Round back to `running` and the Ticket to In Progress. A `usage_observed` whose `observationId` is already recorded for another Round is `409 observation_id_conflict`. `delivered` retains the deliverable, ends the Round as `delivered`, frees the Owner's slot and moves the Ticket from In Progress to In Review, never Done. `stop_confirmed` ends the Round as `stopped` with its evidence, frees the slot and moves the Ticket to Backlog with the Stopped Badge. `failed` and `interrupted` end the Round as `failed` or `interrupted` with the explanation or evidence, free the slot and move the Ticket from In Progress to Blocked; no Round starts until the Owner moves it to Ready. A body over 8 MiB is `413 request_too_large`. A rejection changes nothing. An unknown, malformed or foreign Round id returns the shared 404. A runner that is not Connected is still accepted, and an event is not a heartbeat.
          */
         post: operations["reportRoundEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runner/rounds/{roundId}/authority-checks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roundId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check whether the Round's Agent holds authority for a scope
+         * @description Answers from the grants Galley holds when the check runs, and records the check, allow or deny, in the Round's history. `allow` needs an active grant for the Round's Agent, its Ticket, the same `account` and `action`, and the same `resource`; anything else is `deny`, including a Connected Account with no grant. A scope the Connected Account does not declare is `400 unsupported_scope`. Then `409 stale_claim_epoch` for an `epoch` other than the Round's, `409 round_not_open` for a Round that has ended, and `409 round_not_running` for one claimed or waiting for input. A rejection records nothing. An unknown, malformed or foreign Round id returns the shared 404.
+         */
+        post: operations["checkRoundAuthority"];
         delete?: never;
         options?: never;
         head?: never;
@@ -848,6 +918,8 @@ export interface components {
             openRound: components["schemas"]["TicketOpenRound"] | null;
             /** @description The Ticket's latest Round, when that Round was delivered. Null before any delivery and once a later Round is claimed. */
             delivery: components["schemas"]["TicketDelivery"] | null;
+            /** @description Every Permission grant on this Ticket, oldest first. */
+            permissionGrants: components["schemas"]["PermissionGrant"][];
             completionCondition: components["schemas"]["TicketCompletionCondition"];
             /** @description Manual refinement (issue #58, docs/ticket-creation.md, "Manual guidance" -- prompt "What outcome do you want?"). Plain text, never Markdown (M7 owns report rendering). Always present on the wire; "" means never set or cleared -- read access never distinguishes those two, only PATCH's request body does (see UpdateTicketRequest). */
             goal: string;
@@ -881,10 +953,10 @@ export interface components {
          */
         OpenRoundState: "claimed" | "running" | "waiting_for_input";
         /**
-         * @description What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `stopping` (Stop requested), `waiting_for_answer` (waiting for input, its question unanswered), `resuming` (waiting for input, its question answered), `starting` (claimed) and `working` (running) applies.
+         * @description What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `stopping` (Stop requested), `resuming` (waiting for input, its question answered or its Permission request approved), `waiting_for_answer` (waiting on an unanswered question), `waiting_for_permission` (waiting on a Permission request not approved, declined included), `starting` (claimed) and `working` (running) applies.
          * @enum {string}
          */
-        RoundWaitingReason: "starting" | "working" | "stopping" | "runner_disconnected" | "waiting_for_answer" | "resuming";
+        RoundWaitingReason: "starting" | "working" | "stopping" | "runner_disconnected" | "waiting_for_answer" | "resuming" | "waiting_for_permission";
         RoundQuestion: {
             /**
              * Format: uuid
@@ -904,6 +976,82 @@ export interface components {
         AnswerQuestionRequest: {
             /** @description Counted in Unicode code points. Not blank; no control characters but tab and line feed. */
             answer: string;
+        };
+        /** @enum {string} */
+        PermissionRequestDecision: "approved" | "declined";
+        /**
+         * @description `ticket`: this Agent, this Ticket, this scope, for as long as the grant is active.
+         * @enum {string}
+         */
+        PermissionGrantForm: "ticket";
+        /** @enum {string} */
+        PermissionGrantState: "active";
+        PermissionRequest: {
+            /**
+             * Format: uuid
+             * @description The runner's `requestId`.
+             */
+            id: string;
+            account: string;
+            action: string;
+            resource: string;
+            /** @description True for the controlled substitute Connected Account, which stands in for a real one. */
+            substituteAccount: boolean;
+            /**
+             * Format: date-time
+             * @description Galley's clock.
+             */
+            requestedAt: string;
+            decision: components["schemas"]["PermissionRequestDecision"] | null;
+            /** Format: date-time */
+            decidedAt: string | null;
+            /**
+             * Format: uuid
+             * @description The grant the approval created; set exactly when `decision` is `approved`.
+             */
+            grantId: string | null;
+        };
+        PermissionGrant: {
+            /** Format: uuid */
+            id: string;
+            /** @description The only Agent the grant authorizes. */
+            agent: components["schemas"]["TicketAssigneeAgent"];
+            account: string;
+            action: string;
+            resource: string;
+            substituteAccount: boolean;
+            form: components["schemas"]["PermissionGrantForm"];
+            state: components["schemas"]["PermissionGrantState"];
+            /**
+             * Format: uuid
+             * @description The Round whose request the Owner approved.
+             */
+            roundId: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            approvedAt: string;
+        };
+        ApprovePermissionRequest: {
+            form: components["schemas"]["PermissionGrantForm"];
+        };
+        /** @enum {string} */
+        AuthorityDecision: "allow" | "deny";
+        RoundAuthorityCheck: {
+            account: string;
+            action: string;
+            resource: string;
+            decision: components["schemas"]["AuthorityDecision"];
+            /**
+             * Format: uuid
+             * @description The grant that allowed; set exactly when `decision` is `allow`.
+             */
+            grantId: string | null;
+            /**
+             * Format: date-time
+             * @description Galley's clock.
+             */
+            checkedAt: string;
         };
         AddRoundFeedbackRequest: {
             /** @description Counted in Unicode code points. Not blank; no control characters but tab and line feed. */
@@ -943,8 +1091,10 @@ export interface components {
              */
             stopRequestedAt: string | null;
             waitingReason: components["schemas"]["RoundWaitingReason"];
-            /** @description The question the Round waits on; set exactly when `state` is `waiting_for_input`. */
+            /** @description The question the Round waits on. While `state` is `waiting_for_input`, exactly one of `question` and `permissionRequest` is set; otherwise neither. */
             question: components["schemas"]["RoundQuestion"] | null;
+            /** @description The Permission request the Round waits on; see `question`. */
+            permissionRequest: components["schemas"]["PermissionRequest"] | null;
         };
         TicketDelivery: {
             /** Format: uuid */
@@ -980,6 +1130,12 @@ export interface components {
             questions: components["schemas"]["RoundQuestion"][];
             /** @description The Owner's feedback on this Round's result, oldest first. */
             feedback: components["schemas"]["RoundFeedback"][];
+            /** @description Every Permission request the Round raised, oldest first, with the Owner's decision. */
+            permissionRequests: components["schemas"]["PermissionRequest"][];
+            /** @description The latest 50 authority checks, oldest first. */
+            authorityChecks: components["schemas"]["RoundAuthorityCheck"][];
+            /** @description Every authority check the Round made, including those beyond `authorityChecks`. */
+            authorityCheckCount: number;
         };
         RoundDeliverable: {
             bodyMarkdown: string;
@@ -1061,6 +1217,8 @@ export interface components {
             answer: components["schemas"]["TicketCommandAvailability"];
             /** @description Whether feedback can be added to `delivery.roundId`; otherwise `feedback_not_available`. */
             feedback: components["schemas"]["TicketCommandAvailability"];
+            /** @description Whether `openRound.permissionRequest` can be approved or declined. Unavailable with `permission_decision_not_available` without one, `permission_already_decided` once it is decided, and `stop_already_requested` once Stop is requested. */
+            permissionDecision: components["schemas"]["TicketCommandAvailability"];
         };
         TicketStatusChangeRejection: {
             status: components["schemas"]["TicketStatus"];
@@ -1225,7 +1383,7 @@ export interface components {
          * @description Grows by slice.
          * @enum {string}
          */
-        RoundEventType: "execution_started" | "progress" | "usage_observed" | "delivered" | "stop_confirmed" | "failed" | "interrupted" | "question_raised" | "resumed";
+        RoundEventType: "execution_started" | "progress" | "usage_observed" | "delivered" | "stop_confirmed" | "failed" | "interrupted" | "question_raised" | "resumed" | "permission_requested";
         ExecutionStartedData: {
             /** @description Attached as the Round's current engine execution reference. */
             engineReference: string;
@@ -1290,6 +1448,41 @@ export interface components {
              */
             questionId: string;
         };
+        /** @description The `resumed` payload after an approval. */
+        ApprovalResumedData: {
+            /**
+             * Format: uuid
+             * @description The approved Permission request the runner acted on.
+             */
+            requestId: string;
+        };
+        PermissionRequestedData: {
+            /**
+             * Format: uuid
+             * @description The request's identity, generated by the runner, one per request instance. Lowercase canonical form, not the nil UUID, and equal to the event's `idempotencyKey`.
+             */
+            requestId: string;
+            account: string;
+            action: string;
+            /** @description Must fit the declared pattern; see `AuthorityCheckRequest`. */
+            resource: string;
+        };
+        /** @description A scope matches a grant when `account` and `action` are the same and `resource` is the same string; `resource` must fit the pattern the Connected Account declares for `action`. The controlled substitute account `controlled` declares `read_note` and `write_note` on `notes/<name>` and `post_message` on `channels/<name>`, where `<name>` is 1 to 64 of `a-z`, `0-9` and `-`, starting with a letter or digit. */
+        AuthorityCheckRequest: {
+            account: string;
+            action: string;
+            resource: string;
+            /** @description The fencing token from the claim. */
+            epoch: number;
+        };
+        AuthorityCheckResult: {
+            decision: components["schemas"]["AuthorityDecision"];
+            /**
+             * Format: uuid
+             * @description The grant that allowed; present exactly when `decision` is `allow`.
+             */
+            grantId?: string;
+        };
         RoundEventRequest: {
             type: components["schemas"]["RoundEventType"];
             /** @description Taken verbatim; identity is never trimmed. */
@@ -1301,8 +1494,8 @@ export interface components {
              * @description The runner's clock; Galley keeps it and times the Round by its own.
              */
             occurredAt: string;
-            /** @description The payload for `type`: `ExecutionStartedData`, `ProgressData`, `UsageObservedData`, `DeliveredData`, `StopConfirmedData`, `FailedData`, `InterruptedData`, `QuestionRaisedData` or `ResumedData`. Not `oneOf`: `StopConfirmedData` and `InterruptedData` share a shape. */
-            data: components["schemas"]["ExecutionStartedData"] | components["schemas"]["ProgressData"] | components["schemas"]["UsageObservedData"] | components["schemas"]["DeliveredData"] | components["schemas"]["StopConfirmedData"] | components["schemas"]["FailedData"] | components["schemas"]["InterruptedData"] | components["schemas"]["QuestionRaisedData"] | components["schemas"]["ResumedData"];
+            /** @description The payload for `type`: `ExecutionStartedData`, `ProgressData`, `UsageObservedData`, `DeliveredData`, `StopConfirmedData`, `FailedData`, `InterruptedData`, `QuestionRaisedData`, `PermissionRequestedData`, or `ResumedData` or `ApprovalResumedData`. Not `oneOf`: `StopConfirmedData` and `InterruptedData` share a shape. */
+            data: components["schemas"]["ExecutionStartedData"] | components["schemas"]["ProgressData"] | components["schemas"]["UsageObservedData"] | components["schemas"]["DeliveredData"] | components["schemas"]["StopConfirmedData"] | components["schemas"]["FailedData"] | components["schemas"]["InterruptedData"] | components["schemas"]["QuestionRaisedData"] | components["schemas"]["ResumedData"] | components["schemas"]["PermissionRequestedData"] | components["schemas"]["ApprovalResumedData"];
         };
         RoundEventResult: {
             /** Format: uuid */
@@ -1328,15 +1521,32 @@ export interface components {
             observationId?: string;
             /**
              * Format: uuid
-             * @description For `question_raised` and `resumed`, the question.
+             * @description For `question_raised`, and `resumed` after an answer, the question.
              */
             questionId?: string;
+            /**
+             * Format: uuid
+             * @description For `permission_requested`, and `resumed` after an approval, the Permission request.
+             */
+            requestId?: string;
         };
         /**
          * @description Grows by slice.
          * @enum {string}
          */
-        RunnerCommandType: "stop" | "answer";
+        RunnerCommandType: "stop" | "answer" | "approval";
+        RunnerCommandApprovalData: {
+            /**
+             * Format: uuid
+             * @description The Permission request approved.
+             */
+            requestId: string;
+            /**
+             * Format: uuid
+             * @description The grant the approval created. The runner still checks authority before acting.
+             */
+            grantId: string;
+        };
         RunnerCommandAnswerData: {
             /**
              * Format: uuid
@@ -1358,6 +1568,8 @@ export interface components {
             issuedAt: string;
             /** @description Present exactly when `type` is `answer`. */
             answer?: components["schemas"]["RunnerCommandAnswerData"];
+            /** @description Present exactly when `type` is `approval`. */
+            approval?: components["schemas"]["RunnerCommandApprovalData"];
         };
         RunnerCommandList: {
             commands: components["schemas"]["RunnerCommand"][];
@@ -2309,6 +2521,76 @@ export interface operations {
             };
         };
     };
+    approvePermissionRequest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                roundId: string;
+                requestId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovePermissionRequest"];
+            };
+        };
+        responses: {
+            /** @description The Ticket, with the approval and the grant recorded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ticket"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. Includes `permission_already_decided`, `round_not_open` and `stop_already_requested`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    declinePermissionRequest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                roundId: string;
+                requestId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Ticket, with the decline recorded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ticket"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. Includes `permission_already_decided`, `round_not_open` and `stop_already_requested`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     addRoundFeedback: {
         parameters: {
             query?: never;
@@ -2617,7 +2899,42 @@ export interface operations {
                     "application/json": components["schemas"]["RoundEventResult"];
                 };
             };
-            /** @description Error. See `ErrorBody`. Includes `idempotency_key_conflict`, `stale_claim_epoch`, `round_not_open`, `event_out_of_order`, `stop_not_requested`, `answer_not_supplied`, `observation_id_conflict` and `request_too_large`. */
+            /** @description Error. See `ErrorBody`. Includes `idempotency_key_conflict`, `stale_claim_epoch`, `round_not_open`, `event_out_of_order`, `stop_not_requested`, `answer_not_supplied`, `approval_not_supplied`, `unsupported_scope`, `observation_id_conflict` and `request_too_large`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    checkRoundAuthority: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roundId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AuthorityCheckRequest"];
+            };
+        };
+        responses: {
+            /** @description The decision, recorded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthorityCheckResult"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. Includes `unsupported_scope`, `stale_claim_epoch`, `round_not_open` and `round_not_running`. */
             default: {
                 headers: {
                     [name: string]: unknown;

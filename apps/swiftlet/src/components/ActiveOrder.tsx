@@ -11,6 +11,7 @@ export const waitingReasonLabels: Record<WaitingReason, string> = {
   starting: "Starting",
   working: "Working",
   waiting_for_answer: "Waiting for your answer",
+  waiting_for_permission: "Waiting for a Permission",
   resuming: "Resuming",
   stopping: "Stopping",
   runner_disconnected: "Runner disconnected",

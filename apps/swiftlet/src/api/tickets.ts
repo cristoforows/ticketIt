@@ -11,6 +11,8 @@ export type Ticket = components["schemas"]["Ticket"];
 export type Badge = components["schemas"]["Badge"];
 export type TicketAssignee = components["schemas"]["AssignTicketRequest"];
 export type RoundQuestion = components["schemas"]["RoundQuestion"];
+export type PermissionRequest = components["schemas"]["PermissionRequest"];
+export type PermissionGrant = components["schemas"]["PermissionGrant"];
 
 /**
  * Manual refinement (issue #58): a genuine partial update. A field
@@ -56,7 +58,7 @@ export class TicketNotFoundError extends Error {
 }
 
 type WaitingReason = NonNullable<Ticket["openRound"]>["waitingReason"];
-const WAITING_REASONS: readonly WaitingReason[] = ["starting", "working", "waiting_for_answer", "resuming", "stopping", "runner_disconnected"];
+const WAITING_REASONS: readonly WaitingReason[] = ["starting", "working", "waiting_for_answer", "waiting_for_permission", "resuming", "stopping", "runner_disconnected"];
 type OpenRoundState = NonNullable<Ticket["openRound"]>["state"];
 const OPEN_ROUND_STATES: readonly OpenRoundState[] = ["claimed", "running", "waiting_for_input"];
 
@@ -76,6 +78,68 @@ export function parseRoundQuestion(value: unknown): RoundQuestion | undefined {
     return undefined;
   }
   return { id: question.id, text: question.text, askedAt: question.askedAt, answer: question.answer, answeredAt: question.answeredAt };
+}
+
+const isString = (value: unknown): value is string => typeof value === "string";
+
+export function parsePermissionRequest(value: unknown): PermissionRequest | undefined {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const request = value as Record<string, unknown>;
+  const { decision, decidedAt, grantId } = request;
+  if (
+    ![request.id, request.account, request.action, request.resource, request.requestedAt].every(isString) ||
+    typeof request.substituteAccount !== "boolean" ||
+    !(decision === null || decision === "approved" || decision === "declined") ||
+    !(decidedAt === null || isString(decidedAt)) ||
+    !(grantId === null || isString(grantId)) ||
+    (decision === null) !== (decidedAt === null) ||
+    (decision === "approved") !== (grantId !== null)
+  ) {
+    return undefined;
+  }
+  return {
+    id: request.id as string,
+    account: request.account as string,
+    action: request.action as string,
+    resource: request.resource as string,
+    substituteAccount: request.substituteAccount,
+    requestedAt: request.requestedAt as string,
+    decision,
+    decidedAt,
+    grantId,
+  };
+}
+
+function parsePermissionGrant(value: unknown): PermissionGrant | undefined {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const grant = value as Record<string, unknown>;
+  if (
+    ![grant.id, grant.account, grant.action, grant.resource, grant.roundId, grant.createdAt, grant.approvedAt].every(isString) ||
+    !isAgentSummary(grant.agent) ||
+    typeof grant.substituteAccount !== "boolean" ||
+    grant.form !== "ticket" ||
+    grant.state !== "active"
+  ) {
+    return undefined;
+  }
+  const { id, name, kind } = grant.agent;
+  return {
+    id: grant.id as string,
+    agent: { id, name, kind },
+    account: grant.account as string,
+    action: grant.action as string,
+    resource: grant.resource as string,
+    substituteAccount: grant.substituteAccount,
+    form: grant.form,
+    state: grant.state,
+    roundId: grant.roundId as string,
+    createdAt: grant.createdAt as string,
+    approvedAt: grant.approvedAt as string,
+  };
 }
 
 function parseOpenRound(value: unknown): Ticket["openRound"] | undefined {
@@ -99,8 +163,10 @@ function parseOpenRound(value: unknown): Ticket["openRound"] | undefined {
   ) {
     return undefined;
   }
-  const question = round.state === "waiting_for_input" ? parseRoundQuestion(round.question) : round.question === null ? null : undefined;
-  if (question === undefined) {
+  const question = round.question === null ? null : parseRoundQuestion(round.question);
+  const permissionRequest = round.permissionRequest === null ? null : parsePermissionRequest(round.permissionRequest);
+  const asks = (question === null ? 0 : 1) + (permissionRequest === null ? 0 : 1);
+  if (question === undefined || permissionRequest === undefined || asks !== (round.state === "waiting_for_input" ? 1 : 0)) {
     return undefined;
   }
   const agent = round.agent;
@@ -114,6 +180,7 @@ function parseOpenRound(value: unknown): Ticket["openRound"] | undefined {
     stopRequestedAt: round.stopRequestedAt,
     waitingReason: round.waitingReason as WaitingReason,
     question,
+    permissionRequest,
   };
 }
 
@@ -155,6 +222,8 @@ function parseTicket(payload: unknown): Ticket {
   const stop = parseCommandAvailability(actions?.stop);
   const answer = parseCommandAvailability(actions?.answer);
   const feedback = parseCommandAvailability(actions?.feedback);
+  const permissionDecision = parseCommandAvailability(actions?.permissionDecision);
+  const permissionGrants = Array.isArray(record.permissionGrants) ? record.permissionGrants.map(parsePermissionGrant) : undefined;
   const agent = record.assigneeAgent;
   const openRound = parseOpenRound(record.openRound);
   const delivery = parseDelivery(record.delivery);
@@ -198,7 +267,10 @@ function parseTicket(payload: unknown): Ticket {
     !rework ||
     !stop ||
     !answer ||
-    !feedback
+    !feedback ||
+    !permissionDecision ||
+    !permissionGrants ||
+    !permissionGrants.every((grant) => grant !== undefined)
   ) {
     throw new Error("Galley's Ticket response was missing a required field.");
   }
@@ -214,6 +286,7 @@ function parseTicket(payload: unknown): Ticket {
       stop,
       answer,
       feedback,
+      permissionDecision,
     },
     template: record.template as Ticket["template"],
     completionCondition: record.completionCondition as Ticket["completionCondition"],
@@ -222,6 +295,7 @@ function parseTicket(payload: unknown): Ticket {
     requestingAgentWork: record.requestingAgentWork,
     openRound,
     delivery,
+    permissionGrants: permissionGrants as PermissionGrant[],
     badges: record.badges as Ticket["badges"],
     archivedAt: record.archivedAt,
     goal: record.goal,
@@ -409,6 +483,20 @@ export async function requestTicketStop(id: string): Promise<Ticket> {
 export async function answerRoundQuestion(id: string, roundId: string, questionId: string, answer: string): Promise<Ticket> {
   const path = `${TICKETS_ENDPOINT}/${encodeURIComponent(id)}/rounds/${encodeURIComponent(roundId)}/questions/${encodeURIComponent(questionId)}/answer`;
   return ticketCommand(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answer }) }, "response");
+}
+
+/** A 404 here names the Ticket, Round or Permission request together, so Galley's own message is shown. */
+export async function approvePermissionRequest(id: string, roundId: string, requestId: string): Promise<Ticket> {
+  const body: components["schemas"]["ApprovePermissionRequest"] = { form: "ticket" };
+  return ticketCommand(permissionRequestPath(id, roundId, requestId, "approve"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }, "response");
+}
+
+export async function declinePermissionRequest(id: string, roundId: string, requestId: string): Promise<Ticket> {
+  return ticketCommand(permissionRequestPath(id, roundId, requestId, "decline"), { method: "POST" }, "response");
+}
+
+function permissionRequestPath(id: string, roundId: string, requestId: string, decision: "approve" | "decline"): string {
+  return `${TICKETS_ENDPOINT}/${encodeURIComponent(id)}/rounds/${encodeURIComponent(roundId)}/permission-requests/${encodeURIComponent(requestId)}/${decision}`;
 }
 
 /** A 404 here names the Ticket or Round together, so Galley's own message is shown. */

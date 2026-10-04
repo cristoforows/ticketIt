@@ -1,14 +1,22 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { AwaitAnswer } from "./answerInbox.ts";
+import type { AwaitAnswer, AwaitApproval } from "./answerInbox.ts";
 import type { RunnerCredential } from "./credentials.ts";
-import { NOTE_MAX_LENGTH, type EngineScript } from "./engineScript.ts";
+import { NOTE_MAX_LENGTH, type ActStep, type EngineScript } from "./engineScript.ts";
 import type { FetchFn } from "./galley/client.ts";
-import { reportRoundEvent, type ClaimedFeedback, type RoundEventFailure, type RoundEventRequest, type RunnerClaim } from "./galley/runner.ts";
+import {
+  checkAuthority,
+  reportRoundEvent,
+  type AuthorityCheckResult,
+  type ClaimedFeedback,
+  type RoundEventFailure,
+  type RoundEventRequest,
+  type RunnerClaim,
+} from "./galley/runner.ts";
 import type { Logger } from "./logger.ts";
 import { sleep } from "./statusLoop.ts";
 
 interface PendingEvent {
-  step: "start" | "progress" | "usage" | "deliver" | "fail" | "interrupt" | "stop" | "ask" | "resume";
+  step: "start" | "progress" | "usage" | "deliver" | "fail" | "interrupt" | "stop" | "ask" | "resume" | "request" | "act";
   stepIndex: number;
   event: RoundEventRequest;
   reported: string;
@@ -34,6 +42,7 @@ export interface EngineOptions {
   signal: AbortSignal;
   stop: AbortSignal;
   awaitAnswer?: AwaitAnswer;
+  awaitApproval?: AwaitApproval;
   requestTimeoutMs?: number;
   deps?: Partial<EngineDeps>;
 }
@@ -59,11 +68,19 @@ export function isRetryable(failure: RoundEventFailure): boolean {
   }
 }
 
-// RFC 9562 version 5 with the Round as namespace: a restarted engine raises the same question under the same id, so Galley's replay
-// check, keyed on it, never records a second question.
 export function questionIdFor(roundId: string, stepIndex: number): string {
+  return stepIdFor(roundId, `ask:${stepIndex}`);
+}
+
+export function requestIdFor(roundId: string, stepIndex: number): string {
+  return stepIdFor(roundId, `act:${stepIndex}`);
+}
+
+// RFC 9562 version 5 with the Round as namespace: a restarted engine asks again under the same id, so Galley's replay
+// check, keyed on it, never records a second question or Permission request.
+function stepIdFor(roundId: string, name: string): string {
   const namespace = Buffer.from(roundId.replaceAll("-", ""), "hex");
-  const hash = createHash("sha1").update(namespace).update(`ask:${stepIndex}`).digest();
+  const hash = createHash("sha1").update(namespace).update(name).digest();
   hash[6] = (hash[6]! & 0x0f) | 0x50;
   hash[8] = (hash[8]! & 0x3f) | 0x80;
   const hex = hash.subarray(0, 16).toString("hex");
@@ -74,6 +91,14 @@ const ANSWER_NOTE_PREFIX = "Owner's answer: ";
 
 export function answerNote(answer: string): string {
   return [...`${ANSWER_NOTE_PREFIX}${answer}`].slice(0, NOTE_MAX_LENGTH).join("");
+}
+
+export function performedNote(step: ActStep): string {
+  return [...`Performed ${step.action} on ${step.resource}`].slice(0, NOTE_MAX_LENGTH).join("");
+}
+
+function deniedExplanation(step: ActStep, why: string): string {
+  return [...`Could not ${step.action} on ${step.resource} with the ${step.account} account: ${why}`].slice(0, NOTE_MAX_LENGTH).join("");
 }
 
 export function feedbackNote(feedback: readonly ClaimedFeedback[]): string {
@@ -102,13 +127,14 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
   const halt = AbortSignal.any([signal, stop]);
   const steps = options.script.steps;
   const awaitAnswer: AwaitAnswer = options.awaitAnswer ?? ((_questionId, until) => untilAborted(until).then(() => undefined));
-  let waitingForAnswer = false;
+  const awaitApproval: AwaitApproval = options.awaitApproval ?? ((_requestId, until) => untilAborted(until).then(() => undefined));
+  let waitingFor: "answer" | "approval" | undefined;
   // Sent only once the engine has ceased: Galley ends the Round on this event alone.
   const stopped = async (): Promise<EngineOutcome> => {
     const commandId = typeof stop.reason === "string" ? stop.reason : undefined;
     logger.info("engine stopped", { roundId, stepIndex, ...(commandId === undefined ? {} : { commandId }) });
-    const position = waitingForAnswer
-      ? `while waiting for the answer to step ${stepIndex + 1}`
+    const position = waitingFor !== undefined
+      ? `while waiting for the ${waitingFor} to step ${stepIndex + 1}`
       : stepIndex < steps.length
         ? `before step ${stepIndex + 1}`
         : `after step ${steps.length}`;
@@ -179,7 +205,7 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
         if (raised !== "sent") {
           return raised;
         }
-        waitingForAnswer = true;
+        waitingFor = "answer";
         logger.info("engine waiting for an answer", { roundId, stepIndex, questionId });
         const answer = await awaitAnswer(questionId, halt);
         if (signal.aborted) {
@@ -188,7 +214,7 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
         if (stop.aborted || answer === undefined) {
           return stopped();
         }
-        waitingForAnswer = false;
+        waitingFor = undefined;
         const resumed = await sendEvent(options, deps, {
           step: "resume",
           stepIndex,
@@ -207,6 +233,67 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
           reported: "progress reported",
           context: { questionId },
         };
+        break;
+      }
+      case "act": {
+        const scope = { account: step.account, action: step.action, resource: step.resource };
+        const failed = (why: string): PendingEvent => ({
+          step: "fail",
+          stepIndex,
+          event: envelope("failed", `${roundId}:${stepIndex}:failed`, { explanation: deniedExplanation(step, why) }),
+          reported: "failure reported",
+          context: scope,
+        });
+        const performed: PendingEvent = { step: "act", stepIndex, event: envelope("progress", `${roundId}:${stepIndex}`, { note: performedNote(step) }), reported: "action performed", context: scope };
+        const first = await checkScope(options, deps, step, stepIndex);
+        if (typeof first === "string") {
+          return first;
+        }
+        if (first.decision === "unsupported") {
+          pending = failed("Galley does not support this scope");
+          break;
+        }
+        if (first.decision === "allow") {
+          pending = performed;
+          break;
+        }
+        const requestId = requestIdFor(roundId, stepIndex);
+        const requested = await sendEvent(options, deps, {
+          step: "request",
+          stepIndex,
+          event: envelope("permission_requested", requestId, { requestId, ...scope }),
+          reported: "permission requested",
+          context: { requestId, ...scope },
+        });
+        if (requested !== "sent") {
+          return requested;
+        }
+        waitingFor = "approval";
+        logger.info("engine waiting for an approval", { roundId, stepIndex, requestId });
+        const approval = await awaitApproval(requestId, halt);
+        if (signal.aborted) {
+          return "aborted";
+        }
+        if (stop.aborted || approval === undefined) {
+          return stopped();
+        }
+        waitingFor = undefined;
+        const resumed = await sendEvent(options, deps, {
+          step: "resume",
+          stepIndex,
+          event: envelope("resumed", `${roundId}:${stepIndex}:resumed`, { requestId }),
+          reported: "resume reported",
+          context: { requestId, grantId: approval.grantId },
+        });
+        if (resumed !== "sent") {
+          return resumed;
+        }
+        await approval.acknowledge();
+        const second = await checkScope(options, deps, step, stepIndex);
+        if (typeof second === "string") {
+          return second;
+        }
+        pending = second.decision === "allow" ? performed : failed("Galley still denies it after the Owner's approval");
         break;
       }
       case "hold":
@@ -263,7 +350,8 @@ async function sendEvent(options: EngineOptions, deps: EngineDeps, pending: Pend
   const expected = {
     type: pending.event.type,
     observationId: pending.step === "usage" ? pending.event.idempotencyKey : undefined,
-    questionId: pending.step === "ask" || pending.step === "resume" ? (pending.context["questionId"] as string) : undefined,
+    questionId: pending.step === "ask" || pending.step === "resume" ? (pending.context["questionId"] as string | undefined) : undefined,
+    requestId: pending.step === "request" || pending.step === "resume" ? (pending.context["requestId"] as string | undefined) : undefined,
   };
   for (let attempt = 1; ; attempt++) {
     const report = await reportRoundEvent(request, claim.roundId, body, expected);
@@ -290,6 +378,40 @@ async function sendEvent(options: EngineOptions, deps: EngineDeps, pending: Pend
     }
     const retryInMs = retryDelayMs(attempt);
     logger.warn("round event failed; retrying", { ...context, durationMs: report.durationMs, ...report.failure, retryInMs });
+    await deps.sleep(retryInMs, signal);
+    if (signal.aborted) {
+      return "aborted";
+    }
+  }
+}
+
+type ScopeDecision = AuthorityCheckResult | { decision: "unsupported" };
+
+// Asked of Galley each time the step runs, never remembered: a grant can end between two actions.
+async function checkScope(options: EngineOptions, deps: EngineDeps, step: ActStep, stepIndex: number): Promise<ScopeDecision | "abandoned" | "aborted"> {
+  const { logger, signal, claim } = options;
+  const request = { fetch: options.fetch, galleyUrl: options.galleyUrl, signal, timeoutMs: options.requestTimeoutMs, credential: options.credential };
+  const body = { account: step.account, action: step.action, resource: step.resource, epoch: claim.claimEpoch };
+  for (let attempt = 1; ; attempt++) {
+    const report = await checkAuthority(request, claim.roundId, body);
+    const context = { roundId: claim.roundId, step: "act", stepIndex, attempt, account: step.account, action: step.action, resource: step.resource };
+    if (report.ok) {
+      logger.info("authority checked", { ...context, decision: report.value.decision, ...(report.value.grantId === undefined ? {} : { grantId: report.value.grantId }), durationMs: report.durationMs });
+      return report.value;
+    }
+    if (report.failure.reason === "aborted" || signal.aborted) {
+      return "aborted";
+    }
+    if (report.failure.reason === "http_status" && report.failure.httpStatus === 400 && report.failure.errorCode === "unsupported_scope") {
+      logger.error("authority check refused an unsupported scope", { ...context, durationMs: report.durationMs, ...report.failure });
+      return { decision: "unsupported" };
+    }
+    if (!isRetryable(report.failure)) {
+      logger.error("authority check refused; round abandoned locally", { ...context, durationMs: report.durationMs, ...report.failure });
+      return "abandoned";
+    }
+    const retryInMs = retryDelayMs(attempt);
+    logger.warn("authority check failed; retrying", { ...context, durationMs: report.durationMs, ...report.failure, retryInMs });
     await deps.sleep(retryInMs, signal);
     if (signal.aborted) {
       return "aborted";

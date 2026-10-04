@@ -1,7 +1,7 @@
 import type { components } from "./generated/schema";
 import { isAgentSummary } from "./agents";
 import { authenticatedFetch, isNullableString } from "./http";
-import { parseRoundQuestion, TicketNotFoundError, type RoundQuestion } from "./tickets";
+import { parsePermissionRequest, parseRoundQuestion, TicketNotFoundError, type PermissionRequest, type RoundQuestion } from "./tickets";
 
 export type TicketRound = components["schemas"]["TicketRound"];
 export type RoundActivityNote = components["schemas"]["RoundActivityNote"];
@@ -10,6 +10,7 @@ export type UsageCount = components["schemas"]["UsageCount"];
 export type RoundDeliverable = components["schemas"]["RoundDeliverable"];
 export type RoundActivityPage = components["schemas"]["RoundActivityPage"];
 export type RoundFeedback = components["schemas"]["RoundFeedback"];
+export type RoundAuthorityCheck = components["schemas"]["RoundAuthorityCheck"];
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
@@ -69,6 +70,35 @@ function parseFeedback(value: unknown): RoundFeedback[] | undefined {
   return feedback?.every((item) => item !== undefined) ? (feedback as RoundFeedback[]) : undefined;
 }
 
+function parsePermissionRequests(value: unknown): PermissionRequest[] | undefined {
+  const requests = Array.isArray(value) ? value.map(parsePermissionRequest) : undefined;
+  return requests?.every((request) => request !== undefined) ? (requests as PermissionRequest[]) : undefined;
+}
+
+function parseAuthorityCheck(value: unknown): RoundAuthorityCheck | undefined {
+  const check = record(value);
+  if (
+    !check ||
+    ![check.account, check.action, check.resource, check.checkedAt].every((field) => typeof field === "string") ||
+    !(check.decision === "allow" ? typeof check.grantId === "string" : check.decision === "deny" && check.grantId === null)
+  ) {
+    return undefined;
+  }
+  return {
+    account: check.account as string,
+    action: check.action as string,
+    resource: check.resource as string,
+    decision: check.decision as RoundAuthorityCheck["decision"],
+    grantId: check.grantId as string | null,
+    checkedAt: check.checkedAt as string,
+  };
+}
+
+function parseAuthorityChecks(value: unknown): RoundAuthorityCheck[] | undefined {
+  const checks = Array.isArray(value) ? value.map(parseAuthorityCheck) : undefined;
+  return checks?.every((check) => check !== undefined) ? (checks as RoundAuthorityCheck[]) : undefined;
+}
+
 const NOTED_STATES: readonly TicketRound["state"][] = ["stopped", "failed", "interrupted"];
 
 function parseRound(value: unknown): TicketRound | undefined {
@@ -92,7 +122,11 @@ function parseRound(value: unknown): TicketRound | undefined {
   const outcomeNote = NOTED_STATES.includes(round.state as TicketRound["state"]) ? (typeof round.outcomeNote === "string" ? round.outcomeNote : undefined) : round.outcomeNote === null ? null : undefined;
   const questions = parseQuestions(round.questions);
   const feedback = parseFeedback(round.feedback);
-  if (!usage || deliverable === undefined || outcomeNote === undefined || !activity || !questions || !feedback) return undefined;
+  const permissionRequests = parsePermissionRequests(round.permissionRequests);
+  const authorityChecks = parseAuthorityChecks(round.authorityChecks);
+  const authorityCheckCount = round.authorityCheckCount;
+  if (!usage || deliverable === undefined || outcomeNote === undefined || !activity || !questions || !feedback || !permissionRequests || !authorityChecks) return undefined;
+  if (!Number.isSafeInteger(authorityCheckCount) || (authorityCheckCount as number) < authorityChecks.length) return undefined;
   const { id, name, kind } = round.agent;
   return {
     id: round.id,
@@ -109,6 +143,9 @@ function parseRound(value: unknown): TicketRound | undefined {
     deliverable,
     questions,
     feedback,
+    permissionRequests,
+    authorityChecks,
+    authorityCheckCount: authorityCheckCount as number,
   };
 }
 

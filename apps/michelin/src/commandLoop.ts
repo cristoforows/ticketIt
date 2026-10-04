@@ -22,10 +22,13 @@ export interface CommandLoopOptions {
   signal: AbortSignal;
   onStop: (command: PulledCommand) => void;
   onAnswer: (command: AnswerCommand) => void;
+  onApproval: (command: ApprovalCommand) => void;
   requestTimeoutMs?: number;
 }
 
 export type AnswerCommand = PulledCommand & { answer: NonNullable<PulledCommand["answer"]> };
+
+export type ApprovalCommand = PulledCommand & { approval: NonNullable<PulledCommand["approval"]> };
 
 export interface CommandLoop {
   stop(): Promise<void>;
@@ -64,7 +67,7 @@ async function run(options: CommandLoopOptions, signal: AbortSignal): Promise<vo
       }
       seen.add(command.id);
       const context = { roundId: claim.roundId, commandId: command.id, type: command.type, commandEpoch: command.claimEpoch, claimEpoch: claim.claimEpoch };
-      if (command.type !== "stop" && command.type !== "answer") {
+      if (command.type !== "stop" && command.type !== "answer" && command.type !== "approval") {
         logger.warn("unknown command left unacknowledged", context);
         continue;
       }
@@ -77,6 +80,12 @@ async function run(options: CommandLoopOptions, signal: AbortSignal): Promise<vo
         const answer = command as AnswerCommand;
         logger.info("answer received", { ...context, questionId: answer.answer.questionId });
         options.onAnswer(answer);
+        continue;
+      }
+      if (command.type === "approval") {
+        const approval = command as ApprovalCommand;
+        logger.info("approval received", { ...context, requestId: approval.approval.requestId, grantId: approval.approval.grantId });
+        options.onApproval(approval);
         continue;
       }
       logger.info("stop requested", context);

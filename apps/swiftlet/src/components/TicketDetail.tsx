@@ -7,6 +7,7 @@ import { refinementGuidance } from "./refinementGuidance";
 import type { HealthView } from "./RunnerHealthPill";
 import { lockedLabel } from "./roundLock";
 import type { AddFeedback } from "./FeedbackPanel";
+import type { DecidePermission } from "./PermissionPanel";
 import type { AnswerQuestion } from "./QuestionPanel";
 import { RoundsSection, type LoadEarlierActivity, type RoundRecords } from "./RoundsSection";
 import { BadgeTag, ClaimedTag, DeliveredTag, ErrorMessage, FieldHint, FieldLabel, FieldNote, FieldValue, InlineError, LocalTime, LockGlyph, PrimaryButton, QueuedTag, ReceiptLine, Rule, SecondaryButton, Select, StatusTag, statusLabel, StoppingTag, TextInput, Textarea, ticketSerial } from "./ui";
@@ -34,6 +35,7 @@ interface TicketDetailProps {
   onLoadEarlierActivity?: LoadEarlierActivity;
   onAnswer?: AnswerQuestion;
   onAddFeedback?: AddFeedback;
+  onDecidePermission?: DecidePermission;
 }
 
 interface EditableFields {
@@ -67,7 +69,7 @@ function completionConditionLabel(condition: Ticket["completionCondition"]): str
   return condition === "reviewedPrMerge" ? "Reviewed pull request merged" : "Human acceptance";
 }
 
-export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onRework, onStop, onAssign, onUnassign, onLoadAgents, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge, onArchive, onRestore, onArchived, editRequested = false, runnerHealth = { kind: "loading" }, roundRecords, onLoadEarlierActivity, onAnswer, onAddFeedback }: TicketDetailProps) {
+export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onRework, onStop, onAssign, onUnassign, onLoadAgents, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge, onArchive, onRestore, onArchived, editRequested = false, runnerHealth = { kind: "loading" }, roundRecords, onLoadEarlierActivity, onAnswer, onAddFeedback, onDecidePermission }: TicketDetailProps) {
   const previousTicket = useRef(ticket);
   const [current, setCurrent] = useState(ticket);
   const [mode, setMode] = useState<"view" | "editing">(editRequested && !ticket.archivedAt && !ticket.openRound ? "editing" : "view");
@@ -234,7 +236,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onRewor
             <ReceiptLine label="Created" data-testid="ticket-detail-created-at"><LocalTime iso={current.createdAt} /></ReceiptLine>
             <ReceiptLine label="Updated" data-testid="ticket-detail-updated-at"><LocalTime iso={current.updatedAt} /></ReceiptLine>
           </dl>
-          {(current.openRound || current.delivery || (roundRecords?.rounds?.length ?? 0) > 0) && (
+          {(current.openRound || current.delivery || current.permissionGrants.length > 0 || (roundRecords?.rounds?.length ?? 0) > 0) && (
             <>
               <Rule />
               <RoundsSection
@@ -248,6 +250,9 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onRewor
                 delivery={current.delivery}
                 feedback={current.allowedActions.feedback}
                 onAddFeedback={onAddFeedback}
+                permissionDecision={current.allowedActions.permissionDecision}
+                onDecidePermission={onDecidePermission}
+                permissionGrants={current.permissionGrants}
               />
             </>
           )}

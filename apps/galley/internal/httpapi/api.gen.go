@@ -72,6 +72,24 @@ func (e AssignTicketRequestType) Valid() bool {
 	}
 }
 
+// Defines values for AuthorityDecision.
+const (
+	AuthorityAllow AuthorityDecision = "allow"
+	AuthorityDeny  AuthorityDecision = "deny"
+)
+
+// Valid indicates whether the value is a known member of the AuthorityDecision enum.
+func (e AuthorityDecision) Valid() bool {
+	switch e {
+	case AuthorityAllow:
+		return true
+	case AuthorityDeny:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DatabaseStatusStatus.
 const (
 	DatabaseStatusStatusError DatabaseStatusStatus = "error"
@@ -111,17 +129,66 @@ func (e OpenRoundState) Valid() bool {
 	}
 }
 
+// Defines values for PermissionGrantForm.
+const (
+	PermissionGrantFormTicket PermissionGrantForm = "ticket"
+)
+
+// Valid indicates whether the value is a known member of the PermissionGrantForm enum.
+func (e PermissionGrantForm) Valid() bool {
+	switch e {
+	case PermissionGrantFormTicket:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PermissionGrantState.
+const (
+	PermissionGrantActive PermissionGrantState = "active"
+)
+
+// Valid indicates whether the value is a known member of the PermissionGrantState enum.
+func (e PermissionGrantState) Valid() bool {
+	switch e {
+	case PermissionGrantActive:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PermissionRequestDecision.
+const (
+	PermissionApproved PermissionRequestDecision = "approved"
+	PermissionDeclined PermissionRequestDecision = "declined"
+)
+
+// Valid indicates whether the value is a known member of the PermissionRequestDecision enum.
+func (e PermissionRequestDecision) Valid() bool {
+	switch e {
+	case PermissionApproved:
+		return true
+	case PermissionDeclined:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RoundEventType.
 const (
-	RoundEventDelivered        RoundEventType = "delivered"
-	RoundEventExecutionStarted RoundEventType = "execution_started"
-	RoundEventFailed           RoundEventType = "failed"
-	RoundEventInterrupted      RoundEventType = "interrupted"
-	RoundEventProgress         RoundEventType = "progress"
-	RoundEventQuestionRaised   RoundEventType = "question_raised"
-	RoundEventResumed          RoundEventType = "resumed"
-	RoundEventStopConfirmed    RoundEventType = "stop_confirmed"
-	RoundEventUsageObserved    RoundEventType = "usage_observed"
+	RoundEventDelivered           RoundEventType = "delivered"
+	RoundEventExecutionStarted    RoundEventType = "execution_started"
+	RoundEventFailed              RoundEventType = "failed"
+	RoundEventInterrupted         RoundEventType = "interrupted"
+	RoundEventPermissionRequested RoundEventType = "permission_requested"
+	RoundEventProgress            RoundEventType = "progress"
+	RoundEventQuestionRaised      RoundEventType = "question_raised"
+	RoundEventResumed             RoundEventType = "resumed"
+	RoundEventStopConfirmed       RoundEventType = "stop_confirmed"
+	RoundEventUsageObserved       RoundEventType = "usage_observed"
 )
 
 // Valid indicates whether the value is a known member of the RoundEventType enum.
@@ -134,6 +201,8 @@ func (e RoundEventType) Valid() bool {
 	case RoundEventFailed:
 		return true
 	case RoundEventInterrupted:
+		return true
+	case RoundEventPermissionRequested:
 		return true
 	case RoundEventProgress:
 		return true
@@ -186,6 +255,7 @@ func (e RoundState) Valid() bool {
 // Defines values for RoundWaitingReason.
 const (
 	WaitingForAnswer          RoundWaitingReason = "waiting_for_answer"
+	WaitingForPermission      RoundWaitingReason = "waiting_for_permission"
 	WaitingResuming           RoundWaitingReason = "resuming"
 	WaitingRunnerDisconnected RoundWaitingReason = "runner_disconnected"
 	WaitingStarting           RoundWaitingReason = "starting"
@@ -197,6 +267,8 @@ const (
 func (e RoundWaitingReason) Valid() bool {
 	switch e {
 	case WaitingForAnswer:
+		return true
+	case WaitingForPermission:
 		return true
 	case WaitingResuming:
 		return true
@@ -233,14 +305,17 @@ func (e RunnerCommandAckOutcome) Valid() bool {
 
 // Defines values for RunnerCommandType.
 const (
-	RunnerCommandAnswer RunnerCommandType = "answer"
-	RunnerCommandStop   RunnerCommandType = "stop"
+	RunnerCommandAnswer   RunnerCommandType = "answer"
+	RunnerCommandApproval RunnerCommandType = "approval"
+	RunnerCommandStop     RunnerCommandType = "stop"
 )
 
 // Valid indicates whether the value is a known member of the RunnerCommandType enum.
 func (e RunnerCommandType) Valid() bool {
 	switch e {
 	case RunnerCommandAnswer:
+		return true
+	case RunnerCommandApproval:
 		return true
 	case RunnerCommandStop:
 		return true
@@ -466,6 +541,18 @@ type AnswerQuestionRequest struct {
 	Answer string `json:"answer"`
 }
 
+// ApprovalResumedData The `resumed` payload after an approval.
+type ApprovalResumedData struct {
+	// RequestId The approved Permission request the runner acted on.
+	RequestId string `json:"requestId"`
+}
+
+// ApprovePermissionRequest defines model for ApprovePermissionRequest.
+type ApprovePermissionRequest struct {
+	// Form `ticket`: this Agent, this Ticket, this scope, for as long as the grant is active.
+	Form PermissionGrantForm `json:"form"`
+}
+
 // AssignTicketRequest `agentId` is required when `type` is `agent` and rejected otherwise.
 type AssignTicketRequest struct {
 	AgentId *string                 `json:"agentId,omitempty"`
@@ -474,6 +561,27 @@ type AssignTicketRequest struct {
 
 // AssignTicketRequestType defines model for AssignTicketRequest.Type.
 type AssignTicketRequestType string
+
+// AuthorityCheckRequest A scope matches a grant when `account` and `action` are the same and `resource` is the same string; `resource` must fit the pattern the Connected Account declares for `action`. The controlled substitute account `controlled` declares `read_note` and `write_note` on `notes/<name>` and `post_message` on `channels/<name>`, where `<name>` is 1 to 64 of `a-z`, `0-9` and `-`, starting with a letter or digit.
+type AuthorityCheckRequest struct {
+	Account string `json:"account"`
+	Action  string `json:"action"`
+
+	// Epoch The fencing token from the claim.
+	Epoch    int    `json:"epoch"`
+	Resource string `json:"resource"`
+}
+
+// AuthorityCheckResult defines model for AuthorityCheckResult.
+type AuthorityCheckResult struct {
+	Decision AuthorityDecision `json:"decision"`
+
+	// GrantId The grant that allowed; present exactly when `decision` is `allow`.
+	GrantId *string `json:"grantId,omitempty"`
+}
+
+// AuthorityDecision defines model for AuthorityDecision.
+type AuthorityDecision string
 
 // Badge defines model for Badge.
 type Badge struct {
@@ -654,6 +762,69 @@ type Owner struct {
 	Login string `json:"login"`
 }
 
+// PermissionGrant defines model for PermissionGrant.
+type PermissionGrant struct {
+	Account string `json:"account"`
+	Action  string `json:"action"`
+
+	// Agent The only Agent the grant authorizes.
+	Agent      TicketAssigneeAgent `json:"agent"`
+	ApprovedAt time.Time           `json:"approvedAt"`
+	CreatedAt  time.Time           `json:"createdAt"`
+
+	// Form `ticket`: this Agent, this Ticket, this scope, for as long as the grant is active.
+	Form     PermissionGrantForm `json:"form"`
+	Id       string              `json:"id"`
+	Resource string              `json:"resource"`
+
+	// RoundId The Round whose request the Owner approved.
+	RoundId           string               `json:"roundId"`
+	State             PermissionGrantState `json:"state"`
+	SubstituteAccount bool                 `json:"substituteAccount"`
+}
+
+// PermissionGrantForm `ticket`: this Agent, this Ticket, this scope, for as long as the grant is active.
+type PermissionGrantForm string
+
+// PermissionGrantState defines model for PermissionGrantState.
+type PermissionGrantState string
+
+// PermissionRequest defines model for PermissionRequest.
+type PermissionRequest struct {
+	Account   string                     `json:"account"`
+	Action    string                     `json:"action"`
+	DecidedAt *time.Time                 `json:"decidedAt"`
+	Decision  *PermissionRequestDecision `json:"decision"`
+
+	// GrantId The grant the approval created; set exactly when `decision` is `approved`.
+	GrantId *string `json:"grantId"`
+
+	// Id The runner's `requestId`.
+	Id string `json:"id"`
+
+	// RequestedAt Galley's clock.
+	RequestedAt time.Time `json:"requestedAt"`
+	Resource    string    `json:"resource"`
+
+	// SubstituteAccount True for the controlled substitute Connected Account, which stands in for a real one.
+	SubstituteAccount bool `json:"substituteAccount"`
+}
+
+// PermissionRequestDecision defines model for PermissionRequestDecision.
+type PermissionRequestDecision string
+
+// PermissionRequestedData defines model for PermissionRequestedData.
+type PermissionRequestedData struct {
+	Account string `json:"account"`
+	Action  string `json:"action"`
+
+	// RequestId The request's identity, generated by the runner, one per request instance. Lowercase canonical form, not the nil UUID, and equal to the event's `idempotencyKey`.
+	RequestId string `json:"requestId"`
+
+	// Resource Must fit the declared pattern; see `AuthorityCheckRequest`.
+	Resource string `json:"resource"`
+}
+
 // ProgressData defines model for ProgressData.
 type ProgressData struct {
 	// Note Counted in Unicode code points. Not blank; no control characters but tab and line feed.
@@ -712,6 +883,20 @@ type RoundActivityPage struct {
 	EarlierActivityCursor *EarlierActivityCursor `json:"earlierActivityCursor"`
 }
 
+// RoundAuthorityCheck defines model for RoundAuthorityCheck.
+type RoundAuthorityCheck struct {
+	Account string `json:"account"`
+	Action  string `json:"action"`
+
+	// CheckedAt Galley's clock.
+	CheckedAt time.Time         `json:"checkedAt"`
+	Decision  AuthorityDecision `json:"decision"`
+
+	// GrantId The grant that allowed; set exactly when `decision` is `allow`.
+	GrantId  *string `json:"grantId"`
+	Resource string  `json:"resource"`
+}
+
 // RoundCommandAcknowledgement defines model for RoundCommandAcknowledgement.
 type RoundCommandAcknowledgement struct {
 	AcknowledgedAt time.Time               `json:"acknowledgedAt"`
@@ -731,7 +916,7 @@ type RoundEventRequest struct {
 	// ClaimEpoch The fencing token from the claim.
 	ClaimEpoch int `json:"claimEpoch"`
 
-	// Data The payload for `type`: `ExecutionStartedData`, `ProgressData`, `UsageObservedData`, `DeliveredData`, `StopConfirmedData`, `FailedData`, `InterruptedData`, `QuestionRaisedData` or `ResumedData`. Not `oneOf`: `StopConfirmedData` and `InterruptedData` share a shape.
+	// Data The payload for `type`: `ExecutionStartedData`, `ProgressData`, `UsageObservedData`, `DeliveredData`, `StopConfirmedData`, `FailedData`, `InterruptedData`, `QuestionRaisedData`, `PermissionRequestedData`, or `ResumedData` or `ApprovalResumedData`. Not `oneOf`: `StopConfirmedData` and `InterruptedData` share a shape.
 	Data RoundEventRequest_Data `json:"data"`
 
 	// IdempotencyKey Taken verbatim; identity is never trimmed.
@@ -744,7 +929,7 @@ type RoundEventRequest struct {
 	Type RoundEventType `json:"type"`
 }
 
-// RoundEventRequest_Data The payload for `type`: `ExecutionStartedData`, `ProgressData`, `UsageObservedData`, `DeliveredData`, `StopConfirmedData`, `FailedData`, `InterruptedData`, `QuestionRaisedData` or `ResumedData`. Not `oneOf`: `StopConfirmedData` and `InterruptedData` share a shape.
+// RoundEventRequest_Data The payload for `type`: `ExecutionStartedData`, `ProgressData`, `UsageObservedData`, `DeliveredData`, `StopConfirmedData`, `FailedData`, `InterruptedData`, `QuestionRaisedData`, `PermissionRequestedData`, or `ResumedData` or `ApprovalResumedData`. Not `oneOf`: `StopConfirmedData` and `InterruptedData` share a shape.
 type RoundEventRequest_Data struct {
 	union json.RawMessage
 }
@@ -757,9 +942,12 @@ type RoundEventResult struct {
 	// ObservationId For `usage_observed`, the observation recorded.
 	ObservationId *string `json:"observationId,omitempty"`
 
-	// QuestionId For `question_raised` and `resumed`, the question.
+	// QuestionId For `question_raised`, and `resumed` after an answer, the question.
 	QuestionId *string `json:"questionId,omitempty"`
-	RoundId    string  `json:"roundId"`
+
+	// RequestId For `permission_requested`, and `resumed` after an approval, the Permission request.
+	RequestId *string `json:"requestId,omitempty"`
+	RoundId   string  `json:"roundId"`
 
 	// Seq For `progress`, the note's place in the Round's activity.
 	Seq *int `json:"seq,omitempty"`
@@ -833,7 +1021,7 @@ type RoundUsage struct {
 	OutputTokens UsageCount `json:"outputTokens"`
 }
 
-// RoundWaitingReason What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `stopping` (Stop requested), `waiting_for_answer` (waiting for input, its question unanswered), `resuming` (waiting for input, its question answered), `starting` (claimed) and `working` (running) applies.
+// RoundWaitingReason What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `stopping` (Stop requested), `resuming` (waiting for input, its question answered or its Permission request approved), `waiting_for_answer` (waiting on an unanswered question), `waiting_for_permission` (waiting on a Permission request not approved, declined included), `starting` (claimed) and `working` (running) applies.
 type RoundWaitingReason string
 
 // RunnerClaim defines model for RunnerClaim.
@@ -851,6 +1039,9 @@ type RunnerClaim struct {
 type RunnerCommand struct {
 	// Answer Present exactly when `type` is `answer`.
 	Answer *RunnerCommandAnswerData `json:"answer,omitempty"`
+
+	// Approval Present exactly when `type` is `approval`.
+	Approval *RunnerCommandApprovalData `json:"approval,omitempty"`
 
 	// ClaimEpoch The claim epoch the command targets. A runner holding another epoch acknowledges it `ignored` and does not act on it.
 	ClaimEpoch int `json:"claimEpoch"`
@@ -871,6 +1062,15 @@ type RunnerCommandAnswerData struct {
 	// QuestionId The question answered.
 	QuestionId string `json:"questionId"`
 	Text       string `json:"text"`
+}
+
+// RunnerCommandApprovalData defines model for RunnerCommandApprovalData.
+type RunnerCommandApprovalData struct {
+	// GrantId The grant the approval created. The runner still checks authority before acting.
+	GrantId string `json:"grantId"`
+
+	// RequestId The Permission request approved.
+	RequestId string `json:"requestId"`
 }
 
 // RunnerCommandList defines model for RunnerCommandList.
@@ -989,6 +1189,9 @@ type Ticket struct {
 	// OpenRound Null unless the Ticket has an open Round. While it is set, every change to the Ticket's fields, Assignee, Badges, Status or position, Accept and archive is rejected with `round_open`, and `allowedActions` offers none of them.
 	OpenRound *TicketOpenRound `json:"openRound"`
 
+	// PermissionGrants Every Permission grant on this Ticket, oldest first.
+	PermissionGrants []PermissionGrant `json:"permissionGrants"`
+
 	// Repository One Ticket repository reference (issue #59, D3 S1 check 3), available on either Template, and required before Ready only by a `coding` Agent's readiness. There is exactly one such field on a Ticket; the Coding Template surfaces it by default, but it is not a competing Basic-only concept. Plain text (e.g. an "owner/repo" name or a URL) with no format enforced yet. Always present on the wire; "" means never set or cleared -- see `goal`'s description for the same convention.
 	Repository string `json:"repository"`
 
@@ -1018,7 +1221,10 @@ type TicketAllowedActions struct {
 
 	// Feedback Whether feedback can be added to `delivery.roundId`; otherwise `feedback_not_available`.
 	Feedback TicketCommandAvailability `json:"feedback"`
-	Rework   TicketCommandAvailability `json:"rework"`
+
+	// PermissionDecision Whether `openRound.permissionRequest` can be approved or declined. Unavailable with `permission_decision_not_available` without one, `permission_already_decided` once it is decided, and `stop_already_requested` once Stop is requested.
+	PermissionDecision TicketCommandAvailability `json:"permissionDecision"`
+	Rework             TicketCommandAvailability `json:"rework"`
 
 	// StatusChangeRejections Targets D3 S2's table permits from the current Status that this Ticket's Agent assignment or missing inputs rule out, each with the status command's error.
 	StatusChangeRejections []TicketStatusChangeRejection `json:"statusChangeRejections"`
@@ -1080,7 +1286,10 @@ type TicketOpenRound struct {
 	ClaimedAt time.Time           `json:"claimedAt"`
 	Id        string              `json:"id"`
 
-	// Question The question the Round waits on; set exactly when `state` is `waiting_for_input`.
+	// PermissionRequest The Permission request the Round waits on; see `question`.
+	PermissionRequest *PermissionRequest `json:"permissionRequest"`
+
+	// Question The question the Round waits on. While `state` is `waiting_for_input`, exactly one of `question` and `permissionRequest` is set; otherwise neither.
 	Question  *RoundQuestion `json:"question"`
 	Sequence  int            `json:"sequence"`
 	StartedAt *time.Time     `json:"startedAt"`
@@ -1091,7 +1300,7 @@ type TicketOpenRound struct {
 	// StopRequestedAt When the Owner requested Stop; the Ticket shows Stopping. Not a Status.
 	StopRequestedAt *time.Time `json:"stopRequestedAt"`
 
-	// WaitingReason What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `stopping` (Stop requested), `waiting_for_answer` (waiting for input, its question unanswered), `resuming` (waiting for input, its question answered), `starting` (claimed) and `working` (running) applies.
+	// WaitingReason What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `stopping` (Stop requested), `resuming` (waiting for input, its question answered or its Permission request approved), `waiting_for_answer` (waiting on an unanswered question), `waiting_for_permission` (waiting on a Permission request not approved, declined included), `starting` (claimed) and `working` (running) applies.
 	WaitingReason RoundWaitingReason `json:"waitingReason"`
 }
 
@@ -1101,8 +1310,14 @@ type TicketRound struct {
 	Activity []RoundActivityNote `json:"activity"`
 
 	// Agent The Agent assigned when the Round was claimed.
-	Agent     TicketAssigneeAgent `json:"agent"`
-	ClaimedAt time.Time           `json:"claimedAt"`
+	Agent TicketAssigneeAgent `json:"agent"`
+
+	// AuthorityCheckCount Every authority check the Round made, including those beyond `authorityChecks`.
+	AuthorityCheckCount int `json:"authorityCheckCount"`
+
+	// AuthorityChecks The latest 50 authority checks, oldest first.
+	AuthorityChecks []RoundAuthorityCheck `json:"authorityChecks"`
+	ClaimedAt       time.Time             `json:"claimedAt"`
 
 	// Deliverable Set exactly when `state` is `delivered`.
 	Deliverable *RoundDeliverable `json:"deliverable"`
@@ -1117,6 +1332,9 @@ type TicketRound struct {
 
 	// OutcomeNote Set exactly when `state` is `stopped`, `failed` or `interrupted`.
 	OutcomeNote *string `json:"outcomeNote"`
+
+	// PermissionRequests Every Permission request the Round raised, oldest first, with the Owner's decision.
+	PermissionRequests []PermissionRequest `json:"permissionRequests"`
 
 	// Questions Every question the Round raised, oldest first.
 	Questions []RoundQuestion `json:"questions"`
@@ -1246,6 +1464,9 @@ type CreateDiagnosticNoteJSONRequestBody = CreateDiagnosticNoteRequest
 // RegisterRunnerJSONRequestBody defines body for RegisterRunner for application/json ContentType.
 type RegisterRunnerJSONRequestBody = RegisterRunnerRequest
 
+// CheckRoundAuthorityJSONRequestBody defines body for CheckRoundAuthority for application/json ContentType.
+type CheckRoundAuthorityJSONRequestBody = AuthorityCheckRequest
+
 // AcknowledgeRoundCommandJSONRequestBody defines body for AcknowledgeRoundCommand for application/json ContentType.
 type AcknowledgeRoundCommandJSONRequestBody = AcknowledgeRoundCommandRequest
 
@@ -1266,6 +1487,9 @@ type ReorderTicketJSONRequestBody = ReorderTicketRequest
 
 // AddRoundFeedbackJSONRequestBody defines body for AddRoundFeedback for application/json ContentType.
 type AddRoundFeedbackJSONRequestBody = AddRoundFeedbackRequest
+
+// ApprovePermissionRequestJSONRequestBody defines body for ApprovePermissionRequest for application/json ContentType.
+type ApprovePermissionRequestJSONRequestBody = ApprovePermissionRequest
 
 // AnswerRoundQuestionJSONRequestBody defines body for AnswerRoundQuestion for application/json ContentType.
 type AnswerRoundQuestionJSONRequestBody = AnswerQuestionRequest
@@ -1507,6 +1731,58 @@ func (t *RoundEventRequest_Data) MergeResumedData(v ResumedData) error {
 	return err
 }
 
+// AsPermissionRequestedData returns the union data inside the RoundEventRequest_Data as a PermissionRequestedData
+func (t RoundEventRequest_Data) AsPermissionRequestedData() (PermissionRequestedData, error) {
+	var body PermissionRequestedData
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPermissionRequestedData overwrites any union data inside the RoundEventRequest_Data as the provided PermissionRequestedData
+func (t *RoundEventRequest_Data) FromPermissionRequestedData(v PermissionRequestedData) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePermissionRequestedData performs a merge with any union data inside the RoundEventRequest_Data, using the provided PermissionRequestedData
+func (t *RoundEventRequest_Data) MergePermissionRequestedData(v PermissionRequestedData) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsApprovalResumedData returns the union data inside the RoundEventRequest_Data as a ApprovalResumedData
+func (t RoundEventRequest_Data) AsApprovalResumedData() (ApprovalResumedData, error) {
+	var body ApprovalResumedData
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromApprovalResumedData overwrites any union data inside the RoundEventRequest_Data as the provided ApprovalResumedData
+func (t *RoundEventRequest_Data) FromApprovalResumedData(v ApprovalResumedData) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeApprovalResumedData performs a merge with any union data inside the RoundEventRequest_Data, using the provided ApprovalResumedData
+func (t *RoundEventRequest_Data) MergeApprovalResumedData(v ApprovalResumedData) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
 func (t RoundEventRequest_Data) MarshalJSON() ([]byte, error) {
 	b, err := t.union.MarshalJSON()
 	return b, err
@@ -1567,6 +1843,9 @@ type ServerInterface interface {
 	// RegisterRunner Register a runner
 	// (POST /api/runner/register)
 	RegisterRunner(w http.ResponseWriter, r *http.Request)
+	// CheckRoundAuthority Check whether the Round's Agent holds authority for a scope
+	// (POST /api/runner/rounds/{roundId}/authority-checks)
+	CheckRoundAuthority(w http.ResponseWriter, r *http.Request, roundId string)
 	// ListRoundCommands Pull a Round's unacknowledged commands
 	// (GET /api/runner/rounds/{roundId}/commands)
 	ListRoundCommands(w http.ResponseWriter, r *http.Request, roundId string)
@@ -1633,6 +1912,12 @@ type ServerInterface interface {
 	// AddRoundFeedback Add feedback on a delivered Round for the next Round
 	// (POST /api/tickets/{id}/rounds/{roundId}/feedback)
 	AddRoundFeedback(w http.ResponseWriter, r *http.Request, id string, roundId string)
+	// ApprovePermissionRequest Approve the Permission request a Round waits on
+	// (POST /api/tickets/{id}/rounds/{roundId}/permission-requests/{requestId}/approve)
+	ApprovePermissionRequest(w http.ResponseWriter, r *http.Request, id string, roundId string, requestId string)
+	// DeclinePermissionRequest Decline the Permission request a Round waits on
+	// (POST /api/tickets/{id}/rounds/{roundId}/permission-requests/{requestId}/decline)
+	DeclinePermissionRequest(w http.ResponseWriter, r *http.Request, id string, roundId string, requestId string)
 	// AnswerRoundQuestion Answer the question a Round waits on
 	// (POST /api/tickets/{id}/rounds/{roundId}/questions/{questionId}/answer)
 	AnswerRoundQuestion(w http.ResponseWriter, r *http.Request, id string, roundId string, questionId string)
@@ -1925,6 +2210,32 @@ func (siw *ServerInterfaceWrapper) RegisterRunner(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RegisterRunner(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CheckRoundAuthority operation middleware
+func (siw *ServerInterfaceWrapper) CheckRoundAuthority(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "roundId" -------------
+	var roundId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "roundId", r.PathValue("roundId"), &roundId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "roundId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CheckRoundAuthority(w, r, roundId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2539,6 +2850,94 @@ func (siw *ServerInterfaceWrapper) AddRoundFeedback(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// ApprovePermissionRequest operation middleware
+func (siw *ServerInterfaceWrapper) ApprovePermissionRequest(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "roundId" -------------
+	var roundId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "roundId", r.PathValue("roundId"), &roundId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "roundId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "requestId" -------------
+	var requestId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "requestId", r.PathValue("requestId"), &requestId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "requestId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApprovePermissionRequest(w, r, id, roundId, requestId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeclinePermissionRequest operation middleware
+func (siw *ServerInterfaceWrapper) DeclinePermissionRequest(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "roundId" -------------
+	var roundId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "roundId", r.PathValue("roundId"), &roundId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "roundId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "requestId" -------------
+	var requestId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "requestId", r.PathValue("requestId"), &requestId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "requestId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeclinePermissionRequest(w, r, id, roundId, requestId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // AnswerRoundQuestion operation middleware
 func (siw *ServerInterfaceWrapper) AnswerRoundQuestion(w http.ResponseWriter, r *http.Request) {
 
@@ -2783,6 +3182,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/tickets/{id}/rounds", wrapper.ListTicketRounds)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/tickets/{id}/rounds/{roundId}/activity", wrapper.ListRoundActivity)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/rounds/{roundId}/questions/{questionId}/answer", wrapper.AnswerRoundQuestion)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/rounds/{roundId}/permission-requests/{requestId}/approve", wrapper.ApprovePermissionRequest)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/rounds/{roundId}/permission-requests/{requestId}/decline", wrapper.DeclinePermissionRequest)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/rounds/{roundId}/feedback", wrapper.AddRoundFeedback)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/session", wrapper.SignOut)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/session", wrapper.GetSession)
@@ -2793,6 +3194,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner/heartbeat", wrapper.RunnerHeartbeat)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner/claims", wrapper.ClaimWork)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner/rounds/{roundId}/events", wrapper.ReportRoundEvent)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner/rounds/{roundId}/authority-checks", wrapper.CheckRoundAuthority)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/runner/rounds/{roundId}/commands", wrapper.ListRoundCommands)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/runner/rounds/{roundId}/commands/{commandId}/ack", wrapper.AcknowledgeRoundCommand)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/dev/clock/advance", wrapper.AdvanceDevClock)

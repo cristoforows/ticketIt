@@ -19,11 +19,19 @@ export interface DeliverStep {
   criteriaAssessment: string;
 }
 
+export interface ActStep {
+  step: "act";
+  account: string;
+  action: string;
+  resource: string;
+}
+
 export type EngineStep =
   | { step: "start" }
   | { step: "wait"; ms: number }
   | { step: "progress"; note: string }
   | { step: "ask"; question: string }
+  | ActStep
   | UsageStep
   | DeliverStep
   | { step: "hold" }
@@ -83,7 +91,9 @@ export const DEFAULT_ENGINE_SCRIPT: EngineScript = {
   ],
 };
 
-const SUPPORTED_STEPS = "start, wait, progress, ask, usage, deliver, hold, fail, interrupt";
+const SUPPORTED_STEPS = "start, wait, progress, ask, act, usage, deliver, hold, fail, interrupt";
+
+const ACT_KEYS = ["account", "action", "resource"];
 
 const USAGE_KEYS = ["provider", "model", "inputTokens", "outputTokens", "costUsd", "activeMs", "basis", "providerGenerationId"];
 
@@ -181,6 +191,14 @@ function parseStep(raw: unknown, index: number, total: number, problems: string[
         problems.push(`${at}: "question" must be 1 to ${NOTE_MAX_LENGTH} characters, not blank, without control characters other than tab and line feed`);
       }
       break;
+    case "act":
+      for (const key of ACT_KEYS) {
+        known.add(key);
+        if (!validScopeField(fields[key])) {
+          problems.push(`${at}: "${key}" must be 1 to ${LABEL_MAX_LENGTH} characters, not blank, without control characters`);
+        }
+      }
+      break;
     case "usage":
       USAGE_KEYS.forEach((key) => known.add(key));
       checkUsage(fields, at, problems);
@@ -204,6 +222,8 @@ function parseStep(raw: unknown, index: number, total: number, problems: string[
       return { step: "progress", note: fields["note"] as string };
     case "ask":
       return { step: "ask", question: fields["question"] as string };
+    case "act":
+      return { step: "act", account: fields["account"] as string, action: fields["action"] as string, resource: fields["resource"] as string };
     case "usage":
       return {
         step: "usage",
@@ -267,6 +287,11 @@ function validLabel(value: unknown): value is string {
   if (typeof value !== "string") return false;
   const length = [...value].length;
   return length >= 1 && length <= LABEL_MAX_LENGTH && !hasControl(value, "");
+}
+
+// Whether Galley supports the scope is Galley's to answer; an unsupported one fails the Round when the step runs.
+function validScopeField(value: unknown): value is string {
+  return validLabel(value) && NOT_GO_SPACE.test(value);
 }
 
 // Absent and null both mean unknown; zero is a known value.

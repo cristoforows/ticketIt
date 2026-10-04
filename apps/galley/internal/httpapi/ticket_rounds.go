@@ -32,7 +32,7 @@ func (s *server) ListTicketRounds(w http.ResponseWriter, r *http.Request, id str
 	writeJSON(w, http.StatusOK, TicketRoundList{Rounds: rounds})
 }
 
-// One read-only snapshot, so a Round's activity, usage, questions and feedback agree with each other and with the Round.
+// One read-only snapshot, so a Round's activity, usage, questions, feedback, Permission requests and authority checks agree with each other and with the Round.
 func listRoundsForTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64, ticketID string) ([]TicketRound, bool, error) {
 	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
@@ -93,6 +93,14 @@ func listRoundsForTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64,
 	if err != nil {
 		return nil, false, err
 	}
+	requests, err := roundPermissionRequests(ctx, tx, ownerID, ids)
+	if err != nil {
+		return nil, false, err
+	}
+	checks, err := roundAuthorityChecks(ctx, tx, ownerID, ids)
+	if err != nil {
+		return nil, false, err
+	}
 	for i, id := range ids {
 		rounds[i].Activity = activity[id].Activity
 		rounds[i].EarlierActivityCursor = activity[id].EarlierActivityCursor
@@ -105,6 +113,15 @@ func listRoundsForTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64,
 		if rounds[i].Feedback == nil {
 			rounds[i].Feedback = []RoundFeedback{}
 		}
+		rounds[i].PermissionRequests = requests[id]
+		if rounds[i].PermissionRequests == nil {
+			rounds[i].PermissionRequests = []PermissionRequest{}
+		}
+		rounds[i].AuthorityChecks = checks[id].checks
+		if rounds[i].AuthorityChecks == nil {
+			rounds[i].AuthorityChecks = []RoundAuthorityCheck{}
+		}
+		rounds[i].AuthorityCheckCount = checks[id].count
 	}
 	return rounds, true, nil
 }

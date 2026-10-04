@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { RoundActivityNote, RoundActivityPage, RoundDeliverable, TicketRound } from "../api/rounds";
 import type { Ticket } from "../api/tickets";
 import { FeedbackHistory, FeedbackPanel, type AddFeedback } from "./FeedbackPanel";
+import { PermissionGrants, PermissionHistory, PermissionPanel, type DecidePermission } from "./PermissionPanel";
 import { QuestionHistory, QuestionPanel, type AnswerQuestion } from "./QuestionPanel";
 import type { HealthView } from "./RunnerHealthPill";
 import { activeTime, costFigure, countFigure, type UsageFigure } from "./roundUsage";
@@ -15,7 +16,7 @@ export interface RoundRecords {
 
 export type LoadEarlierActivity = (roundId: string, before: string) => Promise<RoundActivityPage>;
 
-export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEarlierActivity, answer, onAnswer, onAnswered = () => {}, delivery = null, feedback, onAddFeedback }: {
+export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEarlierActivity, answer, onAnswer, onAnswered = () => {}, delivery = null, feedback, onAddFeedback, permissionDecision, onDecidePermission, permissionGrants = [] }: {
   openRound: Ticket["openRound"];
   runnerHealth: HealthView;
   records?: RoundRecords;
@@ -26,6 +27,9 @@ export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEar
   delivery?: Ticket["delivery"];
   feedback?: Ticket["allowedActions"]["feedback"];
   onAddFeedback?: AddFeedback;
+  permissionDecision?: Ticket["allowedActions"]["permissionDecision"];
+  onDecidePermission?: DecidePermission;
+  permissionGrants?: Ticket["permissionGrants"];
 }) {
   const runnerLost = openRound !== null && runnerHealth.kind === "loaded" && runnerHealth.health.state !== "connected";
   const awaitingOpenRound = openRound !== null && !records.rounds?.some((candidate) => candidate.id === openRound.id);
@@ -40,6 +44,10 @@ export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEar
       {openRound?.question && answer && (
         <QuestionPanel roundId={openRound.id} question={openRound.question} availability={answer} onAnswer={onAnswer} onAnswered={onAnswered} />
       )}
+      {openRound?.permissionRequest && permissionDecision && (
+        <PermissionPanel roundId={openRound.id} request={openRound.permissionRequest} availability={permissionDecision} onDecide={onDecidePermission} onDecided={onAnswered} />
+      )}
+      <PermissionGrants grants={permissionGrants} />
       {delivery && feedback && <FeedbackPanel delivery={delivery} availability={feedback} onAddFeedback={onAddFeedback} onAdded={onAnswered} />}
       {records.error && (
         <InlineError data-testid="ticket-detail-round-records-error" className="my-2">
@@ -71,7 +79,7 @@ function outcomeOf(round: TicketRound): ReactNode {
     case "running":
       return "Running";
     case "waiting_for_input":
-      return "Waiting for your answer";
+      return round.questions.every((question) => question.answer !== null) && round.permissionRequests.some((request) => request.decision !== "approved") ? "Waiting for a Permission" : "Waiting for your answer";
     case "claimed":
       return "Claimed, waiting for the runner to start";
   }
@@ -107,6 +115,7 @@ function RoundEntry({ round, defaultOpen, onLoadEarlierActivity }: { round: Tick
         )}
         {round.deliverable && <Deliverable deliverable={round.deliverable} />}
         <QuestionHistory questions={round.questions} awaiting={round.state === "waiting_for_input"} />
+        <PermissionHistory requests={round.permissionRequests} checks={round.authorityChecks} checkCount={round.authorityCheckCount} awaiting={round.state === "waiting_for_input"} />
         <FeedbackHistory feedback={round.feedback} />
         <RoundRecordDetails round={round} onLoadEarlierActivity={onLoadEarlierActivity} usageLabel={round.state === "claimed" || round.state === "running" || round.state === "waiting_for_input" ? "Usage so far" : "Usage"} />
       </Disclosure>

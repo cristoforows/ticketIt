@@ -419,7 +419,7 @@ receipt's notice and the header pill must all show the runner as
 disconnected, with no animation. Re-registering restores Starting. On a
 phone the active slip has no status toggle. Stop on the phone list shows
 Stopping, with no Stop control, on both views. `run.sh` runs it after
-`runner-feedback.spec.ts` with no reset. It leaves a Round open, but no later
+`runner-permission.spec.ts` with no reset. It leaves a Round open, but no later
 spec needs the slot.
 
 `tests/runner-ask.spec.ts` (issue #163) has two tests. The first drives
@@ -455,6 +455,30 @@ the receipt, the reopen route; Round 2's activity must carry it, and
 Round 1, still a delivered Round, then takes another comment (`201`,
 unconsumed) while a 10001-character one is `400 invalid_request`. `run.sh` runs it after `runner-ask.spec.ts`
 with no reset, and it leaves both Tickets Done with no Round open.
+
+`tests/runner-permission.spec.ts` (issue #165) has two tests, each with
+a real Michelin whose script `act`s on the substitute `controlled`
+account's `write_note` on `notes/weekly-report`. In the first, two `act`
+steps share that scope. The first check is denied, so Michelin requests
+the Permission: the Ticket must be Blocked and locked with Waiting for a
+Permission on the board slip, and the receipt must show the request
+with the Substitute account tag and the denied check. **Allow for this
+Ticket** posts `{"form": "ticket"}` and answers `200` with Resuming and
+one active ticket grant. Both actions must then be performed in the
+same Round 1, which delivers: the Round lists one approved request, the
+checks deny, allow, allow (both allows naming the grant), and two
+`Performed write_note on notes/weekly-report` notes. Michelin must log
+one `permission requested`, one `approval received`, the `resumed`
+report before the `applied` ack, and no second request. A repeated
+approval is `400 permission_already_decided` and creates no second
+grant. The second test declines from the receipt. The Round must keep
+waiting with Waiting for a Permission, Michelin must receive no
+approval, and a later approval is `400 permission_already_decided`.
+Stop from the receipt then ends the Round as Stopped in Backlog
+(`Stopped while waiting for the approval to step 2 of 3 …`), with no
+grant, the request listed as declined, one check and no performed
+action. `run.sh` runs it after `runner-feedback.spec.ts` with no reset,
+and it leaves no Round open.
 
 `tests/ticket-priority-order.spec.ts` reorders three Ready Tickets by
 dragging onto the upper and lower halves of board slips, then with Move
