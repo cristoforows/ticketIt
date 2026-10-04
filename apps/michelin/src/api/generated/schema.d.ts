@@ -523,7 +523,7 @@ export interface paths {
         put?: never;
         /**
          * Approve the Permission request a Round waits on
-         * @description Records the Owner's approval once, a grant for the Round's Agent and the requested scope in the chosen `form`, and one `approval` command for the runner to pull. Neither the Round nor the Ticket moves until the runner reports `resumed`. `expiresAt` with the `ticket` form is `400 grant_form_conflict` and the `time` form without `expiresAt` is `400 invalid_request`, both before the lookup. After the checks below, an `expiresAt` not after the approval time by Galley's clock, or more than 30 days after it, is `400 invalid_grant_expiry`. A request already approved or declined is `permission_already_decided`; a Round that has ended is `round_not_open`; a Round with Stop requested is `stop_already_requested`. Each changes nothing and creates no grant. An unknown, malformed or foreign Ticket, Round or request id, or one not of that Ticket or Round, returns the shared 404.
+         * @description Records the Owner's approval once, a grant for the Round's Agent in the chosen `form` and `scope`, and one `approval` command for the runner to pull. `scope` `requested` (the default) grants the requested account, action and resource; `full` grants full access to the requested Connected Account instead. Neither the Round nor the Ticket moves until the runner reports `resumed`. `expiresAt` with the `ticket` form is `400 grant_form_conflict` and the `time` form without `expiresAt` is `400 invalid_request`, both before the lookup. After the checks below, an `expiresAt` not after the approval time by Galley's clock, or more than 30 days after it, is `400 invalid_grant_expiry`. A request already approved or declined is `permission_already_decided`; a Round that has ended is `round_not_open`; a Round with Stop requested is `stop_already_requested`. Each changes nothing and creates no grant. An unknown, malformed or foreign Ticket, Round or request id, or one not of that Ticket or Round, returns the shared 404.
          */
         post: operations["approvePermissionRequest"];
         delete?: never;
@@ -720,7 +720,7 @@ export interface paths {
         put?: never;
         /**
          * Report an execution event for a Round
-         * @description An event is a fact the runner reports, recorded once per `(roundId, idempotencyKey)`. The same key with the same payload returns the original result with `200`; a different payload is `409 idempotency_key_conflict`. Checked in that order, then `409 stale_claim_epoch` for a `claimEpoch` other than the Round's, `409 round_not_open` for a Round that has ended, and `409 event_out_of_order` for a type the Round's state cannot take: `execution_started` needs a claimed Round; `progress`, `usage_observed`, `delivered`, `failed`, `interrupted`, `question_raised` and `permission_requested` a running one; `resumed` one waiting for input, and then `409 answer_not_supplied` unless its `questionId` is the question the Round waits on and the Owner has answered it, or `409 approval_not_supplied` unless its `requestId` is the Permission request the Round waits on and the Owner has approved it; `stop_confirmed` any open Round, and then `409 stop_not_requested` unless the Owner requested Stop. `question_raised` records the question, moves the Round to `waiting_for_input` and the Ticket from In Progress to Blocked, and keeps the Owner's slot; its `idempotencyKey` must equal `data.questionId`. `permission_requested` does the same for a Permission request; its `idempotencyKey` must equal `data.requestId`, and a scope the Connected Account does not declare is `400 unsupported_scope`. A `renewsGrantId` that does not name a `time` grant of this Owner, the Round's Agent and the same scope, expired by Galley's clock, is `400 invalid_renewal`, checked after `event_out_of_order`. `resumed` moves the Round back to `running` and the Ticket to In Progress. A `usage_observed` whose `observationId` is already recorded for another Round is `409 observation_id_conflict`. `delivered` retains the deliverable, ends the Round as `delivered`, frees the Owner's slot and moves the Ticket from In Progress to In Review, never Done. `stop_confirmed` ends the Round as `stopped` with its evidence, frees the slot and moves the Ticket to Backlog with the Stopped Badge. `failed` and `interrupted` end the Round as `failed` or `interrupted` with the explanation or evidence, free the slot and move the Ticket from In Progress to Blocked; no Round starts until the Owner moves it to Ready. A body over 8 MiB is `413 request_too_large`. A rejection changes nothing. An unknown, malformed or foreign Round id returns the shared 404. A runner that is not Connected is still accepted, and an event is not a heartbeat.
+         * @description An event is a fact the runner reports, recorded once per `(roundId, idempotencyKey)`. The same key with the same payload returns the original result with `200`; a different payload is `409 idempotency_key_conflict`. Checked in that order, then `409 stale_claim_epoch` for a `claimEpoch` other than the Round's, `409 round_not_open` for a Round that has ended, and `409 event_out_of_order` for a type the Round's state cannot take: `execution_started` needs a claimed Round; `progress`, `usage_observed`, `delivered`, `failed`, `interrupted`, `question_raised` and `permission_requested` a running one; `resumed` one waiting for input, and then `409 answer_not_supplied` unless its `questionId` is the question the Round waits on and the Owner has answered it, or `409 approval_not_supplied` unless its `requestId` is the Permission request the Round waits on and the Owner has approved it; `stop_confirmed` any open Round, and then `409 stop_not_requested` unless the Owner requested Stop. `question_raised` records the question, moves the Round to `waiting_for_input` and the Ticket from In Progress to Blocked, and keeps the Owner's slot; its `idempotencyKey` must equal `data.questionId`. `permission_requested` does the same for a Permission request; its `idempotencyKey` must equal `data.requestId`, and a scope the Connected Account does not declare is `400 capability_not_supported`. A `renewsGrantId` that does not name a `time` grant of this Owner, the Round's Agent and the same scope or full access to the same Connected Account, expired by Galley's clock, is `400 invalid_renewal`, checked after `event_out_of_order`. `resumed` moves the Round back to `running` and the Ticket to In Progress. A `usage_observed` whose `observationId` is already recorded for another Round is `409 observation_id_conflict`. `delivered` retains the deliverable, ends the Round as `delivered`, frees the Owner's slot and moves the Ticket from In Progress to In Review, never Done. `stop_confirmed` ends the Round as `stopped` with its evidence, frees the slot and moves the Ticket to Backlog with the Stopped Badge. `failed` and `interrupted` end the Round as `failed` or `interrupted` with the explanation or evidence, free the slot and move the Ticket from In Progress to Blocked; no Round starts until the Owner moves it to Ready. A body over 8 MiB is `413 request_too_large`. A rejection changes nothing. An unknown, malformed or foreign Round id returns the shared 404. A runner that is not Connected is still accepted, and an event is not a heartbeat.
          */
         post: operations["reportRoundEvent"];
         delete?: never;
@@ -742,7 +742,7 @@ export interface paths {
         put?: never;
         /**
          * Check whether the Round's Agent holds authority for a scope
-         * @description Answers from the grants Galley holds when the check runs, and records the check, allow or deny, in the Round's history. `allow` needs an active grant for the Round's Agent, the same `account` and `action`, and the same `resource` that is either `ticket` form for the Round's Ticket or `time` form whose `expiresAt` is after Galley's clock at the check; anything else is `deny`, including a Connected Account with no grant. A scope the Connected Account does not declare is `400 unsupported_scope`. Then `409 stale_claim_epoch` for an `epoch` other than the Round's, `409 round_not_open` for a Round that has ended, and `409 round_not_running` for one claimed or waiting for input. A rejection records nothing. An unknown, malformed or foreign Round id returns the shared 404.
+         * @description Answers from the grants Galley holds when the check runs, and records the check, allow or deny, in the Round's history. `allow` needs an active grant for the Round's Agent that is either `ticket` form for the Round's Ticket or `time` form whose `expiresAt` is after Galley's clock at the check, and that holds either the same `account`, `action` and `resource`, or full access to the same `account`; anything else is `deny`, including a Connected Account with no grant. A grant for the exact scope is named before a full-access grant. A scope the Connected Account does not declare is `400 capability_not_supported`, whatever the grants. Then `409 stale_claim_epoch` for an `epoch` other than the Round's, `409 round_not_open` for a Round that has ended, and `409 round_not_running` for one claimed or waiting for input. A rejection records nothing. An unknown, malformed or foreign Round id returns the shared 404.
          */
         post: operations["checkRoundAuthority"];
         delete?: never;
@@ -982,10 +982,15 @@ export interface components {
         /** @enum {string} */
         PermissionRequestDecision: "approved" | "declined";
         /**
-         * @description `ticket`: this Agent, this Ticket, this scope, for as long as the grant is active. `time`: this Agent and this scope on any Ticket until `expiresAt`, whatever any Ticket's Status.
+         * @description `ticket`: this Agent, this Ticket, the granted scope, for as long as the grant is active. `time`: this Agent and the granted scope on any Ticket until `expiresAt`, whatever any Ticket's Status.
          * @enum {string}
          */
         PermissionGrantForm: "ticket" | "time";
+        /**
+         * @description `requested`: the request's account, action and resource. `full`: every action and resource the request's Connected Account declares, and nothing it does not.
+         * @enum {string}
+         */
+        PermissionGrantScope: "requested" | "full";
         /**
          * @description `expired`: a `time` grant whose `expiresAt` is not after Galley's clock when the grant is read. It authorizes nothing and stays recorded.
          * @enum {string}
@@ -1017,7 +1022,7 @@ export interface components {
             grantId: string | null;
             /**
              * Format: uuid
-             * @description The expired `time` grant this request renews.
+             * @description The expired `time` grant this request renews, for this scope or with full access to this account.
              */
             renewsGrantId: string | null;
         };
@@ -1027,8 +1032,12 @@ export interface components {
             /** @description The only Agent the grant authorizes. */
             agent: components["schemas"]["TicketAssigneeAgent"];
             account: string;
-            action: string;
-            resource: string;
+            /** @description Full access to `account`: every action and resource it declares. Only an Owner's approval with `scope` `full` creates one. */
+            full: boolean;
+            /** @description Null exactly when `full`. */
+            action: string | null;
+            /** @description Null exactly when `full`. */
+            resource: string | null;
             substituteAccount: boolean;
             form: components["schemas"]["PermissionGrantForm"];
             state: components["schemas"]["PermissionGrantState"];
@@ -1051,6 +1060,8 @@ export interface components {
         };
         ApprovePermissionRequest: {
             form: components["schemas"]["PermissionGrantForm"];
+            /** @description Defaults to `requested`. */
+            scope?: components["schemas"]["PermissionGrantScope"];
             /**
              * Format: date-time
              * @description Required by the `time` form and refused with the `ticket` form. After Galley's clock and at most 30 days after it.
@@ -1071,7 +1082,7 @@ export interface components {
             grantId: string | null;
             /**
              * Format: uuid
-             * @description On `deny` only: the newest expired `time` grant for the Round's Agent and this scope, when one exists.
+             * @description On `deny` only: the newest expired `time` grant for the Round's Agent and this scope or full access to this account, when one exists.
              */
             expiredGrantId: string | null;
             /**
@@ -1499,7 +1510,7 @@ export interface components {
             /** @description Must fit the declared pattern; see `AuthorityCheckRequest`. */
             resource: string;
         };
-        /** @description A scope matches a grant when `account` and `action` are the same and `resource` is the same string; `resource` must fit the pattern the Connected Account declares for `action`. The controlled substitute account `controlled` declares `read_note` and `write_note` on `notes/<name>` and `post_message` on `channels/<name>`, where `<name>` is 1 to 64 of `a-z`, `0-9` and `-`, starting with a letter or digit. */
+        /** @description A scope matches a grant when `account` and `action` are the same and `resource` is the same string; `resource` must fit the pattern the Connected Account declares for `action`. The declarations are Galley's static configuration. The controlled substitute account `controlled` declares `read_note` and `write_note` on `notes/<name>` and `post_message` on `channels/<name>`, where `<name>` is 1 to 64 of `a-z`, `0-9` and `-`, starting with a letter or digit. */
         AuthorityCheckRequest: {
             account: string;
             action: string;
@@ -1516,7 +1527,7 @@ export interface components {
             grantId?: string;
             /**
              * Format: uuid
-             * @description On `deny` only: the newest expired `time` grant for the Round's Agent and this scope, when one exists. A `permission_requested` for this scope names it as `renewsGrantId`.
+             * @description On `deny` only: the newest expired `time` grant for the Round's Agent and this scope or full access to this account, when one exists. A `permission_requested` for this scope names it as `renewsGrantId`.
              */
             expiredGrantId?: string;
         };
@@ -2936,7 +2947,7 @@ export interface operations {
                     "application/json": components["schemas"]["RoundEventResult"];
                 };
             };
-            /** @description Error. See `ErrorBody`. Includes `idempotency_key_conflict`, `stale_claim_epoch`, `round_not_open`, `event_out_of_order`, `stop_not_requested`, `answer_not_supplied`, `approval_not_supplied`, `unsupported_scope`, `invalid_renewal`, `observation_id_conflict` and `request_too_large`. */
+            /** @description Error. See `ErrorBody`. Includes `idempotency_key_conflict`, `stale_claim_epoch`, `round_not_open`, `event_out_of_order`, `stop_not_requested`, `answer_not_supplied`, `approval_not_supplied`, `capability_not_supported`, `invalid_renewal`, `observation_id_conflict` and `request_too_large`. */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -2971,7 +2982,7 @@ export interface operations {
                     "application/json": components["schemas"]["AuthorityCheckResult"];
                 };
             };
-            /** @description Error. See `ErrorBody`. Includes `unsupported_scope`, `stale_claim_epoch`, `round_not_open` and `round_not_running`. */
+            /** @description Error. See `ErrorBody`. Includes `capability_not_supported`, `stale_claim_epoch`, `round_not_open` and `round_not_running`. */
             default: {
                 headers: {
                     [name: string]: unknown;

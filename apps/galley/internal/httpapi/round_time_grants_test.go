@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -186,7 +187,7 @@ func TestApprove_TheTimeFormRecordsAnExpiringGrantForTheAgentAndScope(t *testing
 	g := ticket.PermissionGrants[0]
 	if g.Id != grantID || g.Form != PermissionGrantFormTime || g.State != PermissionGrantActive || g.ExpiresAt == nil || !g.ExpiresAt.Equal(until) ||
 		g.ExpiresAt.Location() != time.UTC || g.RemainingSeconds == nil || *g.RemainingSeconds != 7200 || !g.ApprovedAt.Equal(approvedAt) ||
-		g.Agent.Id != f.agent.Id || g.Account != writeReport.account || g.Action != writeReport.action || g.Resource != writeReport.resource || g.RoundId != claim.RoundId {
+		g.Agent.Id != f.agent.Id || g.Account != writeReport.account || !reflect.DeepEqual(g.Action, &writeReport.action) || !reflect.DeepEqual(g.Resource, &writeReport.resource) || g.RoundId != claim.RoundId {
 		t.Fatalf("grant = %+v, want a time grant for the Agent and scope until %v with 7200 s left", g, until)
 	}
 	commands := f.mustCommands(t, claim.RoundId)
@@ -506,7 +507,7 @@ func TestRenewal_TheDatabaseTiesTheRenewedGrantToTheRequestsAgentAndScope(t *tes
 	f.mustRequestPermission(t, claim, requestB, readReport)
 	ctx := context.Background()
 	assertViolates(t, func() error {
-		_, err := f.pool.Exec(ctx, `UPDATE permission_requests SET renews_grant_id = (SELECT id FROM permission_grants WHERE public_id = $1::uuid) WHERE request_id = $2::uuid`, expired, requestB)
+		_, err := f.pool.Exec(ctx, `UPDATE permission_requests SET renews_grant_id = (SELECT id FROM permission_grants WHERE public_id = $1::uuid), renews_full_access = false WHERE request_id = $2::uuid`, expired, requestB)
 		return err
 	}(), "permission_requests_renews_grant_fk")
 }
@@ -668,8 +669,8 @@ func TestTicket_ListsTheGrantsThatApplyToItNewestFiftyWithTheirCount(t *testing.
 	}
 	ticket := f.ticket(t, sibling.Id)
 	if ticket.PermissionGrantCount != extra+1 || len(ticket.PermissionGrants) != permissionGrantsShown ||
-		ticket.PermissionGrants[0].Resource != fmt.Sprintf("notes/extra-%d", extra-permissionGrantsShown) || ticket.PermissionGrants[permissionGrantsShown-1].Resource != fmt.Sprintf("notes/extra-%d", extra-1) {
+		!reflect.DeepEqual(ticket.PermissionGrants[0].Resource, new(fmt.Sprintf("notes/extra-%d", extra-permissionGrantsShown))) || !reflect.DeepEqual(ticket.PermissionGrants[permissionGrantsShown-1].Resource, new(fmt.Sprintf("notes/extra-%d", extra-1))) {
 		t.Fatalf("listed %d of %d from %s to %s, want the newest %d of %d, oldest first", len(ticket.PermissionGrants), ticket.PermissionGrantCount,
-			ticket.PermissionGrants[0].Resource, ticket.PermissionGrants[len(ticket.PermissionGrants)-1].Resource, permissionGrantsShown, extra+1)
+			*ticket.PermissionGrants[0].Resource, *ticket.PermissionGrants[len(ticket.PermissionGrants)-1].Resource, permissionGrantsShown, extra+1)
 	}
 }

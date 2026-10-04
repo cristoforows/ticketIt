@@ -20,4 +20,4 @@ export { LocalTime, localTimestamp, shortDate } from "./time";
 export { StageLabel, StageStep } from "./Stage";
 export { statuses, statusLabel, statusTone, type TicketStatus } from "./status";
 export { Markdown } from "./Markdown";
-export { BadgeList, BadgeTag, ClaimedTag, DeliveredTag, EstimateTag, ExpiredTag, FailedTag, HealthPill, InterruptedTag, PendingTag, QueuedTag, StatusTag, StoppedTag, StoppingTag, type HealthPillState } from "./Tags";
+export { BadgeList, BadgeTag, ClaimedTag, DeliveredTag, EstimateTag, ExpiredTag, FailedTag, FullAccessTag, HealthPill, InterruptedTag, PendingTag, QueuedTag, StatusTag, StoppedTag, StoppingTag, type HealthPillState } from "./Tags";

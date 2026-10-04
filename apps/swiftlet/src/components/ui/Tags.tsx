@@ -18,6 +18,7 @@ const tag = cva("inline-block rounded-tag text-label uppercase", {
       delivered: "border border-status-in-review-deep bg-paper px-2 py-px font-bold tracking-label text-status-in-review-deep",
       estimate: "border border-muted bg-paper px-1.5 py-px font-bold tracking-label text-muted normal-case",
       expired: "border border-muted bg-paper px-2 py-px font-bold tracking-label text-muted",
+      fullAccess: "border border-ink bg-ink px-2 py-px font-bold tracking-label text-paper",
     },
   },
 });
@@ -73,6 +74,10 @@ export function EstimateTag({ className, ...rest }: Omit<ComponentPropsWithRef<"
 
 export function ExpiredTag({ className, ...rest }: ComponentPropsWithRef<"span">) {
   return <span className={cn(tag({ kind: "expired" }), className)} {...rest} />;
+}
+
+export function FullAccessTag({ className, ...rest }: ComponentPropsWithRef<"span">) {
+  return <span className={cn(tag({ kind: "fullAccess" }), className)} {...rest} />;
 }
 
 export function PendingTag({ className, ...rest }: ComponentPropsWithRef<"span">) {

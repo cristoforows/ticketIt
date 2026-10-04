@@ -565,8 +565,16 @@ log "running tests/runner-time-grant.spec.ts (a real michelin's time grant allow
   E2E_GITHUBFAKE_BASE_URL="$GITHUBFAKE_URL" \
   npx playwright test tests/runner-time-grant.spec.ts) || RUNNER_TIME_GRANT_EXIT=$?
 
-# tests/active-order-slip.spec.ts (issue #162) needs the Owner's slot free:
+# tests/runner-full-access.spec.ts (issue #167) needs the Owner's slot free:
 # runner-time-grant.spec.ts leaves both its Rounds delivered.
+RUNNER_FULL_ACCESS_EXIT=0
+log "running tests/runner-full-access.spec.ts (one full-access approval in the browser lets a real michelin act on every declared capability of the account without another request; an undeclared action still fails the Round) against the same galley"
+(cd "$SCRIPT_DIR" && E2E_BASE_URL="$SWIFTLET_BASE_URL" GALLEY_BASE_URL="$GALLEY_BASE_URL" \
+  E2E_GITHUBFAKE_BASE_URL="$GITHUBFAKE_URL" \
+  npx playwright test tests/runner-full-access.spec.ts) || RUNNER_FULL_ACCESS_EXIT=$?
+
+# tests/active-order-slip.spec.ts (issue #162) needs the Owner's slot free:
+# runner-full-access.spec.ts leaves its Round failed.
 # Its second test claims directly with the runner credential and leaves that
 # Round open with Stop requested, so it runs after every spec that needs the
 # slot, and no reset follows.
@@ -638,6 +646,7 @@ log "runner-ask.spec.ts exit code: $RUNNER_ASK_EXIT"
 log "runner-feedback.spec.ts exit code: $RUNNER_FEEDBACK_EXIT"
 log "runner-permission.spec.ts exit code: $RUNNER_PERMISSION_EXIT"
 log "runner-time-grant.spec.ts exit code: $RUNNER_TIME_GRANT_EXIT"
+log "runner-full-access.spec.ts exit code: $RUNNER_FULL_ACCESS_EXIT"
 log "active-order-slip.spec.ts exit code: $ACTIVE_ORDER_SLIP_EXIT"
 log "status-failure.spec.ts exit code: $STATUS_FAILURE_EXIT"
 log "backend-failure.spec.ts exit code: $FAILURE_EXIT"
@@ -646,7 +655,7 @@ if [ "$STATUS_EXIT" -ne 0 ] || [ "$AUTH_EXIT" -ne 0 ] || [ "$RESTART_BEFORE_EXIT
   || [ "$LIFECYCLE_BEFORE_EXIT" -ne 0 ] || [ "$BADGES_BEFORE_EXIT" -ne 0 ] || [ "$RESTORE_BEFORE_EXIT" -ne 0 ] || [ "$TICKET_BEFORE_EXIT" -ne 0 ] || [ "$REFINEMENT_BEFORE_EXIT" -ne 0 ] \
   || [ "$RESTART_AFTER_EXIT" -ne 0 ] || [ "$BADGES_AFTER_EXIT" -ne 0 ] || [ "$RESTORE_AFTER_EXIT" -ne 0 ] || [ "$TICKET_AFTER_EXIT" -ne 0 ] || [ "$REFINEMENT_AFTER_EXIT" -ne 0 ] \
   || [ "$LIFECYCLE_AFTER_EXIT" -ne 0 ] || [ "$TICKET_DETAIL_EXIT" -ne 0 ] || [ "$REFINEMENT_EXIT" -ne 0 ] \
-  || [ "$TEMPLATES_EXIT" -ne 0 ] || [ "$LIFECYCLE_EXIT" -ne 0 ] || [ "$ALLOWED_ACTIONS_EXIT" -ne 0 ] || [ "$BOARD_EXIT" -ne 0 ] || [ "$BOARD_MOVES_EXIT" -ne 0 ] || [ "$BOARD_MOBILE_EXIT" -ne 0 ] || [ "$PRIORITY_ORDER_EXIT" -ne 0 ] || [ "$MODAL_EXIT" -ne 0 ] || [ "$BADGE_FILTER_EXIT" -ne 0 ] || [ "$ARCHIVE_EXIT" -ne 0 ] || [ "$CAPTURE_EXIT" -ne 0 ] || [ "$AGENTS_EXIT" -ne 0 ] || [ "$RUNNER_EXIT" -ne 0 ] || [ "$RUNNER_CLAIMS_EXIT" -ne 0 ] || [ "$RUNNER_ENGINE_EXIT" -ne 0 ] || [ "$RUNNER_ACTIVITY_EXIT" -ne 0 ] || [ "$RUNNER_DELIVERY_EXIT" -ne 0 ] || [ "$RUNNER_REWORK_EXIT" -ne 0 ] || [ "$RUNNER_STOP_EXIT" -ne 0 ] || [ "$RUNNER_FAILED_EXIT" -ne 0 ] || [ "$RUNNER_INTERRUPTED_EXIT" -ne 0 ] || [ "$RUNNER_ASK_EXIT" -ne 0 ] || [ "$RUNNER_FEEDBACK_EXIT" -ne 0 ] || [ "$RUNNER_PERMISSION_EXIT" -ne 0 ] || [ "$RUNNER_TIME_GRANT_EXIT" -ne 0 ] || [ "$ACTIVE_ORDER_SLIP_EXIT" -ne 0 ] || [ "$AGENT_READINESS_EXIT" -ne 0 ] || [ "$STATUS_FAILURE_EXIT" -ne 0 ] \
+  || [ "$TEMPLATES_EXIT" -ne 0 ] || [ "$LIFECYCLE_EXIT" -ne 0 ] || [ "$ALLOWED_ACTIONS_EXIT" -ne 0 ] || [ "$BOARD_EXIT" -ne 0 ] || [ "$BOARD_MOVES_EXIT" -ne 0 ] || [ "$BOARD_MOBILE_EXIT" -ne 0 ] || [ "$PRIORITY_ORDER_EXIT" -ne 0 ] || [ "$MODAL_EXIT" -ne 0 ] || [ "$BADGE_FILTER_EXIT" -ne 0 ] || [ "$ARCHIVE_EXIT" -ne 0 ] || [ "$CAPTURE_EXIT" -ne 0 ] || [ "$AGENTS_EXIT" -ne 0 ] || [ "$RUNNER_EXIT" -ne 0 ] || [ "$RUNNER_CLAIMS_EXIT" -ne 0 ] || [ "$RUNNER_ENGINE_EXIT" -ne 0 ] || [ "$RUNNER_ACTIVITY_EXIT" -ne 0 ] || [ "$RUNNER_DELIVERY_EXIT" -ne 0 ] || [ "$RUNNER_REWORK_EXIT" -ne 0 ] || [ "$RUNNER_STOP_EXIT" -ne 0 ] || [ "$RUNNER_FAILED_EXIT" -ne 0 ] || [ "$RUNNER_INTERRUPTED_EXIT" -ne 0 ] || [ "$RUNNER_ASK_EXIT" -ne 0 ] || [ "$RUNNER_FEEDBACK_EXIT" -ne 0 ] || [ "$RUNNER_PERMISSION_EXIT" -ne 0 ] || [ "$RUNNER_TIME_GRANT_EXIT" -ne 0 ] || [ "$RUNNER_FULL_ACCESS_EXIT" -ne 0 ] || [ "$ACTIVE_ORDER_SLIP_EXIT" -ne 0 ] || [ "$AGENT_READINESS_EXIT" -ne 0 ] || [ "$STATUS_FAILURE_EXIT" -ne 0 ] \
   || [ "$FAILURE_EXIT" -ne 0 ]; then
   log "SUITE FAILED"
   exit 1

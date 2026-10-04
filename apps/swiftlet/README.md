@@ -1232,3 +1232,29 @@ Tests: `TicketDetail.test.tsx` ("a Permission request from the Agent"),
 
 Tests: `TicketDetail.test.tsx` ("the time form"), `api/tickets.test.ts`
 and `api/rounds.test.ts`.
+
+## Full Connected Account access (issue #167)
+
+- **Access.** Before deciding, the panel's **Access** radio group offers
+  **Only what was requested** (`ticket-detail-permission-scope-requested`,
+  always the default) or **Full access to the `<account>` account**
+  (`ticket-detail-permission-scope-full`). Choosing full shows a warning
+  (`ticket-detail-permission-full-warning`, the full radio's
+  description) that the Agent may use every action and resource the
+  account declares without asking again, and that anything undeclared
+  stays refused. The forms, the hint and the button follow the choice
+  (**Allow full access for this Ticket** / **for a time**). The choice
+  returns to requested for every new request. Full adds `"scope":
+  "full"` to either form's body; requested sends the #166 body
+  unchanged, with no `scope`. Decline sends no body.
+- **Grants.** A full grant reads `<Agent> has` **Full access** (an
+  inverted ink tag, `ticket-detail-permission-grant-full`) `to the
+  <account> account`, carries `data-full`, and keeps the #166 form and
+  expiry display. An approval reads **Full access allowed for this
+  Ticket** or **for a time**; an allow by a full grant adds **by full
+  access** (`ticket-detail-round-authority-check-full`); a renewal of an
+  expired full grant says so.
+- **Parsing.** A grant requires `full`: when true, `action` and
+  `resource` are null; when false, both are strings.
+
+Tests: `TicketDetail.test.tsx` ("full access") and `api/tickets.test.ts`.

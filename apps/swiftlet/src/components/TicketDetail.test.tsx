@@ -1443,7 +1443,7 @@ describe("a Permission request from the Agent", () => {
     openRound: waitingRound,
     allowedActions: { ...TICKET.allowedActions, statusChanges: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: waitingRound.id } }, stop: { available: true }, permissionDecision: { available: true } },
   };
-  const grant = { id: grantId, agent, account: "controlled", action: "write_note", resource: "notes/weekly-report", substituteAccount: true, form: "ticket" as const, state: "active" as const, expiresAt: null, remainingSeconds: null, roundId: waitingRound.id, createdAt: "2026-10-02T10:00:09Z", approvedAt: "2026-10-02T10:00:09Z" };
+  const grant = { id: grantId, agent, account: "controlled", full: false, action: "write_note", resource: "notes/weekly-report", substituteAccount: true, form: "ticket" as const, state: "active" as const, expiresAt: null, remainingSeconds: null, roundId: waitingRound.id, createdAt: "2026-10-02T10:00:09Z", approvedAt: "2026-10-02T10:00:09Z" };
   const decidedActions = { ...waiting.allowedActions, permissionDecision: { available: false, reason: { code: "permission_already_decided", message: "this Permission request is already decided" } } };
   const resuming: Ticket = { ...waiting, openRound: { ...waitingRound, waitingReason: "resuming", permissionRequest: approved }, permissionGrants: [grant], permissionGrantCount: 1, allowedActions: decidedActions };
   const stillWaiting: Ticket = { ...waiting, openRound: { ...waitingRound, permissionRequest: declined }, allowedActions: decidedActions };
@@ -1611,6 +1611,113 @@ describe("a Permission request from the Agent", () => {
       expect(screen.queryByTestId("ticket-detail-permission-renewal")).not.toBeInTheDocument();
       expect(screen.getByTestId("ticket-detail-round-permission-request")).not.toHaveTextContent("Renews");
       expect(screen.queryByTestId("ticket-detail-round-authority-check-expired")).not.toBeInTheDocument();
+    });
+
+    describe("full access", () => {
+      const fullGrant = { ...timeGrant, id: "15151515-1515-4151-8151-151515151515", full: true, action: null, resource: null };
+      const fullTicketGrant = { ...grant, id: "16161616-1616-4161-8161-161616161616", full: true, action: null, resource: null };
+
+      it("offers it as an explicit choice that is never the default, in a labelled radio group", () => {
+        render(<TicketDetail ticket={waiting} onSave={vi.fn()} {...noopActions()} onDecidePermission={decide()} />);
+        const scope = within(screen.getByRole("group", { name: "Access" }));
+        const requested = scope.getByRole("radio", { name: /Only what was requested — write_note on notes\/weekly-report/ });
+        const full = scope.getByRole("radio", { name: /Full access to the controlled account — every action and resource it declares/ });
+        expect(requested).toBeChecked();
+        expect(full).not.toBeChecked();
+        expect(screen.queryByTestId("ticket-detail-permission-full-warning")).not.toBeInTheDocument();
+        expect(screen.getByTestId("ticket-detail-permission-approve")).toHaveTextContent("Allow for this Ticket");
+        expect(screen.getByRole("group", { name: "Allow" })).toBeInTheDocument();
+      });
+
+      it("warns what full access allows once chosen, and words the forms and the button for it", () => {
+        render(<TicketDetail ticket={waiting} onSave={vi.fn()} {...noopActions()} onDecidePermission={decide()} />);
+        fireEvent.click(screen.getByTestId("ticket-detail-permission-scope-full"));
+        const warning = screen.getByTestId("ticket-detail-permission-full-warning");
+        expect(warning).toHaveTextContent("Full access. This Agent may use every action and resource the controlled account declares (a substitute account) without asking you again, not only write_note on notes/weekly-report. Anything the account does not declare stays refused.");
+        expect(screen.getByTestId("ticket-detail-permission-scope-full")).toHaveAttribute("aria-describedby", warning.id);
+        expect(screen.getByTestId("ticket-detail-permission-approve")).toHaveTextContent("Allow full access for this Ticket");
+        expect(screen.getByRole("radio", { name: /For this Ticket — full access to the controlled account, on this Ticket only/ })).toBeChecked();
+        fireEvent.click(screen.getByTestId("ticket-detail-permission-form-time"));
+        expect(screen.getByTestId("ticket-detail-permission-approve")).toHaveTextContent("Allow full access for a time");
+        fireEvent.click(screen.getByTestId("ticket-detail-permission-scope-requested"));
+        expect(screen.queryByTestId("ticket-detail-permission-full-warning")).not.toBeInTheDocument();
+        expect(screen.getByTestId("ticket-detail-permission-approve")).toHaveTextContent("Allow for a time");
+      });
+
+      it("approves for this Ticket with the full scope and shows the full grant Galley returned", async () => {
+        const onDecide = decide().mockResolvedValue({ ...resuming, permissionGrants: [fullTicketGrant], openRound: { ...waitingRound, waitingReason: "resuming", permissionRequest: { ...approved, grantId: fullTicketGrant.id } } });
+        render(<TicketDetail ticket={waiting} onSave={vi.fn()} {...noopActions()} onDecidePermission={onDecide} />);
+        fireEvent.click(screen.getByTestId("ticket-detail-permission-scope-full"));
+        fireEvent.click(screen.getByTestId("ticket-detail-permission-approve"));
+        expect(onDecide).toHaveBeenCalledExactlyOnceWith(waitingRound.id, request.id, "approve", { form: "ticket", scope: "full" });
+        expect(await screen.findByTestId("ticket-detail-permission-approved")).toHaveTextContent("Full access allowed for this Ticket. The Round resumes.");
+        const listed = screen.getByTestId("ticket-detail-permission-grant");
+        expect(listed).toHaveAttribute("data-full", "true");
+        expect(listed).toHaveTextContent("atlas has Full access to the controlled accountSubstitute account");
+        expect(within(listed).getByTestId("ticket-detail-permission-grant-full")).toHaveTextContent("Full access");
+      });
+
+      it("approves for a time with the full scope and the chosen expiry", () => {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(new Date("2026-10-02T10:00:00Z"));
+        const onDecide = decide().mockResolvedValue(stillWaiting);
+        render(<TicketDetail ticket={waiting} onSave={vi.fn()} {...noopActions()} onDecidePermission={onDecide} />);
+        fireEvent.click(screen.getByTestId("ticket-detail-permission-scope-full"));
+        fireEvent.click(screen.getByTestId("ticket-detail-permission-form-time"));
+        fireEvent.click(screen.getByTestId("ticket-detail-permission-approve"));
+        expect(onDecide).toHaveBeenCalledExactlyOnceWith(waitingRound.id, request.id, "approve", { form: "time", expiresAt: "2026-10-02T11:00:00.000Z", scope: "full" });
+      });
+
+      it("sends no scope once the Owner returns to only what was requested", () => {
+        const onDecide = decide().mockResolvedValue(stillWaiting);
+        render(<TicketDetail ticket={waiting} onSave={vi.fn()} {...noopActions()} onDecidePermission={onDecide} />);
+        fireEvent.click(screen.getByTestId("ticket-detail-permission-scope-full"));
+        fireEvent.click(screen.getByTestId("ticket-detail-permission-scope-requested"));
+        fireEvent.click(screen.getByTestId("ticket-detail-permission-approve"));
+        expect(onDecide).toHaveBeenCalledExactlyOnceWith(waitingRound.id, request.id, "approve", { form: "ticket" });
+      });
+
+      it("declines with no terms while full access is chosen", () => {
+        const onDecide = decide().mockResolvedValue(stillWaiting);
+        render(<TicketDetail ticket={waiting} onSave={vi.fn()} {...noopActions()} onDecidePermission={onDecide} />);
+        fireEvent.click(screen.getByTestId("ticket-detail-permission-scope-full"));
+        fireEvent.click(screen.getByTestId("ticket-detail-permission-decline"));
+        expect(onDecide).toHaveBeenCalledExactlyOnceWith(waitingRound.id, request.id, "decline");
+      });
+
+      it("goes back to only what was requested for the next request", () => {
+        const { rerender } = render(<TicketDetail ticket={waiting} onSave={vi.fn()} {...noopActions()} onDecidePermission={decide()} />);
+        fireEvent.click(screen.getByTestId("ticket-detail-permission-scope-full"));
+        const next: Ticket = { ...waiting, openRound: { ...waitingRound, permissionRequest: { ...request, id: "99999999-9999-5999-8999-999999999991", action: "post_message", resource: "channels/general" } } };
+        rerender(<TicketDetail ticket={next} onSave={vi.fn()} {...noopActions()} onDecidePermission={decide()} />);
+        expect(screen.getByTestId("ticket-detail-permission-scope-requested")).toBeChecked();
+        expect(screen.queryByTestId("ticket-detail-permission-full-warning")).not.toBeInTheDocument();
+      });
+
+      it("shows Galley's refusal of a full-access approval", async () => {
+        const onDecide = decide().mockRejectedValue(new GalleyError({ code: "stop_already_requested", message: "Stop is already requested for this Round" }));
+        render(<TicketDetail ticket={waiting} onSave={vi.fn()} {...noopActions()} onDecidePermission={onDecide} />);
+        fireEvent.click(screen.getByTestId("ticket-detail-permission-scope-full"));
+        fireEvent.click(screen.getByTestId("ticket-detail-permission-approve"));
+        expect(await screen.findByTestId("ticket-detail-permission-error")).toHaveTextContent("Stop is already requested for this Round");
+      });
+
+      it("marks checks allowed by full access, a renewal of expired full access, and lists the time-based full grant with its remaining time", () => {
+        const expiredFull = { ...fullGrant, state: "expired" as const, remainingSeconds: 0 };
+        const renewal = { ...request, renewsGrantId: expiredFull.id };
+        const allow = { account: "controlled", action: "post_message", resource: "channels/general", decision: "allow" as const, grantId: fullGrant.id, expiredGrantId: null, checkedAt: "2026-10-02T10:00:10Z" };
+        const exact = { ...allow, action: "write_note", resource: "notes/weekly-report", grantId };
+        const asking: Ticket = { ...waiting, openRound: { ...waitingRound, permissionRequest: renewal }, permissionGrants: [expiredFull, grant, fullGrant], permissionGrantCount: 3 };
+        render(<TicketDetail ticket={asking} onSave={vi.fn()} {...noopActions()} onDecidePermission={decide()} roundRecords={{ rounds: [record({ permissionRequests: [renewal], authorityChecks: [allow, exact], authorityCheckCount: 2 })] }} />);
+        expect(screen.getByTestId("ticket-detail-permission-renewal")).toHaveTextContent("Renewal. The Agent's time-based full access to the controlled account expired.");
+        const checks = screen.getAllByTestId("ticket-detail-round-authority-check");
+        expect(checks[0]).toHaveTextContent("Allowed post_message on channels/general (controlled) · by full access");
+        expect(checks[1]).not.toHaveTextContent("full access");
+        const listed = screen.getAllByTestId("ticket-detail-permission-grant");
+        expect(listed.map((item) => item.getAttribute("data-full"))).toEqual(["true", "false", "true"]);
+        expect(within(listed[2]!).getByTestId("ticket-detail-permission-grant-remaining")).toHaveTextContent("1 h left");
+        expect(listed[1]).toHaveTextContent("atlas may write_note on notes/weekly-report (controlled)");
+      });
     });
 
     it.each([

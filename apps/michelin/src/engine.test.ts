@@ -1113,12 +1113,49 @@ describe("the act step", () => {
     });
   });
 
-  it("fails the Round on a scope Galley does not support, without asking for a Permission", async () => {
-    const { state, fetchFn } = galley({ checks: [error(400, "unsupported_scope")] });
+  it("fails the Round on a capability the Connected Account does not declare, without asking for a Permission", async () => {
+    const { state, fetchFn } = galley({ checks: [error(400, "capability_not_supported")] });
     const harness = start([START, { step: "act", account: "github", action: "push", resource: "repo" }], fetchFn);
     expect(await harness.run).toBe("failed");
     expect(kinds(state.sent)).toEqual(["execution_started", "check", "failed"]);
-    expect(state.sent.at(-1)?.body).toMatchObject({ data: { explanation: "Could not push on repo with the github account: Galley does not support this scope" } });
+    expect(state.sent.at(-1)?.body).toMatchObject({ data: { explanation: "Could not push on repo with the github account: the Connected Account does not declare this capability" } });
+    expect(harness.records().find((record) => record["msg"] === "authority check refused an undeclared capability")).toMatchObject({ httpStatus: 400, errorCode: "capability_not_supported" });
+  });
+
+  it("abandons the Round on M5.7's retired unsupported_scope code like any other refusal", async () => {
+    const { state, fetchFn } = galley({ checks: [error(400, "unsupported_scope")] });
+    const harness = start([START, ACT], fetchFn);
+    expect(await harness.run).toBe("abandoned");
+    expect(kinds(state.sent)).toEqual(["execution_started", "check"]);
+  });
+
+  it("performs different declared actions under one full-access approval with one request, and fails on an undeclared one", async () => {
+    const FULL = "34343434-3434-4434-8434-343434343434";
+    const declared = new Set(["write_note", "read_note", "post_message"]);
+    const { state, fetchFn } = galley({
+      answer: (body) => {
+        if (!declared.has(String(body["action"]))) return error(400, "capability_not_supported")();
+        return json(state.granted ? { decision: "allow", grantId: FULL } : { decision: "deny" });
+      },
+    });
+    const inbox = new ApprovalInbox();
+    inbox.deliver(requestId, { grantId: FULL, acknowledge: async () => void (state.granted = true) });
+    const READ: EngineStep = { step: "act", account: "controlled", action: "read_note", resource: "notes/team-digest" };
+    const POST: EngineStep = { step: "act", account: "controlled", action: "post_message", resource: "channels/general" };
+    const DELETE: EngineStep = { step: "act", account: "controlled", action: "delete_note", resource: "notes/weekly-report" };
+    const harness = start([START, ACT, READ, POST, ACT, DELETE, { step: "progress", note: "never" }], fetchFn, { awaitApproval: inbox.wait });
+    expect(await harness.run).toBe("failed");
+    expect(kinds(state.sent)).toEqual([
+      "execution_started", "check", "permission_requested", "resumed", "check", "progress", "check", "progress", "check", "progress", "check", "progress", "check", "failed",
+    ]);
+    expect(state.sent.filter(({ body }) => body["type"] === "permission_requested")).toHaveLength(1);
+    expect(state.sent.filter(({ body }) => body["type"] === "progress").map(({ body }) => (body["data"] as { note: string }).note)).toEqual([
+      "Performed write_note on notes/weekly-report",
+      "Performed read_note on notes/team-digest",
+      "Performed post_message on channels/general",
+      "Performed write_note on notes/weekly-report",
+    ]);
+    expect(state.sent.at(-1)?.body).toMatchObject({ data: { explanation: "Could not delete_note on notes/weekly-report with the controlled account: the Connected Account does not declare this capability" } });
   });
 
   it("confirms a Stop that arrives while waiting for the approval, without resuming", async () => {

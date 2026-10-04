@@ -243,7 +243,9 @@ event, so a refusal abandons the Round. Scripts need no step for it.
 **Permissions.** An `act` step first asks Galley
 (`POST /api/runner/rounds/{roundId}/authority-checks`) whether the
 Agent holds authority for its scope now. The answer is used for that
-one action and never remembered, so every `act` asks again.
+one action and never remembered, so every `act` asks again. Whether the
+allow came from a grant for that scope or from full access to the
+account (issue #167) makes no difference to Michelin.
 
 - `allow`: the step sends the progress note `Performed <action> on
   <resource>` and the script continues.
@@ -256,9 +258,12 @@ one action and never remembered, so every `act` asks again.
   Round as Failed (`Could not <action> on <resource> with the <account>
   account: Galley still denies it after the Owner's approval`); the
   step never asks twice.
-- `400 unsupported_scope`: the Round ends as Failed with the explanation
-  `… Galley does not support this scope`. Galley decides what is
-  supported; Michelin's start-up check covers only the shape.
+- `400 capability_not_supported`: the Round ends as Failed with the
+  explanation `… the Connected Account does not declare this
+  capability`, even under full access (issue #167). Galley decides what
+  each account declares; Michelin's start-up check covers only the
+  shape. M5.7's `unsupported_scope` is retired and now abandons the
+  Round like any other refusal.
 - Other refusals abandon the Round locally, as for events. Network
   failures and `5xx` are retried with the events' backoff.
 
@@ -302,7 +307,7 @@ context fields. The credential is never logged.
 | `resume reported` | `info` | As `question raised`, `step` `resume`. |
 | `authority checked` | `info` | `roundId`, `step` `act`, `stepIndex`, `attempt`, `account`, `action`, `resource`, `decision`, `grantId` on `allow`, and `expiredGrantId` on a deny that names one. |
 | `authority check failed; retrying` | `warn` | As `authority checked`, plus `reason`, `httpStatus`, `errorCode`, `retryInMs`. |
-| `authority check refused an unsupported scope`, `authority check refused; round abandoned locally` | `error` | As `authority checked`, plus `httpStatus` and `errorCode`. |
+| `authority check refused an undeclared capability`, `authority check refused; round abandoned locally` | `error` | As `authority checked`, plus `httpStatus` and `errorCode`. |
 | `permission requested` | `info` | `roundId`, `step` `request`, `stepIndex`, `attempt`, `requestId`, the scope, `renewsGrantId` on a renewal, `httpStatus`. |
 | `engine waiting for an approval` | `info` | `roundId`, `stepIndex`, `requestId`. |
 | `approval received` | `info` | An `approval` for the claim's epoch arrived: as `stop requested`, plus `requestId` and `grantId`. |

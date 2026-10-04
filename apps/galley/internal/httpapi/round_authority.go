@@ -47,10 +47,6 @@ func (s *server) CheckRoundAuthority(w http.ResponseWriter, r *http.Request, rou
 		writeError(w, http.StatusBadRequest, "invalid_request", `"epoch" must be a positive integer`)
 		return
 	}
-	if reason := unsupportedScope(scope); reason != "" {
-		writeError(w, http.StatusBadRequest, unsupportedScopeCode, reason)
-		return
-	}
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
 	result, found, rejection, err := checkAuthority(ctx, s.pool, runner.ownerID, roundID, scope, req.Epoch, s.clockNow())
@@ -80,7 +76,11 @@ func decideAuthorityCheck(round checkedRound, epoch int) *roundEventRejection {
 
 // The grant is read in the check's own transaction, never from the claim: a grant committed before the check is honoured.
 // The Round row is share-locked so it cannot end or change epoch between the decision and its record.
+// A full-access grant matches any scope of its account, so the scope must be declared before any grant is read.
 func checkAuthority(ctx context.Context, pool *pgxpool.Pool, ownerID int64, roundID string, scope permissionScope, epoch int, now time.Time) (AuthorityCheckResult, bool, *roundEventRejection, error) {
+	if reason := undeclaredCapability(scope); reason != "" {
+		return AuthorityCheckResult{}, true, &roundEventRejection{http.StatusBadRequest, capabilityNotSupportedCode, reason}, nil
+	}
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return AuthorityCheckResult{}, false, nil, err
@@ -101,9 +101,9 @@ func checkAuthority(ctx context.Context, pool *pgxpool.Pool, ownerID int64, roun
 	var grantRowID, expiredRowID *int64
 	var grantID, expiredID *string
 	err = tx.QueryRow(ctx, `SELECT id, public_id::text FROM permission_grants
-		WHERE owner_id = $1 AND agent_id = $2 AND account = $4 AND action = $5 AND resource = $6 AND state = $7
+		WHERE owner_id = $1 AND agent_id = $2 AND account = $4 AND (full_access OR (action = $5 AND resource = $6)) AND state = $7
 		  AND ((form = $8 AND ticket_id = $3) OR (form = $9 AND expires_at > $10))
-		ORDER BY id LIMIT 1`, ownerID, round.agentID, round.ticketID, scope.account, scope.action, scope.resource, string(PermissionGrantActive),
+		ORDER BY full_access, id LIMIT 1`, ownerID, round.agentID, round.ticketID, scope.account, scope.action, scope.resource, string(PermissionGrantActive),
 		string(PermissionGrantFormTicket), string(PermissionGrantFormTime), now).
 		Scan(&grantRowID, &grantID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -112,7 +112,7 @@ func checkAuthority(ctx context.Context, pool *pgxpool.Pool, ownerID int64, roun
 	result := AuthorityCheckResult{Decision: AuthorityAllow, GrantId: grantID}
 	if grantID == nil {
 		err = tx.QueryRow(ctx, `SELECT id, public_id::text FROM permission_grants
-			WHERE owner_id = $1 AND agent_id = $2 AND account = $3 AND action = $4 AND resource = $5 AND form = $6 AND NOT expires_at > $7
+			WHERE owner_id = $1 AND agent_id = $2 AND account = $3 AND (full_access OR (action = $4 AND resource = $5)) AND form = $6 AND NOT expires_at > $7
 			ORDER BY id DESC LIMIT 1`, ownerID, round.agentID, scope.account, scope.action, scope.resource, string(PermissionGrantFormTime), now).
 			Scan(&expiredRowID, &expiredID)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {

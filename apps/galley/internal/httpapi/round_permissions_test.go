@@ -252,7 +252,7 @@ func TestPermissionRequested_DataIsValidatedStrictly(t *testing.T) {
 		"a wildcard resource":           {controlledAccount, writeReport.action, "notes/*"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			assertErrorCode(t, f.requestPermission(t, claim, requestA, scope), unsupportedScopeCode)
+			assertErrorCode(t, f.requestPermission(t, claim, requestA, scope), capabilityNotSupportedCode)
 		})
 	}
 	assertSnapshotUnchanged(t, f.pool, before, "rejected Permission requests")
@@ -322,7 +322,7 @@ func TestApprove_RecordsTheGrantAndQueuesAnApprovalCommandWithoutMovingTheRound(
 	}
 	grant := ticket.PermissionGrants[0]
 	wantGrant := PermissionGrant{Id: *request.GrantId, Agent: TicketAssigneeAgent{Id: f.agent.Id, Name: f.agent.Name, Kind: f.agent.Kind},
-		Account: writeReport.account, Action: writeReport.action, Resource: writeReport.resource, SubstituteAccount: true,
+		Account: writeReport.account, Action: new(writeReport.action), Resource: new(writeReport.resource), SubstituteAccount: true,
 		Form: PermissionGrantFormTicket, State: PermissionGrantActive, RoundId: claim.RoundId, CreatedAt: approved, ApprovedAt: approved}
 	if !reflect.DeepEqual(grant, wantGrant) {
 		t.Fatalf("grant = %+v, want %+v", grant, wantGrant)

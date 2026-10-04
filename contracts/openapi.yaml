@@ -1017,9 +1017,12 @@ paths:
       tags: [tickets]
       description: >-
         Records the Owner's approval once, a grant for the Round's Agent
-        and the requested scope in the chosen `form`, and one `approval`
-        command for the runner to pull. Neither the Round nor the Ticket
-        moves until the runner reports `resumed`. `expiresAt` with the
+        in the chosen `form` and `scope`, and one `approval` command for
+        the runner to pull. `scope` `requested` (the default) grants the
+        requested account, action and resource; `full` grants full access
+        to the requested Connected Account instead. Neither the Round nor
+        the Ticket moves until the runner reports `resumed`. `expiresAt`
+        with the
         `ticket` form is `400 grant_form_conflict` and the `time` form
         without `expiresAt` is `400 invalid_request`, both before the
         lookup. After the checks below, an `expiresAt` not after the
@@ -1343,9 +1346,10 @@ paths:
         `data.questionId`. `permission_requested` does the same for a
         Permission request; its `idempotencyKey` must equal
         `data.requestId`, and a scope the Connected Account does not
-        declare is `400 unsupported_scope`. A `renewsGrantId` that does
-        not name a `time` grant of this Owner, the Round's Agent and the
-        same scope, expired by Galley's clock, is `400 invalid_renewal`,
+        declare is `400 capability_not_supported`. A `renewsGrantId` that
+        does not name a `time` grant of this Owner, the Round's Agent and
+        the same scope or full access to the same Connected Account,
+        expired by Galley's clock, is `400 invalid_renewal`,
         checked after `event_out_of_order`. `resumed` moves the Round
         back to `running` and the Ticket to In Progress. A
         `usage_observed` whose `observationId` is already recorded for
@@ -1388,7 +1392,7 @@ paths:
             Error. See `ErrorBody`. Includes `idempotency_key_conflict`,
             `stale_claim_epoch`, `round_not_open`, `event_out_of_order`,
             `stop_not_requested`, `answer_not_supplied`,
-            `approval_not_supplied`, `unsupported_scope`,
+            `approval_not_supplied`, `capability_not_supported`,
             `invalid_renewal`, `observation_id_conflict` and
             `request_too_large`.
           content:
@@ -1408,12 +1412,15 @@ paths:
       description: >-
         Answers from the grants Galley holds when the check runs, and
         records the check, allow or deny, in the Round's history. `allow`
-        needs an active grant for the Round's Agent, the same `account`
-        and `action`, and the same `resource` that is either `ticket`
-        form for the Round's Ticket or `time` form whose `expiresAt` is
-        after Galley's clock at the check; anything else is `deny`,
-        including a Connected Account with no grant. A scope the
-        Connected Account does not declare is `400 unsupported_scope`.
+        needs an active grant for the Round's Agent that is either
+        `ticket` form for the Round's Ticket or `time` form whose
+        `expiresAt` is after Galley's clock at the check, and that holds
+        either the same `account`, `action` and `resource`, or full
+        access to the same `account`; anything else is `deny`, including
+        a Connected Account with no grant. A grant for the exact scope is
+        named before a full-access grant. A scope the Connected Account
+        does not declare is `400 capability_not_supported`, whatever the
+        grants.
         Then `409 stale_claim_epoch` for an `epoch` other than the
         Round's, `409 round_not_open` for a Round that has ended, and `409
         round_not_running` for one claimed or waiting for input. A
@@ -1436,7 +1443,7 @@ paths:
                 $ref: "#/components/schemas/AuthorityCheckResult"
         default:
           description: >-
-            Error. See `ErrorBody`. Includes `unsupported_scope`,
+            Error. See `ErrorBody`. Includes `capability_not_supported`,
             `stale_claim_epoch`, `round_not_open` and `round_not_running`.
           content:
             application/json:
@@ -1913,11 +1920,19 @@ components:
     PermissionGrantForm:
       type: string
       description: >-
-        `ticket`: this Agent, this Ticket, this scope, for as long as the
-        grant is active. `time`: this Agent and this scope on any Ticket
-        until `expiresAt`, whatever any Ticket's Status.
+        `ticket`: this Agent, this Ticket, the granted scope, for as long
+        as the grant is active. `time`: this Agent and the granted scope
+        on any Ticket until `expiresAt`, whatever any Ticket's Status.
       enum: [ticket, time]
       x-enum-varnames: [PermissionGrantFormTicket, PermissionGrantFormTime]
+    PermissionGrantScope:
+      type: string
+      description: >-
+        `requested`: the request's account, action and resource. `full`:
+        every action and resource the request's Connected Account
+        declares, and nothing it does not.
+      enum: [requested, full]
+      x-enum-varnames: [PermissionGrantScopeRequested, PermissionGrantScopeFull]
     PermissionGrantState:
       type: string
       description: >-
@@ -1960,19 +1975,33 @@ components:
           type: [string, "null"]
           format: uuid
           x-go-type: string
-          description: The expired `time` grant this request renews.
+          description: The expired `time` grant this request renews, for this scope or with full access to this account.
     PermissionGrant:
       type: object
       additionalProperties: false
-      required: [id, agent, account, action, resource, substituteAccount, form, state, expiresAt, remainingSeconds, roundId, createdAt, approvedAt]
+      required: [id, agent, account, full, action, resource, substituteAccount, form, state, expiresAt, remainingSeconds, roundId, createdAt, approvedAt]
       properties:
         id: {type: string, format: uuid, x-go-type: string}
         agent:
           description: The only Agent the grant authorizes.
           $ref: "#/components/schemas/TicketAssigneeAgent"
         account: {type: string, minLength: 1, maxLength: 200}
-        action: {type: string, minLength: 1, maxLength: 200}
-        resource: {type: string, minLength: 1, maxLength: 200}
+        full:
+          type: boolean
+          description: >-
+            Full access to `account`: every action and resource it
+            declares. Only an Owner's approval with `scope` `full`
+            creates one.
+        action:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 200
+          description: Null exactly when `full`.
+        resource:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 200
+          description: Null exactly when `full`.
         substituteAccount: {type: boolean}
         form:
           $ref: "#/components/schemas/PermissionGrantForm"
@@ -2002,6 +2031,9 @@ components:
       properties:
         form:
           $ref: "#/components/schemas/PermissionGrantForm"
+        scope:
+          description: Defaults to `requested`.
+          $ref: "#/components/schemas/PermissionGrantScope"
         expiresAt:
           type: string
           format: date-time
@@ -2033,7 +2065,8 @@ components:
           x-go-type: string
           description: >-
             On `deny` only: the newest expired `time` grant for the Round's
-            Agent and this scope, when one exists.
+            Agent and this scope or full access to this account, when one
+            exists.
         checkedAt:
           type: string
           format: date-time
@@ -2885,7 +2918,8 @@ components:
       description: >-
         A scope matches a grant when `account` and `action` are the same
         and `resource` is the same string; `resource` must fit the pattern
-        the Connected Account declares for `action`. The controlled
+        the Connected Account declares for `action`. The declarations are
+        Galley's static configuration. The controlled
         substitute account `controlled` declares `read_note` and
         `write_note` on `notes/<name>` and `post_message` on
         `channels/<name>`, where `<name>` is 1 to 64 of `a-z`, `0-9` and
@@ -2917,8 +2951,9 @@ components:
           x-go-type: string
           description: >-
             On `deny` only: the newest expired `time` grant for the Round's
-            Agent and this scope, when one exists. A `permission_requested`
-            for this scope names it as `renewsGrantId`.
+            Agent and this scope or full access to this account, when one
+            exists. A `permission_requested` for this scope names it as
+            `renewsGrantId`.
     RoundEventRequest:
       type: object
       additionalProperties: false

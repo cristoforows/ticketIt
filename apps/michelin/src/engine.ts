@@ -250,7 +250,7 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
           return first;
         }
         if (first.decision === "unsupported") {
-          pending = failed("Galley does not support this scope");
+          pending = failed("the Connected Account does not declare this capability");
           break;
         }
         if (first.decision === "allow") {
@@ -404,8 +404,8 @@ async function checkScope(options: EngineOptions, deps: EngineDeps, step: ActSte
     if (report.failure.reason === "aborted" || signal.aborted) {
       return "aborted";
     }
-    if (report.failure.reason === "http_status" && report.failure.httpStatus === 400 && report.failure.errorCode === "unsupported_scope") {
-      logger.error("authority check refused an unsupported scope", { ...context, durationMs: report.durationMs, ...report.failure });
+    if (report.failure.reason === "http_status" && report.failure.httpStatus === 400 && report.failure.errorCode === "capability_not_supported") {
+      logger.error("authority check refused an undeclared capability", { ...context, durationMs: report.durationMs, ...report.failure });
       return { decision: "unsupported" };
     }
     if (!isRetryable(report.failure)) {

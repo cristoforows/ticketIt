@@ -419,7 +419,7 @@ receipt's notice and the header pill must all show the runner as
 disconnected, with no animation. Re-registering restores Starting. On a
 phone the active slip has no status toggle. Stop on the phone list shows
 Stopping, with no Stop control, on both views. `run.sh` runs it after
-`runner-time-grant.spec.ts` with no reset. It leaves a Round open, but no later
+`runner-full-access.spec.ts` with no reset. It leaves a Round open, but no later
 spec needs the slot.
 
 `tests/runner-ask.spec.ts` (issue #163) has two tests. The first drives
@@ -504,6 +504,23 @@ allowed by the renewed grant with no request, and its receipt must list
 both time grants but not the first Ticket's ticket grant. `run.sh` runs
 it after `runner-permission.spec.ts` with no reset. It leaves Galley's
 dev clock two hours ahead of the browser's and no Round open.
+
+`tests/runner-full-access.spec.ts` (issue #167) drives a real Michelin
+whose script `act`s on four declared capabilities of the `controlled`
+account (`write_note`, `read_note`, `post_message`, and `write_note` on a
+second note), then on the undeclared `delete_note`. The first check is
+denied and raises the only request. In the receipt **Only what was
+requested** must be checked and no warning shown; choosing **Full access
+to the controlled account** shows the warning and the button **Allow
+full access for this Ticket**, which posts `{"form": "ticket", "scope":
+"full"}` and returns one grant with `full: true` and no action or
+resource. The other declared steps must be allowed by that grant with no
+further request. `delete_note` must be refused `400
+capability_not_supported`, recorded as no check, and fail the Round with
+Michelin's explanation, leaving the Ticket Blocked. After a reload the
+grant shows the **Full access** tag and four checks read *by full
+access*. `run.sh` runs it after `runner-time-grant.spec.ts` with no
+reset, and it leaves no Round open.
 
 `tests/ticket-priority-order.spec.ts` reorders three Ready Tickets by
 dragging onto the upper and lower halves of board slips, then with Move

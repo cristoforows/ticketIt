@@ -1461,12 +1461,12 @@ func TestPermissionsAndAuthorityChecks_ResponsesMatchContractAndMethod405(t *tes
 
 	assertErrorCode(t, validate(decide("approve", `{"form":"ticket"}`), http.StatusNotFound), "not_found")
 	validate(check(writeReport, claim.ClaimEpoch), http.StatusOK)
-	assertErrorCode(t, validate(check(permissionScope{"github", "push", "repo"}, claim.ClaimEpoch), http.StatusBadRequest), unsupportedScopeCode)
+	assertErrorCode(t, validate(check(permissionScope{"github", "push", "repo"}, claim.ClaimEpoch), http.StatusBadRequest), capabilityNotSupportedCode)
 	validate(check(permissionScope{"", "push", "repo"}, claim.ClaimEpoch), http.StatusBadRequest)
 	assertErrorCode(t, validate(check(writeReport, claim.ClaimEpoch+1), http.StatusConflict), staleClaimEpochCode)
 	validate(runnerCall{method: http.MethodPost, path: authorityCheckPath(uuid.NewString()), body: authorityCheckBody(t, writeReport, 1), token: f.token}, http.StatusNotFound)
 	validate(runnerCall{method: http.MethodPost, path: authorityCheckPath(claim.RoundId), body: authorityCheckBody(t, writeReport, 1)}, http.StatusUnauthorized)
-	assertErrorCode(t, validate(event(permissionEvent(t, requestA, claim.ClaimEpoch, requestA, permissionScope{"github", "push", "repo"})), http.StatusBadRequest), unsupportedScopeCode)
+	assertErrorCode(t, validate(event(permissionEvent(t, requestA, claim.ClaimEpoch, requestA, permissionScope{"github", "push", "repo"})), http.StatusBadRequest), capabilityNotSupportedCode)
 	validate(event(request), http.StatusCreated)
 	validate(event(request), http.StatusOK)
 	readAll()
@@ -1571,5 +1571,77 @@ func TestTimeGrantsAndRenewals_ResponsesMatchContract(t *testing.T) {
 	validate(event(renewalEvent(t, claim.ClaimEpoch, requestB, writeReport, *denied.ExpiredGrantId)), http.StatusCreated)
 	readAll()
 	validate(approve(requestB, timeApprovalBody(t, until.Add(time.Hour))), http.StatusOK)
+	readAll()
+}
+
+func TestFullAccess_ResponsesMatchContract(t *testing.T) {
+	f := newClaimFixture(t)
+	router, err := legacy.NewRouter(loadContract(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate := func(call runnerCall, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(call.method, call.path, strings.NewReader(call.body))
+		if call.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if call.token != "" {
+			req.Header.Set("Authorization", "Bearer "+call.token)
+		}
+		if call.cookie != nil {
+			req.AddCookie(call.cookie)
+		}
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("%s %s: status=%d, want %d; body=%s", call.method, call.path, rec.Code, want, rec.Body.String())
+		}
+		validateAgainstContract(t, router, req, rec)
+		return rec
+	}
+	queued, claim := f.runningRound(t, "contract")
+	event := func(body string) runnerCall {
+		return runnerCall{method: http.MethodPost, path: "/api/runner/rounds/" + claim.RoundId + "/events", body: body, token: f.token}
+	}
+	check := func(scope permissionScope) runnerCall {
+		return runnerCall{method: http.MethodPost, path: authorityCheckPath(claim.RoundId), body: authorityCheckBody(t, scope, claim.ClaimEpoch), token: f.token}
+	}
+	approve := func(requestID, body string) runnerCall {
+		return runnerCall{method: http.MethodPost, path: permissionPath(queued.Id, claim.RoundId, requestID, "approve"), body: body, cookie: f.cookie}
+	}
+	readAll := func() {
+		t.Helper()
+		for _, read := range []runnerCall{
+			{method: http.MethodGet, path: "/api/tickets/" + queued.Id, cookie: f.cookie},
+			{method: http.MethodGet, path: "/api/tickets", cookie: f.cookie},
+			{method: http.MethodGet, path: "/api/tickets/" + queued.Id + "/rounds", cookie: f.cookie},
+		} {
+			validate(read, http.StatusOK)
+		}
+	}
+	until := runnerEpoch.Add(time.Hour)
+
+	validate(event(permissionEvent(t, requestA, claim.ClaimEpoch, requestA, writeReport)), http.StatusCreated)
+	assertInvalidRequest(t, validate(approve(requestA, `{"form":"ticket","scope":"all"}`), http.StatusBadRequest))
+	rec := validate(approve(requestA, fullApprovalBody(t, PermissionGrantFormTime, until)), http.StatusOK)
+	if g := decodeTicketBody(t, rec).PermissionGrants[0]; !g.Full || g.Action != nil || g.Resource != nil {
+		t.Fatalf("grant = %+v, want full access", g)
+	}
+	readAll()
+	validate(event(approvalResumedEvent(t, "resume-a", claim.ClaimEpoch, requestA)), http.StatusCreated)
+	validate(check(postGeneral), http.StatusOK)
+	assertErrorCode(t, validate(check(permissionScope{controlledAccount, "delete_note", "notes/a"}), http.StatusBadRequest), capabilityNotSupportedCode)
+	assertErrorCode(t, validate(event(permissionEvent(t, requestB, claim.ClaimEpoch, requestB, permissionScope{controlledAccount, "delete_note", "notes/a"})), http.StatusBadRequest), capabilityNotSupportedCode)
+	readAll()
+
+	f.clock.Set(until)
+	var denied AuthorityCheckResult
+	if err := json.Unmarshal(validate(check(readReport), http.StatusOK).Body.Bytes(), &denied); err != nil || denied.ExpiredGrantId == nil {
+		t.Fatalf("check after expiry = %+v, want a deny naming the expired full grant", denied)
+	}
+	validate(event(renewalEvent(t, claim.ClaimEpoch, requestB, readReport, *denied.ExpiredGrantId)), http.StatusCreated)
+	readAll()
+	validate(approve(requestB, `{"form":"ticket","scope":"requested"}`), http.StatusOK)
 	readAll()
 }
