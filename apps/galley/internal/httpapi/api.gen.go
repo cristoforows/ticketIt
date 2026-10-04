@@ -167,15 +167,18 @@ func (e PermissionGrantScope) Valid() bool {
 
 // Defines values for PermissionGrantState.
 const (
-	PermissionGrantActive  PermissionGrantState = "active"
-	PermissionGrantExpired PermissionGrantState = "expired"
-	PermissionGrantRevoked PermissionGrantState = "revoked"
+	PermissionGrantActive      PermissionGrantState = "active"
+	PermissionGrantEndedAtDone PermissionGrantState = "ended_at_done"
+	PermissionGrantExpired     PermissionGrantState = "expired"
+	PermissionGrantRevoked     PermissionGrantState = "revoked"
 )
 
 // Valid indicates whether the value is a known member of the PermissionGrantState enum.
 func (e PermissionGrantState) Valid() bool {
 	switch e {
 	case PermissionGrantActive:
+		return true
+	case PermissionGrantEndedAtDone:
 		return true
 	case PermissionGrantExpired:
 		return true
@@ -817,6 +820,9 @@ type PermissionGrant struct {
 	CoveredOpenRounds []PermissionGrantCoveredRound `json:"coveredOpenRounds"`
 	CreatedAt         time.Time                     `json:"createdAt"`
 
+	// EndedAt Set exactly when `state` is `ended_at_done`.
+	EndedAt *time.Time `json:"endedAt"`
+
 	// ExpiresAt Set exactly for the `time` form.
 	ExpiresAt *time.Time `json:"expiresAt"`
 
@@ -839,14 +845,14 @@ type PermissionGrant struct {
 	// RoundId The Round whose request the Owner approved.
 	RoundId string `json:"roundId"`
 
-	// State `expired`: a `time` grant whose `expiresAt` is not after Galley's clock when the grant is read. `revoked`: ended by the Owner at `revokedAt`, and never `expired`. Neither authorizes anything; both stay recorded.
+	// State `expired`: a `time` grant whose `expiresAt` is not after Galley's clock when the grant is read. `revoked`: ended by the Owner at `revokedAt`, and never `expired`. `ended_at_done`: a `ticket` grant ended at `endedAt` when its Ticket reached Done; reopening the Ticket never revives it, and it is never `expired` or renewable. None authorizes anything; all stay recorded.
 	State             PermissionGrantState `json:"state"`
 	SubstituteAccount bool                 `json:"substituteAccount"`
 }
 
 // PermissionGrantAllowedActions defines model for PermissionGrantAllowedActions.
 type PermissionGrantAllowedActions struct {
-	// Revoke Available only while the grant is `active`. Unavailable with `grant_already_revoked` once revoked, and `grant_expired` once expired.
+	// Revoke Available only while the grant is `active`. Unavailable with `grant_already_revoked` once revoked, `grant_expired` once expired, and `grant_ended` once ended at Done.
 	Revoke TicketCommandAvailability `json:"revoke"`
 }
 
@@ -864,7 +870,7 @@ type PermissionGrantForm string
 // PermissionGrantScope `requested`: the request's account, action and resource. `full`: every action and resource the request's Connected Account declares, and nothing it does not.
 type PermissionGrantScope string
 
-// PermissionGrantState `expired`: a `time` grant whose `expiresAt` is not after Galley's clock when the grant is read. `revoked`: ended by the Owner at `revokedAt`, and never `expired`. Neither authorizes anything; both stay recorded.
+// PermissionGrantState `expired`: a `time` grant whose `expiresAt` is not after Galley's clock when the grant is read. `revoked`: ended by the Owner at `revokedAt`, and never `expired`. `ended_at_done`: a `ticket` grant ended at `endedAt` when its Ticket reached Done; reopening the Ticket never revives it, and it is never `expired` or renewable. None authorizes anything; all stay recorded.
 type PermissionGrantState string
 
 // PermissionRequest defines model for PermissionRequest.

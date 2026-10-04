@@ -192,6 +192,7 @@ export interface paths {
          * @description The one path to `Done`, kept a separate command rather than a Status write to respect the Swiftlet -> Galley owner-command boundary (docs/contracts/execution-interface.md).
          *     Requires the Ticket to be `InReview`; otherwise `invalid_transition`, validated against the persisted Status the same way `changeTicketStatus` is.
          *     A Ticket whose retained completion condition is `reviewedPrMerge` is rejected with `reviewed_pr_merge_not_implemented` rather than downgraded: D2 is unresolved and the mechanism it selects is owned by M8 (docs/decisions/d3-agent-template-compatibility.md, "Completing human work that requires a reviewed PR merge").
+         *     Every `active` `ticket` grant bound to the Ticket ends in the same transaction (`ended_at_done`); `time` grants are unaffected.
          *     Creates no Round, work request, or queue entry. Requires a valid session; returns `401 unauthenticated` otherwise. Identifier handling matches the other `/api/tickets/{id}` operations.
          */
         post: operations["acceptTicket"];
@@ -569,7 +570,7 @@ export interface paths {
         put?: never;
         /**
          * Revoke an active Permission grant
-         * @description Ends the grant at once: every later authority check denies it. For each open Round the grant covers (see `coveredOpenRounds`), records one Stop request exactly as `requestTicketStop` does, sharing its one Stop per Round, and one `authority_changed` command. A covered Round reaches `stopped` only on the runner's `stop_confirmed`; an action it already took stays recorded. A grant covering no open Round requests no Stop. A repeat returns the revoked grant and records nothing. An expired grant is `grant_expired` and changes nothing. Takes no body. An unknown, malformed or foreign grant id returns the shared 404.
+         * @description Ends the grant at once: every later authority check denies it. For each open Round the grant covers (see `coveredOpenRounds`), records one Stop request exactly as `requestTicketStop` does, sharing its one Stop per Round, and one `authority_changed` command. A covered Round reaches `stopped` only on the runner's `stop_confirmed`; an action it already took stays recorded. A grant covering no open Round requests no Stop. A repeat returns the revoked grant and records nothing. An expired grant is `grant_expired` and changes nothing, as does a grant ended at Done (`grant_ended`). Takes no body. An unknown, malformed or foreign grant id returns the shared 404.
          */
         post: operations["revokePermissionGrant"];
         delete?: never;
@@ -1014,12 +1015,12 @@ export interface components {
          */
         PermissionGrantScope: "requested" | "full";
         /**
-         * @description `expired`: a `time` grant whose `expiresAt` is not after Galley's clock when the grant is read. `revoked`: ended by the Owner at `revokedAt`, and never `expired`. Neither authorizes anything; both stay recorded.
+         * @description `expired`: a `time` grant whose `expiresAt` is not after Galley's clock when the grant is read. `revoked`: ended by the Owner at `revokedAt`, and never `expired`. `ended_at_done`: a `ticket` grant ended at `endedAt` when its Ticket reached Done; reopening the Ticket never revives it, and it is never `expired` or renewable. None authorizes anything; all stay recorded.
          * @enum {string}
          */
-        PermissionGrantState: "active" | "expired" | "revoked";
+        PermissionGrantState: "active" | "expired" | "revoked" | "ended_at_done";
         PermissionGrantAllowedActions: {
-            /** @description Available only while the grant is `active`. Unavailable with `grant_already_revoked` once revoked, and `grant_expired` once expired. */
+            /** @description Available only while the grant is `active`. Unavailable with `grant_already_revoked` once revoked, `grant_expired` once expired, and `grant_ended` once ended at Done. */
             revoke: components["schemas"]["TicketCommandAvailability"];
         };
         PermissionGrantCoveredRound: {
@@ -1087,6 +1088,11 @@ export interface components {
              * @description Set exactly when `state` is `revoked`.
              */
             revokedAt: string | null;
+            /**
+             * Format: date-time
+             * @description Set exactly when `state` is `ended_at_done`.
+             */
+            endedAt: string | null;
             /**
              * Format: uuid
              * @description The Round whose request the Owner approved.
@@ -2701,7 +2707,7 @@ export interface operations {
                     "application/json": components["schemas"]["PermissionGrant"];
                 };
             };
-            /** @description Error. See `ErrorBody`. Includes `grant_expired`. */
+            /** @description Error. See `ErrorBody`. Includes `grant_expired` and `grant_ended`. */
             default: {
                 headers: {
                     [name: string]: unknown;

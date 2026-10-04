@@ -11,6 +11,7 @@ export type RevokeGrant = (grantId: string) => Promise<Ticket>;
 const revokeRefusedMessages: Record<string, string> = {
   grant_already_revoked: "This grant was already revoked. The receipt now shows it as Galley has it.",
   grant_expired: "This grant has already expired, so there is nothing to revoke. The receipt now shows it as Galley has it.",
+  grant_ended: "This grant ended when its Ticket reached Done, so there is nothing to revoke. The receipt now shows it as Galley has it.",
 };
 
 const refreshedMessages: Record<string, string> = {
@@ -282,6 +283,14 @@ function GrantTerms({ grant }: { grant: PermissionGrant }) {
       <p className="m-0 text-muted">
         <ExpiredTag data-testid="ticket-detail-permission-grant-revoked">Revoked</ExpiredTag> {grant.form === "ticket" ? "Allowed for this Ticket" : "Allowed for a time"} <LocalTime iso={grant.approvedAt} /> · revoked{" "}
         <LocalTime iso={grant.revokedAt} data-testid="ticket-detail-permission-grant-revoked-at" />
+      </p>
+    );
+  }
+  if (grant.state === "ended_at_done" && grant.endedAt !== null) {
+    return (
+      <p className="m-0 text-muted">
+        <ExpiredTag data-testid="ticket-detail-permission-grant-ended">Ended at Done</ExpiredTag> Allowed for this Ticket <LocalTime iso={grant.approvedAt} /> · ended{" "}
+        <LocalTime iso={grant.endedAt} data-testid="ticket-detail-permission-grant-ended-at" />
       </p>
     );
   }

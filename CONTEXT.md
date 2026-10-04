@@ -49,7 +49,7 @@ Authorization for an **Agent** to perform actions within a resource scope, inclu
 _Avoid_: Skill when referring to authorization rather than instructions.
 
 **Temporary Permission**:
-A **Permission** for an **Agent** of one of two distinct kinds: ticket-based, ending when its specified **Ticket** reaches **Done**, or time-based, covering the agent on any of its tickets until its expiry by Galley's clock, independently of ticket completion. It authorizes repeated uses within its account, action, and resource scope, or its whole account under **Full Access**; ticket and time limits are not combined in one grant. Expiry is judged at each check and stops only that scope; the expired grant stays recorded, and renewal is a new grant. The owner can end one sooner by **Revocation**.
+A **Permission** for an **Agent** of one of two distinct kinds: ticket-based, ending when its specified **Ticket** reaches **Done** and staying ended if the ticket is reopened, or time-based, covering the agent on any of its tickets until its expiry by Galley's clock, independently of ticket completion. It authorizes repeated uses within its account, action, and resource scope, or its whole account under **Full Access**; ticket and time limits are not combined in one grant. Expiry is judged at each check and stops only that scope; the expired grant stays recorded, and renewal is a new grant, as is any grant approved after a reopening. The owner can end one sooner by **Revocation**.
 _Avoid_: One-time permission when referring to a ticket-bound or time-bound grant.
 
 **Permission Request**:

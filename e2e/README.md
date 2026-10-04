@@ -539,6 +539,18 @@ deny, the allow by the grant, and the *Performed* note. `run.sh` runs it
 after `runner-full-access.spec.ts` with no reset, and it leaves no Round
 open.
 
+`tests/runner-grant-done.spec.ts` (issue #169) drives a real Michelin
+whose script is `start`, `act`, `deliver`. The Owner approves the
+Permission for this Ticket in the browser and the Round delivers. Accept
+in the browser ends the grant: the receipt shows **Ended at Done** with
+Galley's `endedAt` and no Revoke. Done → Ready runs a second Round of
+the same script, which must raise the Permission request again (Waiting
+for a Permission, no expired mark, the ended grant still listed ended).
+A fresh approval allows the action and the Round delivers; the receipt
+lists the ended and the active grant, and the second Round's checks are
+a deny then an allow by the fresh grant. `run.sh` runs it after
+`runner-revoke.spec.ts` with no reset, and it leaves no Round open.
+
 `tests/ticket-priority-order.spec.ts` reorders three Ready Tickets by
 dragging onto the upper and lower halves of board slips, then with Move
 up and Move down in the list. After each step the rendered order must

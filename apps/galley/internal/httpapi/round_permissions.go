@@ -47,7 +47,7 @@ const applicablePermissionGrantsSQL = `FROM permission_grants g
 const permissionGrantJSON = `json_build_object('id', g.public_id,
 	          'agent', json_build_object('id', a.public_id, 'name', a.name, 'kind', a.kind),
 	          'account', g.account, 'full', g.full_access, 'action', g.action, 'resource', g.resource, 'substituteAccount', false,
-	          'form', g.form, 'state', g.state, 'expiresAt', g.expires_at, 'remainingSeconds', NULL, 'revokedAt', g.revoked_at,
+	          'form', g.form, 'state', g.state, 'expiresAt', g.expires_at, 'remainingSeconds', NULL, 'revokedAt', g.revoked_at, 'endedAt', g.ended_at,
 	          'roundId', r.public_id, 'createdAt', g.created_at, 'approvedAt', g.approved_at,
 	          'coveredOpenRounds', (SELECT COALESCE(json_agg(json_build_object('roundId', cr.public_id, 'sequence', cr.sequence,
 	              'ticketId', ct.public_id, 'ticketTitle', ct.title) ORDER BY cr.id), '[]')
@@ -229,6 +229,7 @@ func normalisePermissionGrant(grant *PermissionGrant, now time.Time) {
 	grant.ApprovedAt = grant.ApprovedAt.UTC()
 	grant.ExpiresAt = utcOrNil(grant.ExpiresAt)
 	grant.RevokedAt = utcOrNil(grant.RevokedAt)
+	grant.EndedAt = utcOrNil(grant.EndedAt)
 	rejection := decideRevoke(revocationTarget{state: grant.State, expiresAt: grant.ExpiresAt}, now)
 	grant.AllowedActions = PermissionGrantAllowedActions{Revoke: commandAvailability(rejection)}
 	if rejection != nil || grant.CoveredOpenRounds == nil {

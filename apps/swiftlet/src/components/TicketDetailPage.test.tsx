@@ -526,7 +526,7 @@ describe("TicketDetailPage", () => {
       const approved = { ...request, decision: "approved", decidedAt: "2026-10-01T10:00:08Z", grantId };
       const waitingRound = { ...running.openRound, state: "waiting_for_input", waitingReason: "waiting_for_permission", question: null, permissionRequest: request };
       const waiting = { ...running, status: "Blocked", openRound: waitingRound, allowedActions: { ...lockedActions, stop: { available: true }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: true } } };
-      const grant = { id: grantId, agent, account: "controlled", full: false, action: "write_note", resource: "notes/weekly-report", substituteAccount: true, form: "ticket", state: "active", expiresAt: null, remainingSeconds: null, roundId: round.id, createdAt: "2026-10-01T10:00:08Z", approvedAt: "2026-10-01T10:00:08Z", revokedAt: null, allowedActions: { revoke: { available: true } }, coveredOpenRounds: [] };
+      const grant = { id: grantId, agent, account: "controlled", full: false, action: "write_note", resource: "notes/weekly-report", substituteAccount: true, form: "ticket", state: "active", expiresAt: null, remainingSeconds: null, roundId: round.id, createdAt: "2026-10-01T10:00:08Z", approvedAt: "2026-10-01T10:00:08Z", revokedAt: null, endedAt: null, allowedActions: { revoke: { available: true } }, coveredOpenRounds: [] };
       const resuming = { ...waiting, openRound: { ...waitingRound, waitingReason: "resuming", permissionRequest: approved }, permissionGrants: [grant], permissionGrantCount: 1, allowedActions: { ...waiting.allowedActions, permissionDecision: { available: false, reason: { code: "permission_already_decided", message: "this Permission request is already decided" } } } };
       const approvePath = `/api/tickets/${TICKET_ID}/rounds/${round.id}/permission-requests/${request.id}/approve`;
       const waitingRecord = { ...record(), state: "waiting_for_input", permissionRequests: [request] };
@@ -597,7 +597,7 @@ describe("TicketDetailPage", () => {
         const revokePath = `/api/grants/${grantId}/revoke`;
         const live = { ...grant, coveredOpenRounds: [{ roundId: round.id, sequence: round.sequence, ticketId: TICKET_ID, ticketTitle: running.title }] };
         const working = { ...resuming, openRound: { ...waitingRound, state: "running", waitingReason: "working", permissionRequest: null }, permissionGrants: [live] };
-        const revokedGrant = { ...grant, state: "revoked", revokedAt: "2026-10-01T10:00:20Z", allowedActions: { revoke: { available: false, reason: { code: "grant_already_revoked", message: "this grant is already revoked" } } } };
+        const revokedGrant = { ...grant, state: "revoked", revokedAt: "2026-10-01T10:00:20Z", endedAt: null, allowedActions: { revoke: { available: false, reason: { code: "grant_already_revoked", message: "this grant is already revoked" } } } };
         const stopping = { ...working, openRound: { ...working.openRound, stopRequestedAt: "2026-10-01T10:00:20Z", waitingReason: "stopping" }, permissionGrants: [revokedGrant] };
 
         it("posts the revoke, then reloads the Ticket to show the grant Revoked and the Round Stopping", async () => {

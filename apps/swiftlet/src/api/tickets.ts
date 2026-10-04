@@ -144,9 +144,11 @@ function parsePermissionGrant(value: unknown): PermissionGrant | undefined {
     !isGrantScope(grant) ||
     !isAgentSummary(grant.agent) ||
     typeof grant.substituteAccount !== "boolean" ||
-    !(grant.form === "ticket" ? (grant.state === "active" || grant.state === "revoked") && grant.expiresAt === null && grant.remainingSeconds === null : grant.form === "time" && isTimeGrantExpiry(grant)) ||
+    !(grant.form === "ticket" ? (grant.state === "active" || grant.state === "revoked" || grant.state === "ended_at_done") && grant.expiresAt === null && grant.remainingSeconds === null : grant.form === "time" && isTimeGrantExpiry(grant)) ||
     (grant.state === "revoked") !== isString(grant.revokedAt) ||
     !(grant.revokedAt === null || isString(grant.revokedAt)) ||
+    (grant.state === "ended_at_done") !== isString(grant.endedAt) ||
+    !(grant.endedAt === null || isString(grant.endedAt)) ||
     !revoke ||
     revoke.available !== (grant.state === "active") ||
     !covered ||
@@ -172,6 +174,7 @@ function parsePermissionGrant(value: unknown): PermissionGrant | undefined {
     createdAt: grant.createdAt as string,
     approvedAt: grant.approvedAt as string,
     revokedAt: grant.revokedAt as string | null,
+    endedAt: grant.endedAt as string | null,
     allowedActions: { revoke },
     coveredOpenRounds: covered as PermissionGrant["coveredOpenRounds"],
   };

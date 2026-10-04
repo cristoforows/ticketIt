@@ -466,6 +466,9 @@ paths:
         (docs/decisions/d3-agent-template-compatibility.md, "Completing
         human work that requires a reviewed PR merge").
 
+        Every `active` `ticket` grant bound to the Ticket ends in the same
+        transaction (`ended_at_done`); `time` grants are unaffected.
+
         Creates no Round, work request, or queue entry. Requires a
         valid session; returns `401 unauthenticated` otherwise.
         Identifier handling matches the other `/api/tickets/{id}`
@@ -1116,7 +1119,8 @@ paths:
         `stop_confirmed`; an action it already took stays recorded. A
         grant covering no open Round requests no Stop. A repeat returns
         the revoked grant and records nothing. An expired grant is
-        `grant_expired` and changes nothing. Takes no body. An unknown,
+        `grant_expired` and changes nothing, as does a grant ended at
+        Done (`grant_ended`). Takes no body. An unknown,
         malformed or foreign grant id returns the shared 404.
       responses:
         "200":
@@ -1126,7 +1130,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/PermissionGrant"
         default:
-          description: Error. See `ErrorBody`. Includes `grant_expired`.
+          description: Error. See `ErrorBody`. Includes `grant_expired` and `grant_ended`.
           content:
             application/json:
               schema:
@@ -1974,10 +1978,12 @@ components:
       description: >-
         `expired`: a `time` grant whose `expiresAt` is not after Galley's
         clock when the grant is read. `revoked`: ended by the Owner at
-        `revokedAt`, and never `expired`. Neither authorizes anything;
-        both stay recorded.
-      enum: [active, expired, revoked]
-      x-enum-varnames: [PermissionGrantActive, PermissionGrantExpired, PermissionGrantRevoked]
+        `revokedAt`, and never `expired`. `ended_at_done`: a `ticket`
+        grant ended at `endedAt` when its Ticket reached Done; reopening
+        the Ticket never revives it, and it is never `expired` or
+        renewable. None authorizes anything; all stay recorded.
+      enum: [active, expired, revoked, ended_at_done]
+      x-enum-varnames: [PermissionGrantActive, PermissionGrantExpired, PermissionGrantRevoked, PermissionGrantEndedAtDone]
     PermissionGrantAllowedActions:
       type: object
       additionalProperties: false
@@ -1986,8 +1992,8 @@ components:
         revoke:
           description: >-
             Available only while the grant is `active`. Unavailable with
-            `grant_already_revoked` once revoked, and `grant_expired` once
-            expired.
+            `grant_already_revoked` once revoked, `grant_expired` once
+            expired, and `grant_ended` once ended at Done.
           $ref: "#/components/schemas/TicketCommandAvailability"
     PermissionGrantCoveredRound:
       type: object
@@ -2036,7 +2042,7 @@ components:
     PermissionGrant:
       type: object
       additionalProperties: false
-      required: [id, agent, account, full, action, resource, substituteAccount, form, state, expiresAt, remainingSeconds, revokedAt, roundId, createdAt, approvedAt, allowedActions, coveredOpenRounds]
+      required: [id, agent, account, full, action, resource, substituteAccount, form, state, expiresAt, remainingSeconds, revokedAt, endedAt, roundId, createdAt, approvedAt, allowedActions, coveredOpenRounds]
       properties:
         id: {type: string, format: uuid, x-go-type: string}
         agent:
@@ -2079,6 +2085,10 @@ components:
           type: [string, "null"]
           format: date-time
           description: Set exactly when `state` is `revoked`.
+        endedAt:
+          type: [string, "null"]
+          format: date-time
+          description: Set exactly when `state` is `ended_at_done`.
         roundId:
           type: string
           format: uuid

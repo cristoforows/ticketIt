@@ -1444,7 +1444,7 @@ describe("a Permission request from the Agent", () => {
     openRound: waitingRound,
     allowedActions: { ...TICKET.allowedActions, statusChanges: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: waitingRound.id } }, stop: { available: true }, permissionDecision: { available: true } },
   };
-  const grant = { id: grantId, agent, account: "controlled", full: false, action: "write_note", resource: "notes/weekly-report", substituteAccount: true, form: "ticket" as const, state: "active" as const, expiresAt: null, remainingSeconds: null, roundId: waitingRound.id, createdAt: "2026-10-02T10:00:09Z", approvedAt: "2026-10-02T10:00:09Z", revokedAt: null, allowedActions: { revoke: { available: true } }, coveredOpenRounds: [] };
+  const grant = { id: grantId, agent, account: "controlled", full: false, action: "write_note", resource: "notes/weekly-report", substituteAccount: true, form: "ticket" as const, state: "active" as const, expiresAt: null, remainingSeconds: null, roundId: waitingRound.id, createdAt: "2026-10-02T10:00:09Z", approvedAt: "2026-10-02T10:00:09Z", revokedAt: null, endedAt: null, allowedActions: { revoke: { available: true } }, coveredOpenRounds: [] };
   const decidedActions = { ...waiting.allowedActions, permissionDecision: { available: false, reason: { code: "permission_already_decided", message: "this Permission request is already decided" } } };
   const resuming: Ticket = { ...waiting, openRound: { ...waitingRound, waitingReason: "resuming", permissionRequest: approved }, permissionGrants: [grant], permissionGrantCount: 1, allowedActions: decidedActions };
   const stillWaiting: Ticket = { ...waiting, openRound: { ...waitingRound, permissionRequest: declined }, allowedActions: decidedActions };
@@ -1742,8 +1742,8 @@ describe("revoking a grant", () => {
   const agent = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kind: "research" as const };
   const runningRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 2, state: "running" as const, agent, claimedAt: "2026-10-02T10:00:00Z", startedAt: "2026-10-02T10:00:01Z", stopRequestedAt: null, waitingReason: "working" as const, question: null, permissionRequest: null };
   const covered = { roundId: runningRound.id, sequence: 2, ticketId: REFINED_TICKET.id, ticketTitle: "Write the weekly report" };
-  const grant = { id: "12121212-1212-4121-8121-121212121212", agent, account: "controlled", full: false, action: "write_note", resource: "notes/weekly-report", substituteAccount: false, form: "ticket" as const, state: "active" as const, expiresAt: null, remainingSeconds: null, roundId: runningRound.id, createdAt: "2026-10-02T10:00:09Z", approvedAt: "2026-10-02T10:00:09Z", revokedAt: null, allowedActions: { revoke: { available: true } }, coveredOpenRounds: [covered] };
-  const revoked = { ...grant, state: "revoked" as const, revokedAt: "2026-10-02T10:05:00Z", allowedActions: { revoke: { available: false, reason: { code: "grant_already_revoked", message: "this grant is already revoked" } } }, coveredOpenRounds: [] };
+  const grant = { id: "12121212-1212-4121-8121-121212121212", agent, account: "controlled", full: false, action: "write_note", resource: "notes/weekly-report", substituteAccount: false, form: "ticket" as const, state: "active" as const, expiresAt: null, remainingSeconds: null, roundId: runningRound.id, createdAt: "2026-10-02T10:00:09Z", approvedAt: "2026-10-02T10:00:09Z", revokedAt: null, endedAt: null, allowedActions: { revoke: { available: true } }, coveredOpenRounds: [covered] };
+  const revoked = { ...grant, state: "revoked" as const, revokedAt: "2026-10-02T10:05:00Z", endedAt: null, allowedActions: { revoke: { available: false, reason: { code: "grant_already_revoked", message: "this grant is already revoked" } } }, coveredOpenRounds: [] };
   const running: Ticket = {
     ...REFINED_TICKET,
     status: "InProgress",
@@ -1768,6 +1768,19 @@ describe("revoking a grant", () => {
     cleanup();
     render(<TicketDetail ticket={running} onSave={vi.fn()} {...noopActions()} />);
     expect(screen.queryByTestId("ticket-detail-permission-grant-revoke")).not.toBeInTheDocument();
+  });
+
+  it("shows a grant ended at Done with its time, distinct from Revoked and Expired, and offers no Revoke", () => {
+    const ended = { ...grant, state: "ended_at_done" as const, endedAt: "2026-10-02T10:06:00Z", allowedActions: { revoke: { available: false, reason: { code: "grant_ended", message: "this grant ended when its Ticket reached Done" } } } };
+    render(<TicketDetail ticket={{ ...running, status: "Done", openRound: null, permissionGrants: [ended, revoked], permissionGrantCount: 2 }} onSave={vi.fn()} {...noopActions()} onRevokeGrant={vi.fn()} />);
+    const [endedItem, revokedItem] = screen.getAllByTestId("ticket-detail-permission-grant");
+    expect(endedItem).toHaveAttribute("data-state", "ended_at_done");
+    expect(within(endedItem).getByTestId("ticket-detail-permission-grant-ended")).toHaveTextContent("Ended at Done");
+    expect(within(endedItem).getByTestId("ticket-detail-permission-grant-ended-at")).toHaveAttribute("dateTime", "2026-10-02T10:06:00Z");
+    expect(within(endedItem).queryByTestId("ticket-detail-permission-grant-revoked")).not.toBeInTheDocument();
+    expect(within(endedItem).queryByTestId("ticket-detail-permission-grant-expired")).not.toBeInTheDocument();
+    expect(within(endedItem).queryByTestId("ticket-detail-permission-grant-revoke")).not.toBeInTheDocument();
+    expect(within(revokedItem).queryByTestId("ticket-detail-permission-grant-ended")).not.toBeInTheDocument();
   });
 
   it("names the grant in the button's accessible name", () => {

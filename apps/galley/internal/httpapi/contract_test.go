@@ -1706,3 +1706,32 @@ func TestRevokeGrant_ResponsesMatchContractAndMethod405(t *testing.T) {
 		t.Fatalf("Allow = %q, want POST", rec.Header().Get("Allow"))
 	}
 }
+
+func TestEndedGrants_ResponsesMatchContract(t *testing.T) {
+	f := newClaimFixture(t)
+	router, err := legacy.NewRouter(loadContract(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate := func(call runnerCall, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(call.method, call.path, strings.NewReader(call.body))
+		req.AddCookie(f.cookie)
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("%s %s: status=%d, want %d; body=%s", call.method, call.path, rec.Code, want, rec.Body.String())
+		}
+		validateAgainstContract(t, router, req, rec)
+		return rec
+	}
+	queued, claim, grantID := grantForms[0].grant(t, f, "ended contract")
+	f.deliver(t, claim)
+	rec := validate(runnerCall{method: http.MethodPost, path: "/api/tickets/" + queued.Id + "/accept"}, http.StatusOK)
+	if g := grantOf(t, decodeTicketBody(t, rec).PermissionGrants, grantID); g.State != PermissionGrantEndedAtDone || g.EndedAt == nil {
+		t.Fatalf("grant = %+v, want ended at Done", g)
+	}
+	validate(runnerCall{method: http.MethodGet, path: "/api/tickets/" + queued.Id}, http.StatusOK)
+	validate(runnerCall{method: http.MethodGet, path: "/api/tickets"}, http.StatusOK)
+	assertErrorCode(t, validate(runnerCall{method: http.MethodPost, path: revokePath(grantID)}, http.StatusBadRequest), grantEndedCode)
+}
