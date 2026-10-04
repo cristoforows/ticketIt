@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { RoundActivityNote, RoundActivityPage, RoundDeliverable, TicketRound } from "../api/rounds";
 import type { Ticket } from "../api/tickets";
 import { FeedbackHistory, FeedbackPanel, type AddFeedback } from "./FeedbackPanel";
-import { PermissionGrants, PermissionHistory, PermissionPanel, type DecidePermission } from "./PermissionPanel";
+import { PermissionGrants, PermissionHistory, PermissionPanel, type DecidePermission, type RevokeGrant } from "./PermissionPanel";
 import { QuestionHistory, QuestionPanel, type AnswerQuestion } from "./QuestionPanel";
 import type { HealthView } from "./RunnerHealthPill";
 import { activeTime, costFigure, countFigure, type UsageFigure } from "./roundUsage";
@@ -16,7 +16,7 @@ export interface RoundRecords {
 
 export type LoadEarlierActivity = (roundId: string, before: string) => Promise<RoundActivityPage>;
 
-export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEarlierActivity, answer, onAnswer, onAnswered = () => {}, delivery = null, feedback, onAddFeedback, permissionDecision, onDecidePermission, permissionGrants = [], permissionGrantCount = permissionGrants.length }: {
+export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEarlierActivity, answer, onAnswer, onAnswered = () => {}, delivery = null, feedback, onAddFeedback, permissionDecision, onDecidePermission, onRevokeGrant, permissionGrants = [], permissionGrantCount = permissionGrants.length }: {
   openRound: Ticket["openRound"];
   runnerHealth: HealthView;
   records?: RoundRecords;
@@ -29,6 +29,7 @@ export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEar
   onAddFeedback?: AddFeedback;
   permissionDecision?: Ticket["allowedActions"]["permissionDecision"];
   onDecidePermission?: DecidePermission;
+  onRevokeGrant?: RevokeGrant;
   permissionGrants?: Ticket["permissionGrants"];
   permissionGrantCount?: number;
 }) {
@@ -48,7 +49,7 @@ export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEar
       {openRound?.permissionRequest && permissionDecision && (
         <PermissionPanel roundId={openRound.id} request={openRound.permissionRequest} availability={permissionDecision} onDecide={onDecidePermission} onDecided={onAnswered} grants={permissionGrants} />
       )}
-      <PermissionGrants grants={permissionGrants} count={permissionGrantCount} />
+      <PermissionGrants grants={permissionGrants} count={permissionGrantCount} onRevoke={onRevokeGrant} onRevoked={onAnswered} />
       {delivery && feedback && <FeedbackPanel delivery={delivery} availability={feedback} onAddFeedback={onAddFeedback} onAdded={onAnswered} />}
       {records.error && (
         <InlineError data-testid="ticket-detail-round-records-error" className="my-2">

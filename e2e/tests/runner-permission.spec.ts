@@ -109,8 +109,10 @@ test("a real Michelin's denied action blocks the Ticket, and one approval for th
     expect(lines(log, "permission requested").map((line) => line["requestId"])).toEqual([requestId]);
     expect(lines(log, "approval received").map((line) => [line["requestId"], line["grantId"]])).toEqual([[requestId, grantId]]);
     expect(lines(log, "authority checked").map((line) => line["decision"])).toEqual(["deny", "allow", "allow"]);
-    expect(lines(log, "command acknowledged").map((line) => line["outcome"])).toEqual(["applied"]);
-    expect(log.indexOf('"msg":"resume reported"')).toBeLessThan(log.indexOf('"msg":"command acknowledged"'));
+    const acks = lines(log, "command acknowledged");
+    expect(acks.map((line) => [line["type"], line["outcome"]])).toEqual([["authority_changed", "applied"], ["approval", "applied"]]);
+    const order = log.split("\n").filter((line) => line.includes('"msg":"resume reported"') || (line.includes('"msg":"command acknowledged"') && line.includes('"type":"approval"')));
+    expect(order.map((line) => (JSON.parse(line) as Record<string, unknown>)["msg"])).toEqual(["resume reported", "command acknowledged"]);
     expect(log).not.toContain("round event refused");
     expect(log).not.toContain(token);
 

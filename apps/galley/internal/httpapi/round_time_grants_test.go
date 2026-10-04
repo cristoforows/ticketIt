@@ -190,10 +190,7 @@ func TestApprove_TheTimeFormRecordsAnExpiringGrantForTheAgentAndScope(t *testing
 		g.Agent.Id != f.agent.Id || g.Account != writeReport.account || !reflect.DeepEqual(g.Action, &writeReport.action) || !reflect.DeepEqual(g.Resource, &writeReport.resource) || g.RoundId != claim.RoundId {
 		t.Fatalf("grant = %+v, want a time grant for the Agent and scope until %v with 7200 s left", g, until)
 	}
-	commands := f.mustCommands(t, claim.RoundId)
-	if len(commands) != 1 || commands[0].Type != RunnerCommandApproval || commands[0].Approval == nil || commands[0].Approval.GrantId != grantID {
-		t.Fatalf("commands = %+v, want one approval naming %s", commands, grantID)
-	}
+	assertApprovalCommands(t, f.mustCommands(t, claim.RoundId), grantID)
 }
 
 func TestApprove_RefusesBothFormsAndAnExpiryOutsideTheWindowChangingNothing(t *testing.T) {
@@ -564,7 +561,7 @@ func TestApprove_ConcurrentTimeApprovalsRecordExactlyOneGrant(t *testing.T) {
 				t.Fatalf("trial %d response %d: status=%d body=%s", trial, i, code, bodies[i])
 			}
 		}
-		if grants := tableRowCount(t, f.pool, "permission_grants"); winners != 1 || grants != 1 || len(f.mustCommands(t, claim.RoundId)) != 1 {
+		if grants := tableRowCount(t, f.pool, "permission_grants"); winners != 1 || grants != 1 || len(f.mustCommands(t, claim.RoundId)) != 2 {
 			t.Fatalf("trial %d: %d winners, %d grants", trial, winners, grants)
 		}
 	}
@@ -589,7 +586,7 @@ func TestApprove_ATimeApprovalRacingStopLeavesNoGrantOrBothCommands(t *testing.T
 		}
 		commands, grants := f.mustCommands(t, claim.RoundId), tableRowCount(t, f.pool, "permission_grants")
 		switch {
-		case codes[1] == http.StatusOK && len(commands) == 2 && grants == 1:
+		case codes[1] == http.StatusOK && len(commands) == 3 && commands[0].Type == RunnerCommandStop && grants == 1:
 			outcomes["approved first"]++
 		case codes[1] == http.StatusBadRequest && strings.Contains(bodies[1], stopAlreadyRequestedCode) && len(commands) == 1 && grants == 0:
 			outcomes["stopped first"]++

@@ -269,7 +269,7 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 			}
 		case "round_commands":
 			if after != before[table] {
-				t.Errorf("%s row count changed from %d to %d -- a manual lifecycle action recorded a Round command; only a Stop request on an open Round, an answer to its question or an approval of its Permission request may", table, before[table], after)
+				t.Errorf("%s row count changed from %d to %d -- a manual lifecycle action recorded a Round command; only a Stop request on an open Round, an answer to its question, an approval of its Permission request or a revoke of a grant covering it may", table, before[table], after)
 			}
 		default:
 			if after != before[table] {

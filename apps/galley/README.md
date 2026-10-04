@@ -2040,6 +2040,61 @@ renamed rows across the #165 and #166 tests, and
 `TestFullAccess_ResponsesMatchContract`.
 Evidence: `docs/evidence/m5/167-full-account-access.md`.
 
+## Manual revocation and the authority-changed command (issue #168)
+
+Migration `000025_revoke_grants.up.sql` widens `permission_grants.state`
+to `active | revoked` and adds `revoked_at`, set exactly on a revoked
+grant and never before its approval. `round_commands.type` gains
+`authority_changed`.
+
+`POST /api/grants/{grantId}/revoke` (Owner session, no body):
+
+| Case | Response |
+|------|----------|
+| An active grant | `200` the grant, `state: revoked`, `revokedAt` |
+| Already revoked | `200` the same grant; nothing is recorded |
+| Expired by Galley's clock | `400 grant_expired`; nothing changes |
+| Unknown, malformed or another Owner's id | the same `404 not_found` |
+
+**Covered Rounds.** A grant covers the open Rounds of its Agent, only
+on its own Ticket for the ticket form, and any of them for the time
+form; full access follows its form. The rule is one SQL fragment,
+`grantCoversOpenRoundSQL`, used both to stop Rounds and to list them.
+A revoke records the Owner's Stop of each covered Round through the
+same path as `.../stop`, so it shares one pending Stop per Round with
+the Owner's own. It also records one `authority_changed` per Round.
+A grant covering no open Round requests no Stop.
+
+**Lock order.** The Owner's priority lock, each covered Ticket row (by
+Ticket id), then the grant row `FOR NO KEY UPDATE`. An authority check
+now takes the allowing grant row `FOR SHARE`. A revoke waits for a
+check that holds the grant, and a check queued behind a revoke re-reads
+the row and denies. No allow commits after the revocation. An action
+allowed before it may complete and is recorded.
+
+**Commands.** Approval also records one `authority_changed` per open
+Round its grant covers. The command is informational: Michelin
+acknowledges it at any claim epoch. Expiry records none, because every
+check reads Galley's clock. Commands are delivered Stop first, then
+`authority_changed`, then the rest by `issued_at`.
+
+**Reading.** Each grant carries `revokedAt` and
+`allowedActions.revoke`. It is available only while the grant is
+`active`; otherwise it is unavailable with `grant_already_revoked` or
+`grant_expired`. `coveredOpenRounds` lists `roundId`, `sequence`,
+`ticketId` and `ticketTitle`, and is empty unless revoke is available.
+A revoked time grant reads `remainingSeconds: 0` and is never
+`expired`, never named as `expiredGrantId`, and never renewed. Revoked
+grants stay listed in `permissionGrants`.
+
+Tests: `grant_revocation_test.go` (both forms and full access, the
+covering rule, the Stop and its confirmation, the in-flight action,
+repeat, 404 and 401, expired and renewal, concurrent revokes and races
+with Stop, approval and checks, the lock order, command order and
+fencing, constraints), the extra `authority_changed` in the approval
+tests, and `TestRevokeGrant_ResponsesMatchContractAndMethod405`.
+Evidence: `docs/evidence/m5/168-revocation.md`.
+
 ## Error shape
 
 `ErrorBody`/`ErrorDetail` are generated from

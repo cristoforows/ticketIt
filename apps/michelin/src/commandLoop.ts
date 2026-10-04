@@ -67,6 +67,12 @@ async function run(options: CommandLoopOptions, signal: AbortSignal): Promise<vo
       }
       seen.add(command.id);
       const context = { roundId: claim.roundId, commandId: command.id, type: command.type, commandEpoch: command.claimEpoch, claimEpoch: claim.claimEpoch };
+      // Not fenced by epoch: it asks for nothing, and every action already checks authority with Galley first.
+      if (command.type === "authority_changed") {
+        logger.info("authority changed; the next action checks it again", context);
+        await acknowledgeCommand(request, logger, claim.roundId, command, "applied");
+        continue;
+      }
       if (command.type !== "stop" && command.type !== "answer" && command.type !== "approval") {
         logger.warn("unknown command left unacknowledged", context);
         continue;

@@ -1258,3 +1258,30 @@ and `api/rounds.test.ts`.
   `resource` are null; when false, both are strings.
 
 Tests: `TicketDetail.test.tsx` ("full access") and `api/tickets.test.ts`.
+
+## Revoking a grant (issue #168)
+
+- **Revoke.** A grant whose `allowedActions.revoke` is available shows
+  **Revoke** (`ticket-detail-permission-grant-revoke`, named `Revoke:
+  <scope>`). It opens a Radix dialog titled **Revoke this grant?**,
+  described by its text, with focus on **Cancel**. Escape and Cancel
+  close it unchanged, and focus stays trapped while it is open. The text
+  names each Round Galley lists in `coveredOpenRounds` (`Round <n> of
+  "<Ticket title>"`), or says no open Round uses the grant. It also says
+  completed actions are not undone. Swiftlet never works out coverage
+  itself.
+- **After.** **Revoke** posts `POST /api/grants/{id}/revoke`, then
+  reloads the Ticket and its Rounds. The grant shows **Revoked**
+  (`ticket-detail-permission-grant-revoked`) with Galley's `revokedAt`.
+  The header shows Stopping for a Round the revoke stopped. On failure
+  the dialog closes. An alert under the grants then explains
+  `grant_expired`, `grant_already_revoked`, the shared 404 or Galley's
+  message, and the receipt is reloaded.
+- **Parsing.** A grant requires `revokedAt` (a string exactly when
+  `revoked`), `allowedActions.revoke` (available exactly when
+  `active`) and `coveredOpenRounds` (empty unless revoke is available).
+  A revoked time grant has `remainingSeconds: 0`.
+
+Tests: `TicketDetail.test.tsx` ("revoking a grant"),
+`TicketDetailPage.test.tsx` ("revoking the grant") and
+`api/tickets.test.ts`.

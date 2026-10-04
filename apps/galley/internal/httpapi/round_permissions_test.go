@@ -323,7 +323,9 @@ func TestApprove_RecordsTheGrantAndQueuesAnApprovalCommandWithoutMovingTheRound(
 	grant := ticket.PermissionGrants[0]
 	wantGrant := PermissionGrant{Id: *request.GrantId, Agent: TicketAssigneeAgent{Id: f.agent.Id, Name: f.agent.Name, Kind: f.agent.Kind},
 		Account: writeReport.account, Action: new(writeReport.action), Resource: new(writeReport.resource), SubstituteAccount: true,
-		Form: PermissionGrantFormTicket, State: PermissionGrantActive, RoundId: claim.RoundId, CreatedAt: approved, ApprovedAt: approved}
+		Form: PermissionGrantFormTicket, State: PermissionGrantActive, RoundId: claim.RoundId, CreatedAt: approved, ApprovedAt: approved,
+		AllowedActions:    PermissionGrantAllowedActions{Revoke: TicketCommandAvailability{Available: true}},
+		CoveredOpenRounds: []PermissionGrantCoveredRound{{RoundId: claim.RoundId, Sequence: 1, TicketId: queued.Id, TicketTitle: queued.Title}}}
 	if !reflect.DeepEqual(grant, wantGrant) {
 		t.Fatalf("grant = %+v, want %+v", grant, wantGrant)
 	}
@@ -342,12 +344,14 @@ func TestApprove_RecordsTheGrantAndQueuesAnApprovalCommandWithoutMovingTheRound(
 
 	commands := f.mustCommands(t, claim.RoundId)
 	rows := roundCommandRows(t, f)
-	want := []RunnerCommand{{Id: rows[0].commandID, Type: RunnerCommandApproval, ClaimEpoch: claim.ClaimEpoch, IssuedAt: approved,
-		Approval: &RunnerCommandApprovalData{RequestId: requestA, GrantId: grant.Id}}}
+	want := []RunnerCommand{{Id: rows[1].commandID, Type: RunnerCommandAuthorityChanged, ClaimEpoch: claim.ClaimEpoch, IssuedAt: approved},
+		{Id: rows[0].commandID, Type: RunnerCommandApproval, ClaimEpoch: claim.ClaimEpoch, IssuedAt: approved,
+			Approval: &RunnerCommandApprovalData{RequestId: requestA, GrantId: grant.Id}}}
 	if !reflect.DeepEqual(commands, want) {
 		t.Fatalf("commands = %+v, want %+v", commands, want)
 	}
 	decodeAck(t, f.ack(t, claim.RoundId, commands[0].Id, RunnerCommandApplied))
+	decodeAck(t, f.ack(t, claim.RoundId, commands[1].Id, RunnerCommandApplied))
 	if got := f.ticket(t, queued.Id); got.Status != Blocked || got.OpenRound.State != OpenRoundWaitingForInput {
 		t.Fatalf("the ack moved the Ticket: %s %+v", got.Status, got.OpenRound)
 	}
@@ -467,7 +471,7 @@ func TestPermissionDecision_ConcurrentDecisionsRecordExactlyOne(t *testing.T) {
 			t.Fatalf("trial %d: stored decision %v, want the winner's %s", trial, d, want)
 		}
 		grants, commands := tableRowCount(t, f.pool, "permission_grants"), f.mustCommands(t, claim.RoundId)
-		if approved := want == PermissionApproved; (grants == 1) != approved || (len(commands) == 1) != approved || grants > 1 || len(commands) > 1 {
+		if approved := want == PermissionApproved; (grants == 1) != approved || (len(commands) == 2) != approved || grants > 1 || len(commands) > 2 {
 			t.Fatalf("trial %d: %s left %d grants and commands %+v", trial, want, grants, commands)
 		}
 		outcomes[want]++
@@ -572,8 +576,8 @@ func TestApprove_RacingStopLeavesEitherAStoppingRoundWithNoGrantOrBothCommands(t
 		grants := tableRowCount(t, f.pool, "permission_grants")
 		switch codes[1] {
 		case http.StatusOK:
-			if len(commands) != 2 || commands[0].Type != RunnerCommandStop || commands[1].Type != RunnerCommandApproval || grants != 1 {
-				t.Fatalf("trial %d: commands = %+v grants=%d, want the Stop first, then the approval, and one grant", trial, commands, grants)
+			if len(commands) != 3 || commands[0].Type != RunnerCommandStop || commands[1].Type != RunnerCommandAuthorityChanged || commands[2].Type != RunnerCommandApproval || grants != 1 {
+				t.Fatalf("trial %d: commands = %+v grants=%d, want the Stop first, then authority changed, then the approval, and one grant", trial, commands, grants)
 			}
 			outcomes["approved first"]++
 		case http.StatusBadRequest:

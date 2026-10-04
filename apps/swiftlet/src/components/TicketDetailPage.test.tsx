@@ -526,7 +526,7 @@ describe("TicketDetailPage", () => {
       const approved = { ...request, decision: "approved", decidedAt: "2026-10-01T10:00:08Z", grantId };
       const waitingRound = { ...running.openRound, state: "waiting_for_input", waitingReason: "waiting_for_permission", question: null, permissionRequest: request };
       const waiting = { ...running, status: "Blocked", openRound: waitingRound, allowedActions: { ...lockedActions, stop: { available: true }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: true } } };
-      const grant = { id: grantId, agent, account: "controlled", full: false, action: "write_note", resource: "notes/weekly-report", substituteAccount: true, form: "ticket", state: "active", expiresAt: null, remainingSeconds: null, roundId: round.id, createdAt: "2026-10-01T10:00:08Z", approvedAt: "2026-10-01T10:00:08Z" };
+      const grant = { id: grantId, agent, account: "controlled", full: false, action: "write_note", resource: "notes/weekly-report", substituteAccount: true, form: "ticket", state: "active", expiresAt: null, remainingSeconds: null, roundId: round.id, createdAt: "2026-10-01T10:00:08Z", approvedAt: "2026-10-01T10:00:08Z", revokedAt: null, allowedActions: { revoke: { available: true } }, coveredOpenRounds: [] };
       const resuming = { ...waiting, openRound: { ...waitingRound, waitingReason: "resuming", permissionRequest: approved }, permissionGrants: [grant], permissionGrantCount: 1, allowedActions: { ...waiting.allowedActions, permissionDecision: { available: false, reason: { code: "permission_already_decided", message: "this Permission request is already decided" } } } };
       const approvePath = `/api/tickets/${TICKET_ID}/rounds/${round.id}/permission-requests/${request.id}/approve`;
       const waitingRecord = { ...record(), state: "waiting_for_input", permissionRequests: [request] };
@@ -591,6 +591,49 @@ describe("TicketDetailPage", () => {
         expect(screen.getByTestId("ticket-detail-permission-approved")).toBeInTheDocument();
         expect(screen.queryByTestId("ticket-detail-permission-approve")).not.toBeInTheDocument();
         expect(screen.getByTestId("ticket-detail-permission-error")).toHaveTextContent("This Permission request is already decided. The receipt now shows the decision Galley recorded.");
+      });
+
+      describe("revoking the grant", () => {
+        const revokePath = `/api/grants/${grantId}/revoke`;
+        const live = { ...grant, coveredOpenRounds: [{ roundId: round.id, sequence: round.sequence, ticketId: TICKET_ID, ticketTitle: running.title }] };
+        const working = { ...resuming, openRound: { ...waitingRound, state: "running", waitingReason: "working", permissionRequest: null }, permissionGrants: [live] };
+        const revokedGrant = { ...grant, state: "revoked", revokedAt: "2026-10-01T10:00:20Z", allowedActions: { revoke: { available: false, reason: { code: "grant_already_revoked", message: "this grant is already revoked" } } } };
+        const stopping = { ...working, openRound: { ...working.openRound, stopRequestedAt: "2026-10-01T10:00:20Z", waitingReason: "stopping" }, permissionGrants: [revokedGrant] };
+
+        it("posts the revoke, then reloads the Ticket to show the grant Revoked and the Round Stopping", async () => {
+          const fetchMock = stubRound([answer(working), answer(stopping)], undefined, [roundsOf(record())]);
+          const posts = vi.fn();
+          vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+            if (String(input) !== revokePath) return fetchMock(input);
+            posts(init?.method, init?.body);
+            return Promise.resolve(jsonResponse(revokedGrant));
+          }));
+          render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+          await flush();
+          const before = ticketFetches(fetchMock);
+          fireEvent.click(screen.getByTestId("ticket-detail-permission-grant-revoke"));
+          fireEvent.click(screen.getByTestId("ticket-detail-permission-revoke-confirm"));
+          await flush();
+          expect(posts).toHaveBeenCalledExactlyOnceWith("POST", undefined);
+          expect(ticketFetches(fetchMock)).toBe(before + 1);
+          expect(screen.getByTestId("ticket-detail-permission-grant")).toHaveAttribute("data-state", "revoked");
+          expect(screen.getByTestId("ticket-detail-stopping")).toBeInTheDocument();
+          expect(screen.queryByRole("dialog", { name: "Revoke this grant?" })).not.toBeInTheDocument();
+        });
+
+        it("refreshes the receipt when Galley has no such grant", async () => {
+          const fetchMock = stubRound([answer(working), answer(stopping)], undefined, [roundsOf(record())]);
+          vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) =>
+            String(input) === revokePath ? Promise.resolve(jsonResponse({ error: { code: "not_found", message: "no grant with that identifier" } }, 404)) : fetchMock(input)));
+          render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+          await flush();
+          const before = ticketFetches(fetchMock);
+          fireEvent.click(screen.getByTestId("ticket-detail-permission-grant-revoke"));
+          fireEvent.click(screen.getByTestId("ticket-detail-permission-revoke-confirm"));
+          await flush();
+          expect(ticketFetches(fetchMock)).toBe(before + 1);
+          expect(screen.getByTestId("ticket-detail-permission-revoke-error")).toHaveTextContent("Galley has no such grant. The receipt now shows the grants Galley has.");
+        });
       });
     });
 

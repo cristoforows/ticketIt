@@ -79,12 +79,16 @@ export interface PermissionGrant {
   substituteAccount: boolean;
   form: "ticket" | "time";
   /** Derived from Galley's clock when read; no stored state changes at expiry (issue #166). */
-  state: "active" | "expired";
+  state: "active" | "expired" | "revoked";
   expiresAt: string | null;
   remainingSeconds: number | null;
   roundId: string;
   createdAt: string;
   approvedAt: string;
+  revokedAt: string | null;
+  allowedActions: { revoke: { available: boolean; reason?: { code: string; message: string } } };
+  /** The open Rounds a revoke would stop (issue #168). */
+  coveredOpenRounds: { roundId: string; sequence: number; ticketId: string; ticketTitle: string }[];
 }
 
 export interface AuthorityCheck {

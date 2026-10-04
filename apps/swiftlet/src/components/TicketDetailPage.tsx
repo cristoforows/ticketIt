@@ -11,6 +11,8 @@ import {
   answerRoundQuestion,
   approvePermissionRequest,
   declinePermissionRequest,
+  revokePermissionGrant,
+  GrantNotFoundError,
   assignTicket,
   unassignTicket,
   createBadge,
@@ -205,6 +207,20 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
     }
   }
 
+  async function revokeGrant(grantId: string): Promise<Ticket> {
+    try {
+      const ticket = await runCommand(async () => {
+        await revokePermissionGrant(grantId);
+        return fetchTicket(ticketId);
+      });
+      void loadRounds();
+      return ticket;
+    } catch (error) {
+      if (error instanceof GalleyError || error instanceof GrantNotFoundError) void refreshTicket();
+      throw error;
+    }
+  }
+
   function assign(assignee: TicketAssignee): Promise<Ticket> {
     return runCommand(() => assignTicket(ticketId, assignee));
   }
@@ -273,6 +289,7 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
       onAnswer={answer}
       onAddFeedback={addFeedback}
       onDecidePermission={decidePermission}
+      onRevokeGrant={revokeGrant}
       onArchived={() => (onArchiveSucceeded ? onArchiveSucceeded() : navigate(fullPageReturnPath()))}
     />
   );
