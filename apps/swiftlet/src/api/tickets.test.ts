@@ -70,7 +70,7 @@ describe("fetchTicket", () => {
   });
 
   const PERMISSION_REQUEST = { id: "99999999-9999-5999-8999-999999999990", account: "controlled", action: "write_note", resource: "notes/weekly-report", substituteAccount: true, requestedAt: "2026-10-02T10:00:03Z", decision: null, decidedAt: null, grantId: null, renewsGrantId: null };
-  const GRANT = { id: "12121212-1212-4121-8121-121212121212", agent, account: "controlled", action: "write_note", resource: "notes/weekly-report", substituteAccount: true, form: "ticket", state: "active", expiresAt: null, remainingSeconds: null, roundId: round.id, createdAt: "2026-10-02T10:00:09Z", approvedAt: "2026-10-02T10:00:09Z" };
+  const GRANT = { id: "12121212-1212-4121-8121-121212121212", agent, account: "controlled", full: false, action: "write_note", resource: "notes/weekly-report", substituteAccount: true, form: "ticket", state: "active", expiresAt: null, remainingSeconds: null, roundId: round.id, createdAt: "2026-10-02T10:00:09Z", approvedAt: "2026-10-02T10:00:09Z" };
   const permissionWaiting = { ...round, state: "waiting_for_input", stopRequestedAt: null, waitingReason: "waiting_for_permission", question: null, permissionRequest: PERMISSION_REQUEST };
 
   it("reads the Permission request a waiting Round holds, the decision availability and the Ticket's grants", async () => {
@@ -93,6 +93,28 @@ describe("fetchTicket", () => {
     expect(ticket.openRound?.permissionRequest).toEqual(renewal);
     expect(ticket.permissionGrants).toEqual([EXPIRED_GRANT, TIME_GRANT, GRANT]);
     expect(ticket.permissionGrantCount).toBe(57);
+  });
+
+  const FULL_GRANT = { ...TIME_GRANT, id: "15151515-1515-4151-8151-151515151515", full: true, action: null, resource: null };
+
+  it("reads a full-access grant, which names its account and no action or resource", async () => {
+    const payload = { ...TICKET, permissionGrants: [FULL_GRANT, GRANT], permissionGrantCount: 2 };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => payload }));
+    const ticket = await fetchTicket(TICKET.id);
+    expect(ticket.permissionGrants).toEqual([FULL_GRANT, GRANT]);
+    expect(ticket.permissionGrants.map((grant) => grant.full)).toEqual([true, false]);
+  });
+
+  it.each([
+    ["a full grant with an action", { ...FULL_GRANT, action: "write_note" }],
+    ["a full grant with a resource", { ...FULL_GRANT, resource: "notes/weekly-report" }],
+    ["a granular grant without an action", { ...GRANT, action: null }],
+    ["a granular grant without a resource", { ...GRANT, resource: null }],
+    ["a grant without full", { ...GRANT, full: undefined }],
+    ["a grant whose full is not a boolean", { ...FULL_GRANT, full: "true" }],
+  ])("rejects a Ticket with %s", async (_name, grant) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => ({ ...TICKET, permissionGrants: [grant], permissionGrantCount: 1 }) }));
+    await expect(fetchTicket(TICKET.id)).rejects.toThrow("missing a required field");
   });
 
   it("keeps an approved request with its grant while the Round resumes", async () => {
@@ -228,6 +250,13 @@ describe("Permission decisions", () => {
     vi.stubGlobal("fetch", fetchMock);
     await approvePermissionRequest("t1", "r1", "p1", { form: "time", expiresAt: "2026-10-02T11:00:00.000Z" });
     expect(fetchMock.mock.calls[0][1].body).toBe(JSON.stringify({ form: "time", expiresAt: "2026-10-02T11:00:00.000Z" }));
+  });
+
+  it("approves with full access only when the scope names it", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => TICKET });
+    vi.stubGlobal("fetch", fetchMock);
+    await approvePermissionRequest("t1", "r1", "p1", { form: "ticket", scope: "full" });
+    expect(fetchMock.mock.calls[0][1].body).toBe(JSON.stringify({ form: "ticket", scope: "full" }));
   });
 
   it("declines with no body on the request's path and returns the Ticket", async () => {

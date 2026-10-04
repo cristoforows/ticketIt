@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from "react";
 import { GalleyError } from "../api/http";
 import type { RoundAuthorityCheck } from "../api/rounds";
 import type { GrantChoice, PermissionGrant, PermissionRequest, Ticket } from "../api/tickets";
-import { ExpiredTag, FieldHint, FieldLabel, FieldNote, InlineError, LocalTime, PrimaryButton, ReceiptLine, SecondaryButton, Select, localTimestamp } from "./ui";
+import { ExpiredTag, FieldHint, FullAccessTag, FieldLabel, FieldNote, InlineError, LocalTime, PrimaryButton, ReceiptLine, SecondaryButton, Select, localTimestamp } from "./ui";
 
 export type DecidePermission = (roundId: string, requestId: string, decision: "approve" | "decline", grant?: GrantChoice) => Promise<Ticket>;
 
@@ -36,13 +36,14 @@ export function remainingText(seconds: number): string {
 }
 
 function grantedText(grant: PermissionGrant | undefined): string {
+  const allowed = grant?.full ? "Full access allowed" : "Allowed";
   switch (grant?.form) {
     case "ticket":
-      return "Allowed for this Ticket";
+      return `${allowed} for this Ticket`;
     case "time":
-      return "Allowed for a time";
+      return `${allowed} for a time`;
     default:
-      return "Allowed";
+      return allowed;
   }
 }
 
@@ -84,12 +85,16 @@ export function PermissionPanel({ roundId, request, availability, onDecide, onDe
   const [sending, setSending] = useState<"approve" | "decline" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<"ticket" | "time">("ticket");
+  const [scope, setScope] = useState<"requested" | "full">("requested");
   const [duration, setDuration] = useState(GRANT_DURATIONS[0]!.seconds);
   const ids = useId();
+  const full = scope === "full";
+  const granted = full ? `full access to the ${request.account} account` : "this action on this resource";
 
   useEffect(() => {
     setError(null);
     setForm("ticket");
+    setScope("requested");
     setDuration(GRANT_DURATIONS[0]!.seconds);
   }, [request.id]);
 
@@ -97,7 +102,8 @@ export function PermissionPanel({ roundId, request, availability, onDecide, onDe
     if (!onDecide || sending) return;
     setSending(decision);
     setError(null);
-    const grant: GrantChoice = form === "ticket" ? { form: "ticket" } : { form: "time", expiresAt: grantExpiry(duration, Date.now()) };
+    const terms: GrantChoice = form === "ticket" ? { form: "ticket" } : { form: "time", expiresAt: grantExpiry(duration, Date.now()) };
+    const grant: GrantChoice = full ? { ...terms, scope: "full" } : terms;
     try {
       onDecided(await (decision === "approve" ? onDecide(roundId, request.id, decision, grant) : onDecide(roundId, request.id, decision)));
     } catch (failure) {
@@ -114,7 +120,10 @@ export function PermissionPanel({ roundId, request, availability, onDecide, onDe
       <ScopeLines scope={request} testIdPrefix="ticket-detail-permission" />
       {request.renewsGrantId !== null && (
         <p data-testid="ticket-detail-permission-renewal" className="my-1">
-          <span className="font-bold">Renewal.</span> The Agent's time-based grant for this scope expired.
+          <span className="font-bold">Renewal.</span>{" "}
+          {grants.find((grant) => grant.id === request.renewsGrantId)?.full
+            ? `The Agent's time-based full access to the ${request.account} account expired.`
+            : "The Agent's time-based grant for this scope expired."}
         </p>
       )}
       <FieldHint>Requested <LocalTime iso={request.requestedAt} /></FieldHint>
@@ -126,15 +135,32 @@ export function PermissionPanel({ roundId, request, availability, onDecide, onDe
         </p>
       ) : availability.available ? (
         <>
+        <fieldset data-testid="ticket-detail-permission-scope" className="m-0 mt-2 border-0 p-0" disabled={sending !== null || !onDecide}>
+          <legend className="m-0 p-0 text-label font-bold tracking-label text-muted uppercase">Access</legend>
+          <label className="mt-1 flex items-baseline gap-2">
+            <input type="radio" name={`${ids}-scope`} value="requested" className="accent-ink" checked={!full} onChange={() => setScope("requested")} data-testid="ticket-detail-permission-scope-requested" />
+            <span>Only what was requested <span className="text-muted">— <span className="break-all">{request.action}</span> on <span className="break-all">{request.resource}</span></span></span>
+          </label>
+          <label className="mt-1 flex items-baseline gap-2">
+            <input type="radio" name={`${ids}-scope`} value="full" className="accent-ink" checked={full} onChange={() => setScope("full")} aria-describedby={full ? `${ids}-full-warning` : undefined} data-testid="ticket-detail-permission-scope-full" />
+            <span>Full access to the <span className="break-all">{request.account}</span> account <span className="text-muted">— every action and resource it declares</span></span>
+          </label>
+          {full && (
+            <p id={`${ids}-full-warning`} data-testid="ticket-detail-permission-full-warning" className="m-0 mt-2 ml-6 border-l-2 border-ink pl-2">
+              <span className="font-bold">Full access.</span> This Agent may use every action and resource the {request.account} account declares
+              {request.substituteAccount && " (a substitute account)"} without asking you again, not only {request.action} on {request.resource}. Anything the account does not declare stays refused.
+            </p>
+          )}
+        </fieldset>
         <fieldset data-testid="ticket-detail-permission-form" className="m-0 mt-2 border-0 p-0" disabled={sending !== null || !onDecide}>
           <legend className="m-0 p-0 text-label font-bold tracking-label text-muted uppercase">Allow</legend>
           <label className="mt-1 flex items-baseline gap-2">
             <input type="radio" name={`${ids}-form`} value="ticket" className="accent-ink" checked={form === "ticket"} onChange={() => setForm("ticket")} data-testid="ticket-detail-permission-form-ticket" />
-            <span>For this Ticket <span className="text-muted">— this action on this resource, on this Ticket only</span></span>
+            <span>For this Ticket <span className="text-muted">— {granted}, on this Ticket only</span></span>
           </label>
           <label className="mt-1 flex items-baseline gap-2">
             <input type="radio" name={`${ids}-form`} value="time" className="accent-ink" checked={form === "time"} onChange={() => setForm("time")} data-testid="ticket-detail-permission-form-time" />
-            <span>For a time <span className="text-muted">— this action on this resource, on any of this Agent's Tickets, until it expires</span></span>
+            <span>For a time <span className="text-muted">— {granted}, on any of this Agent's Tickets, until it expires</span></span>
           </label>
           {form === "time" && (
             <div className="mt-2 ml-6">
@@ -148,7 +174,7 @@ export function PermissionPanel({ roundId, request, availability, onDecide, onDe
         </fieldset>
         <div data-testid="ticket-detail-permission-actions" className="mt-2 flex flex-wrap gap-2">
           <PrimaryButton data-testid="ticket-detail-permission-approve" disabled={sending !== null || !onDecide} onClick={() => void decide("approve")}>
-            {sending === "approve" ? "Allowing…" : form === "ticket" ? "Allow for this Ticket" : "Allow for a time"}
+            {sending === "approve" ? "Allowing…" : `Allow ${full ? "full access " : ""}${form === "ticket" ? "for this Ticket" : "for a time"}`}
           </PrimaryButton>
           <SecondaryButton data-testid="ticket-detail-permission-decline" disabled={sending !== null || !onDecide} onClick={() => void decide("decline")}>
             {sending === "decline" ? "Declining…" : "Decline"}
@@ -159,7 +185,11 @@ export function PermissionPanel({ roundId, request, availability, onDecide, onDe
         <FieldNote data-testid="ticket-detail-permission-unavailable">{availability.reason?.message}</FieldNote>
       )}
       {request.decision === null && availability.available && (
-        <FieldHint>Allowing grants this Agent this one action on this one resource and nothing else.</FieldHint>
+        <FieldHint>
+          {full
+            ? `Allowing grants this Agent full access to the ${request.account} account and nothing it does not declare.`
+            : "Allowing grants this Agent this one action on this one resource and nothing else."}
+        </FieldHint>
       )}
       {error && <InlineError data-testid="ticket-detail-permission-error">{error}</InlineError>}
     </section>
@@ -179,6 +209,17 @@ function decisionText(request: PermissionRequest, awaiting: boolean, grants: Per
 
 function scopeText(scope: { account: string; action: string; resource: string }): string {
   return `${scope.action} on ${scope.resource} (${scope.account})`;
+}
+
+function GrantScope({ grant }: { grant: PermissionGrant }) {
+  if (grant.full || grant.action === null || grant.resource === null) {
+    return (
+      <>
+        {grant.agent.name} has <FullAccessTag data-testid="ticket-detail-permission-grant-full">Full access</FullAccessTag> to the {grant.account} account
+      </>
+    );
+  }
+  return <>{grant.agent.name} may {scopeText({ account: grant.account, action: grant.action, resource: grant.resource })}</>;
 }
 
 export function PermissionHistory({ requests, checks, checkCount, awaiting, grants = [] }: { requests: PermissionRequest[]; checks: RoundAuthorityCheck[]; checkCount: number; awaiting: boolean; grants?: PermissionGrant[] }) {
@@ -216,6 +257,7 @@ export function PermissionHistory({ requests, checks, checkCount, awaiting, gran
                 <LocalTime iso={check.checkedAt} className="shrink-0 text-label text-muted" />
                 <span className="min-w-0 break-words">
                   <span className="font-bold uppercase">{check.decision === "allow" ? "Allowed" : "Denied"}</span> {scopeText(check)}
+                  {check.grantId !== null && grants.find((grant) => grant.id === check.grantId)?.full && <span data-testid="ticket-detail-round-authority-check-full" className="text-muted"> · by full access</span>}
                   {check.expiredGrantId !== null && <span data-testid="ticket-detail-round-authority-check-expired" className="text-muted"> · its time-based grant expired</span>}
                 </span>
               </li>
@@ -256,9 +298,9 @@ export function PermissionGrants({ grants, count = grants.length }: { grants: Pe
       )}
       <ol className="my-1 flex list-none flex-col gap-2 p-0">
         {grants.map((grant) => (
-          <li key={grant.id} data-testid="ticket-detail-permission-grant" data-grant-id={grant.id} data-form={grant.form} data-state={grant.state} className="mt-0 border-t-0 pt-0">
+          <li key={grant.id} data-testid="ticket-detail-permission-grant" data-grant-id={grant.id} data-form={grant.form} data-state={grant.state} data-full={grant.full} className="mt-0 border-t-0 pt-0">
             <p className="m-0 break-words">
-              {grant.agent.name} may {scopeText(grant)}
+              <GrantScope grant={grant} />
               {grant.substituteAccount && <SubstituteLabel />}
             </p>
             <GrantTerms grant={grant} />

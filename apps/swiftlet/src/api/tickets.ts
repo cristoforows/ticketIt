@@ -120,13 +120,18 @@ function isTimeGrantExpiry(grant: Record<string, unknown>): boolean {
     (state === "active" ? (remainingSeconds as number) > 0 : state === "expired" && remainingSeconds === 0);
 }
 
+function isGrantScope(grant: Record<string, unknown>): boolean {
+  return grant.full === true ? grant.action === null && grant.resource === null : grant.full === false && isString(grant.action) && isString(grant.resource);
+}
+
 function parsePermissionGrant(value: unknown): PermissionGrant | undefined {
   if (typeof value !== "object" || value === null) {
     return undefined;
   }
   const grant = value as Record<string, unknown>;
   if (
-    ![grant.id, grant.account, grant.action, grant.resource, grant.roundId, grant.createdAt, grant.approvedAt].every(isString) ||
+    ![grant.id, grant.account, grant.roundId, grant.createdAt, grant.approvedAt].every(isString) ||
+    !isGrantScope(grant) ||
     !isAgentSummary(grant.agent) ||
     typeof grant.substituteAccount !== "boolean" ||
     !(grant.form === "ticket" ? grant.state === "active" && grant.expiresAt === null && grant.remainingSeconds === null : grant.form === "time" && isTimeGrantExpiry(grant))
@@ -138,8 +143,9 @@ function parsePermissionGrant(value: unknown): PermissionGrant | undefined {
     id: grant.id as string,
     agent: { id, name, kind },
     account: grant.account as string,
-    action: grant.action as string,
-    resource: grant.resource as string,
+    full: grant.full as boolean,
+    action: grant.action as string | null,
+    resource: grant.resource as string | null,
     substituteAccount: grant.substituteAccount,
     form: grant.form as PermissionGrant["form"],
     state: grant.state as PermissionGrant["state"],

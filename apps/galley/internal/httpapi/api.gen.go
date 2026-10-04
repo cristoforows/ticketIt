@@ -147,6 +147,24 @@ func (e PermissionGrantForm) Valid() bool {
 	}
 }
 
+// Defines values for PermissionGrantScope.
+const (
+	PermissionGrantScopeFull      PermissionGrantScope = "full"
+	PermissionGrantScopeRequested PermissionGrantScope = "requested"
+)
+
+// Valid indicates whether the value is a known member of the PermissionGrantScope enum.
+func (e PermissionGrantScope) Valid() bool {
+	switch e {
+	case PermissionGrantScopeFull:
+		return true
+	case PermissionGrantScopeRequested:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PermissionGrantState.
 const (
 	PermissionGrantActive  PermissionGrantState = "active"
@@ -558,8 +576,11 @@ type ApprovePermissionRequest struct {
 	// ExpiresAt Required by the `time` form and refused with the `ticket` form. After Galley's clock and at most 30 days after it.
 	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 
-	// Form `ticket`: this Agent, this Ticket, this scope, for as long as the grant is active. `time`: this Agent and this scope on any Ticket until `expiresAt`, whatever any Ticket's Status.
+	// Form `ticket`: this Agent, this Ticket, the granted scope, for as long as the grant is active. `time`: this Agent and the granted scope on any Ticket until `expiresAt`, whatever any Ticket's Status.
 	Form PermissionGrantForm `json:"form"`
+
+	// Scope Defaults to `requested`.
+	Scope *PermissionGrantScope `json:"scope,omitempty"`
 }
 
 // AssignTicketRequest `agentId` is required when `type` is `agent` and rejected otherwise.
@@ -571,7 +592,7 @@ type AssignTicketRequest struct {
 // AssignTicketRequestType defines model for AssignTicketRequest.Type.
 type AssignTicketRequestType string
 
-// AuthorityCheckRequest A scope matches a grant when `account` and `action` are the same and `resource` is the same string; `resource` must fit the pattern the Connected Account declares for `action`. The controlled substitute account `controlled` declares `read_note` and `write_note` on `notes/<name>` and `post_message` on `channels/<name>`, where `<name>` is 1 to 64 of `a-z`, `0-9` and `-`, starting with a letter or digit.
+// AuthorityCheckRequest A scope matches a grant when `account` and `action` are the same and `resource` is the same string; `resource` must fit the pattern the Connected Account declares for `action`. The declarations are Galley's static configuration. The controlled substitute account `controlled` declares `read_note` and `write_note` on `notes/<name>` and `post_message` on `channels/<name>`, where `<name>` is 1 to 64 of `a-z`, `0-9` and `-`, starting with a letter or digit.
 type AuthorityCheckRequest struct {
 	Account string `json:"account"`
 	Action  string `json:"action"`
@@ -585,7 +606,7 @@ type AuthorityCheckRequest struct {
 type AuthorityCheckResult struct {
 	Decision AuthorityDecision `json:"decision"`
 
-	// ExpiredGrantId On `deny` only: the newest expired `time` grant for the Round's Agent and this scope, when one exists. A `permission_requested` for this scope names it as `renewsGrantId`.
+	// ExpiredGrantId On `deny` only: the newest expired `time` grant for the Round's Agent and this scope or full access to this account, when one exists. A `permission_requested` for this scope names it as `renewsGrantId`.
 	ExpiredGrantId *string `json:"expiredGrantId,omitempty"`
 
 	// GrantId The grant that allowed; present exactly when `decision` is `allow`.
@@ -777,7 +798,9 @@ type Owner struct {
 // PermissionGrant defines model for PermissionGrant.
 type PermissionGrant struct {
 	Account string `json:"account"`
-	Action  string `json:"action"`
+
+	// Action Null exactly when `full`.
+	Action *string `json:"action"`
 
 	// Agent The only Agent the grant authorizes.
 	Agent      TicketAssigneeAgent `json:"agent"`
@@ -787,13 +810,18 @@ type PermissionGrant struct {
 	// ExpiresAt Set exactly for the `time` form.
 	ExpiresAt *time.Time `json:"expiresAt"`
 
-	// Form `ticket`: this Agent, this Ticket, this scope, for as long as the grant is active. `time`: this Agent and this scope on any Ticket until `expiresAt`, whatever any Ticket's Status.
+	// Form `ticket`: this Agent, this Ticket, the granted scope, for as long as the grant is active. `time`: this Agent and the granted scope on any Ticket until `expiresAt`, whatever any Ticket's Status.
 	Form PermissionGrantForm `json:"form"`
-	Id   string              `json:"id"`
+
+	// Full Full access to `account`: every action and resource it declares. Only an Owner's approval with `scope` `full` creates one.
+	Full bool   `json:"full"`
+	Id   string `json:"id"`
 
 	// RemainingSeconds Whole seconds from Galley's clock at the read to `expiresAt`, rounded up; 0 once expired; null for the `ticket` form.
-	RemainingSeconds *int   `json:"remainingSeconds"`
-	Resource         string `json:"resource"`
+	RemainingSeconds *int `json:"remainingSeconds"`
+
+	// Resource Null exactly when `full`.
+	Resource *string `json:"resource"`
 
 	// RoundId The Round whose request the Owner approved.
 	RoundId string `json:"roundId"`
@@ -803,8 +831,11 @@ type PermissionGrant struct {
 	SubstituteAccount bool                 `json:"substituteAccount"`
 }
 
-// PermissionGrantForm `ticket`: this Agent, this Ticket, this scope, for as long as the grant is active. `time`: this Agent and this scope on any Ticket until `expiresAt`, whatever any Ticket's Status.
+// PermissionGrantForm `ticket`: this Agent, this Ticket, the granted scope, for as long as the grant is active. `time`: this Agent and the granted scope on any Ticket until `expiresAt`, whatever any Ticket's Status.
 type PermissionGrantForm string
+
+// PermissionGrantScope `requested`: the request's account, action and resource. `full`: every action and resource the request's Connected Account declares, and nothing it does not.
+type PermissionGrantScope string
 
 // PermissionGrantState `expired`: a `time` grant whose `expiresAt` is not after Galley's clock when the grant is read. It authorizes nothing and stays recorded.
 type PermissionGrantState string
@@ -822,7 +853,7 @@ type PermissionRequest struct {
 	// Id The runner's `requestId`.
 	Id string `json:"id"`
 
-	// RenewsGrantId The expired `time` grant this request renews.
+	// RenewsGrantId The expired `time` grant this request renews, for this scope or with full access to this account.
 	RenewsGrantId *string `json:"renewsGrantId"`
 
 	// RequestedAt Galley's clock.
@@ -918,7 +949,7 @@ type RoundAuthorityCheck struct {
 	CheckedAt time.Time         `json:"checkedAt"`
 	Decision  AuthorityDecision `json:"decision"`
 
-	// ExpiredGrantId On `deny` only: the newest expired `time` grant for the Round's Agent and this scope, when one exists.
+	// ExpiredGrantId On `deny` only: the newest expired `time` grant for the Round's Agent and this scope or full access to this account, when one exists.
 	ExpiredGrantId *string `json:"expiredGrantId"`
 
 	// GrantId The grant that allowed; set exactly when `decision` is `allow`.

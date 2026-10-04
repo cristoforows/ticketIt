@@ -1857,7 +1857,7 @@ Every Owner has it, and having it authorizes nothing.
 | `controlled` | `read_note`, `write_note` | `^notes/[a-z0-9][a-z0-9-]{0,63}$` |
 | `controlled` | `post_message` | `^channels/[a-z0-9][a-z0-9-]{0,63}$` |
 
-A scope outside this table is `400 unsupported_scope` on both the check
+A scope outside this table is `400 capability_not_supported` on both the check
 and `permission_requested`, and nothing is recorded. `substituteAccount`
 is `true` on every request and grant for `controlled`.
 
@@ -1876,7 +1876,7 @@ the Round row, and never from the claim.
 | Check | Response |
 | --- | --- |
 | Malformed body or field | `400 invalid_request` |
-| Scope outside the catalogue | `400 unsupported_scope` |
+| Scope outside the catalogue | `400 capability_not_supported` |
 | Unknown, malformed or another Owner's Round | `404 not_found` |
 | `epoch` is not the Round's | `409 stale_claim_epoch` |
 | The Round has ended | `409 round_not_open` |
@@ -1994,6 +1994,51 @@ Stop, the grants view), the new strict-decoding rows in
 `no_execution_side_effects_test.go`, and
 `TestTimeGrantsAndRenewals_ResponsesMatchContract`.
 Evidence: `docs/evidence/m5/166-time-based-grants.md`.
+
+## Full Connected Account access (issue #167)
+
+M5.7's `unsupported_scope` is renamed `capability_not_supported`, the
+code the issue's Settled Decisions name; the condition is unchanged.
+
+Migration `000024_full_account_access.up.sql` adds
+`permission_grants.full_access`. A full grant records no action or
+resource (`permission_grants_scope_follows_full_access`).
+`permission_grants_request_account_fk` binds every grant, full or not,
+to its request's Ticket, Agent and account, because the scope key skips
+a full grant's NULLs. `permission_requests.renews_full_access` says
+whether `renews_grant_id` names a full grant: the account key holds for
+both, and the scope key only for a granular one, through the generated
+`renews_scoped_grant_id`.
+
+**Approve.** `.../approve` also takes `"scope": "requested" | "full"`,
+strictly decoded, on either form. Absent means `requested`, so every
+older body grants what it did before. An unknown scope is
+`400 invalid_request`. `full` grants the request's own account to the
+request's Agent, on the chosen form; it never needs another request and
+is never created without one.
+
+**Matching.** A check is allowed by an active grant of the Round's Agent
+on the check's account, either for the exact action and resource or
+with `full_access`, under the same form rules as #166. Galley first
+checks the scope against the catalogue above, before reading any grant:
+an undeclared scope is `400 capability_not_supported` with a full grant
+in place, and nothing is recorded. When both match, the exact grant is
+named. A full grant on one account allows nothing on another, and no
+granular grant, and no number of them, allows what a full grant would.
+Every allow records the grant that allowed it.
+
+**Renewal.** A deny names the newest expired time grant that would have
+allowed the scope, exact or full, as `expiredGrantId`; a renewal naming
+either is accepted, and the Owner may renew it as the requested scope
+or in full.
+
+Tests: `round_full_access_test.go` (the approve body and its
+compatibility, both forms, the undeclared refusal, Agent, Ticket, Owner
+and account boundaries, never implied, exact-before-full, expiry and
+renewal, concurrent approvals and races with Stop, constraints), the
+renamed rows across the #165 and #166 tests, and
+`TestFullAccess_ResponsesMatchContract`.
+Evidence: `docs/evidence/m5/167-full-account-access.md`.
 
 ## Error shape
 

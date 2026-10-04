@@ -41,15 +41,15 @@ Reusable instructions assigned to an **Agent** for performing a type of work. A 
 _Avoid_: Recipe when referring to reusable work instructions.
 
 **Connected Account**:
-An external-service identity authenticated by the user and made available for explicitly permitted **Agent** work. An agent using a connected account acts through that identity, such as the user's GitHub account. Its existence authorizes nothing. Until real accounts arrive, the controlled account is a labelled substitute with a fixed set of actions and resource patterns.
+An external-service identity authenticated by the user and made available for explicitly permitted **Agent** work. An agent using a connected account acts through that identity, such as the user's GitHub account. Its existence authorizes nothing. Galley declares each account's capabilities, the actions and resource patterns it supports; an undeclared capability is refused whatever the grants. Until real accounts arrive, the controlled account is a labelled substitute with a fixed set of capabilities.
 _Avoid_: Agent, model provider when referring to the external identity used for work.
 
 **Permission**:
-Authorization for an **Agent** to perform actions within a resource scope, including granular grants or explicit full access through a **Connected Account**. Full access covers the actions and resources available through that connection, not capabilities beyond the account's authenticated access. Authority is read live before each action, never carried from the start of a **Round**; with no matching grant the answer is deny, and a denied agent may ask through a **Permission Request**.
+Authorization for an **Agent** to perform actions within a resource scope, including granular grants or explicit full access through a **Connected Account**. **Full Access** covers every capability the account declares, for one agent, and nothing beyond it; it is chosen explicitly and never implied by granular grants or by having the account. Authority is read live before each action, never carried from the start of a **Round**; with no matching grant the answer is deny, and a denied agent may ask through a **Permission Request**.
 _Avoid_: Skill when referring to authorization rather than instructions.
 
 **Temporary Permission**:
-A **Permission** for an **Agent** of one of two distinct kinds: ticket-based, ending when its specified **Ticket** reaches **Done**, or time-based, covering the agent on any of its tickets until its expiry by Galley's clock, independently of ticket completion. It authorizes repeated uses within its account, action, and resource scope; ticket and time limits are not combined in one grant. Expiry is judged at each check and stops only that scope; the expired grant stays recorded, and renewal is a new grant.
+A **Permission** for an **Agent** of one of two distinct kinds: ticket-based, ending when its specified **Ticket** reaches **Done**, or time-based, covering the agent on any of its tickets until its expiry by Galley's clock, independently of ticket completion. It authorizes repeated uses within its account, action, and resource scope, or its whole account under **Full Access**; ticket and time limits are not combined in one grant. Expiry is judged at each check and stops only that scope; the expired grant stays recorded, and renewal is a new grant.
 _Avoid_: One-time permission when referring to a ticket-bound or time-bound grant.
 
 **Permission Request**:
@@ -57,7 +57,7 @@ An **Agent**'s ask, during a **Round**, for one account, action and resource it 
 _Avoid_: Question when referring to an ask for authority rather than information.
 
 **Approval**:
-The owner's acceptance of a **Permission Request**, which creates a **Temporary Permission** of the kind the owner chooses for exactly that agent and scope (and, ticket-based, that ticket) and resumes the same **Round**. Later actions it covers need no new request.
+The owner's acceptance of a **Permission Request**, which creates a **Temporary Permission** of the kind the owner chooses for exactly that agent and scope, or **Full Access** to that scope's account when the owner chooses it (and, ticket-based, that ticket), and resumes the same **Round**. Later actions it covers need no new request.
 _Avoid_: Answer when referring to granting authority.
 
 **Grill Mode**:

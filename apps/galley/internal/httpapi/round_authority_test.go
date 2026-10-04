@@ -99,7 +99,7 @@ func TestAuthorityCheck_MatchesTheGrantsAgentTicketAndScopeExactly(t *testing.T)
 		"an uppercase resource":         {controlledAccount, writeReport.action, "notes/Weekly-report"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			assertErrorCode(t, f.check(t, claim.RoundId, claim.ClaimEpoch, scope), unsupportedScopeCode)
+			assertErrorCode(t, f.check(t, claim.RoundId, claim.ClaimEpoch, scope), capabilityNotSupportedCode)
 		})
 	}
 	assertSnapshotUnchanged(t, f.pool, before, "checks of unsupported scopes")

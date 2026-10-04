@@ -8,7 +8,7 @@ import (
 const (
 	scopeFieldMaxLength = 200
 
-	unsupportedScopeCode = "unsupported_scope"
+	capabilityNotSupportedCode = "capability_not_supported"
 
 	// A substitute for a real Connected Account (M8, #9). Every Owner has it; it authorizes nothing by itself.
 	controlledAccount = "controlled"
@@ -36,7 +36,7 @@ func isSubstituteAccount(account string) bool {
 	return account == controlledAccount
 }
 
-func unsupportedScope(scope permissionScope) string {
+func undeclaredCapability(scope permissionScope) string {
 	actions, ok := connectedAccountActions[scope.account]
 	if !ok {
 		return fmt.Sprintf("%q is not a Connected Account Galley knows", scope.account)

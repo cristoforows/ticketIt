@@ -72,8 +72,10 @@ export interface PermissionGrant {
   id: string;
   agent: { id: string; name: string; kind: AgentKind };
   account: string;
-  action: string;
-  resource: string;
+  /** Full access to the account, which records no action or resource (issue #167). */
+  full: boolean;
+  action: string | null;
+  resource: string | null;
   substituteAccount: boolean;
   form: "ticket" | "time";
   /** Derived from Galley's clock when read; no stored state changes at expiry (issue #166). */
@@ -304,7 +306,7 @@ export async function addFeedbackDirect(from: Api, id: string, roundId: string, 
 }
 
 /** Same purpose as changeTicketStatusDirect, for the Owner's Permission decision. */
-export type GrantChoice = { form: "ticket" } | { form: "time"; expiresAt: string };
+export type GrantChoice = ({ form: "ticket" } | { form: "time"; expiresAt: string }) & { scope?: "requested" | "full" };
 
 export async function decidePermissionDirect(from: Api, id: string, roundId: string, requestId: string, decision: "approve" | "decline", grant: GrantChoice = { form: "ticket" }): Promise<TicketCommandResult> {
   return ticketCommand(from, "POST", `/api/tickets/${id}/rounds/${roundId}/permission-requests/${requestId}/${decision}`, decision === "approve" ? grant : undefined);
