@@ -128,10 +128,7 @@ func TestApprove_TheFullScopeRecordsAFullAccessGrantForTheRequestsAgentAndAccoun
 		g.RemainingSeconds != nil || g.RoundId != claim.RoundId || !g.ApprovedAt.Equal(approved) {
 		t.Fatalf("grant = %+v, want full access to %s for the Agent on this Ticket", g, controlledAccount)
 	}
-	commands := f.mustCommands(t, claim.RoundId)
-	if len(commands) != 1 || commands[0].Type != RunnerCommandApproval || commands[0].Approval == nil || commands[0].Approval.GrantId != grantID {
-		t.Fatalf("commands = %+v, want one approval naming %s", commands, grantID)
-	}
+	assertApprovalCommands(t, f.mustCommands(t, claim.RoundId), grantID)
 	var full bool
 	var action, resource *string
 	if err := f.pool.QueryRow(context.Background(), `SELECT full_access, action, resource FROM permission_grants WHERE public_id = $1::uuid`, grantID).Scan(&full, &action, &resource); err != nil {
@@ -460,7 +457,7 @@ func TestApprove_ConcurrentFullAndRequestedApprovalsRecordExactlyOneGrant(t *tes
 			}
 		}
 		grants := f.ticket(t, queued.Id).PermissionGrants
-		if winner < 0 || len(grants) != 1 || tableRowCount(t, f.pool, "permission_grants") != 1 || len(f.mustCommands(t, claim.RoundId)) != 1 {
+		if winner < 0 || len(grants) != 1 || tableRowCount(t, f.pool, "permission_grants") != 1 || len(f.mustCommands(t, claim.RoundId)) != 2 {
 			t.Fatalf("trial %d: winner %d, grants %+v", trial, winner, grants)
 		}
 		if grants[0].Full != (winner%2 == 0) {
@@ -485,7 +482,7 @@ func TestApprove_AFullApprovalRacingStopLeavesNoGrantOrBothCommands(t *testing.T
 		}
 		commands, grants := f.mustCommands(t, claim.RoundId), tableRowCount(t, f.pool, "permission_grants")
 		switch {
-		case codes[1] == http.StatusOK && len(commands) == 2 && commands[0].Type == RunnerCommandStop && grants == 1:
+		case codes[1] == http.StatusOK && len(commands) == 3 && commands[0].Type == RunnerCommandStop && grants == 1:
 			outcomes["approved first"]++
 		case codes[1] == http.StatusBadRequest && strings.Contains(bodies[1], stopAlreadyRequestedCode) && len(commands) == 1 && grants == 0:
 			outcomes["stopped first"]++

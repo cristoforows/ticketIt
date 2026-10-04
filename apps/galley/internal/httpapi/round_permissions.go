@@ -44,16 +44,24 @@ const permissionRequestJSON = `json_build_object('id', p.request_id, 'account', 
 const applicablePermissionGrantsSQL = `FROM permission_grants g
 	  WHERE g.owner_id = tickets.owner_id AND (g.ticket_id = tickets.id OR (g.form = 'time' AND g.agent_id = tickets.assignee_agent_id))`
 
-// The LIMIT is permissionGrantsShown.
-const permissionGrantsJSON = `COALESCE((SELECT json_agg(json_build_object('id', g.public_id,
+const permissionGrantJSON = `json_build_object('id', g.public_id,
 	          'agent', json_build_object('id', a.public_id, 'name', a.name, 'kind', a.kind),
 	          'account', g.account, 'full', g.full_access, 'action', g.action, 'resource', g.resource, 'substituteAccount', false,
-	          'form', g.form, 'state', g.state, 'expiresAt', g.expires_at, 'remainingSeconds', NULL,
-	          'roundId', r.public_id, 'createdAt', g.created_at, 'approvedAt', g.approved_at) ORDER BY g.id)
-	   FROM (SELECT g.* ` + applicablePermissionGrantsSQL + ` ORDER BY g.id DESC LIMIT 50) g
-	   JOIN agents a ON a.owner_id = g.owner_id AND a.id = g.agent_id
+	          'form', g.form, 'state', g.state, 'expiresAt', g.expires_at, 'remainingSeconds', NULL, 'revokedAt', g.revoked_at,
+	          'roundId', r.public_id, 'createdAt', g.created_at, 'approvedAt', g.approved_at,
+	          'coveredOpenRounds', (SELECT COALESCE(json_agg(json_build_object('roundId', cr.public_id, 'sequence', cr.sequence,
+	              'ticketId', ct.public_id, 'ticketTitle', ct.title) ORDER BY cr.id), '[]')
+	            FROM rounds cr JOIN tickets ct ON ct.owner_id = cr.owner_id AND ct.id = cr.ticket_id
+	            WHERE ` + grantCoversOpenRoundSQL + `))`
+
+const permissionGrantJoins = `JOIN agents a ON a.owner_id = g.owner_id AND a.id = g.agent_id
 	   JOIN permission_requests p ON p.owner_id = g.owner_id AND p.id = g.request_id
-	   JOIN rounds r ON r.owner_id = p.owner_id AND r.id = p.round_id), '[]'),
+	   JOIN rounds r ON r.owner_id = p.owner_id AND r.id = p.round_id`
+
+// The LIMIT is permissionGrantsShown.
+const permissionGrantsJSON = `COALESCE((SELECT json_agg(` + permissionGrantJSON + ` ORDER BY g.id)
+	   FROM (SELECT g.* ` + applicablePermissionGrantsSQL + ` ORDER BY g.id DESC LIMIT 50) g
+	   ` + permissionGrantJoins + `), '[]'),
 	(SELECT count(*) ` + applicablePermissionGrantsSQL + `)`
 
 type requestedPermission struct {
@@ -98,8 +106,9 @@ func renewedGrant(ctx context.Context, tx pgx.Tx, ownerID, roundID int64, reques
 	var target renewalTarget
 	err := tx.QueryRow(ctx, `SELECT g.id, g.full_access FROM permission_grants g JOIN rounds r ON r.owner_id = g.owner_id AND r.id = $2
 		WHERE g.owner_id = $1 AND g.public_id = $3::uuid AND g.agent_id = r.agent_id AND g.account = $4 AND (g.full_access OR (g.action = $5 AND g.resource = $6))
-		  AND g.form = $7 AND NOT g.expires_at > $8`,
-		ownerID, roundID, request.renewsGrantID, request.scope.account, request.scope.action, request.scope.resource, string(PermissionGrantFormTime), now).Scan(&target.grantRowID, &target.fullAccess)
+		  AND g.form = $7 AND NOT g.expires_at > $8 AND g.state = $9`,
+		ownerID, roundID, request.renewsGrantID, request.scope.account, request.scope.action, request.scope.resource, string(PermissionGrantFormTime), now,
+		string(PermissionGrantActive)).Scan(&target.grantRowID, &target.fullAccess)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, &roundEventRejection{http.StatusBadRequest, invalidRenewalCode, invalidRenewalMessage}, nil
 	}
@@ -210,23 +219,34 @@ func normalisePermissionRequest(request *PermissionRequest) {
 
 func normalisePermissionGrants(grants []PermissionGrant, now time.Time) {
 	for i := range grants {
-		grant := &grants[i]
-		grant.SubstituteAccount = isSubstituteAccount(grant.Account)
-		grant.CreatedAt = grant.CreatedAt.UTC()
-		grant.ApprovedAt = grant.ApprovedAt.UTC()
-		grant.ExpiresAt = utcOrNil(grant.ExpiresAt)
-		grant.RemainingSeconds = nil
-		if grant.ExpiresAt == nil {
-			continue
-		}
-		remaining := 0
-		if timeGrantLive(*grant.ExpiresAt, now) {
-			remaining = int((grant.ExpiresAt.Sub(now) + time.Second - 1) / time.Second)
-		} else {
-			grant.State = PermissionGrantExpired
-		}
-		grant.RemainingSeconds = &remaining
+		normalisePermissionGrant(&grants[i], now)
 	}
+}
+
+func normalisePermissionGrant(grant *PermissionGrant, now time.Time) {
+	grant.SubstituteAccount = isSubstituteAccount(grant.Account)
+	grant.CreatedAt = grant.CreatedAt.UTC()
+	grant.ApprovedAt = grant.ApprovedAt.UTC()
+	grant.ExpiresAt = utcOrNil(grant.ExpiresAt)
+	grant.RevokedAt = utcOrNil(grant.RevokedAt)
+	rejection := decideRevoke(revocationTarget{state: grant.State, expiresAt: grant.ExpiresAt}, now)
+	grant.AllowedActions = PermissionGrantAllowedActions{Revoke: commandAvailability(rejection)}
+	if rejection != nil || grant.CoveredOpenRounds == nil {
+		grant.CoveredOpenRounds = []PermissionGrantCoveredRound{}
+	}
+	grant.RemainingSeconds = nil
+	if grant.ExpiresAt == nil {
+		return
+	}
+	remaining := 0
+	switch {
+	case grant.State == PermissionGrantRevoked:
+	case timeGrantLive(*grant.ExpiresAt, now):
+		remaining = int((grant.ExpiresAt.Sub(now) + time.Second - 1) / time.Second)
+	default:
+		grant.State = PermissionGrantExpired
+	}
+	grant.RemainingSeconds = &remaining
 }
 
 func writePermissionRequestNotFound(w http.ResponseWriter) {
@@ -335,14 +355,22 @@ func decidePermissionForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID i
 		return Ticket{}, true, nil, err
 	}
 	if decision == PermissionApproved {
-		if _, err := tx.Exec(ctx, `INSERT INTO permission_grants (owner_id, public_id, ticket_id, agent_id, request_id, account, action, resource, form, state, created_at, approved_at, expires_at, full_access)
+		var grantRowID int64
+		if err := tx.QueryRow(ctx, `INSERT INTO permission_grants (owner_id, public_id, ticket_id, agent_id, request_id, account, action, resource, form, state, created_at, approved_at, expires_at, full_access)
 			SELECT owner_id, $2::uuid, ticket_id, agent_id, id, account, CASE WHEN $6 THEN NULL ELSE action END, CASE WHEN $6 THEN NULL ELSE resource END,
-				$3, $4, decided_at, decided_at, $5, $6 FROM permission_requests WHERE id = $1`,
-			requestRowID, uuid.NewString(), string(terms.form), string(PermissionGrantActive), terms.expiresAt, terms.fullAccess); err != nil {
+				$3, $4, decided_at, decided_at, $5, $6 FROM permission_requests WHERE id = $1 RETURNING id`,
+			requestRowID, uuid.NewString(), string(terms.form), string(PermissionGrantActive), terms.expiresAt, terms.fullAccess).Scan(&grantRowID); err != nil {
 			return Ticket{}, true, nil, err
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO round_commands (owner_id, round_id, public_id, type, claim_epoch, issued_at, permission_request_id)
 			VALUES ($1, $2, $3::uuid, $4, $5, $6, $7)`, ownerID, roundRowID, uuid.NewString(), string(RunnerCommandApproval), epoch, now, requestRowID); err != nil {
+			return Ticket{}, true, nil, err
+		}
+		covered, err := coveredOpenRounds(ctx, tx, ownerID, grantRowID)
+		if err != nil {
+			return Ticket{}, true, nil, err
+		}
+		if err := issueAuthorityChanged(ctx, tx, ownerID, covered, now); err != nil {
 			return Ticket{}, true, nil, err
 		}
 	}

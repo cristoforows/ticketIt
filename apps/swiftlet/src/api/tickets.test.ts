@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GalleyError } from "./http";
-import { addRoundFeedback, answerRoundQuestion, approvePermissionRequest, declinePermissionRequest, fetchTicket } from "./tickets";
+import { addRoundFeedback, answerRoundQuestion, approvePermissionRequest, declinePermissionRequest, fetchTicket, GrantNotFoundError, revokePermissionGrant } from "./tickets";
 
 const TICKET = {
   id: "44444444-4444-4444-8444-444444444444",
@@ -70,7 +70,7 @@ describe("fetchTicket", () => {
   });
 
   const PERMISSION_REQUEST = { id: "99999999-9999-5999-8999-999999999990", account: "controlled", action: "write_note", resource: "notes/weekly-report", substituteAccount: true, requestedAt: "2026-10-02T10:00:03Z", decision: null, decidedAt: null, grantId: null, renewsGrantId: null };
-  const GRANT = { id: "12121212-1212-4121-8121-121212121212", agent, account: "controlled", full: false, action: "write_note", resource: "notes/weekly-report", substituteAccount: true, form: "ticket", state: "active", expiresAt: null, remainingSeconds: null, roundId: round.id, createdAt: "2026-10-02T10:00:09Z", approvedAt: "2026-10-02T10:00:09Z" };
+  const GRANT = { id: "12121212-1212-4121-8121-121212121212", agent, account: "controlled", full: false, action: "write_note", resource: "notes/weekly-report", substituteAccount: true, form: "ticket", state: "active", expiresAt: null, remainingSeconds: null, roundId: round.id, createdAt: "2026-10-02T10:00:09Z", approvedAt: "2026-10-02T10:00:09Z", revokedAt: null, allowedActions: { revoke: { available: true } }, coveredOpenRounds: [] };
   const permissionWaiting = { ...round, state: "waiting_for_input", stopRequestedAt: null, waitingReason: "waiting_for_permission", question: null, permissionRequest: PERMISSION_REQUEST };
 
   it("reads the Permission request a waiting Round holds, the decision availability and the Ticket's grants", async () => {
@@ -83,7 +83,18 @@ describe("fetchTicket", () => {
   });
 
   const TIME_GRANT = { ...GRANT, id: "13131313-1313-4131-8131-131313131313", form: "time", expiresAt: "2026-10-02T11:00:09Z", remainingSeconds: 3600 };
-  const EXPIRED_GRANT = { ...TIME_GRANT, id: "14141414-1414-4141-8141-141414141414", state: "expired", remainingSeconds: 0 };
+  const EXPIRED_GRANT = { ...TIME_GRANT, id: "14141414-1414-4141-8141-141414141414", state: "expired", remainingSeconds: 0, allowedActions: { revoke: { available: false, reason: { code: "grant_expired", message: "this grant has expired and authorizes nothing, so there is nothing to revoke" } } } };
+  const COVERED = { roundId: round.id, sequence: 2, ticketId: TICKET.id, ticketTitle: "Write the report" };
+  const REVOKED_GRANT = { ...GRANT, id: "17171717-1717-4171-8171-171717171717", state: "revoked", revokedAt: "2026-10-02T10:05:00Z", allowedActions: { revoke: { available: false, reason: { code: "grant_already_revoked", message: "this grant is already revoked" } } } };
+  const REVOKED_TIME_GRANT = { ...TIME_GRANT, id: "18181818-1818-4181-8181-181818181818", state: "revoked", remainingSeconds: 0, revokedAt: "2026-10-02T10:05:00Z", allowedActions: { revoke: { available: false, reason: { code: "grant_already_revoked", message: "this grant is already revoked" } } } };
+
+  it("reads revoked grants with their time and a live grant with the open Rounds a revoke would stop", async () => {
+    const live = { ...GRANT, coveredOpenRounds: [COVERED] };
+    const payload = { ...TICKET, permissionGrants: [REVOKED_TIME_GRANT, REVOKED_GRANT, live], permissionGrantCount: 3 };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => payload }));
+    expect((await fetchTicket(TICKET.id)).permissionGrants).toEqual([REVOKED_TIME_GRANT, REVOKED_GRANT, live]);
+  });
+
 
   it("reads live and expired time grants, a renewal request and the grant count", async () => {
     const renewal = { ...PERMISSION_REQUEST, renewsGrantId: EXPIRED_GRANT.id };
@@ -166,7 +177,16 @@ describe("fetchTicket", () => {
     ["no Permission decision availability", { ...TICKET, allowedActions: { ...TICKET.allowedActions, permissionDecision: undefined } }],
     ["no permissionGrants field", { ...TICKET, permissionGrants: undefined }],
     ["a grant of another form", { ...TICKET, permissionGrants: [{ ...GRANT, form: "always" }], permissionGrantCount: 1 }],
-    ["a grant that is not active", { ...TICKET, permissionGrants: [{ ...GRANT, state: "revoked" }], permissionGrantCount: 1 }],
+    ["a grant of an unknown state", { ...TICKET, permissionGrants: [{ ...GRANT, state: "suspended" }], permissionGrantCount: 1 }],
+    ["a revoked grant without its revocation time", { ...TICKET, permissionGrants: [{ ...REVOKED_GRANT, revokedAt: null }], permissionGrantCount: 1 }],
+    ["an active grant with a revocation time", { ...TICKET, permissionGrants: [{ ...GRANT, revokedAt: "2026-10-02T10:05:00Z" }], permissionGrantCount: 1 }],
+    ["a revoked time grant with time left", { ...TICKET, permissionGrants: [{ ...REVOKED_TIME_GRANT, remainingSeconds: 60 }], permissionGrantCount: 1 }],
+    ["a revoked grant still offering revoke", { ...TICKET, permissionGrants: [{ ...REVOKED_GRANT, allowedActions: { revoke: { available: true } } }], permissionGrantCount: 1 }],
+    ["an active grant refusing revoke", { ...TICKET, permissionGrants: [{ ...GRANT, allowedActions: { revoke: { available: false, reason: { code: "grant_already_revoked", message: "this grant is already revoked" } } } }], permissionGrantCount: 1 }],
+    ["a grant without allowedActions", { ...TICKET, permissionGrants: [{ ...GRANT, allowedActions: undefined }], permissionGrantCount: 1 }],
+    ["a grant without coveredOpenRounds", { ...TICKET, permissionGrants: [{ ...GRANT, coveredOpenRounds: undefined }], permissionGrantCount: 1 }],
+    ["a covered Round without its Ticket title", { ...TICKET, permissionGrants: [{ ...GRANT, coveredOpenRounds: [{ ...COVERED, ticketTitle: undefined }] }], permissionGrantCount: 1 }],
+    ["a revoked grant still covering a Round", { ...TICKET, permissionGrants: [{ ...REVOKED_GRANT, coveredOpenRounds: [COVERED] }], permissionGrantCount: 1 }],
     ["a grant without its Agent", { ...TICKET, permissionGrants: [{ ...GRANT, agent: undefined }], permissionGrantCount: 1 }],
     ["a Permission request without renewsGrantId", { ...TICKET, openRound: { ...permissionWaiting, permissionRequest: { ...PERMISSION_REQUEST, renewsGrantId: undefined } } }],
     ["a numeric renewsGrantId", { ...TICKET, openRound: { ...permissionWaiting, permissionRequest: { ...PERMISSION_REQUEST, renewsGrantId: 7 } } }],
@@ -277,5 +297,33 @@ describe("Permission decisions", () => {
     const error = await approvePermissionRequest("t1", "r1", "p1", { form: "ticket" }).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(GalleyError);
     expect(error).toMatchObject({ code, message });
+  });
+});
+
+describe("revokePermissionGrant", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const REVOKED = { id: "12121212-1212-4121-8121-121212121212", agent: { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kind: "research" }, account: "controlled", full: false, action: "write_note", resource: "notes/weekly-report", substituteAccount: false, form: "ticket", state: "revoked", expiresAt: null, remainingSeconds: null, roundId: "55555555-5555-4555-8555-555555555555", createdAt: "2026-10-02T10:00:09Z", approvedAt: "2026-10-02T10:00:09Z", revokedAt: "2026-10-02T10:05:00Z", allowedActions: { revoke: { available: false, reason: { code: "grant_already_revoked", message: "this grant is already revoked" } } }, coveredOpenRounds: [] };
+
+  it("posts to the grant's revoke path without a body and returns the revoked grant", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => REVOKED });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await revokePermissionGrant(REVOKED.id)).toEqual(REVOKED);
+    expect(fetchMock).toHaveBeenCalledWith(`/api/grants/${REVOKED.id}/revoke`, expect.objectContaining({ method: "POST" }));
+    expect(fetchMock.mock.calls[0][1].body).toBeUndefined();
+  });
+
+  it("throws GrantNotFoundError on Galley's 404", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404, statusText: "", json: async () => ({ error: { code: "not_found", message: "no grant with that identifier" } }) }));
+    await expect(revokePermissionGrant(REVOKED.id)).rejects.toBeInstanceOf(GrantNotFoundError);
+  });
+
+  it("surfaces grant_expired as Galley's own error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 400, statusText: "", json: async () => ({ error: { code: "grant_expired", message: "this grant has expired" } }) }));
+    await expect(revokePermissionGrant(REVOKED.id)).rejects.toMatchObject({ code: "grant_expired" });
+  });
+
+  it("rejects a response that is not a grant", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => ({ ...REVOKED, revokedAt: null }) }));
+    await expect(revokePermissionGrant(REVOKED.id)).rejects.toThrow("did not match");
   });
 });

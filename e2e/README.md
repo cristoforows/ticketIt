@@ -419,7 +419,7 @@ receipt's notice and the header pill must all show the runner as
 disconnected, with no animation. Re-registering restores Starting. On a
 phone the active slip has no status toggle. Stop on the phone list shows
 Stopping, with no Stop control, on both views. `run.sh` runs it after
-`runner-full-access.spec.ts` with no reset. It leaves a Round open, but no later
+`runner-revoke.spec.ts` with no reset. It leaves a Round open, but no later
 spec needs the slot.
 
 `tests/runner-ask.spec.ts` (issue #163) has two tests. The first drives
@@ -468,8 +468,10 @@ one active ticket grant. Both actions must then be performed in the
 same Round 1, which delivers: the Round lists one approved request, the
 checks deny, allow, allow (both allows naming the grant), and two
 `Performed write_note on notes/weekly-report` notes. Michelin must log
-one `permission requested`, one `approval received`, the `resumed`
-report before the `applied` ack, and no second request. A repeated
+one `permission requested`, one `approval received`, an `applied` ack
+of the `authority_changed` the approval also records (#168), the
+`resumed` report before the approval's `applied` ack, and no second
+request. A repeated
 approval is `400 permission_already_decided` and creates no second
 grant. The second test declines from the receipt. The Round must keep
 waiting with Waiting for a Permission, Michelin must receive no
@@ -521,6 +523,21 @@ Michelin's explanation, leaving the Ticket Blocked. After a reload the
 grant shows the **Full access** tag and four checks read *by full
 access*. `run.sh` runs it after `runner-time-grant.spec.ts` with no
 reset, and it leaves no Round open.
+
+`tests/runner-revoke.spec.ts` (issue #168) drives a real Michelin whose
+script is denied, approved for this Ticket over the API, performs
+`write_note`, and holds. The grant must name its open Round in
+`coveredOpenRounds`. In the receipt, **Revoke** opens a dialog labelled
+*Revoke this grant?* with focus on Cancel, naming *Round 1* of the
+Ticket and saying completed actions are not undone; Escape closes it
+without revoking. Confirming posts `POST /api/grants/{id}/revoke`, and
+the grant shows **Revoked** with Galley's `revokedAt` and the Ticket
+shows Stopping. Michelin is paused with `SIGSTOP` across that check so
+its Stop confirmation cannot race it. Once resumed, it confirms the Stop:
+Backlog with the Stopped Badge, and the stopped Round still lists the
+deny, the allow by the grant, and the *Performed* note. `run.sh` runs it
+after `runner-full-access.spec.ts` with no reset, and it leaves no Round
+open.
 
 `tests/ticket-priority-order.spec.ts` reorders three Ready Tickets by
 dragging onto the upper and lower halves of board slips, then with Move

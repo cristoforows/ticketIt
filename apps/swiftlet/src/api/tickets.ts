@@ -117,7 +117,15 @@ export function parsePermissionRequest(value: unknown): PermissionRequest | unde
 function isTimeGrantExpiry(grant: Record<string, unknown>): boolean {
   const { state, expiresAt, remainingSeconds } = grant;
   return isString(expiresAt) && Number.isSafeInteger(remainingSeconds) &&
-    (state === "active" ? (remainingSeconds as number) > 0 : state === "expired" && remainingSeconds === 0);
+    (state === "active" ? (remainingSeconds as number) > 0 : (state === "expired" || state === "revoked") && remainingSeconds === 0);
+}
+
+function parseCoveredRound(value: unknown): PermissionGrant["coveredOpenRounds"][number] | undefined {
+  const round = value as Record<string, unknown> | null | undefined;
+  if (typeof round !== "object" || round === null || ![round.roundId, round.ticketId, round.ticketTitle].every(isString) || !Number.isSafeInteger(round.sequence)) {
+    return undefined;
+  }
+  return { roundId: round.roundId as string, sequence: round.sequence as number, ticketId: round.ticketId as string, ticketTitle: round.ticketTitle as string };
 }
 
 function isGrantScope(grant: Record<string, unknown>): boolean {
@@ -129,12 +137,21 @@ function parsePermissionGrant(value: unknown): PermissionGrant | undefined {
     return undefined;
   }
   const grant = value as Record<string, unknown>;
+  const revoke = parseCommandAvailability((grant.allowedActions as Record<string, unknown> | null | undefined)?.revoke);
+  const covered = Array.isArray(grant.coveredOpenRounds) ? grant.coveredOpenRounds.map(parseCoveredRound) : undefined;
   if (
     ![grant.id, grant.account, grant.roundId, grant.createdAt, grant.approvedAt].every(isString) ||
     !isGrantScope(grant) ||
     !isAgentSummary(grant.agent) ||
     typeof grant.substituteAccount !== "boolean" ||
-    !(grant.form === "ticket" ? grant.state === "active" && grant.expiresAt === null && grant.remainingSeconds === null : grant.form === "time" && isTimeGrantExpiry(grant))
+    !(grant.form === "ticket" ? (grant.state === "active" || grant.state === "revoked") && grant.expiresAt === null && grant.remainingSeconds === null : grant.form === "time" && isTimeGrantExpiry(grant)) ||
+    (grant.state === "revoked") !== isString(grant.revokedAt) ||
+    !(grant.revokedAt === null || isString(grant.revokedAt)) ||
+    !revoke ||
+    revoke.available !== (grant.state === "active") ||
+    !covered ||
+    !covered.every((round) => round !== undefined) ||
+    (!revoke.available && covered.length > 0)
   ) {
     return undefined;
   }
@@ -154,6 +171,9 @@ function parsePermissionGrant(value: unknown): PermissionGrant | undefined {
     roundId: grant.roundId as string,
     createdAt: grant.createdAt as string,
     approvedAt: grant.approvedAt as string,
+    revokedAt: grant.revokedAt as string | null,
+    allowedActions: { revoke },
+    coveredOpenRounds: covered as PermissionGrant["coveredOpenRounds"],
   };
 }
 
@@ -516,6 +536,29 @@ export async function declinePermissionRequest(id: string, roundId: string, requ
 
 function permissionRequestPath(id: string, roundId: string, requestId: string, decision: "approve" | "decline"): string {
   return `${TICKETS_ENDPOINT}/${encodeURIComponent(id)}/rounds/${encodeURIComponent(roundId)}/permission-requests/${encodeURIComponent(requestId)}/${decision}`;
+}
+
+export class GrantNotFoundError extends Error {
+  constructor() {
+    super("Galley has no such grant. The receipt now shows the grants Galley has.");
+    this.name = "GrantNotFoundError";
+  }
+}
+
+export async function revokePermissionGrant(grantId: string): Promise<PermissionGrant> {
+  const response = await authenticatedFetch(`/api/grants/${encodeURIComponent(grantId)}/revoke`, { method: "POST" });
+  if (response.status === 404) {
+    throw new GrantNotFoundError();
+  }
+  const payload: unknown = await response.json();
+  if (!response.ok) {
+    const detail = parseErrorDetail((payload as { error?: unknown } | null)?.error);
+    if (detail) throw new GalleyError(detail);
+    throw new Error(`Galley returned an error response: ${response.status} ${response.statusText}`.trim());
+  }
+  const grant = parsePermissionGrant(payload);
+  if (!grant) throw new Error("Galley's grant response did not match the expected shape.");
+  return grant;
 }
 
 /** A 404 here names the Ticket or Round together, so Galley's own message is shown. */

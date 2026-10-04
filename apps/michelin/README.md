@@ -124,6 +124,10 @@ Three loops run side by side, and a fourth while a Round is held:
     below); with another `claimEpoch` it is acknowledged `ignored`. A
     listing with an `approval` lacking either field is an
     `invalid_body` poll failure.
+  - `authority_changed` (issue #168), at any `claimEpoch`, is logged and
+    acknowledged `applied`; the engine keeps running. Michelin keeps no
+    authority between actions, so the next `act` checks Galley again
+    and a revoked grant is denied there.
   - Any other type is logged once and left unacknowledged.
 
 Requests in one loop never overlap. The status and runner loops keep
@@ -314,6 +318,7 @@ context fields. The credential is never logged.
 | `action performed` | `info` | As `progress reported`, `step` `act`, plus the scope. |
 | `engine holding`, `engine script finished` | `info` | The script reached `hold`, or its last step. |
 | `stop requested` | `info` | A `stop` for the claim's epoch arrived: `roundId`, `commandId`, `type`, `commandEpoch`, `claimEpoch`. |
+| `authority changed; the next action checks it again` | `info` | As `stop requested`, for an `authority_changed`. |
 | `engine stopped` | `info` | The engine halted at `stepIndex` for the Stop `commandId`. |
 | `stop confirmation reported` | `info` | `roundId`, `step` `stop`, `attempt`, `httpStatus`, Galley's `endedAt`. |
 | `command for another claim epoch ignored` | `warn` | As `stop requested`; the command is acknowledged `ignored`. |

@@ -169,6 +169,7 @@ func (e PermissionGrantScope) Valid() bool {
 const (
 	PermissionGrantActive  PermissionGrantState = "active"
 	PermissionGrantExpired PermissionGrantState = "expired"
+	PermissionGrantRevoked PermissionGrantState = "revoked"
 )
 
 // Valid indicates whether the value is a known member of the PermissionGrantState enum.
@@ -177,6 +178,8 @@ func (e PermissionGrantState) Valid() bool {
 	case PermissionGrantActive:
 		return true
 	case PermissionGrantExpired:
+		return true
+	case PermissionGrantRevoked:
 		return true
 	default:
 		return false
@@ -329,9 +332,10 @@ func (e RunnerCommandAckOutcome) Valid() bool {
 
 // Defines values for RunnerCommandType.
 const (
-	RunnerCommandAnswer   RunnerCommandType = "answer"
-	RunnerCommandApproval RunnerCommandType = "approval"
-	RunnerCommandStop     RunnerCommandType = "stop"
+	RunnerCommandAnswer           RunnerCommandType = "answer"
+	RunnerCommandApproval         RunnerCommandType = "approval"
+	RunnerCommandAuthorityChanged RunnerCommandType = "authority_changed"
+	RunnerCommandStop             RunnerCommandType = "stop"
 )
 
 // Valid indicates whether the value is a known member of the RunnerCommandType enum.
@@ -340,6 +344,8 @@ func (e RunnerCommandType) Valid() bool {
 	case RunnerCommandAnswer:
 		return true
 	case RunnerCommandApproval:
+		return true
+	case RunnerCommandAuthorityChanged:
 		return true
 	case RunnerCommandStop:
 		return true
@@ -606,7 +612,7 @@ type AuthorityCheckRequest struct {
 type AuthorityCheckResult struct {
 	Decision AuthorityDecision `json:"decision"`
 
-	// ExpiredGrantId On `deny` only: the newest expired `time` grant for the Round's Agent and this scope or full access to this account, when one exists. A `permission_requested` for this scope names it as `renewsGrantId`.
+	// ExpiredGrantId On `deny` only: the newest expired, unrevoked `time` grant for the Round's Agent and this scope or full access to this account, when one exists. A `permission_requested` for this scope names it as `renewsGrantId`.
 	ExpiredGrantId *string `json:"expiredGrantId,omitempty"`
 
 	// GrantId The grant that allowed; present exactly when `decision` is `allow`.
@@ -803,9 +809,13 @@ type PermissionGrant struct {
 	Action *string `json:"action"`
 
 	// Agent The only Agent the grant authorizes.
-	Agent      TicketAssigneeAgent `json:"agent"`
-	ApprovedAt time.Time           `json:"approvedAt"`
-	CreatedAt  time.Time           `json:"createdAt"`
+	Agent          TicketAssigneeAgent           `json:"agent"`
+	AllowedActions PermissionGrantAllowedActions `json:"allowedActions"`
+	ApprovedAt     time.Time                     `json:"approvedAt"`
+
+	// CoveredOpenRounds The open Rounds a revoke would request Stop of: those of the grant's Agent, and on the grant's Ticket for the `ticket` form. Empty unless `allowedActions.revoke` is available.
+	CoveredOpenRounds []PermissionGrantCoveredRound `json:"coveredOpenRounds"`
+	CreatedAt         time.Time                     `json:"createdAt"`
 
 	// ExpiresAt Set exactly for the `time` form.
 	ExpiresAt *time.Time `json:"expiresAt"`
@@ -817,18 +827,35 @@ type PermissionGrant struct {
 	Full bool   `json:"full"`
 	Id   string `json:"id"`
 
-	// RemainingSeconds Whole seconds from Galley's clock at the read to `expiresAt`, rounded up; 0 once expired; null for the `ticket` form.
+	// RemainingSeconds Whole seconds from Galley's clock at the read to `expiresAt`, rounded up; 0 once expired or revoked; null for the `ticket` form.
 	RemainingSeconds *int `json:"remainingSeconds"`
 
 	// Resource Null exactly when `full`.
 	Resource *string `json:"resource"`
 
+	// RevokedAt Set exactly when `state` is `revoked`.
+	RevokedAt *time.Time `json:"revokedAt"`
+
 	// RoundId The Round whose request the Owner approved.
 	RoundId string `json:"roundId"`
 
-	// State `expired`: a `time` grant whose `expiresAt` is not after Galley's clock when the grant is read. It authorizes nothing and stays recorded.
+	// State `expired`: a `time` grant whose `expiresAt` is not after Galley's clock when the grant is read. `revoked`: ended by the Owner at `revokedAt`, and never `expired`. Neither authorizes anything; both stay recorded.
 	State             PermissionGrantState `json:"state"`
 	SubstituteAccount bool                 `json:"substituteAccount"`
+}
+
+// PermissionGrantAllowedActions defines model for PermissionGrantAllowedActions.
+type PermissionGrantAllowedActions struct {
+	// Revoke Available only while the grant is `active`. Unavailable with `grant_already_revoked` once revoked, and `grant_expired` once expired.
+	Revoke TicketCommandAvailability `json:"revoke"`
+}
+
+// PermissionGrantCoveredRound defines model for PermissionGrantCoveredRound.
+type PermissionGrantCoveredRound struct {
+	RoundId     string `json:"roundId"`
+	Sequence    int    `json:"sequence"`
+	TicketId    string `json:"ticketId"`
+	TicketTitle string `json:"ticketTitle"`
 }
 
 // PermissionGrantForm `ticket`: this Agent, this Ticket, the granted scope, for as long as the grant is active. `time`: this Agent and the granted scope on any Ticket until `expiresAt`, whatever any Ticket's Status.
@@ -837,7 +864,7 @@ type PermissionGrantForm string
 // PermissionGrantScope `requested`: the request's account, action and resource. `full`: every action and resource the request's Connected Account declares, and nothing it does not.
 type PermissionGrantScope string
 
-// PermissionGrantState `expired`: a `time` grant whose `expiresAt` is not after Galley's clock when the grant is read. It authorizes nothing and stays recorded.
+// PermissionGrantState `expired`: a `time` grant whose `expiresAt` is not after Galley's clock when the grant is read. `revoked`: ended by the Owner at `revokedAt`, and never `expired`. Neither authorizes anything; both stay recorded.
 type PermissionGrantState string
 
 // PermissionRequest defines model for PermissionRequest.
@@ -949,7 +976,7 @@ type RoundAuthorityCheck struct {
 	CheckedAt time.Time         `json:"checkedAt"`
 	Decision  AuthorityDecision `json:"decision"`
 
-	// ExpiredGrantId On `deny` only: the newest expired `time` grant for the Round's Agent and this scope or full access to this account, when one exists.
+	// ExpiredGrantId On `deny` only: the newest expired, unrevoked `time` grant for the Round's Agent and this scope or full access to this account, when one exists.
 	ExpiredGrantId *string `json:"expiredGrantId"`
 
 	// GrantId The grant that allowed; set exactly when `decision` is `allow`.
@@ -1103,14 +1130,14 @@ type RunnerCommand struct {
 	// Approval Present exactly when `type` is `approval`.
 	Approval *RunnerCommandApprovalData `json:"approval,omitempty"`
 
-	// ClaimEpoch The claim epoch the command targets. A runner holding another epoch acknowledges it `ignored` and does not act on it.
+	// ClaimEpoch The claim epoch the command targets. A runner holding another epoch acknowledges it `ignored` and does not act on it, except `authority_changed`, which is not fenced by epoch.
 	ClaimEpoch int `json:"claimEpoch"`
 
 	// Id The command's idempotency key.
 	Id       string    `json:"id"`
 	IssuedAt time.Time `json:"issuedAt"`
 
-	// Type Grows by slice.
+	// Type Grows by slice. `authority_changed` is informational: a grant covering the Round was approved or revoked, and the runner checks authority before its next action as always. It carries no data.
 	Type RunnerCommandType `json:"type"`
 }
 
@@ -1138,7 +1165,7 @@ type RunnerCommandList struct {
 	Commands []RunnerCommand `json:"commands"`
 }
 
-// RunnerCommandType Grows by slice.
+// RunnerCommandType Grows by slice. `authority_changed` is informational: a grant covering the Round was approved or revoked, and the runner checks authority before its next action as always. It carries no data.
 type RunnerCommandType string
 
 // RunnerHealth defines model for RunnerHealth.
@@ -1888,6 +1915,9 @@ type ServerInterface interface {
 	// CreateDiagnosticNote Persist a development diagnostic note
 	// (POST /api/dev/diagnostic-notes)
 	CreateDiagnosticNote(w http.ResponseWriter, r *http.Request)
+	// RevokePermissionGrant Revoke an active Permission grant
+	// (POST /api/grants/{grantId}/revoke)
+	RevokePermissionGrant(w http.ResponseWriter, r *http.Request, grantId string)
 	// RevokeRunner Revoke the runner credential
 	// (DELETE /api/runner-credential)
 	RevokeRunner(w http.ResponseWriter, r *http.Request)
@@ -2189,6 +2219,32 @@ func (siw *ServerInterfaceWrapper) CreateDiagnosticNote(w http.ResponseWriter, r
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateDiagnosticNote(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokePermissionGrant operation middleware
+func (siw *ServerInterfaceWrapper) RevokePermissionGrant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "grantId" -------------
+	var grantId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "grantId", r.PathValue("grantId"), &grantId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "grantId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokePermissionGrant(w, r, grantId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3247,6 +3303,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/rounds/{roundId}/questions/{questionId}/answer", wrapper.AnswerRoundQuestion)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/rounds/{roundId}/permission-requests/{requestId}/approve", wrapper.ApprovePermissionRequest)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/rounds/{roundId}/permission-requests/{requestId}/decline", wrapper.DeclinePermissionRequest)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/grants/{grantId}/revoke", wrapper.RevokePermissionGrant)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/rounds/{roundId}/feedback", wrapper.AddRoundFeedback)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/session", wrapper.SignOut)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/session", wrapper.GetSession)

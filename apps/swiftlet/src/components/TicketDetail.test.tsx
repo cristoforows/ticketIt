@@ -8,6 +8,7 @@ import type { Badge, Ticket, TicketAssignee, TicketUpdate } from "../api/tickets
 import { statusLabel } from "./ui";
 import { GalleyError } from "../api/http";
 import { remainingText, type DecidePermission } from "./PermissionPanel";
+import { GrantNotFoundError } from "../api/tickets";
 import type { HealthView } from "./RunnerHealthPill";
 
 const TICKET: Ticket = {
@@ -1443,7 +1444,7 @@ describe("a Permission request from the Agent", () => {
     openRound: waitingRound,
     allowedActions: { ...TICKET.allowedActions, statusChanges: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: waitingRound.id } }, stop: { available: true }, permissionDecision: { available: true } },
   };
-  const grant = { id: grantId, agent, account: "controlled", full: false, action: "write_note", resource: "notes/weekly-report", substituteAccount: true, form: "ticket" as const, state: "active" as const, expiresAt: null, remainingSeconds: null, roundId: waitingRound.id, createdAt: "2026-10-02T10:00:09Z", approvedAt: "2026-10-02T10:00:09Z" };
+  const grant = { id: grantId, agent, account: "controlled", full: false, action: "write_note", resource: "notes/weekly-report", substituteAccount: true, form: "ticket" as const, state: "active" as const, expiresAt: null, remainingSeconds: null, roundId: waitingRound.id, createdAt: "2026-10-02T10:00:09Z", approvedAt: "2026-10-02T10:00:09Z", revokedAt: null, allowedActions: { revoke: { available: true } }, coveredOpenRounds: [] };
   const decidedActions = { ...waiting.allowedActions, permissionDecision: { available: false, reason: { code: "permission_already_decided", message: "this Permission request is already decided" } } };
   const resuming: Ticket = { ...waiting, openRound: { ...waitingRound, waitingReason: "resuming", permissionRequest: approved }, permissionGrants: [grant], permissionGrantCount: 1, allowedActions: decidedActions };
   const stillWaiting: Ticket = { ...waiting, openRound: { ...waitingRound, permissionRequest: declined }, allowedActions: decidedActions };
@@ -1542,7 +1543,7 @@ describe("a Permission request from the Agent", () => {
     afterEach(() => vi.useRealTimers());
 
     const timeGrant = { ...grant, id: "13131313-1313-4131-8131-131313131313", form: "time" as const, expiresAt: "2026-10-02T11:00:09Z", remainingSeconds: 3_600 };
-    const expiredGrant = { ...timeGrant, id: "14141414-1414-4141-8141-141414141414", state: "expired" as const, expiresAt: "2026-10-01T11:00:00Z", remainingSeconds: 0 };
+    const expiredGrant = { ...timeGrant, id: "14141414-1414-4141-8141-141414141414", state: "expired" as const, expiresAt: "2026-10-01T11:00:00Z", remainingSeconds: 0, allowedActions: { revoke: { available: false, reason: { code: "grant_expired", message: "this grant has expired and authorizes nothing, so there is nothing to revoke" } } } };
 
     it("defaults to the ticket form and offers the time form with a labelled duration", () => {
       render(<TicketDetail ticket={waiting} onSave={vi.fn()} {...noopActions()} onDecidePermission={decide()} />);
@@ -1703,7 +1704,7 @@ describe("a Permission request from the Agent", () => {
       });
 
       it("marks checks allowed by full access, a renewal of expired full access, and lists the time-based full grant with its remaining time", () => {
-        const expiredFull = { ...fullGrant, state: "expired" as const, remainingSeconds: 0 };
+        const expiredFull = { ...fullGrant, state: "expired" as const, remainingSeconds: 0, allowedActions: { revoke: { available: false, reason: { code: "grant_expired", message: "this grant has expired and authorizes nothing, so there is nothing to revoke" } } } };
         const renewal = { ...request, renewsGrantId: expiredFull.id };
         const allow = { account: "controlled", action: "post_message", resource: "channels/general", decision: "allow" as const, grantId: fullGrant.id, expiredGrantId: null, checkedAt: "2026-10-02T10:00:10Z" };
         const exact = { ...allow, action: "write_note", resource: "notes/weekly-report", grantId };
@@ -1732,5 +1733,101 @@ describe("a Permission request from the Agent", () => {
     ])("words %i seconds left as %s", (seconds, text) => {
       expect(remainingText(seconds)).toBe(text);
     });
+  });
+});
+
+describe("revoking a grant", () => {
+  afterEach(cleanup);
+
+  const agent = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kind: "research" as const };
+  const runningRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 2, state: "running" as const, agent, claimedAt: "2026-10-02T10:00:00Z", startedAt: "2026-10-02T10:00:01Z", stopRequestedAt: null, waitingReason: "working" as const, question: null, permissionRequest: null };
+  const covered = { roundId: runningRound.id, sequence: 2, ticketId: REFINED_TICKET.id, ticketTitle: "Write the weekly report" };
+  const grant = { id: "12121212-1212-4121-8121-121212121212", agent, account: "controlled", full: false, action: "write_note", resource: "notes/weekly-report", substituteAccount: false, form: "ticket" as const, state: "active" as const, expiresAt: null, remainingSeconds: null, roundId: runningRound.id, createdAt: "2026-10-02T10:00:09Z", approvedAt: "2026-10-02T10:00:09Z", revokedAt: null, allowedActions: { revoke: { available: true } }, coveredOpenRounds: [covered] };
+  const revoked = { ...grant, state: "revoked" as const, revokedAt: "2026-10-02T10:05:00Z", allowedActions: { revoke: { available: false, reason: { code: "grant_already_revoked", message: "this grant is already revoked" } } }, coveredOpenRounds: [] };
+  const running: Ticket = {
+    ...REFINED_TICKET,
+    status: "InProgress",
+    assigneeType: "agent",
+    assigneeAgent: agent,
+    openRound: runningRound,
+    permissionGrants: [grant],
+    permissionGrantCount: 1,
+    allowedActions: { ...TICKET.allowedActions, statusChanges: [], stop: { available: true } },
+  };
+  const stopping: Ticket = { ...running, openRound: { ...runningRound, stopRequestedAt: "2026-10-02T10:05:00Z", waitingReason: "stopping" }, permissionGrants: [revoked], allowedActions: { ...running.allowedActions, stop: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } } } };
+  const openDialog = () => {
+    fireEvent.click(screen.getByTestId("ticket-detail-permission-grant-revoke"));
+    return screen.getByRole("dialog", { name: "Revoke this grant?" });
+  };
+
+  it("offers Revoke only on a grant Galley says can be revoked, and only with a handler", () => {
+    const expired = { ...grant, id: "14141414-1414-4141-8141-141414141414", form: "time" as const, state: "expired" as const, expiresAt: "2026-10-01T11:00:00Z", remainingSeconds: 0, allowedActions: { revoke: { available: false, reason: { code: "grant_expired", message: "expired" } } }, coveredOpenRounds: [] };
+    render(<TicketDetail ticket={{ ...running, permissionGrants: [expired, revoked, grant], permissionGrantCount: 3 }} onSave={vi.fn()} {...noopActions()} onRevokeGrant={vi.fn()} />);
+    const listed = screen.getAllByTestId("ticket-detail-permission-grant");
+    expect(listed.map((item) => within(item).queryByTestId("ticket-detail-permission-grant-revoke") !== null)).toEqual([false, false, true]);
+    cleanup();
+    render(<TicketDetail ticket={running} onSave={vi.fn()} {...noopActions()} />);
+    expect(screen.queryByTestId("ticket-detail-permission-grant-revoke")).not.toBeInTheDocument();
+  });
+
+  it("names the grant in the button's accessible name", () => {
+    render(<TicketDetail ticket={running} onSave={vi.fn()} {...noopActions()} onRevokeGrant={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Revoke: write_note on notes/weekly-report (controlled)" })).toBeInTheDocument();
+  });
+
+  it("confirms in a labelled, described dialog that names the Round it stops, says completed actions stay, and focuses Cancel", async () => {
+    render(<TicketDetail ticket={running} onSave={vi.fn()} {...noopActions()} onRevokeGrant={vi.fn()} />);
+    const dialog = openDialog();
+    expect(dialog).toHaveAccessibleDescription(expect.stringContaining("This stops the open Round it covers: Round 2 of “Write the weekly report”."));
+    expect(within(dialog).getByTestId("ticket-detail-permission-revoke-undone")).toHaveTextContent("Actions the Agent already completed are not undone.");
+    await waitFor(() => expect(within(dialog).getByTestId("ticket-detail-permission-revoke-cancel")).toHaveFocus());
+  });
+
+  it("says nothing is stopped when no open Round uses the grant, and lists several when it covers several", () => {
+    render(<TicketDetail ticket={{ ...running, permissionGrants: [{ ...grant, coveredOpenRounds: [] }] }} onSave={vi.fn()} {...noopActions()} onRevokeGrant={vi.fn()} />);
+    expect(within(openDialog()).getByTestId("ticket-detail-permission-revoke-effect")).toHaveTextContent("No open Round uses it, so nothing is stopped.");
+    cleanup();
+    const other = { roundId: "77777777-7777-4777-8777-777777777777", sequence: 1, ticketId: "88888888-8888-4888-8888-888888888888", ticketTitle: "Tidy the notes" };
+    render(<TicketDetail ticket={{ ...running, permissionGrants: [{ ...grant, form: "time", expiresAt: "2026-10-02T11:00:09Z", remainingSeconds: 3_600, coveredOpenRounds: [covered, other] }] }} onSave={vi.fn()} {...noopActions()} onRevokeGrant={vi.fn()} />);
+    expect(within(openDialog()).getByTestId("ticket-detail-permission-revoke-effect")).toHaveTextContent("This stops the 2 open Rounds it covers: Round 2 of “Write the weekly report”, Round 1 of “Tidy the notes”.");
+  });
+
+  it("Cancel and Escape close the dialog without revoking", async () => {
+    const onRevokeGrant = vi.fn();
+    render(<TicketDetail ticket={running} onSave={vi.fn()} {...noopActions()} onRevokeGrant={onRevokeGrant} />);
+    fireEvent.click(within(openDialog()).getByTestId("ticket-detail-permission-revoke-cancel"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    fireEvent.keyDown(openDialog(), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(onRevokeGrant).not.toHaveBeenCalled();
+  });
+
+  it("revokes, then shows the grant Revoked with its time and the Round Stopping", async () => {
+    const onRevokeGrant = vi.fn().mockResolvedValue(stopping);
+    render(<TicketDetail ticket={running} onSave={vi.fn()} {...noopActions()} onRevokeGrant={onRevokeGrant} />);
+    fireEvent.click(within(openDialog()).getByTestId("ticket-detail-permission-revoke-confirm"));
+    expect(onRevokeGrant).toHaveBeenCalledExactlyOnceWith(grant.id);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    const listed = screen.getByTestId("ticket-detail-permission-grant");
+    expect(listed).toHaveAttribute("data-state", "revoked");
+    expect(within(listed).getByTestId("ticket-detail-permission-grant-revoked")).toHaveTextContent("Revoked");
+    expect(within(listed).getByTestId("ticket-detail-permission-grant-revoked-at")).toHaveAttribute("dateTime", "2026-10-02T10:05:00Z");
+    expect(within(listed).queryByTestId("ticket-detail-permission-grant-revoke")).not.toBeInTheDocument();
+    expect(screen.getByTestId("ticket-detail-stopping")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["grant_expired", new GalleyError({ code: "grant_expired", message: "raw" }), "This grant has already expired, so there is nothing to revoke."],
+    ["grant_already_revoked", new GalleyError({ code: "grant_already_revoked", message: "raw" }), "This grant was already revoked."],
+    ["a 404", new GrantNotFoundError(), "Galley has no such grant."],
+    ["an outage", new Error("failed to revoke the grant"), "failed to revoke the grant"],
+  ])("closes the dialog and explains %s under the grants", async (_name, failure, message) => {
+    render(<TicketDetail ticket={running} onSave={vi.fn()} {...noopActions()} onRevokeGrant={vi.fn().mockRejectedValue(failure)} />);
+    fireEvent.click(within(openDialog()).getByTestId("ticket-detail-permission-revoke-confirm"));
+    expect(await screen.findByTestId("ticket-detail-permission-revoke-error")).toHaveTextContent(message);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not revoke the grant.");
+    openDialog();
+    expect(screen.queryByTestId("ticket-detail-permission-revoke-error")).not.toBeInTheDocument();
   });
 });

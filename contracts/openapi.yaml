@@ -1020,8 +1020,10 @@ paths:
         in the chosen `form` and `scope`, and one `approval` command for
         the runner to pull. `scope` `requested` (the default) grants the
         requested account, action and resource; `full` grants full access
-        to the requested Connected Account instead. Neither the Round nor
-        the Ticket moves until the runner reports `resumed`. `expiresAt`
+        to the requested Connected Account instead. Also one
+        `authority_changed` command for each open Round the grant covers.
+        Neither the Round nor the Ticket moves until the runner reports
+        `resumed`. `expiresAt`
         with the
         `ticket` form is `400 grant_form_conflict` and the `time` form
         without `expiresAt` is `400 invalid_request`, both before the
@@ -1091,6 +1093,40 @@ paths:
           description: >-
             Error. See `ErrorBody`. Includes `permission_already_decided`,
             `round_not_open` and `stop_already_requested`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+  /api/grants/{grantId}/revoke:
+    parameters:
+      - name: grantId
+        in: path
+        required: true
+        schema: {type: string, format: uuid, x-go-type: string}
+    post:
+      operationId: revokePermissionGrant
+      summary: Revoke an active Permission grant
+      tags: [tickets]
+      description: >-
+        Ends the grant at once: every later authority check denies it.
+        For each open Round the grant covers (see `coveredOpenRounds`),
+        records one Stop request exactly as `requestTicketStop` does,
+        sharing its one Stop per Round, and one `authority_changed`
+        command. A covered Round reaches `stopped` only on the runner's
+        `stop_confirmed`; an action it already took stays recorded. A
+        grant covering no open Round requests no Stop. A repeat returns
+        the revoked grant and records nothing. An expired grant is
+        `grant_expired` and changes nothing. Takes no body. An unknown,
+        malformed or foreign grant id returns the shared 404.
+      responses:
+        "200":
+          description: The grant, revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PermissionGrant"
+        default:
+          description: Error. See `ErrorBody`. Includes `grant_expired`.
           content:
             application/json:
               schema:
@@ -1349,7 +1385,7 @@ paths:
         declare is `400 capability_not_supported`. A `renewsGrantId` that
         does not name a `time` grant of this Owner, the Round's Agent and
         the same scope or full access to the same Connected Account,
-        expired by Galley's clock, is `400 invalid_renewal`,
+        expired by Galley's clock and not revoked, is `400 invalid_renewal`,
         checked after `event_out_of_order`. `resumed` moves the Round
         back to `running` and the Ticket to In Progress. A
         `usage_observed` whose `observationId` is already recorded for
@@ -1937,10 +1973,31 @@ components:
       type: string
       description: >-
         `expired`: a `time` grant whose `expiresAt` is not after Galley's
-        clock when the grant is read. It authorizes nothing and stays
-        recorded.
-      enum: [active, expired]
-      x-enum-varnames: [PermissionGrantActive, PermissionGrantExpired]
+        clock when the grant is read. `revoked`: ended by the Owner at
+        `revokedAt`, and never `expired`. Neither authorizes anything;
+        both stay recorded.
+      enum: [active, expired, revoked]
+      x-enum-varnames: [PermissionGrantActive, PermissionGrantExpired, PermissionGrantRevoked]
+    PermissionGrantAllowedActions:
+      type: object
+      additionalProperties: false
+      required: [revoke]
+      properties:
+        revoke:
+          description: >-
+            Available only while the grant is `active`. Unavailable with
+            `grant_already_revoked` once revoked, and `grant_expired` once
+            expired.
+          $ref: "#/components/schemas/TicketCommandAvailability"
+    PermissionGrantCoveredRound:
+      type: object
+      additionalProperties: false
+      required: [roundId, sequence, ticketId, ticketTitle]
+      properties:
+        roundId: {type: string, format: uuid, x-go-type: string}
+        sequence: {type: integer, minimum: 1}
+        ticketId: {type: string, format: uuid, x-go-type: string}
+        ticketTitle: {type: string}
     PermissionRequest:
       type: object
       additionalProperties: false
@@ -1979,7 +2036,7 @@ components:
     PermissionGrant:
       type: object
       additionalProperties: false
-      required: [id, agent, account, full, action, resource, substituteAccount, form, state, expiresAt, remainingSeconds, roundId, createdAt, approvedAt]
+      required: [id, agent, account, full, action, resource, substituteAccount, form, state, expiresAt, remainingSeconds, revokedAt, roundId, createdAt, approvedAt, allowedActions, coveredOpenRounds]
       properties:
         id: {type: string, format: uuid, x-go-type: string}
         agent:
@@ -2016,7 +2073,12 @@ components:
           minimum: 0
           description: >-
             Whole seconds from Galley's clock at the read to `expiresAt`,
-            rounded up; 0 once expired; null for the `ticket` form.
+            rounded up; 0 once expired or revoked; null for the `ticket`
+            form.
+        revokedAt:
+          type: [string, "null"]
+          format: date-time
+          description: Set exactly when `state` is `revoked`.
         roundId:
           type: string
           format: uuid
@@ -2024,6 +2086,16 @@ components:
           description: The Round whose request the Owner approved.
         createdAt: {type: string, format: date-time}
         approvedAt: {type: string, format: date-time}
+        allowedActions:
+          $ref: "#/components/schemas/PermissionGrantAllowedActions"
+        coveredOpenRounds:
+          type: array
+          description: >-
+            The open Rounds a revoke would request Stop of: those of the
+            grant's Agent, and on the grant's Ticket for the `ticket` form.
+            Empty unless `allowedActions.revoke` is available.
+          items:
+            $ref: "#/components/schemas/PermissionGrantCoveredRound"
     ApprovePermissionRequest:
       type: object
       additionalProperties: false
@@ -2064,9 +2136,9 @@ components:
           format: uuid
           x-go-type: string
           description: >-
-            On `deny` only: the newest expired `time` grant for the Round's
-            Agent and this scope or full access to this account, when one
-            exists.
+            On `deny` only: the newest expired, unrevoked `time` grant for
+            the Round's Agent and this scope or full access to this
+            account, when one exists.
         checkedAt:
           type: string
           format: date-time
@@ -2950,10 +3022,10 @@ components:
           format: uuid
           x-go-type: string
           description: >-
-            On `deny` only: the newest expired `time` grant for the Round's
-            Agent and this scope or full access to this account, when one
-            exists. A `permission_requested` for this scope names it as
-            `renewsGrantId`.
+            On `deny` only: the newest expired, unrevoked `time` grant for
+            the Round's Agent and this scope or full access to this
+            account, when one exists. A `permission_requested` for this
+            scope names it as `renewsGrantId`.
     RoundEventRequest:
       type: object
       additionalProperties: false
@@ -3035,9 +3107,12 @@ components:
           description: For `permission_requested`, and `resumed` after an approval, the Permission request.
     RunnerCommandType:
       type: string
-      description: Grows by slice.
-      enum: [stop, answer, approval]
-      x-enum-varnames: [RunnerCommandStop, RunnerCommandAnswer, RunnerCommandApproval]
+      description: >-
+        Grows by slice. `authority_changed` is informational: a grant
+        covering the Round was approved or revoked, and the runner checks
+        authority before its next action as always. It carries no data.
+      enum: [stop, answer, approval, authority_changed]
+      x-enum-varnames: [RunnerCommandStop, RunnerCommandAnswer, RunnerCommandApproval, RunnerCommandAuthorityChanged]
     RunnerCommandApprovalData:
       type: object
       additionalProperties: false
@@ -3081,7 +3156,8 @@ components:
           minimum: 1
           description: >-
             The claim epoch the command targets. A runner holding another
-            epoch acknowledges it `ignored` and does not act on it.
+            epoch acknowledges it `ignored` and does not act on it, except
+            `authority_changed`, which is not fenced by epoch.
         issuedAt: {type: string, format: date-time}
         answer:
           description: Present exactly when `type` is `answer`.

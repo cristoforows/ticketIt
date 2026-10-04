@@ -7,7 +7,7 @@ import { refinementGuidance } from "./refinementGuidance";
 import type { HealthView } from "./RunnerHealthPill";
 import { lockedLabel } from "./roundLock";
 import type { AddFeedback } from "./FeedbackPanel";
-import type { DecidePermission } from "./PermissionPanel";
+import type { DecidePermission, RevokeGrant } from "./PermissionPanel";
 import type { AnswerQuestion } from "./QuestionPanel";
 import { RoundsSection, type LoadEarlierActivity, type RoundRecords } from "./RoundsSection";
 import { BadgeTag, ClaimedTag, DeliveredTag, ErrorMessage, FieldHint, FieldLabel, FieldNote, FieldValue, InlineError, LocalTime, LockGlyph, PrimaryButton, QueuedTag, ReceiptLine, Rule, SecondaryButton, Select, StatusTag, statusLabel, StoppingTag, TextInput, Textarea, ticketSerial } from "./ui";
@@ -36,6 +36,7 @@ interface TicketDetailProps {
   onAnswer?: AnswerQuestion;
   onAddFeedback?: AddFeedback;
   onDecidePermission?: DecidePermission;
+  onRevokeGrant?: RevokeGrant;
 }
 
 interface EditableFields {
@@ -69,7 +70,7 @@ function completionConditionLabel(condition: Ticket["completionCondition"]): str
   return condition === "reviewedPrMerge" ? "Reviewed pull request merged" : "Human acceptance";
 }
 
-export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onRework, onStop, onAssign, onUnassign, onLoadAgents, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge, onArchive, onRestore, onArchived, editRequested = false, runnerHealth = { kind: "loading" }, roundRecords, onLoadEarlierActivity, onAnswer, onAddFeedback, onDecidePermission }: TicketDetailProps) {
+export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onRework, onStop, onAssign, onUnassign, onLoadAgents, onLoadBadges, onCreateBadge, onAttachBadge, onDetachBadge, onArchive, onRestore, onArchived, editRequested = false, runnerHealth = { kind: "loading" }, roundRecords, onLoadEarlierActivity, onAnswer, onAddFeedback, onDecidePermission, onRevokeGrant }: TicketDetailProps) {
   const previousTicket = useRef(ticket);
   const [current, setCurrent] = useState(ticket);
   const [mode, setMode] = useState<"view" | "editing">(editRequested && !ticket.archivedAt && !ticket.openRound ? "editing" : "view");
@@ -252,6 +253,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onRewor
                 onAddFeedback={onAddFeedback}
                 permissionDecision={current.allowedActions.permissionDecision}
                 onDecidePermission={onDecidePermission}
+                onRevokeGrant={onRevokeGrant}
                 permissionGrants={current.permissionGrants}
                 permissionGrantCount={current.permissionGrantCount}
               />

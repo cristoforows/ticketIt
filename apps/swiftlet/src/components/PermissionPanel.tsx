@@ -1,10 +1,17 @@
-import { useEffect, useId, useState } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
+import { useEffect, useId, useRef, useState } from "react";
 import { GalleyError } from "../api/http";
 import type { RoundAuthorityCheck } from "../api/rounds";
 import type { GrantChoice, PermissionGrant, PermissionRequest, Ticket } from "../api/tickets";
-import { ExpiredTag, FieldHint, FullAccessTag, FieldLabel, FieldNote, InlineError, LocalTime, PrimaryButton, ReceiptLine, SecondaryButton, Select, localTimestamp } from "./ui";
+import { ErrorMessage, ExpiredTag, FieldHint, FullAccessTag, FieldLabel, FieldNote, InlineError, LocalTime, PrimaryButton, ReceiptBody, ReceiptDialog, ReceiptFooter, ReceiptLine, ReceiptTitle, Rule, SecondaryButton, Select, localTimestamp } from "./ui";
 
 export type DecidePermission = (roundId: string, requestId: string, decision: "approve" | "decline", grant?: GrantChoice) => Promise<Ticket>;
+export type RevokeGrant = (grantId: string) => Promise<Ticket>;
+
+const revokeRefusedMessages: Record<string, string> = {
+  grant_already_revoked: "This grant was already revoked. The receipt now shows it as Galley has it.",
+  grant_expired: "This grant has already expired, so there is nothing to revoke. The receipt now shows it as Galley has it.",
+};
 
 const refreshedMessages: Record<string, string> = {
   permission_already_decided: "This Permission request is already decided. The receipt now shows the decision Galley recorded.",
@@ -270,6 +277,14 @@ export function PermissionHistory({ requests, checks, checkCount, awaiting, gran
 }
 
 function GrantTerms({ grant }: { grant: PermissionGrant }) {
+  if (grant.state === "revoked" && grant.revokedAt !== null) {
+    return (
+      <p className="m-0 text-muted">
+        <ExpiredTag data-testid="ticket-detail-permission-grant-revoked">Revoked</ExpiredTag> {grant.form === "ticket" ? "Allowed for this Ticket" : "Allowed for a time"} <LocalTime iso={grant.approvedAt} /> · revoked{" "}
+        <LocalTime iso={grant.revokedAt} data-testid="ticket-detail-permission-grant-revoked-at" />
+      </p>
+    );
+  }
   if (grant.form === "ticket" || grant.expiresAt === null || grant.remainingSeconds === null) {
     return <p className="m-0 text-muted">Allowed for this Ticket <LocalTime iso={grant.approvedAt} /></p>;
   }
@@ -288,8 +303,95 @@ function GrantTerms({ grant }: { grant: PermissionGrant }) {
   );
 }
 
-export function PermissionGrants({ grants, count = grants.length }: { grants: PermissionGrant[]; count?: number }) {
-  if (grants.length === 0) return null;
+function coveredRoundsText(grant: PermissionGrant): string {
+  const rounds = grant.coveredOpenRounds;
+  if (rounds.length === 0) return "No open Round uses it, so nothing is stopped.";
+  const named = rounds.map((round) => `Round ${round.sequence} of “${round.ticketTitle}”`).join(", ");
+  return rounds.length === 1 ? `This stops the open Round it covers: ${named}.` : `This stops the ${rounds.length} open Rounds it covers: ${named}.`;
+}
+
+function revokeFailureText(failure: unknown): string {
+  if (failure instanceof GalleyError && revokeRefusedMessages[failure.code]) return revokeRefusedMessages[failure.code]!;
+  return failure instanceof Error ? failure.message : "Unable to revoke the grant.";
+}
+
+function RevokeGrantDialog({ grant, onRevoke, onRevoked, onFailed, onClose }: { grant: PermissionGrant; onRevoke: RevokeGrant; onRevoked: (ticket: Ticket) => void; onFailed: (message: string) => void; onClose: () => void }) {
+  const [pending, setPending] = useState(false);
+  const cancel = useRef<HTMLButtonElement>(null);
+  const keepOpenWhilePending = (event: Event) => {
+    if (pending) event.preventDefault();
+  };
+
+  async function revoke() {
+    if (pending) return;
+    setPending(true);
+    try {
+      onRevoked(await onRevoke(grant.id));
+    } catch (failure) {
+      onFailed(revokeFailureText(failure));
+    }
+    onClose();
+  }
+
+  return (
+    <ReceiptDialog
+      data-testid="ticket-detail-permission-revoke-dialog"
+      layout="stack"
+      onOpenAutoFocus={(event) => {
+        event.preventDefault();
+        cancel.current?.focus();
+      }}
+      onEscapeKeyDown={keepOpenWhilePending}
+      onInteractOutside={keepOpenWhilePending}
+    >
+      <ReceiptBody>
+        <ReceiptTitle as={Dialog.Title}>Revoke this grant?</ReceiptTitle>
+        <Rule className="my-0" weight="thick" />
+        <Dialog.Description asChild>
+          <div className="flex flex-col gap-2">
+            <p className="m-0 break-words"><GrantScope grant={grant} />{grant.substituteAccount && <SubstituteLabel />}</p>
+            <p data-testid="ticket-detail-permission-revoke-effect" className="m-0">
+              Revoking ends this grant now, and every later action it allowed is refused. {coveredRoundsText(grant)}
+            </p>
+            <p data-testid="ticket-detail-permission-revoke-undone" className="m-0">
+              Actions the Agent already completed are not undone.
+            </p>
+          </div>
+        </Dialog.Description>
+      </ReceiptBody>
+      <ReceiptFooter>
+        <div className="flex flex-wrap gap-2">
+          <PrimaryButton data-testid="ticket-detail-permission-revoke-confirm" disabled={pending} onClick={() => void revoke()}>
+            {pending ? "Revoking…" : "Revoke"}
+          </PrimaryButton>
+          <Dialog.Close asChild>
+            <SecondaryButton ref={cancel} data-testid="ticket-detail-permission-revoke-cancel" disabled={pending}>
+              Cancel
+            </SecondaryButton>
+          </Dialog.Close>
+        </div>
+      </ReceiptFooter>
+    </ReceiptDialog>
+  );
+}
+
+function RevokeGrantControl({ grant, onRevoke, onRevoked, onFailed }: { grant: PermissionGrant; onRevoke: RevokeGrant; onRevoked: (ticket: Ticket) => void; onFailed: (message: string | null) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Dialog.Root open={open} onOpenChange={(next) => { if (next) onFailed(null); setOpen(next); }}>
+      <Dialog.Trigger asChild>
+        <SecondaryButton size="sm" className="mt-1" data-testid="ticket-detail-permission-grant-revoke" aria-label={`Revoke: ${grant.full ? `full access to the ${grant.account} account` : scopeText({ account: grant.account, action: grant.action ?? "", resource: grant.resource ?? "" })}`}>
+          Revoke
+        </SecondaryButton>
+      </Dialog.Trigger>
+      {open && <RevokeGrantDialog grant={grant} onRevoke={onRevoke} onRevoked={onRevoked} onFailed={onFailed} onClose={() => setOpen(false)} />}
+    </Dialog.Root>
+  );
+}
+
+export function PermissionGrants({ grants, count = grants.length, onRevoke, onRevoked = () => {} }: { grants: PermissionGrant[]; count?: number; onRevoke?: RevokeGrant; onRevoked?: (ticket: Ticket) => void }) {
+  const [revokeError, setRevokeError] = useState<string | null>(null);
+  if (grants.length === 0 && revokeError === null) return null;
   return (
     <section aria-label="Permissions for this Ticket" data-testid="ticket-detail-permission-grants" className="my-3">
       <FieldLabel as="h4">Permissions for this Ticket</FieldLabel>
@@ -304,9 +406,15 @@ export function PermissionGrants({ grants, count = grants.length }: { grants: Pe
               {grant.substituteAccount && <SubstituteLabel />}
             </p>
             <GrantTerms grant={grant} />
+            {onRevoke && grant.allowedActions.revoke.available && <RevokeGrantControl grant={grant} onRevoke={onRevoke} onRevoked={onRevoked} onFailed={setRevokeError} />}
           </li>
         ))}
       </ol>
+      {revokeError && (
+        <ErrorMessage flat title="Could not revoke the grant.">
+          <p data-testid="ticket-detail-permission-revoke-error" className="m-0">{revokeError}</p>
+        </ErrorMessage>
+      )}
     </section>
   );
 }

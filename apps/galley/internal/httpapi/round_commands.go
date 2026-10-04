@@ -12,8 +12,6 @@ import (
 )
 
 const (
-	oneStopPerRoundIndex = "round_commands_one_stop_per_round"
-
 	commandAlreadyAcknowledgedCode    = "command_already_acknowledged"
 	commandAlreadyAcknowledgedMessage = "this command is already acknowledged with another outcome"
 	roundOrCommandNotFoundMessage     = "no round or command with that identifier"
@@ -58,22 +56,12 @@ func requestStopForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64,
 	if err != nil || !found {
 		return Ticket{}, found, nil, err
 	}
-	rejection := decideStop(ticketWorkflowState{ticketLock: lock})
+	rejection, err := requestStop(ctx, tx, ownerID, lock, now)
+	if err != nil {
+		return Ticket{}, true, nil, err
+	}
 	if rejection != nil && rejection.code != stopAlreadyRequestedCode {
 		return Ticket{}, true, rejection, nil
-	}
-	if rejection == nil {
-		_, err := tx.Exec(ctx, `INSERT INTO round_commands (owner_id, round_id, public_id, type, claim_epoch, issued_at)
-			SELECT owner_id, id, $3::uuid, $4, claim_epoch, $5 FROM rounds WHERE owner_id = $1 AND public_id = $2::uuid`,
-			ownerID, lock.openRoundID, uuid.NewString(), string(RunnerCommandStop), now)
-		if isUniqueViolation(err, oneStopPerRoundIndex) {
-			_ = tx.Rollback(ctx)
-			ticket, found, err := getTicketForOwner(ctx, pool, ownerID, id, now)
-			return ticket, found, nil, err
-		}
-		if err != nil {
-			return Ticket{}, true, nil, err
-		}
 	}
 	ticket, err := readLockedTicket(ctx, tx, ownerID, id, now)
 	if err != nil {
@@ -86,6 +74,18 @@ func requestStopForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64,
 		return Ticket{}, true, nil, err
 	}
 	return ticket, true, nil, nil
+}
+
+// The caller holds the Ticket row lock, which lock.openRoundID and lock.stopRequested were read under.
+func requestStop(ctx context.Context, tx pgx.Tx, ownerID int64, lock ticketLock, now time.Time) (*transitionRejection, error) {
+	if rejection := decideStop(ticketWorkflowState{ticketLock: lock}); rejection != nil {
+		return rejection, nil
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO round_commands (owner_id, round_id, public_id, type, claim_epoch, issued_at)
+		SELECT owner_id, id, $3::uuid, $4, claim_epoch, $5 FROM rounds WHERE owner_id = $1 AND public_id = $2::uuid
+		ON CONFLICT (round_id) WHERE type = 'stop' DO NOTHING`,
+		ownerID, lock.openRoundID, uuid.NewString(), string(RunnerCommandStop), now)
+	return nil, err
 }
 
 func (s *server) ListRoundCommands(w http.ResponseWriter, r *http.Request, roundId string) {
@@ -120,7 +120,7 @@ func pendingRoundCommands(ctx context.Context, pool *pgxpool.Pool, ownerID int64
 		LEFT JOIN permission_requests p ON p.owner_id = c.owner_id AND p.id = c.permission_request_id
 		LEFT JOIN permission_grants g ON g.owner_id = p.owner_id AND g.request_id = p.id
 		WHERE r.owner_id = $1 AND r.public_id = $2::uuid
-		ORDER BY c.type = $3 DESC, c.issued_at, c.id`, ownerID, roundID, string(RunnerCommandStop))
+		ORDER BY c.type = $3 DESC, c.type = $4 DESC, c.issued_at, c.id`, ownerID, roundID, string(RunnerCommandStop), string(RunnerCommandAuthorityChanged))
 	if err != nil {
 		return nil, false, err
 	}

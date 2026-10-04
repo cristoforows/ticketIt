@@ -1645,3 +1645,64 @@ func TestFullAccess_ResponsesMatchContract(t *testing.T) {
 	validate(approve(requestB, `{"form":"ticket","scope":"requested"}`), http.StatusOK)
 	readAll()
 }
+
+func TestRevokeGrant_ResponsesMatchContractAndMethod405(t *testing.T) {
+	f := newClaimFixture(t)
+	router, err := legacy.NewRouter(loadContract(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate := func(call runnerCall, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(call.method, call.path, strings.NewReader(call.body))
+		if call.token != "" {
+			req.Header.Set("Authorization", "Bearer "+call.token)
+		}
+		if call.cookie != nil {
+			req.AddCookie(call.cookie)
+		}
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("%s %s: status=%d, want %d; body=%s", call.method, call.path, rec.Code, want, rec.Body.String())
+		}
+		validateAgainstContract(t, router, req, rec)
+		return rec
+	}
+	queued, claim, grantID := f.timeGrantRound(t, "revoke contract", writeReport, runnerEpoch.Add(time.Hour))
+	revoke := func(id string) runnerCall {
+		return runnerCall{method: http.MethodPost, path: revokePath(id), cookie: f.cookie}
+	}
+	commands := runnerCall{method: http.MethodGet, path: "/api/runner/rounds/" + claim.RoundId + "/commands", token: f.token}
+	readAll := func() {
+		t.Helper()
+		for _, read := range []runnerCall{
+			{method: http.MethodGet, path: "/api/tickets/" + queued.Id, cookie: f.cookie},
+			{method: http.MethodGet, path: "/api/tickets", cookie: f.cookie},
+			commands,
+		} {
+			validate(read, http.StatusOK)
+		}
+	}
+	readAll()
+	var revoked PermissionGrant
+	if err := json.Unmarshal(validate(revoke(grantID), http.StatusOK).Body.Bytes(), &revoked); err != nil || revoked.State != PermissionGrantRevoked {
+		t.Fatalf("revoke = %+v (%v), want revoked", revoked, err)
+	}
+	validate(revoke(grantID), http.StatusOK)
+	readAll()
+	validate(revoke(uuid.NewString()), http.StatusNotFound)
+	validate(revoke("grant-1"), http.StatusNotFound)
+	validate(runnerCall{method: http.MethodPost, path: revokePath(grantID)}, http.StatusUnauthorized)
+
+	f.mustConfirmStop(t, claim)
+	_, next, expiring := f.timeGrantRound(t, "expiring", readReport, runnerEpoch.Add(time.Hour))
+	f.clock.Set(runnerEpoch.Add(time.Hour))
+	assertErrorCode(t, validate(revoke(expiring), http.StatusBadRequest), grantExpiredCode)
+	validate(runnerCall{method: http.MethodGet, path: "/api/tickets/" + next.Ticket.Id, cookie: f.cookie}, http.StatusOK)
+
+	rec := f.expect(t, runnerCall{method: http.MethodGet, path: revokePath(grantID), cookie: f.cookie}, http.StatusMethodNotAllowed)
+	if rec.Header().Get("Allow") != "POST" {
+		t.Fatalf("Allow = %q, want POST", rec.Header().Get("Allow"))
+	}
+}

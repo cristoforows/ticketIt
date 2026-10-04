@@ -49,7 +49,7 @@ Authorization for an **Agent** to perform actions within a resource scope, inclu
 _Avoid_: Skill when referring to authorization rather than instructions.
 
 **Temporary Permission**:
-A **Permission** for an **Agent** of one of two distinct kinds: ticket-based, ending when its specified **Ticket** reaches **Done**, or time-based, covering the agent on any of its tickets until its expiry by Galley's clock, independently of ticket completion. It authorizes repeated uses within its account, action, and resource scope, or its whole account under **Full Access**; ticket and time limits are not combined in one grant. Expiry is judged at each check and stops only that scope; the expired grant stays recorded, and renewal is a new grant.
+A **Permission** for an **Agent** of one of two distinct kinds: ticket-based, ending when its specified **Ticket** reaches **Done**, or time-based, covering the agent on any of its tickets until its expiry by Galley's clock, independently of ticket completion. It authorizes repeated uses within its account, action, and resource scope, or its whole account under **Full Access**; ticket and time limits are not combined in one grant. Expiry is judged at each check and stops only that scope; the expired grant stays recorded, and renewal is a new grant. The owner can end one sooner by **Revocation**.
 _Avoid_: One-time permission when referring to a ticket-bound or time-bound grant.
 
 **Permission Request**:
@@ -59,6 +59,14 @@ _Avoid_: Question when referring to an ask for authority rather than information
 **Approval**:
 The owner's acceptance of a **Permission Request**, which creates a **Temporary Permission** of the kind the owner chooses for exactly that agent and scope, or **Full Access** to that scope's account when the owner chooses it (and, ticket-based, that ticket), and resumes the same **Round**. Later actions it covers need no new request.
 _Avoid_: Answer when referring to granting authority.
+
+**Revocation**:
+The owner's ending of a live **Temporary Permission** or **Full Access** before it would end by itself. It takes effect at once: no later check is allowed by that grant. Each open **Round** the grant covers, those of its agent and, ticket-based, on its ticket, is put in **Stopping** as by the owner's Stop. An action already allowed may complete and stays recorded; nothing completed is undone. The revoked grant stays recorded, and an expired grant cannot be revoked.
+_Avoid_: Decline when referring to ending a grant rather than refusing a request; expiry when the owner ended it.
+
+**Authority Changed**:
+Galley's notice to the runner holding an open **Round** that a grant covering it was approved or revoked. It asks for nothing, since every action already checks authority live; expiry sends none, for the same reason.
+_Avoid_: Stop when referring to this notice; it ends nothing.
 
 **Grill Mode**:
 An optional guided interview during **Ticket** creation that helps the person adding the ticket clarify its intended outcome and supply information needed to carry out the work. People can instead fill in the ticket themselves using simple guidance.

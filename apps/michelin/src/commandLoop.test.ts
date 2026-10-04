@@ -428,3 +428,85 @@ describe("approvals", () => {
     await loop.stop();
   });
 });
+
+describe("authority changed", () => {
+  const CHANGED = { id: "d2d2d2d2-d2d2-4d2d-8d2d-d2d2d2d2d2d2", type: "authority_changed", claimEpoch: 2, issuedAt: "2026-10-02T12:00:02Z" };
+  const STALE_CHANGED = { ...CHANGED, id: "d3d3d3d3-d3d3-4d3d-8d3d-d3d3d3d3d3d3", claimEpoch: 1 };
+  const requestId = requestIdFor(CLAIM.roundId, 3);
+  const grantId = "12121212-1212-4212-8212-121212121212";
+  const performed = () => json({ roundId: CLAIM.roundId, type: "progress", state: "running", startedAt: "2026-10-02T11:59:00Z", seq: 1 }, 201);
+  const requested = () => json({ roundId: CLAIM.roundId, type: "permission_requested", state: "waiting_for_input", startedAt: "2026-10-02T11:59:00Z", requestId }, 201);
+  const allow = () => json({ decision: "allow", grantId });
+  const deny = () => json({ decision: "deny" });
+  const eventTypes = (fetchFn: ReturnType<typeof galley>) => calls(fetchFn, eventPath).map(([, init]) => (JSON.parse(String(init?.body)) as { type: string }).type);
+
+  it.each([
+    ["its claim epoch", CHANGED],
+    ["another claim epoch", STALE_CHANGED],
+  ] as const)("acknowledges an authority change at %s applied once, however often it is listed, and the engine keeps holding", async (_epoch, command) => {
+    const fetchFn = galley({ commands: [listing(command)] });
+    const { loop, records, messages } = setup(fetchFn);
+
+    await vi.advanceTimersByTimeAsync(6000);
+
+    expect(calls(fetchFn, commandsPath).length).toBeGreaterThanOrEqual(4);
+    expect(ackBodies(fetchFn, command.id)).toEqual([{ outcome: "applied" }]);
+    expect(records().filter((record) => record["msg"] === "authority changed; the next action checks it again")).toEqual([
+      expect.objectContaining({ level: "info", commandId: command.id, commandEpoch: command.claimEpoch, claimEpoch: CLAIM.claimEpoch }),
+    ]);
+    expect(messages()).not.toContain("command for another claim epoch ignored");
+    expect(messages()).not.toContain("engine stopped");
+    await loop.stop();
+  });
+
+  it("acknowledges a redelivered authority change applied again after a restart, and Galley's stored acknowledgement stands", async () => {
+    const stored = () => json({ id: CHANGED.id, acknowledgedAt: "2026-10-02T12:00:05Z", outcome: "applied" });
+    for (let run = 0; run < 2; run++) {
+      const fetchFn = galley({ commands: [listing(CHANGED)], ack: [stored] });
+      const { loop, messages } = setup(fetchFn);
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(ackBodies(fetchFn, CHANGED.id)).toEqual([{ outcome: "applied" }]);
+      expect(messages()).not.toContain("command acknowledgement refused");
+      await loop.stop();
+    }
+  });
+
+  it("applies the Stop listed before the authority change, then acknowledges both applied", async () => {
+    const fetchFn = galley({ commands: [listing(), listing(STOP, CHANGED), listing()] });
+    const { loop, messages } = setup(fetchFn);
+
+    await vi.advanceTimersByTimeAsync(4000);
+
+    const shown = messages();
+    expect(shown.indexOf("stop requested")).toBeGreaterThan(-1);
+    expect(shown.indexOf("authority changed; the next action checks it again")).toBeGreaterThan(shown.indexOf("stop requested"));
+    expect(shown).toContain("stop confirmation reported");
+    expect(ackBodies(fetchFn, STOP.id)).toEqual([{ outcome: "applied" }]);
+    expect(ackBodies(fetchFn, CHANGED.id)).toEqual([{ outcome: "applied" }]);
+    await loop.stop();
+  });
+
+  it("checks authority afresh at the next action after an authority change, and asks when Galley now denies", async () => {
+    const ACT_TWICE: EngineScript = {
+      steps: [
+        { step: "start" },
+        { step: "act", account: "controlled", action: "write_note", resource: "notes/weekly-report" },
+        { step: "wait", ms: 3000 },
+        { step: "act", account: "controlled", action: "write_note", resource: "notes/weekly-report" },
+        { step: "hold" },
+      ],
+    };
+    const fetchFn = galley({ commands: [listing(CHANGED), listing()], events: [created, performed, requested], checks: [allow, deny] });
+    const { loop } = setup(fetchFn, ACT_TWICE);
+
+    await vi.advanceTimersByTimeAsync(3500);
+    expect(eventTypes(fetchFn)).toEqual(["execution_started", "progress"]);
+    expect(calls(fetchFn, checksPath)).toHaveLength(1);
+    expect(ackBodies(fetchFn, CHANGED.id)).toEqual([{ outcome: "applied" }]);
+
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(calls(fetchFn, checksPath)).toHaveLength(2);
+    expect(eventTypes(fetchFn)).toEqual(["execution_started", "progress", "permission_requested"]);
+    await loop.stop();
+  });
+});
