@@ -1285,3 +1285,17 @@ Tests: `TicketDetail.test.tsx` ("full access") and `api/tickets.test.ts`.
 Tests: `TicketDetail.test.tsx` ("revoking a grant"),
 `TicketDetailPage.test.tsx` ("revoking the grant") and
 `api/tickets.test.ts`.
+
+## Grants ended at Done (issue #169)
+
+A ticket grant Galley ended when its Ticket reached Done has `state:
+ended_at_done`. It shows the tag **Ended at Done**
+(`ticket-detail-permission-grant-ended`) and Galley's `endedAt`
+(`ticket-detail-permission-grant-ended-at`), in the tag style of
+**Revoked** and **Expired** and distinct from both. It offers no
+Revoke; Swiftlet only reads `allowedActions.revoke`. The parser
+requires `endedAt` (a string exactly when `ended_at_done`) and accepts
+that state for the `ticket` form only. `grant_ended` is explained if a
+stale receipt posts a revoke.
+
+Tests: `TicketDetail.test.tsx` and `api/tickets.test.ts`.

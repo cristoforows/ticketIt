@@ -79,13 +79,15 @@ export interface PermissionGrant {
   substituteAccount: boolean;
   form: "ticket" | "time";
   /** Derived from Galley's clock when read; no stored state changes at expiry (issue #166). */
-  state: "active" | "expired" | "revoked";
+  state: "active" | "expired" | "revoked" | "ended_at_done";
   expiresAt: string | null;
   remainingSeconds: number | null;
   roundId: string;
   createdAt: string;
   approvedAt: string;
   revokedAt: string | null;
+  /** Set exactly when the Ticket reached Done and ended a ticket grant (issue #169). */
+  endedAt: string | null;
   allowedActions: { revoke: { available: boolean; reason?: { code: string; message: string } } };
   /** The open Rounds a revoke would stop (issue #168). */
   coveredOpenRounds: { roundId: string; sequence: number; ticketId: string; ticketTitle: string }[];

@@ -2095,6 +2095,43 @@ fencing, constraints), the extra `authority_changed` in the approval
 tests, and `TestRevokeGrant_ResponsesMatchContractAndMethod405`.
 Evidence: `docs/evidence/m5/168-revocation.md`.
 
+## Ticket grants end at Done (issue #169)
+
+Migration `000026_end_grants_at_done.up.sql` widens
+`permission_grants.state` to `active | revoked | ended_at_done` and adds
+`ended_at`, set exactly on an ended grant, never before its approval,
+and only on a `ticket`-form grant. A time grant cannot be ended at Done:
+`permission_grants_only_ticket_form_ends_at_done`.
+
+`endTicketGrantsAtDone` (`grant_ending.go`) runs inside
+`transitionLockedTicket` whenever the chosen Status is Done, before the
+Ticket row is updated, so the response already shows the ended grants.
+Every `active` ticket grant bound to the Ticket ends, whatever its
+Agent, scope or full access. Revoked grants stay revoked, time grants
+and other Tickets' grants are untouched. The Ticket's lock order is the
+transition's: the Owner's priority lock, the Ticket row, then the grant
+rows, the same as a revoke.
+
+Accept is the only route to Done. The plain status command refuses
+`Done`, and every other `UPDATE tickets SET status` writes a Status
+other than Done; `TestEveryTicketStatusWriteIsAccountedFor` lists them
+and fails on a new one.
+
+An ended grant matches no check (checks read `state = 'active'`), is not
+an `expiredGrantId`, and cannot be renewed (`invalid_renewal`).
+Reopening Done to Ready does not revive it: the next Round's check
+denies, Michelin raises a new request, and the approval creates a new
+grant. No Ticket flag blocks that. Revoking an ended grant is
+`400 grant_ended`, and its `coveredOpenRounds` is empty. Rework from In
+Review ends nothing.
+
+Tests: `grant_ending_test.go` (every grant kind, Agents and Tickets,
+reopen and fresh grant, renewal, rework, time grants, the routes to
+Done, injected failure on both sides of the transaction, concurrent
+accepts, accept against revoke, another Ticket's checks, constraints)
+and `TestEndedGrants_ResponsesMatchContract`.
+Evidence: `docs/evidence/m5/169-grants-end-at-done.md`.
+
 ## Error shape
 
 `ErrorBody`/`ErrorDetail` are generated from

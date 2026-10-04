@@ -274,6 +274,11 @@ func transitionLockedTicket(
 		}
 	}
 
+	if nextStatus == Done {
+		if err := endTicketGrantsAtDone(ctx, tx, ownerID, publicID, now); err != nil {
+			return Ticket{}, true, nil, fmt.Errorf("failed to end the ticket's grants: %w", err)
+		}
+	}
 	row := tx.QueryRow(ctx,
 		`UPDATE tickets SET status = $3, updated_at = now()
 		  WHERE owner_id = $1 AND public_id = $2::uuid

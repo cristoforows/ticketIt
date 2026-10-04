@@ -15,6 +15,8 @@ import (
 const (
 	grantAlreadyRevokedCode    = "grant_already_revoked"
 	grantAlreadyRevokedMessage = "this grant is already revoked"
+	grantEndedCode             = "grant_ended"
+	grantEndedMessage          = "this grant ended when its Ticket reached Done and authorizes nothing, so there is nothing to revoke"
 	grantExpiredCode           = "grant_expired"
 	grantExpiredMessage        = "this grant has expired and authorizes nothing, so there is nothing to revoke"
 	grantNotFoundMessage       = "no grant with that identifier"
@@ -33,6 +35,8 @@ func decideRevoke(target revocationTarget, now time.Time) *transitionRejection {
 	switch {
 	case target.state == PermissionGrantRevoked:
 		return &transitionRejection{code: grantAlreadyRevokedCode, message: grantAlreadyRevokedMessage}
+	case target.state == PermissionGrantEndedAtDone:
+		return &transitionRejection{code: grantEndedCode, message: grantEndedMessage}
 	case target.expiresAt != nil && !timeGrantLive(*target.expiresAt, now):
 		return &transitionRejection{code: grantExpiredCode, message: grantExpiredMessage}
 	}
