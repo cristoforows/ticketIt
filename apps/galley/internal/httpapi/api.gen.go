@@ -428,6 +428,12 @@ type AcknowledgeRoundCommandRequest struct {
 	Outcome RunnerCommandAckOutcome `json:"outcome"`
 }
 
+// AddRoundFeedbackRequest defines model for AddRoundFeedbackRequest.
+type AddRoundFeedbackRequest struct {
+	// Body Counted in Unicode code points. Not blank; no control characters but tab and line feed.
+	Body string `json:"body"`
+}
+
 // AdvanceDevClockRequest defines model for AdvanceDevClockRequest.
 type AdvanceDevClockRequest struct {
 	Seconds int `json:"seconds"`
@@ -487,15 +493,28 @@ type ChangeTicketStatusRequest struct {
 	Status TicketStatus `json:"status"`
 }
 
+// ClaimedFeedback defines model for ClaimedFeedback.
+type ClaimedFeedback struct {
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"createdAt"`
+
+	// RoundId The delivered Round the feedback is about.
+	RoundId       string `json:"roundId"`
+	RoundSequence int    `json:"roundSequence"`
+}
+
 // ClaimedTicket defines model for ClaimedTicket.
 type ClaimedTicket struct {
-	Constraints     string `json:"constraints"`
-	Context         string `json:"context"`
-	Goal            string `json:"goal"`
-	Id              string `json:"id"`
-	Repository      string `json:"repository"`
-	SuccessCriteria string `json:"successCriteria"`
-	Title           string `json:"title"`
+	Constraints string `json:"constraints"`
+	Context     string `json:"context"`
+
+	// Feedback The Owner's feedback no earlier Round received, oldest first. This claim consumes it; no later claim carries it again.
+	Feedback        []ClaimedFeedback `json:"feedback"`
+	Goal            string            `json:"goal"`
+	Id              string            `json:"id"`
+	Repository      string            `json:"repository"`
+	SuccessCriteria string            `json:"successCriteria"`
+	Title           string            `json:"title"`
 }
 
 // CreateAgentRequest defines model for CreateAgentRequest.
@@ -758,6 +777,24 @@ type RoundEventResult struct {
 // RoundEventType Grows by slice.
 type RoundEventType string
 
+// RoundFeedback defines model for RoundFeedback.
+type RoundFeedback struct {
+	Body string `json:"body"`
+
+	// ConsumedBy The later Round whose claim carried this feedback; null until one is claimed.
+	ConsumedBy *RoundFeedbackConsumer `json:"consumedBy"`
+
+	// CreatedAt Galley's clock.
+	CreatedAt time.Time `json:"createdAt"`
+	Id        string    `json:"id"`
+}
+
+// RoundFeedbackConsumer defines model for RoundFeedbackConsumer.
+type RoundFeedbackConsumer struct {
+	RoundId  string `json:"roundId"`
+	Sequence int    `json:"sequence"`
+}
+
 // RoundQuestion defines model for RoundQuestion.
 type RoundQuestion struct {
 	Answer     *string    `json:"answer"`
@@ -978,7 +1015,10 @@ type TicketAllowedActions struct {
 
 	// Answer Whether `openRound.question` can be answered. Unavailable with `answer_not_available` without one, `question_already_answered` once it is answered, and `stop_already_requested` once Stop is requested.
 	Answer TicketCommandAvailability `json:"answer"`
-	Rework TicketCommandAvailability `json:"rework"`
+
+	// Feedback Whether feedback can be added to `delivery.roundId`; otherwise `feedback_not_available`.
+	Feedback TicketCommandAvailability `json:"feedback"`
+	Rework   TicketCommandAvailability `json:"rework"`
 
 	// StatusChangeRejections Targets D3 S2's table permits from the current Status that this Ticket's Agent assignment or missing inputs rule out, each with the status command's error.
 	StatusChangeRejections []TicketStatusChangeRejection `json:"statusChangeRejections"`
@@ -1070,7 +1110,10 @@ type TicketRound struct {
 	// EarlierActivityCursor Opaque. Passed as `before` to `listRoundActivity`, it reads the notes older than this page's first. Null when there are none.
 	EarlierActivityCursor *EarlierActivityCursor `json:"earlierActivityCursor"`
 	EndedAt               *time.Time             `json:"endedAt"`
-	Id                    string                 `json:"id"`
+
+	// Feedback The Owner's feedback on this Round's result, oldest first.
+	Feedback []RoundFeedback `json:"feedback"`
+	Id       string          `json:"id"`
 
 	// OutcomeNote Set exactly when `state` is `stopped`, `failed` or `interrupted`.
 	OutcomeNote *string `json:"outcomeNote"`
@@ -1220,6 +1263,9 @@ type AssignTicketJSONRequestBody = AssignTicketRequest
 
 // ReorderTicketJSONRequestBody defines body for ReorderTicket for application/json ContentType.
 type ReorderTicketJSONRequestBody = ReorderTicketRequest
+
+// AddRoundFeedbackJSONRequestBody defines body for AddRoundFeedback for application/json ContentType.
+type AddRoundFeedbackJSONRequestBody = AddRoundFeedbackRequest
 
 // AnswerRoundQuestionJSONRequestBody defines body for AnswerRoundQuestion for application/json ContentType.
 type AnswerRoundQuestionJSONRequestBody = AnswerQuestionRequest
@@ -1584,6 +1630,9 @@ type ServerInterface interface {
 	// ListRoundActivity Page through a Round's activity
 	// (GET /api/tickets/{id}/rounds/{roundId}/activity)
 	ListRoundActivity(w http.ResponseWriter, r *http.Request, id string, roundId string, params ListRoundActivityParams)
+	// AddRoundFeedback Add feedback on a delivered Round for the next Round
+	// (POST /api/tickets/{id}/rounds/{roundId}/feedback)
+	AddRoundFeedback(w http.ResponseWriter, r *http.Request, id string, roundId string)
 	// AnswerRoundQuestion Answer the question a Round waits on
 	// (POST /api/tickets/{id}/rounds/{roundId}/questions/{questionId}/answer)
 	AnswerRoundQuestion(w http.ResponseWriter, r *http.Request, id string, roundId string, questionId string)
@@ -2455,6 +2504,41 @@ func (siw *ServerInterfaceWrapper) ListRoundActivity(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// AddRoundFeedback operation middleware
+func (siw *ServerInterfaceWrapper) AddRoundFeedback(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "roundId" -------------
+	var roundId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "roundId", r.PathValue("roundId"), &roundId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "roundId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddRoundFeedback(w, r, id, roundId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // AnswerRoundQuestion operation middleware
 func (siw *ServerInterfaceWrapper) AnswerRoundQuestion(w http.ResponseWriter, r *http.Request) {
 
@@ -2699,6 +2783,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/tickets/{id}/rounds", wrapper.ListTicketRounds)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/tickets/{id}/rounds/{roundId}/activity", wrapper.ListRoundActivity)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/rounds/{roundId}/questions/{questionId}/answer", wrapper.AnswerRoundQuestion)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/rounds/{roundId}/feedback", wrapper.AddRoundFeedback)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/session", wrapper.SignOut)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/session", wrapper.GetSession)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/runner-credential", wrapper.RevokeRunner)

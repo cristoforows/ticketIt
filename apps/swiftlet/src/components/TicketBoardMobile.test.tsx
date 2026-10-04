@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { TicketBoard } from "./TicketBoard";
 
 const accept = { available: false, reason: { code: "invalid_transition", message: "Unavailable" } };
+const feedback = { available: false, reason: { code: "feedback_not_available", message: "Unavailable" } };
 const rework = { available: false, reason: { code: "rework_not_available", message: "Unavailable" } };
 const stop = { available: false, reason: { code: "stop_not_available", message: "Unavailable" } };
 const answer = { available: false, reason: { code: "answer_not_available", message: "Unavailable" } };
@@ -11,7 +12,7 @@ const ticket = (id: string, status: string, statusChanges: string[] = [], archiv
   title: `Ticket ${id}`,
   status,
   template: "Basic",
-  allowedActions: { statusChangeRejections: [], statusChanges, accept, rework, stop, answer },
+  allowedActions: { statusChangeRejections: [], statusChanges, accept, rework, stop, answer, feedback },
   completionCondition: "humanAcceptance",
   assigneeType: "",
   assigneeAgent: null,
@@ -65,7 +66,7 @@ describe("TicketBoard on phones", () => {
     const agent = { id: "a1", name: "Builder", kind: "coding" };
     const openRound = { id: "r1", sequence: 1, state: "running", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: "2026-10-01T10:00:01Z", stopRequestedAt: null, waitingReason: "working", question: null };
     stubTickets([
-      { ...ticket("locked", "Backlog"), assigneeType: "agent", assigneeAgent: agent, openRound, allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason }, rework, stop: { available: true }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } } } },
+      { ...ticket("locked", "Backlog"), assigneeType: "agent", assigneeAgent: agent, openRound, allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason }, rework, stop: { available: true }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } } } },
       ticket("next", "Backlog", ["Ready"]),
     ]);
     render(<TicketBoard onUnauthenticated={() => {}} />);
@@ -204,7 +205,7 @@ describe("TicketBoard on phones", () => {
       const original = ticket("a", "Backlog", ["Ready", "Blocked", "Done"]);
       const fetchStub = vi.fn()
         .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ tickets: [original] }) })
-        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ...original, status: "Ready", allowedActions: { statusChangeRejections: [], statusChanges: ["Backlog"], accept, rework, stop, answer } }) })
+        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ...original, status: "Ready", allowedActions: { statusChangeRejections: [], statusChanges: ["Backlog"], accept, rework, stop, answer, feedback } }) })
         .mockResolvedValue({ ok: true, status: 200, json: async () => ({ tickets: [{ ...original, status: "Ready" }] }) });
       vi.stubGlobal("fetch", fetchStub);
       render(<TicketBoard onUnauthenticated={() => {}} />);

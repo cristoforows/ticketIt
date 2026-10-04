@@ -19,7 +19,7 @@ const TICKET = {
   id: TICKET_ID,
   title: "Write the report",
   status: "Backlog",
-  allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } } },
+  allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } } },
   template: "Basic",
   completionCondition: "humanAcceptance",
   assigneeType: "",
@@ -96,7 +96,7 @@ describe("TicketDetailPage", () => {
   it("rejects a Ticket missing Galley's allowed actions or an unavailable Accept reason", async () => {
     for (const payload of [
       { ...TICKET, allowedActions: undefined },
-      { ...TICKET, allowedActions: { statusChangeRejections: [], statusChanges: ["Ready"], accept: { available: false }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } } } },
+      { ...TICKET, allowedActions: { statusChangeRejections: [], statusChanges: ["Ready"], accept: { available: false }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } } } },
     ]) {
       stubFetch(jsonResponse(payload));
       const { unmount } = render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
@@ -282,7 +282,7 @@ describe("TicketDetailPage", () => {
 
     it("renders the receipt read-only with the lock copy from Galley's openRound", async () => {
       const reason = { code: "round_open", message: "this Ticket has an open Round; it can be changed once the Round ends", roundId: claimedRound.id };
-      stubFetch(jsonResponse({ ...claimed, openRound: { ...claimedRound, sequence: 2 }, allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } } } }));
+      stubFetch(jsonResponse({ ...claimed, openRound: { ...claimedRound, sequence: 2 }, allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } } } }));
       render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
       expect(await screen.findByTestId("ticket-detail-locked")).toHaveTextContent("Locked while atlas works on Round 2");
       for (const name of ["Edit", "Archive", "Add badge", "Unassign", "Assign"]) {
@@ -308,7 +308,7 @@ describe("TicketDetailPage", () => {
   describe("refreshing while execution may change the Ticket", () => {
     const agent = { id: AGENTS[0].id, name: "atlas", kind: "research" };
     const round = { id: "66666666-6666-4666-8666-666666666666", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null, waitingReason: "starting", question: null };
-    const lockedActions = { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: round.id } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } } };
+    const lockedActions = { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: round.id } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } } };
     const claimed = { ...TICKET, status: "Ready", assigneeType: "agent", assigneeAgent: agent, openRound: round, allowedActions: lockedActions };
     const running = { ...claimed, status: "InProgress", openRound: { ...round, state: "running", startedAt: "2026-10-01T10:00:05Z", waitingReason: "working" }, updatedAt: "2026-10-01T10:00:05Z" };
     const closed = { ...TICKET, status: "InReview", assigneeType: "agent", assigneeAgent: agent, updatedAt: "2026-10-01T10:05:00Z" };
@@ -332,6 +332,7 @@ describe("TicketDetailPage", () => {
       activity,
       earlierActivityCursor: null,
       questions: [],
+      feedback: [],
       usage,
       deliverable: null,
     });
@@ -437,8 +438,8 @@ describe("TicketDetailPage", () => {
     });
 
     it("requests Stop through POST /api/tickets/:id/stop, shows Stopping, and keeps refreshing the still-open Round", async () => {
-      const stoppable = { ...running, allowedActions: { ...lockedActions, stop: { available: true }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } } } };
-      const stopping = { ...running, openRound: { ...running.openRound, stopRequestedAt: "2026-10-01T10:00:07Z", waitingReason: "stopping", question: null }, allowedActions: { ...lockedActions, stop: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } } } };
+      const stoppable = { ...running, allowedActions: { ...lockedActions, stop: { available: true }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } } } };
+      const stopping = { ...running, openRound: { ...running.openRound, stopRequestedAt: "2026-10-01T10:00:07Z", waitingReason: "stopping", question: null }, allowedActions: { ...lockedActions, stop: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } } } };
       const fetchMock = stubRound([answer(stoppable), answer(stopping)]);
       const posts = vi.fn();
       vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -467,7 +468,7 @@ describe("TicketDetailPage", () => {
       const question = { id: "99999999-9999-5999-8999-999999999999", text: "Which region?", askedAt: "2026-10-01T10:00:06Z", answer: null, answeredAt: null };
       const answered = { ...question, answer: "Europe", answeredAt: "2026-10-01T10:00:08Z" };
       const waitingRound = { ...running.openRound, state: "waiting_for_input", waitingReason: "waiting_for_answer", question };
-      const waiting = { ...running, status: "Blocked", openRound: waitingRound, allowedActions: { ...lockedActions, stop: { available: true }, answer: { available: true } } };
+      const waiting = { ...running, status: "Blocked", openRound: waitingRound, allowedActions: { ...lockedActions, stop: { available: true }, answer: { available: true }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } } } };
       const resuming = { ...waiting, openRound: { ...waitingRound, waitingReason: "resuming", question: answered }, allowedActions: { ...waiting.allowedActions, answer: { available: false, reason: { code: "question_already_answered", message: "This question already has an answer" } } } };
       const answerPath = `/api/tickets/${TICKET_ID}/rounds/${round.id}/questions/${question.id}/answer`;
       const waitingRecord = { ...record(), state: "waiting_for_input", questions: [question] };
@@ -539,7 +540,7 @@ describe("TicketDetailPage", () => {
     describe("delivery", () => {
       const deliverable = { bodyMarkdown: "# Result\n\n- Found the cause\n", summary: "Found the cause.", criteriaAssessment: "A written cause: met." };
       const delivery = { roundId: round.id, sequence: 1, agent, deliveredAt: "2026-10-01T10:00:09Z" };
-      const delivered = { ...running, status: "InReview", openRound: null, delivery, updatedAt: "2026-10-01T10:00:09Z", allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: true }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } } } };
+      const delivered = { ...running, status: "InReview", openRound: null, delivery, updatedAt: "2026-10-01T10:00:09Z", allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: true }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } } } };
       const deliveredRecord = { ...record([{ seq: 1, note: "Reading the Ticket", occurredAt: "2026-10-01T10:00:06Z" }]), state: "delivered", endedAt: "2026-10-01T10:00:09Z", deliverable };
 
       it("picks up In Review, the delivering Agent and the deliverable on the same tick, then stops refreshing", async () => {
@@ -607,9 +608,55 @@ describe("TicketDetailPage", () => {
         expect(screen.getByTestId("ticket-detail-error-message")).toHaveTextContent("missing a required field");
       });
 
+      describe("feedback", () => {
+        const reviewable = { ...delivered, allowedActions: { ...delivered.allowedActions, feedback: { available: true } } };
+        const feedbackPath = `/api/tickets/${TICKET_ID}/rounds/${round.id}/feedback`;
+        const item = { id: "13131313-1313-4313-8313-131313131313", body: "Cover Asia too", createdAt: "2026-10-01T10:20:00Z", consumedBy: null };
+
+        it("posts the feedback to the delivered Round and reloads the Round to list it", async () => {
+          const fetchMock = stubRound([answer(reviewable)], undefined, [roundsOf(deliveredRecord), roundsOf({ ...deliveredRecord, feedback: [item] })]);
+          const posts = vi.fn();
+          vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+            if (String(input) !== feedbackPath) return fetchMock(input);
+            posts(init?.method, init?.body);
+            return Promise.resolve(jsonResponse(reviewable, 201));
+          }));
+          render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+          await flush();
+          expect(screen.queryByTestId("ticket-detail-round-feedback")).not.toBeInTheDocument();
+          const roundsBefore = roundFetches(fetchMock);
+
+          fireEvent.change(screen.getByLabelText("Your feedback on Round 1"), { target: { value: "Cover Asia too" } });
+          fireEvent.click(screen.getByTestId("ticket-detail-feedback-submit"));
+          await flush();
+          expect(posts).toHaveBeenCalledExactlyOnceWith("POST", JSON.stringify({ body: "Cover Asia too" }));
+          expect(roundFetches(fetchMock)).toBe(roundsBefore + 1);
+          expect(screen.getByTestId("ticket-detail-round-feedback-body")).toHaveTextContent("Cover Asia too");
+          expect(screen.getByTestId("ticket-detail-round-feedback-consumed")).toHaveTextContent("Waiting for the next Round");
+        });
+
+        it("refreshes the receipt when Galley no longer takes feedback, and hides the form", async () => {
+          const reopened = { ...delivered, status: "Ready", requestingAgentWork: true };
+          const fetchMock = stubRound([answer(reviewable), answer(reopened)], undefined, [roundsOf(deliveredRecord)]);
+          vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) =>
+            String(input) === feedbackPath ? Promise.resolve(jsonResponse({ error: { code: "feedback_not_available", message: "Feedback needs a Ticket in In Review or Done (current status Ready)" } }, 400)) : fetchMock(input)));
+          render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+          await flush();
+          const before = ticketFetches(fetchMock);
+
+          fireEvent.change(screen.getByLabelText("Your feedback on Round 1"), { target: { value: "Cover Asia too" } });
+          fireEvent.click(screen.getByTestId("ticket-detail-feedback-submit"));
+          await flush();
+          expect(ticketFetches(fetchMock)).toBe(before + 1);
+          expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("Ready");
+          expect(screen.queryByTestId("ticket-detail-feedback-form")).not.toBeInTheDocument();
+          expect(screen.getByTestId("ticket-detail-feedback-error")).toHaveTextContent("Feedback is no longer available on this Round.");
+        });
+      });
+
       describe("rework", () => {
         const reviewable = { ...delivered, allowedActions: { ...delivered.allowedActions, rework: { available: true } } };
-        const queuedAgain = { ...delivered, status: "Ready", requestingAgentWork: true, allowedActions: { statusChanges: [], statusChangeRejections: [], accept: delivered.allowedActions.accept, rework: delivered.allowedActions.rework, stop: delivered.allowedActions.stop, answer: delivered.allowedActions.answer } };
+        const queuedAgain = { ...delivered, status: "Ready", requestingAgentWork: true, allowedActions: { statusChanges: [], statusChangeRejections: [], accept: delivered.allowedActions.accept, rework: delivered.allowedActions.rework, stop: delivered.allowedActions.stop, answer: delivered.allowedActions.answer, feedback: delivered.allowedActions.feedback } };
         const round2 = { ...round, id: "88888888-8888-4888-8888-888888888888", sequence: 2 };
         const claimed2 = { ...queuedAgain, requestingAgentWork: false, delivery: null, openRound: round2, allowedActions: lockedActions };
         const running2 = { ...claimed2, status: "InProgress", openRound: { ...round2, state: "running", startedAt: "2026-10-01T10:10:05Z", waitingReason: "working" } };

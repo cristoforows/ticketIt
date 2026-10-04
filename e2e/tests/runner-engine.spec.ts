@@ -48,6 +48,7 @@ test("a real Michelin starts a claimed Round with no browser open, and the slip 
       activity: [],
       earlierActivityCursor: null,
       questions: [],
+      feedback: [],
       usage: NO_USAGE,
       deliverable: null,
     }]);

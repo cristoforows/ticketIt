@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AnswerInbox, type AwaitAnswer } from "./answerInbox.ts";
-import { answerNote, questionIdFor, retryDelayMs, runControlledEngine, type EngineOutcome } from "./engine.ts";
+import { answerNote, feedbackNote, questionIdFor, retryDelayMs, runControlledEngine, type EngineOutcome } from "./engine.ts";
 import { DEFAULT_ENGINE_SCRIPT, type DeliverStep, type EngineStep } from "./engineScript.ts";
 import { resolveRunnerCredential } from "./credentials.ts";
 import type { FetchFn } from "./galley/client.ts";
@@ -16,7 +16,7 @@ const CLAIM: RunnerClaim = {
   roundId: ROUND_ID,
   sequence: 2,
   claimEpoch: 3,
-  ticket: { id: "88888888-8888-4888-8888-888888888888", title: "Write the report", goal: "g", context: "c", successCriteria: "s", constraints: "", repository: "" },
+  ticket: { id: "88888888-8888-4888-8888-888888888888", title: "Write the report", goal: "g", context: "c", successCriteria: "s", constraints: "", repository: "", feedback: [] },
   agent: { id: "99999999-9999-4999-8999-999999999999", name: "atlas", kind: "research" },
 };
 
@@ -988,5 +988,55 @@ describe("the ask step", () => {
     expect(await harness.run).toBe("completed");
     const raisedIds = bodies(fetchFn).filter((body) => body["type"] === "question_raised").map((body) => (body["data"] as { questionId: string }).questionId);
     expect(raisedIds).toEqual([questionId, second]);
+  });
+});
+
+describe("feedback from earlier Rounds", () => {
+  const FEEDBACK: RunnerClaim["ticket"]["feedback"] = [
+    { roundId: "66666666-6666-4666-8666-666666666666", roundSequence: 1, body: "Cover the EU too.", createdAt: "2026-10-01T11:00:00Z" },
+    { roundId: "66666666-6666-4666-8666-666666666666", roundSequence: 1, body: "Line one\n\tline two", createdAt: "2026-10-01T11:05:00Z" },
+  ];
+  const claimWith = (feedback: RunnerClaim["ticket"]["feedback"]): RunnerClaim => ({ ...CLAIM, ticket: { ...CLAIM.ticket, feedback } });
+
+  it("notes the feedback it received right after starting, keyed apart from the script's steps", async () => {
+    const fetchFn = answering();
+    const harness = start([START, NOTE("Reading the Ticket")], fetchFn, { instantSleep: true, claim: claimWith(FEEDBACK) });
+    expect(await harness.run).toBe("completed");
+
+    expect(sent(fetchFn).map((event) => [event.type, event.idempotencyKey])).toEqual([
+      ["execution_started", `${ROUND_ID}:0`],
+      ["progress", `${ROUND_ID}:0:feedback`],
+      ["progress", `${ROUND_ID}:1`],
+    ]);
+    expect(sent(fetchFn)[1]!.data).toEqual({ note: "Owner's feedback received (2 comments):\nRound 1: Cover the EU too.\nRound 1: Line one\n\tline two" });
+    expect(harness.records().find((record) => record["msg"] === "feedback reported")).toMatchObject({ step: "progress", stepIndex: 0, feedback: 2, seq: 1 });
+  });
+
+  it("adds no note when the claim carries no feedback", async () => {
+    const fetchFn = answering();
+    const harness = start([START, NOTE("Reading the Ticket")], fetchFn, { instantSleep: true });
+    expect(await harness.run).toBe("completed");
+    expect(sent(fetchFn).map((event) => event.type)).toEqual(["execution_started", "progress"]);
+  });
+
+  it("retries the feedback note with the identical body and abandons the Round when Galley refuses it", async () => {
+    const retried = answering(created, refused, error(503, "database_unavailable"));
+    expect(await start([START], retried, { instantSleep: true, claim: claimWith(FEEDBACK) }).run).toBe("completed");
+    const bodies = retried.mock.calls.map(([, init]) => String(init?.body));
+    expect(bodies).toHaveLength(4);
+    expect(new Set(bodies.slice(1)).size).toBe(1);
+
+    const refusedNote = sequence(created, error(400, "invalid_request"));
+    expect(await start([START, NOTE("never sent")], refusedNote, { instantSleep: true, claim: claimWith(FEEDBACK) }).run).toBe("abandoned");
+    expect(refusedNote).toHaveBeenCalledTimes(2);
+  });
+
+  it("writes one deterministic note and truncates it to Galley's note limit", () => {
+    expect(feedbackNote(FEEDBACK.slice(0, 1))).toBe("Owner's feedback received (1 comment):\nRound 1: Cover the EU too.");
+    const long = [1, 2, 3].map((n) => ({ ...FEEDBACK[0]!, roundSequence: n, body: "界".repeat(10_000) }));
+    const note = feedbackNote(long);
+    expect([...note]).toHaveLength(2000);
+    expect(note.startsWith("Owner's feedback received (3 comments):\nRound 1: 界")).toBe(true);
+    expect(feedbackNote(long)).toBe(note);
   });
 });

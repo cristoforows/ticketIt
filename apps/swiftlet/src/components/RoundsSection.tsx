@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { RoundActivityNote, RoundActivityPage, RoundDeliverable, TicketRound } from "../api/rounds";
 import type { Ticket } from "../api/tickets";
+import { FeedbackHistory, FeedbackPanel, type AddFeedback } from "./FeedbackPanel";
 import { QuestionHistory, QuestionPanel, type AnswerQuestion } from "./QuestionPanel";
 import type { HealthView } from "./RunnerHealthPill";
 import { activeTime, costFigure, countFigure, type UsageFigure } from "./roundUsage";
@@ -14,7 +15,7 @@ export interface RoundRecords {
 
 export type LoadEarlierActivity = (roundId: string, before: string) => Promise<RoundActivityPage>;
 
-export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEarlierActivity, answer, onAnswer, onAnswered = () => {} }: {
+export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEarlierActivity, answer, onAnswer, onAnswered = () => {}, delivery = null, feedback, onAddFeedback }: {
   openRound: Ticket["openRound"];
   runnerHealth: HealthView;
   records?: RoundRecords;
@@ -22,6 +23,9 @@ export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEar
   answer?: Ticket["allowedActions"]["answer"];
   onAnswer?: AnswerQuestion;
   onAnswered?: (ticket: Ticket) => void;
+  delivery?: Ticket["delivery"];
+  feedback?: Ticket["allowedActions"]["feedback"];
+  onAddFeedback?: AddFeedback;
 }) {
   const runnerLost = openRound !== null && runnerHealth.kind === "loaded" && runnerHealth.health.state !== "connected";
   const awaitingOpenRound = openRound !== null && !records.rounds?.some((candidate) => candidate.id === openRound.id);
@@ -36,6 +40,7 @@ export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEar
       {openRound?.question && answer && (
         <QuestionPanel roundId={openRound.id} question={openRound.question} availability={answer} onAnswer={onAnswer} onAnswered={onAnswered} />
       )}
+      {delivery && feedback && <FeedbackPanel delivery={delivery} availability={feedback} onAddFeedback={onAddFeedback} onAdded={onAnswered} />}
       {records.error && (
         <InlineError data-testid="ticket-detail-round-records-error" className="my-2">
           Unable to refresh activity and usage: {records.error}
@@ -102,6 +107,7 @@ function RoundEntry({ round, defaultOpen, onLoadEarlierActivity }: { round: Tick
         )}
         {round.deliverable && <Deliverable deliverable={round.deliverable} />}
         <QuestionHistory questions={round.questions} awaiting={round.state === "waiting_for_input"} />
+        <FeedbackHistory feedback={round.feedback} />
         <RoundRecordDetails round={round} onLoadEarlierActivity={onLoadEarlierActivity} usageLabel={round.state === "claimed" || round.state === "running" || round.state === "waiting_for_input" ? "Usage so far" : "Usage"} />
       </Disclosure>
     </li>

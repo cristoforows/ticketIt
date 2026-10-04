@@ -43,7 +43,7 @@ func roundSnapshot(t *testing.T, pool *pgxpool.Pool, roundID string) string {
 		t.Fatal(err)
 	}
 	fmt.Fprintf(&out, "rounds=%s\n", row)
-	for _, table := range []string{"round_events", "round_engine_references", "round_activity", "usage_observations", "round_deliverables"} {
+	for _, table := range []string{"round_events", "round_engine_references", "round_activity", "usage_observations", "round_deliverables", "round_feedback"} {
 		if err := pool.QueryRow(context.Background(),
 			`SELECT COALESCE(json_agg(row_to_json(x) ORDER BY x.id), '[]')::text FROM `+table+` x WHERE x.round_id = (SELECT id FROM rounds WHERE public_id = $1::uuid)`, roundID).Scan(&row); err != nil {
 			t.Fatal(err)

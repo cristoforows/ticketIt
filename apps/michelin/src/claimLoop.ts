@@ -57,6 +57,7 @@ async function run(options: ClaimLoopOptions, signal: AbortSignal): Promise<void
         claimEpoch,
         ticketId: ticket.id,
         ticketTitle: ticket.title,
+        feedback: ticket.feedback.length,
       });
       await runRound(options, result.value, signal);
       continue;

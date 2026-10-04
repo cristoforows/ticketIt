@@ -1780,6 +1780,52 @@ lock-order test in `round_events_test.go`, `round_waiting_test.go` and
 `TestQuestionsAndAnswers_ResponsesMatchContractAndMethod405`. Evidence:
 `docs/evidence/m5/163-questions-answers.md`.
 
+## Round feedback and the reopen route (issue #164)
+
+Migration `000021_round_feedback.up.sql` adds `round_feedback`: the
+Round it is on, `body` (1 to 10000 characters, not blank), Galley's
+`created_at`, and `consumed_by_round_id`, set once by the claim that
+carried it. Both Round references are composite keys on
+`(owner_id, ticket_id, id)`, so feedback and its consumer belong to
+the same Ticket, and a Round never consumes its own feedback.
+
+`POST /api/tickets/{id}/rounds/{roundId}/feedback` takes
+`{"body": "..."}` (strict decode; `400 invalid_request` when blank, over
+10000 characters, or with control characters other than tab and line
+feed). It locks the Ticket row and decides in order:
+
+| Check | Response |
+| --- | --- |
+| No such Ticket, or Round of that Ticket | `404 not_found` |
+| The Ticket is archived | `400 feedback_not_available` |
+| The Ticket is not Agent-assigned | `400 feedback_not_available` |
+| A Round is open | `400 feedback_not_available` with `roundId` |
+| The Ticket is not In Review or Done | `400 feedback_not_available` |
+| The Round is not delivered | `400 feedback_not_available` |
+| Otherwise | `201`, the Ticket; records the feedback |
+
+Any delivered Round of the Ticket takes feedback, not only the latest.
+`allowedActions.feedback` is the same decision for `delivery.roundId`
+(unavailable while the latest Round is not delivered).
+`TicketRound.feedback` lists a Round's feedback oldest first, each with
+`consumedBy` (`{roundId, sequence}`, or `null` while unconsumed).
+
+The claim's `ticket.feedback` carries every unconsumed item of the
+Ticket, oldest first, as `{roundId, roundSequence, body, createdAt}`,
+and marks it consumed by the new Round in the claim's transaction,
+under the Ticket row lock that feedback, rework and status changes also
+take. No later claim carries it again, even when the consuming Round
+fails, is interrupted or is stopped. Rework from In Review and Done →
+Ready both queue the Ticket for that claim; Done → Ready is the reopen
+route.
+
+Tests: `round_feedback_test.go` (decision table, both routes, once-only
+consumption across Rounds 2 to 4, a failed consumer, the shared `404`,
+strict decoding, constraints, the lock, races with rework and claims,
+concurrent claims), `TestClaim_CreatesOneRoundAndLeavesTheTicketReady`
+and `TestRoundFeedback_ResponsesMatchContractAndMethod405`. Evidence:
+`docs/evidence/m5/164-round-feedback.md`.
+
 ## Error shape
 
 `ErrorBody`/`ErrorDetail` are generated from

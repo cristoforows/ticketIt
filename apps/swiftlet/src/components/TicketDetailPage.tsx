@@ -7,6 +7,7 @@ import {
   acceptTicket,
   requestTicketRework,
   requestTicketStop,
+  addRoundFeedback,
   answerRoundQuestion,
   assignTicket,
   unassignTicket,
@@ -179,6 +180,17 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
     }
   }
 
+  async function addFeedback(roundId: string, body: string): Promise<Ticket> {
+    try {
+      const ticket = await runCommand(() => addRoundFeedback(ticketId, roundId, body));
+      void loadRounds();
+      return ticket;
+    } catch (error) {
+      if (error instanceof GalleyError && error.code === "feedback_not_available") void refreshTicket();
+      throw error;
+    }
+  }
+
   function assign(assignee: TicketAssignee): Promise<Ticket> {
     return runCommand(() => assignTicket(ticketId, assignee));
   }
@@ -245,6 +257,7 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
       roundRecords={roundRecords.ticketId === ticketId ? roundRecords : undefined}
       onLoadEarlierActivity={loadEarlierActivity}
       onAnswer={answer}
+      onAddFeedback={addFeedback}
       onArchived={() => (onArchiveSucceeded ? onArchiveSucceeded() : navigate(fullPageReturnPath()))}
     />
   );
