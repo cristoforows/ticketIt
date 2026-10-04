@@ -11,31 +11,44 @@ func TestDecideWaitingReason(t *testing.T) {
 	answer := "Use the staging data"
 	unanswered := &RoundQuestion{Text: "Which data?"}
 	answered := &RoundQuestion{Text: "Which data?", Answer: &answer}
+	approved, declined := PermissionApproved, PermissionDeclined
+	undecidedRequest := &PermissionRequest{Account: controlledAccount}
+	approvedRequest := &PermissionRequest{Account: controlledAccount, Decision: &approved}
+	declinedRequest := &PermissionRequest{Account: controlledAccount, Decision: &declined}
 	for _, tc := range []struct {
 		state           OpenRoundState
 		question        *RoundQuestion
+		request         *PermissionRequest
 		stopRequested   bool
 		runnerConnected bool
 		want            RoundWaitingReason
 	}{
-		{OpenRoundClaimed, nil, false, true, WaitingStarting},
-		{OpenRoundRunning, nil, false, true, WaitingWorking},
-		{OpenRoundClaimed, nil, true, true, WaitingStopping},
-		{OpenRoundRunning, nil, true, true, WaitingStopping},
-		{OpenRoundClaimed, nil, false, false, WaitingRunnerDisconnected},
-		{OpenRoundRunning, nil, false, false, WaitingRunnerDisconnected},
-		{OpenRoundClaimed, nil, true, false, WaitingRunnerDisconnected},
-		{OpenRoundRunning, nil, true, false, WaitingRunnerDisconnected},
-		{OpenRoundWaitingForInput, unanswered, false, true, WaitingForAnswer},
-		{OpenRoundWaitingForInput, answered, false, true, WaitingResuming},
-		{OpenRoundWaitingForInput, unanswered, true, true, WaitingStopping},
-		{OpenRoundWaitingForInput, answered, true, true, WaitingStopping},
-		{OpenRoundWaitingForInput, unanswered, false, false, WaitingRunnerDisconnected},
-		{OpenRoundWaitingForInput, answered, true, false, WaitingRunnerDisconnected},
+		{OpenRoundClaimed, nil, nil, false, true, WaitingStarting},
+		{OpenRoundRunning, nil, nil, false, true, WaitingWorking},
+		{OpenRoundClaimed, nil, nil, true, true, WaitingStopping},
+		{OpenRoundRunning, nil, nil, true, true, WaitingStopping},
+		{OpenRoundClaimed, nil, nil, false, false, WaitingRunnerDisconnected},
+		{OpenRoundRunning, nil, nil, false, false, WaitingRunnerDisconnected},
+		{OpenRoundClaimed, nil, nil, true, false, WaitingRunnerDisconnected},
+		{OpenRoundRunning, nil, nil, true, false, WaitingRunnerDisconnected},
+		{OpenRoundWaitingForInput, unanswered, nil, false, true, WaitingForAnswer},
+		{OpenRoundWaitingForInput, answered, nil, false, true, WaitingResuming},
+		{OpenRoundWaitingForInput, unanswered, nil, true, true, WaitingStopping},
+		{OpenRoundWaitingForInput, answered, nil, true, true, WaitingStopping},
+		{OpenRoundWaitingForInput, unanswered, nil, false, false, WaitingRunnerDisconnected},
+		{OpenRoundWaitingForInput, answered, nil, true, false, WaitingRunnerDisconnected},
+		{OpenRoundWaitingForInput, nil, undecidedRequest, false, true, WaitingForPermission},
+		{OpenRoundWaitingForInput, nil, declinedRequest, false, true, WaitingForPermission},
+		{OpenRoundWaitingForInput, nil, approvedRequest, false, true, WaitingResuming},
+		{OpenRoundWaitingForInput, nil, undecidedRequest, true, true, WaitingStopping},
+		{OpenRoundWaitingForInput, nil, declinedRequest, true, true, WaitingStopping},
+		{OpenRoundWaitingForInput, nil, approvedRequest, true, true, WaitingStopping},
+		{OpenRoundWaitingForInput, nil, undecidedRequest, false, false, WaitingRunnerDisconnected},
+		{OpenRoundWaitingForInput, nil, approvedRequest, true, false, WaitingRunnerDisconnected},
 	} {
-		got := decideWaitingReason(tc.state, tc.question, tc.stopRequested, tc.runnerConnected)
+		got := decideWaitingReason(tc.state, tc.question, tc.request, tc.stopRequested, tc.runnerConnected)
 		if got != tc.want {
-			t.Errorf("decideWaitingReason(%s, question=%+v, stopRequested=%t, connected=%t) = %s, want %s", tc.state, tc.question, tc.stopRequested, tc.runnerConnected, got, tc.want)
+			t.Errorf("decideWaitingReason(%s, question=%+v, request=%+v, stopRequested=%t, connected=%t) = %s, want %s", tc.state, tc.question, tc.request, tc.stopRequested, tc.runnerConnected, got, tc.want)
 		}
 	}
 }

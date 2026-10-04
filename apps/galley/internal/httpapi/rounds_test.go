@@ -573,7 +573,7 @@ func TestRounds_IdentityIsGalleyIssuedAndHasNoEngineReference(t *testing.T) {
 		columns = append(columns, name)
 	}
 	rows.Close()
-	want := []string{"agent_id", "claim_epoch", "claimed_at", "ended_at", "id", "outcome_note", "owner_id", "public_id", "sequence", "started_at", "state", "ticket_id"}
+	want := []string{"agent_id", "claim_epoch", "claimed_at", "ended_at", "id", "outcome_note", "owner_id", "public_id", "sequence", "started_at", "state", "ticket_id", "waiting_permission_request_id", "waiting_question_id"}
 	if !equalStrings(columns, want) {
 		t.Fatalf("rounds columns = %v, want %v (an engine execution reference is a separate record, ADR 0002)", columns, want)
 	}

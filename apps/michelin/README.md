@@ -119,6 +119,11 @@ Three loops run side by side, and a fourth while a Round is held:
     with another `claimEpoch` it is acknowledged `ignored`. A listing
     with an `answer` lacking `answer.questionId` or `answer.text` is an
     `invalid_body` poll failure.
+  - `approval` with the claim's `claimEpoch` hands `approval.grantId` to
+    the `act` step waiting on `approval.requestId` (see "Permissions"
+    below); with another `claimEpoch` it is acknowledged `ignored`. A
+    listing with an `approval` lacking either field is an
+    `invalid_body` poll failure.
   - Any other type is logged once and left unacknowledged.
 
 Requests in one loop never overlap. The status and runner loops keep
@@ -155,6 +160,7 @@ makes no model or provider call. Each reporting step sends one event to
 | `fail` | `failed` | `<roundId>:<step index>` | End the Round as Failed with `explanation` (the progress note's limits). Galley moves the Ticket to Blocked, keeps the activity and usage, and frees the slot; the engine returns and the claim loop polls again. Only the last step. |
 | `interrupt` | `interrupted` | `<roundId>:<step index>` | End the Round as Interrupted with `evidence` (the progress note's limits), otherwise as `fail`. Only the last step. |
 | `ask` | `question_raised`, then `resumed` | the `questionId`; then `<roundId>:<step index>` | Raise `question` (the progress note's limits) and wait for the Owner's answer. `questionId` is a UUID v5 of `ask:<step index>` in the Round's id, so a restarted engine raises the same question under the same id. See "Questions" below. |
+| `act` | `progress`; or `permission_requested`, then `resumed`, then `progress` | `<roundId>:<step index>`; the `requestId`, then `<roundId>:<step index>:resumed` | Perform `action` on `resource` through Connected Account `account` (each 1 to 200 characters, not blank, no control characters), once Galley's live authority check allows it. `requestId` is a UUID v5 of `act:<step index>` in the Round's id. See "Permissions" below. |
 | `hold` | none | none | Wait until Michelin stops. Only the last step, so a script ends with at most one of `hold`, `deliver`, `fail` and `interrupt`. |
 
 With `MICHELIN_ENGINE_SCRIPT` unset, the script is: `start`; progress
@@ -234,7 +240,34 @@ then one line `Round <roundSequence>: <body>` per item in Galley's
 order, truncated to 2000 characters. It is sent and retried like any
 event, so a refusal abandons the Round. Scripts need no step for it.
 
-Stopping Michelin aborts a wait, a hold, an `ask`'s wait for its answer,
+**Permissions.** An `act` step first asks Galley
+(`POST /api/runner/rounds/{roundId}/authority-checks`) whether the
+Agent holds authority for its scope now. The answer is used for that
+one action and never remembered, so every `act` asks again.
+
+- `allow`: the step sends the progress note `Performed <action> on
+  <resource>` and the script continues.
+- `deny`: the step reports `permission_requested` with the scope and
+  waits, logging `engine waiting for an approval`. When the `approval`
+  command for its `requestId` arrives, it sends `resumed` with that
+  `requestId`, acknowledges the command `applied` only after that, and
+  checks again. An `allow` performs the action. A second `deny` ends the
+  Round as Failed (`Could not <action> on <resource> with the <account>
+  account: Galley still denies it after the Owner's approval`); the
+  step never asks twice.
+- `400 unsupported_scope`: the Round ends as Failed with the explanation
+  `… Galley does not support this scope`. Galley decides what is
+  supported; Michelin's start-up check covers only the shape.
+- Other refusals abandon the Round locally, as for events. Network
+  failures and `5xx` are retried with the events' backoff.
+
+A declined request sends no command, so the step keeps waiting until a
+Stop, which it confirms with the evidence `Stopped while waiting for the
+approval to step <step index + 1> of <step count> on Stop command
+<commandId>`. The `controlled` account is a substitute: performing an
+action only records the note, and nothing outside Galley changes.
+
+Stopping Michelin aborts a wait, a hold, an `ask`'s wait for its answer, an `act`'s wait for its approval,
 a backoff and an in-flight request at once.
 
 ## Logs
@@ -266,6 +299,13 @@ context fields. The credential is never logged.
 | `engine waiting for an answer` | `info` | `roundId`, `stepIndex`, `questionId`. |
 | `answer received` | `info` | An `answer` for the claim's epoch arrived: as `stop requested`, plus `questionId`. The text is not logged. |
 | `resume reported` | `info` | As `question raised`, `step` `resume`. |
+| `authority checked` | `info` | `roundId`, `step` `act`, `stepIndex`, `attempt`, `account`, `action`, `resource`, `decision`, and `grantId` on `allow`. |
+| `authority check failed; retrying` | `warn` | As `authority checked`, plus `reason`, `httpStatus`, `errorCode`, `retryInMs`. |
+| `authority check refused an unsupported scope`, `authority check refused; round abandoned locally` | `error` | As `authority checked`, plus `httpStatus` and `errorCode`. |
+| `permission requested` | `info` | `roundId`, `step` `request`, `stepIndex`, `attempt`, `requestId`, the scope, `httpStatus`. |
+| `engine waiting for an approval` | `info` | `roundId`, `stepIndex`, `requestId`. |
+| `approval received` | `info` | An `approval` for the claim's epoch arrived: as `stop requested`, plus `requestId` and `grantId`. |
+| `action performed` | `info` | As `progress reported`, `step` `act`, plus the scope. |
 | `engine holding`, `engine script finished` | `info` | The script reached `hold`, or its last step. |
 | `stop requested` | `info` | A `stop` for the claim's epoch arrived: `roundId`, `commandId`, `type`, `commandEpoch`, `claimEpoch`. |
 | `engine stopped` | `info` | The engine halted at `stepIndex` for the Stop `commandId`. |
@@ -317,8 +357,8 @@ src/
 ├── heartbeatLoop.ts  # register, then heartbeat; owns the shared registration flag
 ├── claimLoop.ts      # claim poll while registered; runs each claimed Round's script
 ├── commandLoop.ts    # the held Round's command poll and acknowledgements
-├── answerInbox.ts    # answers delivered by the command loop, awaited by the ask step
-├── engine.ts         # the controlled engine: script steps, event retry, abandonment, Stop, questions
+├── answerInbox.ts    # answers and approvals delivered by the command loop, awaited by the ask and act steps
+├── engine.ts         # the controlled engine: script steps, event retry, abandonment, Stop, questions, authority checks
 ├── engineScript.ts   # the script format, its parser and the built-in default
 ├── galley/client.ts  # request helper and GET /api/status
 ├── galley/runner.ts  # register, heartbeat, claim, Round event and command requests

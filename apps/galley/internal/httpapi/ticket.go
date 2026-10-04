@@ -414,8 +414,9 @@ const ticketSelectColumns = `public_id::text, title, status, template, completio
 	          'agent', json_build_object('id', a.public_id, 'name', a.name, 'kind', a.kind),
 	          'claimedAt', r.claimed_at, 'startedAt', r.started_at,
 	          'stopRequestedAt', (SELECT c.issued_at FROM round_commands c WHERE c.owner_id = r.owner_id AND c.round_id = r.id AND c.type = 'stop'),
-	          'question', (SELECT ` + roundQuestionJSON + ` FROM round_questions q
-	             WHERE q.owner_id = r.owner_id AND q.round_id = r.id AND r.state = 'waiting_for_input' ORDER BY q.id DESC LIMIT 1))
+	          'question', (SELECT ` + roundQuestionJSON + ` FROM round_questions q WHERE q.owner_id = r.owner_id AND q.id = r.waiting_question_id),
+	          'permissionRequest', (SELECT ` + permissionRequestJSON + ` FROM permission_requests p
+	             WHERE p.owner_id = r.owner_id AND p.id = r.waiting_permission_request_id))
 	   FROM rounds r JOIN agents a ON a.owner_id = r.owner_id AND a.id = r.agent_id
 	  WHERE r.owner_id = tickets.owner_id AND r.ticket_id = tickets.id AND r.state IN ` + openRoundStatesSQL + `),
 	(SELECT json_build_object('roundId', r.public_id, 'sequence', r.sequence,
@@ -424,6 +425,7 @@ const ticketSelectColumns = `public_id::text, title, status, template, completio
 	   JOIN agents a ON a.owner_id = r.owner_id AND a.id = r.agent_id
 	  WHERE r.state = 'delivered'),
 	(SELECT ru.last_seen_at FROM runners ru WHERE ru.owner_id = tickets.owner_id),
+	` + permissionGrantsJSON + `,
 	goal, context, success_criteria, constraints, repository, created_at, updated_at, archived_at`
 
 // ticketRowScanner is satisfied by both pgx.Row (QueryRow) and pgx.Rows
@@ -453,7 +455,7 @@ func scanTicketRow(row ticketRowScanner, now time.Time) (Ticket, error) {
 	)
 	if err := row.Scan(
 		&ticket.Id, &ticket.Title, &status, &template, &completionCondition, &assigneeType, &ticket.AssigneeAgent, &ticket.OpenRound, &ticket.Delivery,
-		&runnerLastSeenAt, &goal, &ctxField, &successCriteria, &constraints, &repository,
+		&runnerLastSeenAt, &ticket.PermissionGrants, &goal, &ctxField, &successCriteria, &constraints, &repository,
 		&createdAt, &updatedAt, &archivedAt,
 	); err != nil {
 		return Ticket{}, err
@@ -480,11 +482,16 @@ func scanTicketRow(row ticketRowScanner, now time.Time) (Ticket, error) {
 		if ticket.OpenRound.Question != nil {
 			normaliseQuestionTimes(ticket.OpenRound.Question)
 		}
-		ticket.OpenRound.WaitingReason = decideWaitingReason(ticket.OpenRound.State, ticket.OpenRound.Question, ticket.OpenRound.StopRequestedAt != nil, runnerConnected(now, runnerLastSeenAt))
+		if ticket.OpenRound.PermissionRequest != nil {
+			normalisePermissionRequest(ticket.OpenRound.PermissionRequest)
+		}
+		ticket.OpenRound.WaitingReason = decideWaitingReason(ticket.OpenRound.State, ticket.OpenRound.Question, ticket.OpenRound.PermissionRequest,
+			ticket.OpenRound.StopRequestedAt != nil, runnerConnected(now, runnerLastSeenAt))
 	}
 	if ticket.Delivery != nil {
 		ticket.Delivery.DeliveredAt = ticket.Delivery.DeliveredAt.UTC()
 	}
+	normalisePermissionGrants(ticket.PermissionGrants)
 	ticket.CreatedAt = createdAt.UTC().Format(time.RFC3339)
 	ticket.UpdatedAt = updatedAt.UTC().Format(time.RFC3339)
 	state := workflowStateOf(ticket)

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AnswerInbox, type AwaitAnswer } from "./answerInbox.ts";
-import { answerNote, feedbackNote, questionIdFor, retryDelayMs, runControlledEngine, type EngineOutcome } from "./engine.ts";
+import { AnswerInbox, ApprovalInbox, type AwaitAnswer, type AwaitApproval } from "./answerInbox.ts";
+import { answerNote, feedbackNote, performedNote, questionIdFor, requestIdFor, retryDelayMs, runControlledEngine, type EngineOutcome } from "./engine.ts";
 import { DEFAULT_ENGINE_SCRIPT, type DeliverStep, type EngineStep } from "./engineScript.ts";
 import { resolveRunnerCredential } from "./credentials.ts";
 import type { FetchFn } from "./galley/client.ts";
@@ -61,7 +61,7 @@ interface Harness {
   run: Promise<EngineOutcome>;
 }
 
-function start(steps: EngineStep[], fetchFn: FetchFn, options: { instantSleep?: boolean; claim?: RunnerClaim; awaitAnswer?: AwaitAnswer } = {}): Harness {
+function start(steps: EngineStep[], fetchFn: FetchFn, options: { instantSleep?: boolean; claim?: RunnerClaim; awaitAnswer?: AwaitAnswer; awaitApproval?: AwaitApproval } = {}): Harness {
   const controller = new AbortController();
   const stopper = new AbortController();
   const lines: string[] = [];
@@ -81,6 +81,7 @@ function start(steps: EngineStep[], fetchFn: FetchFn, options: { instantSleep?: 
     signal: controller.signal,
     stop: stopper.signal,
     awaitAnswer: options.awaitAnswer,
+    awaitApproval: options.awaitApproval,
     requestTimeoutMs: 300,
     deps: {
       now: () => {
@@ -988,6 +989,209 @@ describe("the ask step", () => {
     expect(await harness.run).toBe("completed");
     const raisedIds = bodies(fetchFn).filter((body) => body["type"] === "question_raised").map((body) => (body["data"] as { questionId: string }).questionId);
     expect(raisedIds).toEqual([questionId, second]);
+  });
+});
+
+describe("the act step", () => {
+  const CHECKS_PATH = `/api/runner/rounds/${ROUND_ID}/authority-checks`;
+  const ACT: EngineStep = { step: "act", account: "controlled", action: "write_note", resource: "notes/weekly-report" };
+  const SCOPE = { account: "controlled", action: "write_note", resource: "notes/weekly-report" };
+  const GRANT = "12121212-1212-4212-8212-121212121212";
+  const requestId = requestIdFor(ROUND_ID, 1);
+  const startedAt = "2026-10-01T12:00:00Z";
+
+  // A Galley whose grants the test changes between calls; each check answers from them as they are then.
+  function galley(options: { checks?: (() => Response)[] } = {}) {
+    const state = { granted: false, checks: 0, sent: [] as { path: string; body: Record<string, unknown> }[] };
+    const fetchFn = vi.fn<FetchFn>(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      state.sent.push({ path, body });
+      if (path === CHECKS_PATH) {
+        state.checks++;
+        const scripted = options.checks?.shift();
+        if (scripted) return scripted();
+        return json(state.granted ? { decision: "allow", grantId: GRANT } : { decision: "deny" });
+      }
+      if (path !== EVENTS_PATH) throw new Error(`unexpected ${path}`);
+      const data = body["data"] as Record<string, unknown>;
+      switch (body["type"]) {
+        case "permission_requested":
+          return json({ roundId: ROUND_ID, type: "permission_requested", state: "waiting_for_input", startedAt, requestId: data["requestId"] }, 201);
+        case "resumed":
+          return json({ roundId: ROUND_ID, type: "resumed", state: "running", startedAt, requestId: data["requestId"] }, 201);
+        case "progress":
+          return json({ roundId: ROUND_ID, type: "progress", state: "running", startedAt, seq: state.sent.length }, 201);
+        case "failed":
+          return json({ roundId: ROUND_ID, type: "failed", state: "failed", startedAt, endedAt: startedAt }, 201);
+        case "stop_confirmed":
+          return json({ roundId: ROUND_ID, type: "stop_confirmed", state: "stopped", startedAt, endedAt: startedAt }, 201);
+        default:
+          return created();
+      }
+    });
+    return { state, fetchFn };
+  }
+  const kinds = (sent: { path: string; body: Record<string, unknown> }[]) => sent.map(({ path, body }) => (path === CHECKS_PATH ? "check" : String(body["type"])));
+
+  it("derives a stable version 5 requestId apart from the question ids", () => {
+    expect(requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(requestIdFor(ROUND_ID, 1)).toBe(requestId);
+    expect(requestId).not.toBe(questionIdFor(ROUND_ID, 1));
+    expect(requestIdFor(ROUND_ID, 2)).not.toBe(requestId);
+  });
+
+  it("checks authority with the claim's epoch and performs an allowed action as a progress note", async () => {
+    const { state, fetchFn } = galley();
+    state.granted = true;
+    const harness = start([START, ACT], fetchFn);
+    expect(await harness.run).toBe("completed");
+    expect(kinds(state.sent)).toEqual(["execution_started", "check", "progress"]);
+    expect(state.sent[1]?.body).toEqual({ ...SCOPE, epoch: 3 });
+    expect(state.sent[2]?.body).toMatchObject({ idempotencyKey: `${ROUND_ID}:1`, data: { note: "Performed write_note on notes/weekly-report" } });
+    expect(harness.records().find((record) => record["msg"] === "authority checked")).toMatchObject({ decision: "allow", grantId: GRANT, stepIndex: 1 });
+  });
+
+  it("asks for a Permission on a deny, waits, resumes on the approval, acknowledges, checks again and performs", async () => {
+    const { state, fetchFn } = galley();
+    const inbox = new ApprovalInbox();
+    const order: string[] = [];
+    fetchFn.mockImplementation(((original) => async (input, init) => {
+      const response = await original(input, init);
+      order.push(kinds(state.sent.slice(-1))[0]!);
+      return response;
+    })(fetchFn.getMockImplementation()!));
+    const harness = start([START, ACT, { step: "progress", note: "after the action" }], fetchFn, { awaitApproval: inbox.wait });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(kinds(state.sent)).toEqual(["execution_started", "check", "permission_requested"]);
+    expect(state.sent[2]?.body).toMatchObject({ idempotencyKey: requestId, claimEpoch: 3, data: { requestId, ...SCOPE } });
+    expect(harness.records().map((record) => record["msg"])).toContain("engine waiting for an approval");
+
+    state.granted = true;
+    inbox.deliver(requestId, { grantId: GRANT, acknowledge: async () => void order.push("ack") });
+    expect(await harness.run).toBe("completed");
+    expect(order).toEqual(["execution_started", "check", "permission_requested", "resumed", "ack", "check", "progress", "progress"]);
+    const resumed = state.sent.find(({ body }) => body["type"] === "resumed");
+    expect(resumed?.body).toMatchObject({ idempotencyKey: `${ROUND_ID}:1:resumed`, data: { requestId } });
+    expect(state.sent.filter(({ body }) => body["type"] === "progress").map(({ body }) => (body["data"] as { note: string }).note)).toEqual([
+      "Performed write_note on notes/weekly-report",
+      "after the action",
+    ]);
+  });
+
+  it("never caches an allow: each act step checks again, and a grant gone by the second check is not used", async () => {
+    const { state, fetchFn } = galley({ checks: [() => json({ decision: "allow", grantId: GRANT }), () => json({ decision: "deny" })] });
+    const harness = start([START, ACT, ACT], fetchFn);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(kinds(state.sent)).toEqual(["execution_started", "check", "progress", "check", "permission_requested"]);
+    expect(state.checks).toBe(2);
+    harness.stopper.abort("stop");
+    expect(await harness.run).toBe("stopped");
+  });
+
+  it("reuses a grant across act steps without a second request, checking before each", async () => {
+    const { state, fetchFn } = galley();
+    const inbox = new ApprovalInbox();
+    inbox.deliver(requestId, { grantId: GRANT, acknowledge: async () => void (state.granted = true) });
+    const harness = start([START, ACT, ACT], fetchFn, { awaitApproval: inbox.wait });
+    expect(await harness.run).toBe("completed");
+    expect(kinds(state.sent)).toEqual(["execution_started", "check", "permission_requested", "resumed", "check", "progress", "check", "progress"]);
+  });
+
+  it("fails the Round rather than asking again when Galley still denies after the approval", async () => {
+    const { state, fetchFn } = galley();
+    const inbox = new ApprovalInbox();
+    inbox.deliver(requestId, { grantId: GRANT, acknowledge: async () => {} });
+    const harness = start([START, ACT, { step: "progress", note: "never" }], fetchFn, { awaitApproval: inbox.wait });
+    expect(await harness.run).toBe("failed");
+    expect(kinds(state.sent)).toEqual(["execution_started", "check", "permission_requested", "resumed", "check", "failed"]);
+    expect(state.sent.at(-1)?.body).toMatchObject({
+      idempotencyKey: `${ROUND_ID}:1:failed`,
+      data: { explanation: "Could not write_note on notes/weekly-report with the controlled account: Galley still denies it after the Owner's approval" },
+    });
+  });
+
+  it("fails the Round on a scope Galley does not support, without asking for a Permission", async () => {
+    const { state, fetchFn } = galley({ checks: [error(400, "unsupported_scope")] });
+    const harness = start([START, { step: "act", account: "github", action: "push", resource: "repo" }], fetchFn);
+    expect(await harness.run).toBe("failed");
+    expect(kinds(state.sent)).toEqual(["execution_started", "check", "failed"]);
+    expect(state.sent.at(-1)?.body).toMatchObject({ data: { explanation: "Could not push on repo with the github account: Galley does not support this scope" } });
+  });
+
+  it("confirms a Stop that arrives while waiting for the approval, without resuming", async () => {
+    const { state, fetchFn } = galley();
+    const inbox = new ApprovalInbox();
+    let acknowledged = false;
+    const harness = start([START, ACT], fetchFn, { awaitApproval: inbox.wait });
+    await vi.advanceTimersByTimeAsync(5_000);
+    harness.stopper.abort("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    inbox.deliver(requestId, { grantId: GRANT, acknowledge: async () => void (acknowledged = true) });
+    expect(await harness.run).toBe("stopped");
+    expect(kinds(state.sent)).toEqual(["execution_started", "check", "permission_requested", "stop_confirmed"]);
+    expect(state.sent.at(-1)?.body).toMatchObject({
+      data: { evidence: "Stopped while waiting for the approval to step 2 of 2 on Stop command aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
+    });
+    expect(acknowledged).toBe(false);
+  });
+
+  it("waits until stopped when no approval arrives, as after a decline", async () => {
+    const { state, fetchFn } = galley();
+    const harness = start([START, ACT], fetchFn, { awaitApproval: new ApprovalInbox().wait });
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(kinds(state.sent)).toEqual(["execution_started", "check", "permission_requested"]);
+    harness.stopper.abort("stop");
+    expect(await harness.run).toBe("stopped");
+  });
+
+  it("retries a check through 5xx and network failures and abandons on a refusal", async () => {
+    const retried = galley({ checks: [error(503, "database_unavailable"), refused] });
+    retried.state.granted = true;
+    const harness = start([START, ACT], retried.fetchFn, { instantSleep: true });
+    expect(await harness.run).toBe("completed");
+    expect(kinds(retried.state.sent)).toEqual(["execution_started", "check", "check", "check", "progress"]);
+
+    for (const code of ["stale_claim_epoch", "round_not_open", "round_not_running"]) {
+      const refusedCheck = galley({ checks: [error(409, code)] });
+      expect(await start([START, ACT], refusedCheck.fetchFn).run).toBe("abandoned");
+      expect(kinds(refusedCheck.state.sent)).toEqual(["execution_started", "check"]);
+    }
+  });
+
+  it.each([
+    ["an allow without its grant", { decision: "allow" }],
+    ["a deny naming a grant", { decision: "deny", grantId: GRANT }],
+    ["another decision", { decision: "maybe" }],
+  ])("retries a check whose result is %s", async (_name, body) => {
+    const { state, fetchFn } = galley({ checks: [() => json(body)] });
+    state.granted = true;
+    const harness = start([START, ACT], fetchFn, { instantSleep: true });
+    expect(await harness.run).toBe("completed");
+    expect(kinds(state.sent)).toEqual(["execution_started", "check", "check", "progress"]);
+    expect(harness.records().some((record) => record["msg"] === "authority check failed; retrying" && record["reason"] === "invalid_body")).toBe(true);
+  });
+
+  it("retries rather than waits when the request result names another request", async () => {
+    const { state, fetchFn } = galley();
+    const original = fetchFn.getMockImplementation()!;
+    fetchFn.mockImplementation(async (input, init) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (body["type"] === "permission_requested") {
+        state.sent.push({ path: EVENTS_PATH, body });
+        return json({ roundId: ROUND_ID, type: "permission_requested", state: "waiting_for_input", startedAt, requestId: requestIdFor(ROUND_ID, 9) }, 201);
+      }
+      return original(input, init);
+    });
+    const harness = start([START, ACT], fetchFn);
+    await vi.advanceTimersByTimeAsync(3_500);
+    harness.controller.abort();
+    expect(await harness.run).toBe("aborted");
+    expect(kinds(state.sent)).toEqual(["execution_started", "check", "permission_requested", "permission_requested", "permission_requested"]);
+  });
+
+  it("truncates the performance note to Galley's note limit", () => {
+    expect([...performedNote({ step: "act", account: "controlled", action: "a".repeat(200), resource: "界".repeat(2000) })]).toHaveLength(2000);
   });
 });
 

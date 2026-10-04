@@ -1,4 +1,4 @@
-import { AnswerInbox } from "./answerInbox.ts";
+import { AnswerInbox, ApprovalInbox } from "./answerInbox.ts";
 import { acknowledgeCommand, startCommandLoop } from "./commandLoop.ts";
 import type { RunnerCredential } from "./credentials.ts";
 import { runControlledEngine, type EngineDeps } from "./engine.ts";
@@ -73,6 +73,7 @@ async function runRound(options: ClaimLoopOptions, claim: RunnerClaim, signal: A
   const stop = new AbortController();
   let stopCommand: PulledCommand | undefined;
   const answers = new AnswerInbox();
+  const approvals = new ApprovalInbox();
   const request = { fetch, galleyUrl, signal, timeoutMs: requestTimeoutMs, credential };
   const commands = startCommandLoop({
     galleyUrl,
@@ -95,6 +96,14 @@ async function runRound(options: ClaimLoopOptions, claim: RunnerClaim, signal: A
         },
       });
     },
+    onApproval: (command) => {
+      approvals.deliver(command.approval.requestId, {
+        grantId: command.approval.grantId,
+        acknowledge: async () => {
+          await acknowledgeCommand(request, logger, claim.roundId, command, "applied");
+        },
+      });
+    },
   });
   try {
     const outcome = await runControlledEngine({
@@ -107,6 +116,7 @@ async function runRound(options: ClaimLoopOptions, claim: RunnerClaim, signal: A
       signal,
       stop: stop.signal,
       awaitAnswer: answers.wait,
+      awaitApproval: approvals.wait,
       requestTimeoutMs,
       deps: options.engineDeps,
     });

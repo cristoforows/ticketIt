@@ -7,12 +7,14 @@ const feedback = { available: false, reason: { code: "feedback_not_available", m
 const rework = { available: false, reason: { code: "rework_not_available", message: "Unavailable" } };
 const stop = { available: false, reason: { code: "stop_not_available", message: "Unavailable" } };
 const answer = { available: false, reason: { code: "answer_not_available", message: "Unavailable" } };
+const permissionDecision = { available: false, reason: { code: "permission_decision_not_available", message: "Unavailable" } };
 const ticket = (id: string, status: string, statusChanges: string[] = [], archivedAt: string | null = null) => ({
   id,
   title: `Ticket ${id}`,
   status,
   template: "Basic",
-  allowedActions: { statusChangeRejections: [], statusChanges, accept, rework, stop, answer, feedback },
+  permissionGrants: [],
+  allowedActions: { statusChangeRejections: [], statusChanges, accept, rework, stop, answer, feedback, permissionDecision },
   completionCondition: "humanAcceptance",
   assigneeType: "",
   assigneeAgent: null,
@@ -64,9 +66,9 @@ describe("TicketBoard on phones", () => {
   it("gives an active slip its own View and Stop, with no actions toggle covering them, and no edit, move or reorder", async () => {
     const reason = { code: "round_open", message: "this Ticket has an open Round; it can be changed once the Round ends", roundId: "r1" };
     const agent = { id: "a1", name: "Builder", kind: "coding" };
-    const openRound = { id: "r1", sequence: 1, state: "running", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: "2026-10-01T10:00:01Z", stopRequestedAt: null, waitingReason: "working", question: null };
+    const openRound = { id: "r1", sequence: 1, state: "running", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: "2026-10-01T10:00:01Z", stopRequestedAt: null, waitingReason: "working", question: null, permissionRequest: null };
     stubTickets([
-      { ...ticket("locked", "Backlog"), assigneeType: "agent", assigneeAgent: agent, openRound, allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason }, rework, stop: { available: true }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } } } },
+      { ...ticket("locked", "Backlog"), assigneeType: "agent", assigneeAgent: agent, openRound, allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason }, rework, stop: { available: true }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } } },
       ticket("next", "Backlog", ["Ready"]),
     ]);
     render(<TicketBoard onUnauthenticated={() => {}} />);
@@ -205,7 +207,7 @@ describe("TicketBoard on phones", () => {
       const original = ticket("a", "Backlog", ["Ready", "Blocked", "Done"]);
       const fetchStub = vi.fn()
         .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ tickets: [original] }) })
-        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ...original, status: "Ready", allowedActions: { statusChangeRejections: [], statusChanges: ["Backlog"], accept, rework, stop, answer, feedback } }) })
+        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ...original, status: "Ready", allowedActions: { statusChangeRejections: [], statusChanges: ["Backlog"], accept, rework, stop, answer, feedback, permissionDecision } }) })
         .mockResolvedValue({ ok: true, status: 200, json: async () => ({ tickets: [{ ...original, status: "Ready" }] }) });
       vi.stubGlobal("fetch", fetchStub);
       render(<TicketBoard onUnauthenticated={() => {}} />);

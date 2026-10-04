@@ -113,10 +113,12 @@ func (s *server) ListRoundCommands(w http.ResponseWriter, r *http.Request, round
 }
 
 func pendingRoundCommands(ctx context.Context, pool *pgxpool.Pool, ownerID int64, roundID string) ([]RunnerCommand, bool, error) {
-	rows, err := pool.Query(ctx, `SELECT c.public_id::text, c.type, c.claim_epoch, c.issued_at, q.question_id::text, q.answer
+	rows, err := pool.Query(ctx, `SELECT c.public_id::text, c.type, c.claim_epoch, c.issued_at, q.question_id::text, q.answer, p.request_id::text, g.public_id::text
 		FROM rounds r
 		LEFT JOIN round_commands c ON c.owner_id = r.owner_id AND c.round_id = r.id AND c.acknowledged_at IS NULL AND r.state IN `+openRoundStatesSQL+`
 		LEFT JOIN round_questions q ON q.owner_id = c.owner_id AND q.id = c.question_id
+		LEFT JOIN permission_requests p ON p.owner_id = c.owner_id AND p.id = c.permission_request_id
+		LEFT JOIN permission_grants g ON g.owner_id = p.owner_id AND g.request_id = p.id
 		WHERE r.owner_id = $1 AND r.public_id = $2::uuid
 		ORDER BY c.type = $3 DESC, c.issued_at, c.id`, ownerID, roundID, string(RunnerCommandStop))
 	if err != nil {
@@ -127,10 +129,10 @@ func pendingRoundCommands(ctx context.Context, pool *pgxpool.Pool, ownerID int64
 	commands := []RunnerCommand{}
 	for rows.Next() {
 		found = true
-		var id, commandType, questionID, answer *string
+		var id, commandType, questionID, answer, requestID, grantID *string
 		var epoch *int
 		var issuedAt *time.Time
-		if err := rows.Scan(&id, &commandType, &epoch, &issuedAt, &questionID, &answer); err != nil {
+		if err := rows.Scan(&id, &commandType, &epoch, &issuedAt, &questionID, &answer, &requestID, &grantID); err != nil {
 			return nil, false, err
 		}
 		if id == nil {
@@ -139,6 +141,9 @@ func pendingRoundCommands(ctx context.Context, pool *pgxpool.Pool, ownerID int64
 		command := RunnerCommand{Id: *id, Type: RunnerCommandType(*commandType), ClaimEpoch: *epoch, IssuedAt: issuedAt.UTC()}
 		if questionID != nil {
 			command.Answer = &RunnerCommandAnswerData{QuestionId: *questionID, Text: *answer}
+		}
+		if requestID != nil {
+			command.Approval = &RunnerCommandApprovalData{RequestId: *requestID, GrantId: *grantID}
 		}
 		commands = append(commands, command)
 	}

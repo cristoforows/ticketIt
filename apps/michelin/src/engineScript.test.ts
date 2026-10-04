@@ -57,6 +57,11 @@ describe("parseEngineScript", () => {
     ["progress notes at both length bounds", scriptOf({ step: "start" }, { step: "progress", note: "x" }, { step: "progress", note: "é".repeat(2000) }), [{ step: "start" }, { step: "progress", note: "x" }, { step: "progress", note: "é".repeat(2000) }]],
     ["a note with tabs and line feeds", scriptOf({ step: "start" }, { step: "progress", note: "a\tb\nc" }), [{ step: "start" }, { step: "progress", note: "a\tb\nc" }]],
     ["a fully known usage", scriptOf({ step: "start" }, USAGE), [{ step: "start" }, USAGE]],
+    [
+      "act steps at both length bounds",
+      scriptOf({ step: "start" }, { step: "act", account: "controlled", action: "write_note", resource: "notes/a" }, { step: "act", account: "c", action: "a", resource: "é".repeat(200) }),
+      [{ step: "start" }, { step: "act", account: "controlled", action: "write_note", resource: "notes/a" }, { step: "act", account: "c", action: "a", resource: "é".repeat(200) }],
+    ],
     ["an ask at both length bounds", scriptOf({ step: "start" }, { step: "ask", question: "?" }, { step: "ask", question: "é".repeat(2000) }), [{ step: "start" }, { step: "ask", question: "?" }, { step: "ask", question: "é".repeat(2000) }]],
     ["a usage with every figure null", scriptOf({ step: "start" }, UNKNOWN_USAGE), [{ step: "start" }, UNKNOWN_USAGE]],
     ["a usage with absent figures, read as unknown", scriptOf({ step: "start" }, { step: "usage", provider: "p", model: "m", basis: "reported" }), [{ step: "start" }, UNKNOWN_USAGE]],
@@ -104,7 +109,7 @@ describe("parseEngineScript", () => {
     ["a step that is not an object", scriptOf({ step: "start" }, "wait"), /steps\[1\].*must be an object/],
     ["a step without a name", scriptOf({ step: "start" }, { ms: 5 }), /steps\[1\].*"step" must be a string/],
     ["a step name that is not a string", scriptOf({ step: "start" }, { step: 7 }), /steps\[1\].*"step" must be a string/],
-    ["an unknown step name", scriptOf({ step: "start" }, { step: "sleep", ms: 5 }), /steps\[1\].*unknown step "sleep".*start, wait, progress, ask, usage, deliver, hold, fail, interrupt/],
+    ["an unknown step name", scriptOf({ step: "start" }, { step: "sleep", ms: 5 }), /steps\[1\].*unknown step "sleep".*start, wait, progress, ask, act, usage, deliver, hold, fail, interrupt/],
     ["deliver before the last step", scriptOf({ step: "start" }, DELIVER, { step: "wait", ms: 10 }), /steps\[1\].*"deliver" may only be the last step/],
     ["deliver then hold", scriptOf({ step: "start" }, DELIVER, { step: "hold" }), /steps\[1\].*"deliver".*last.*mutually exclusive/],
     ["hold then deliver", scriptOf({ step: "start" }, { step: "hold" }, DELIVER), /steps\[1\].*"hold".*last.*mutually exclusive/],
@@ -183,6 +188,12 @@ describe("parseEngineScript", () => {
     ["an ask with a control character", scriptOf({ step: "start" }, { step: "ask", question: "a\u0007b" }), /steps\[1\].*"question"/],
     ["an ask with an unknown key", scriptOf({ step: "start" }, { step: "ask", question: "q", options: ["a"] }), /steps\[1\].*unknown key "options"/],
     ["an ask before start", scriptOf({ step: "ask", question: "q" }), /steps\[0\].*first step must be "start"/],
+    ["an act without a resource", scriptOf({ step: "start" }, { step: "act", account: "controlled", action: "write_note" }), /steps\[1\].*"resource" must be 1 to 200/],
+    ["an act with a blank action", scriptOf({ step: "start" }, { step: "act", account: "controlled", action: " ", resource: "notes/a" }), /steps\[1\].*"action"/],
+    ["an act with a numeric account", scriptOf({ step: "start" }, { step: "act", account: 7, action: "write_note", resource: "notes/a" }), /steps\[1\].*"account"/],
+    ["an act with a control character", scriptOf({ step: "start" }, { step: "act", account: "controlled", action: "write_note", resource: "notes/a\nb" }), /steps\[1\].*"resource"/],
+    ["an act over 200 characters", scriptOf({ step: "start" }, { step: "act", account: "controlled", action: "write_note", resource: "é".repeat(201) }), /steps\[1\].*"resource"/],
+    ["an act with a form", scriptOf({ step: "start" }, { step: "act", account: "controlled", action: "write_note", resource: "notes/a", form: "ticket" }), /steps\[1\].*unknown key "form"/],
   ])("rejects %s, naming the step index", (_name, text, message) => {
     const { script, problems } = parse(text);
     expect(script).toBeUndefined();

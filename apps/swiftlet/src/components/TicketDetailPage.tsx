@@ -9,6 +9,8 @@ import {
   requestTicketStop,
   addRoundFeedback,
   answerRoundQuestion,
+  approvePermissionRequest,
+  declinePermissionRequest,
   assignTicket,
   unassignTicket,
   createBadge,
@@ -191,6 +193,17 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
     }
   }
 
+  async function decidePermission(roundId: string, requestId: string, decision: "approve" | "decline"): Promise<Ticket> {
+    try {
+      const ticket = await runCommand(() => (decision === "approve" ? approvePermissionRequest : declinePermissionRequest)(ticketId, roundId, requestId));
+      void loadRounds();
+      return ticket;
+    } catch (error) {
+      if (error instanceof GalleyError) void refreshTicket();
+      throw error;
+    }
+  }
+
   function assign(assignee: TicketAssignee): Promise<Ticket> {
     return runCommand(() => assignTicket(ticketId, assignee));
   }
@@ -258,6 +271,7 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
       onLoadEarlierActivity={loadEarlierActivity}
       onAnswer={answer}
       onAddFeedback={addFeedback}
+      onDecidePermission={decidePermission}
       onArchived={() => (onArchiveSucceeded ? onArchiveSucceeded() : navigate(fullPageReturnPath()))}
     />
   );

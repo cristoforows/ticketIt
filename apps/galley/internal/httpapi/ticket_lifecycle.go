@@ -173,6 +173,7 @@ func allowedActionsForTicket(state ticketWorkflowState, condition TicketCompleti
 		Rework:                 commandAvailability(decideRework(state)),
 		Stop:                   commandAvailability(decideStop(state)),
 		Answer:                 commandAvailability(decideWaitingAnswer(state)),
+		PermissionDecision:     commandAvailability(decideWaitingPermission(state)),
 		Feedback:               commandAvailability(decideFeedback(state, state.deliveredRoundID != "")),
 	}
 	if rejection := decideTicketMutation(state.ticketLock, false); rejection != nil {

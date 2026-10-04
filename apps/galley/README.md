@@ -1826,6 +1826,112 @@ concurrent claims), `TestClaim_CreatesOneRoundAndLeavesTheTicketReady`
 and `TestRoundFeedback_ResponsesMatchContractAndMethod405`. Evidence:
 `docs/evidence/m5/164-round-feedback.md`.
 
+## Live authority checks and ticket-based Permission grants (issue #165)
+
+Migration `000022_live_authority_and_permission_grants.up.sql` adds the
+event `permission_requested`, the command type `approval`, and three
+tables:
+
+- `permission_requests`: the Round's ask for one scope, its
+  runner-chosen `request_id`, and the Owner's `decision`
+  (`approved | declined`) with `decided_at`, set together. A Round has
+  at most one undecided request.
+- `permission_grants`: the Galley record of a Permission. Agent,
+  Ticket and scope are bound by composite keys to the approved request,
+  so a grant cannot name another Agent, Ticket or scope than the one
+  asked for. `form` is `ticket` and `state` is `active`, the only values
+  this slice allows. `approved_at` equals `created_at`.
+- `round_authority_checks`: every check, with its decision, the grant
+  that allowed it (set exactly on `allow`) and the claim epoch.
+
+`rounds.waiting_question_id` and `rounds.waiting_permission_request_id`
+name the ask a waiting Round waits on. `rounds_waits_on_one_ask` holds
+exactly one while `waiting_for_input` and none otherwise.
+
+**The controlled Connected Account** is declared in code
+(`connected_accounts.go`) and is a substitute for a real account (M8).
+Every Owner has it, and having it authorizes nothing.
+
+| Account | Action | Resource pattern |
+| --- | --- | --- |
+| `controlled` | `read_note`, `write_note` | `^notes/[a-z0-9][a-z0-9-]{0,63}$` |
+| `controlled` | `post_message` | `^channels/[a-z0-9][a-z0-9-]{0,63}$` |
+
+A scope outside this table is `400 unsupported_scope` on both the check
+and `permission_requested`, and nothing is recorded. `substituteAccount`
+is `true` on every request and grant for `controlled`.
+
+**Matching.** A grant allows a check when its Agent is the Round's
+Agent, its Ticket is the Round's Ticket, and its account, action and
+resource equal the check's, byte for byte, with `state = active`. The
+pattern decides only whether a scope may be requested; it never widens
+a grant. There are no wildcards and no prefixes.
+
+`POST /api/runner/rounds/{roundId}/authority-checks` (runner bearer
+auth) takes `{"account", "action", "resource", "epoch"}`, strictly
+decoded. Each field is 1 to 200 characters with no control characters.
+The grant is read in the check's own transaction, under a share lock on
+the Round row, and never from the claim.
+
+| Check | Response |
+| --- | --- |
+| Malformed body or field | `400 invalid_request` |
+| Scope outside the catalogue | `400 unsupported_scope` |
+| Unknown, malformed or another Owner's Round | `404 not_found` |
+| `epoch` is not the Round's | `409 stale_claim_epoch` |
+| The Round has ended | `409 round_not_open` |
+| The Round is not `running` | `409 round_not_running` |
+| Otherwise | `200 {"decision": "allow", "grantId"}` or `{"decision": "deny"}`, recorded |
+
+| Event | `data` | Accepted on | Effect |
+| --- | --- | --- | --- |
+| `permission_requested` | `{"requestId", "account", "action", "resource"}`, `idempotencyKey` = `requestId` | `running` | Round `waiting_for_input` on the request, Ticket In Progress → Blocked, slot held |
+| `resumed` | `{"requestId"}` | `waiting_for_input` | Round `running`, Ticket Blocked → In Progress |
+
+`resumed` carries exactly one of `questionId` and `requestId`. Naming a
+request other than the one the Round waits on, or one not approved, is
+`409 approval_not_supplied`.
+
+`POST /api/tickets/{id}/rounds/{roundId}/permission-requests/{requestId}/approve`
+takes `{"form": "ticket"}` (strict decode, an enum).
+`.../decline` takes no body. Both lock the Ticket row, then the request
+row, and decide in order with one function, which
+`allowedActions.permissionDecision` also uses:
+
+| Check | Response |
+| --- | --- |
+| No such Ticket, Round of that Ticket, or request of that Round | `404 not_found` |
+| The request is decided | `400 permission_already_decided` |
+| The Round has ended | `400 round_not_open` |
+| The Round is not waiting | `400 permission_decision_not_available` |
+| Stop is requested | `400 stop_already_requested` |
+| Otherwise | `200`, the Ticket |
+
+Approval writes the decision, the grant and one `approval` command in
+one transaction. Decline writes only the decision: the Round keeps
+waiting with `waitingReason` `waiting_for_permission` until Stop ends it.
+After an approval the reason is `resuming`. `runner_disconnected` and
+`stopping` outrank both. The runner's command list carries
+`approval: {requestId, grantId}` and lists a Stop before an approval.
+
+The Ticket carries `openRound.permissionRequest` (set exactly when the
+waiting Round waits on a request) and `permissionGrants` (its active
+grants). Each `TicketRound` carries `permissionRequests` (oldest
+first), `authorityChecks` (the latest 50, oldest first) and
+`authorityCheckCount`.
+
+Tests: `round_authority_test.go` (live read, the boundary table,
+reuse in a later Round, recording and the 50 window, epoch and state,
+the shared `404`, strict decoding, constraints),
+`round_permissions_test.go` (the request lifecycle, replay, validation,
+approve, resume, first decision wins, concurrency, decline then Stop,
+races with Stop, the shared `404`, the waiting reason, lock order and
+constraints), the new rows in `round_events_test.go` and
+`round_waiting_test.go`, the three tables in
+`no_execution_side_effects_test.go`, and
+`TestPermissionsAndAuthorityChecks_ResponsesMatchContractAndMethod405`.
+Evidence: `docs/evidence/m5/165-live-authority.md`.
+
 ## Error shape
 
 `ErrorBody`/`ErrorDetail` are generated from
@@ -2113,6 +2219,9 @@ apps/galley/
         ├── round_commands.go      # issue #159: Stop request, the runner's command list and acks
         ├── round_waiting.go       # issue #162: decideWaitingReason
         ├── round_endings.go       # issues #160, #161: endRound for stop_confirmed, failed and interrupted; the Stopped Badge
+        ├── connected_accounts.go  # issue #165: the controlled substitute Connected Account and its scope catalogue
+        ├── round_authority.go     # issue #165: the runner's live authority check and its record
+        ├── round_permissions.go   # issue #165: Permission requests, the Owner's decision, grants
         ├── devclock.go     # issue #130: development-only clock advance for the browser suite
         └── no_execution_side_effects_test.go   # issue #60: the no-Round/queue/work-request guardrail
 ```

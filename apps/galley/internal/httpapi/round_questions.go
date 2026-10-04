@@ -28,7 +28,7 @@ const (
 
 const roundQuestionJSON = `json_build_object('id', q.question_id, 'text', q.text, 'askedAt', q.asked_at, 'answer', q.answer, 'answeredAt', q.answered_at)`
 
-var errWaitingTicketNotMatched = errors.New("the Ticket of a Round raising a question is not In Progress, or of a resuming Round not Blocked")
+var errWaitingTicketNotMatched = errors.New("the Ticket of a Round raising a question or Permission request is not In Progress, or of a resuming Round not Blocked")
 
 type raisedQuestion struct {
 	id, text string
@@ -53,36 +53,49 @@ func validateQuestionRaisedData(raw []byte) (raisedQuestion, string) {
 	return question, ""
 }
 
-func validateResumedData(raw []byte) (string, string) {
-	const shape = `"data" must be an object with exactly "questionId"`
-	fields, ok := exactObject(raw, "questionId")
+func validateResumedData(raw []byte) (questionID, requestID, problem string) {
+	const shape = `"data" must be an object with exactly "questionId" or exactly "requestId"`
+	key := "questionId"
+	fields, ok := exactObject(raw, key)
 	if !ok {
-		return "", shape
+		key = "requestId"
+		if fields, ok = exactObject(raw, key); !ok {
+			return "", "", shape
+		}
 	}
 	var id string
-	if json.Unmarshal(fields["questionId"], &id) != nil {
-		return "", shape
+	if json.Unmarshal(fields[key], &id) != nil {
+		return "", "", shape
 	}
 	if !canonicalRunnerUUID(id) {
-		return "", `"questionId" must be a non-nil UUID in lowercase canonical form`
+		return "", "", fmt.Sprintf(`%q must be a non-nil UUID in lowercase canonical form`, key)
 	}
-	return id, ""
+	if key == "questionId" {
+		return id, "", ""
+	}
+	return "", id, ""
 }
 
 func raiseQuestion(ctx context.Context, tx pgx.Tx, ownerID int64, ticketID string, roundID int64, question raisedQuestion, now time.Time) error {
-	if _, err := tx.Exec(ctx, `INSERT INTO round_questions (owner_id, round_id, question_id, text, asked_at) VALUES ($1, $2, $3::uuid, $4, $5)`,
-		ownerID, roundID, question.id, question.text, now); err != nil {
+	var questionRowID int64
+	if err := tx.QueryRow(ctx, `INSERT INTO round_questions (owner_id, round_id, question_id, text, asked_at) VALUES ($1, $2, $3::uuid, $4, $5) RETURNING id`,
+		ownerID, roundID, question.id, question.text, now).Scan(&questionRowID); err != nil {
 		return err
 	}
-	return moveRoundAndTicket(ctx, tx, ownerID, ticketID, roundID, RoundRunning, RoundWaitingForInput)
+	return moveRoundAndTicket(ctx, tx, ownerID, ticketID, roundID, RoundRunning, RoundWaitingForInput, roundAsk{questionID: &questionRowID})
 }
 
 func resumeRound(ctx context.Context, tx pgx.Tx, ownerID int64, ticketID string, roundID int64) error {
-	return moveRoundAndTicket(ctx, tx, ownerID, ticketID, roundID, RoundWaitingForInput, RoundRunning)
+	return moveRoundAndTicket(ctx, tx, ownerID, ticketID, roundID, RoundWaitingForInput, RoundRunning, roundAsk{})
 }
 
-func moveRoundAndTicket(ctx context.Context, tx pgx.Tx, ownerID int64, ticketID string, roundID int64, from, to RoundState) error {
-	if _, err := tx.Exec(ctx, `UPDATE rounds SET state = $3 WHERE id = $1 AND owner_id = $2`, roundID, ownerID, string(to)); err != nil {
+type roundAsk struct {
+	questionID, permissionRequestID *int64
+}
+
+func moveRoundAndTicket(ctx context.Context, tx pgx.Tx, ownerID int64, ticketID string, roundID int64, from, to RoundState, ask roundAsk) error {
+	if _, err := tx.Exec(ctx, `UPDATE rounds SET state = $3, waiting_question_id = $4, waiting_permission_request_id = $5 WHERE id = $1 AND owner_id = $2`,
+		roundID, ownerID, string(to), ask.questionID, ask.permissionRequestID); err != nil {
 		return err
 	}
 	tag, err := tx.Exec(ctx, `UPDATE tickets SET status = $3, updated_at = now()

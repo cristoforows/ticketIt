@@ -3,28 +3,37 @@ export interface ReceivedAnswer {
   acknowledge(): Promise<void>;
 }
 
-export type AwaitAnswer = (questionId: string, signal: AbortSignal) => Promise<ReceivedAnswer | undefined>;
+export interface ReceivedApproval {
+  grantId: string;
+  acknowledge(): Promise<void>;
+}
 
-export class AnswerInbox {
-  readonly #answers = new Map<string, ReceivedAnswer>();
-  readonly #waiters = new Map<string, (answer: ReceivedAnswer) => void>();
+export type Await<T> = (id: string, signal: AbortSignal) => Promise<T | undefined>;
 
-  deliver(questionId: string, answer: ReceivedAnswer): void {
-    const waiter = this.#waiters.get(questionId);
+export type AwaitAnswer = Await<ReceivedAnswer>;
+
+export type AwaitApproval = Await<ReceivedApproval>;
+
+export class Inbox<T> {
+  readonly #held = new Map<string, T>();
+  readonly #waiters = new Map<string, (item: T) => void>();
+
+  deliver(id: string, item: T): void {
+    const waiter = this.#waiters.get(id);
     if (waiter !== undefined) {
-      this.#waiters.delete(questionId);
-      waiter(answer);
+      this.#waiters.delete(id);
+      waiter(item);
       return;
     }
-    if (!this.#answers.has(questionId)) {
-      this.#answers.set(questionId, answer);
+    if (!this.#held.has(id)) {
+      this.#held.set(id, item);
     }
   }
 
-  readonly wait: AwaitAnswer = (questionId, signal) => {
-    const held = this.#answers.get(questionId);
+  readonly wait: Await<T> = (id, signal) => {
+    const held = this.#held.get(id);
     if (held !== undefined) {
-      this.#answers.delete(questionId);
+      this.#held.delete(id);
       return Promise.resolve(held);
     }
     return new Promise((resolve) => {
@@ -33,14 +42,18 @@ export class AnswerInbox {
         return;
       }
       const onAbort = (): void => {
-        this.#waiters.delete(questionId);
+        this.#waiters.delete(id);
         resolve(undefined);
       };
       signal.addEventListener("abort", onAbort, { once: true });
-      this.#waiters.set(questionId, (answer) => {
+      this.#waiters.set(id, (item) => {
         signal.removeEventListener("abort", onAbort);
-        resolve(answer);
+        resolve(item);
       });
     });
   };
 }
+
+export class AnswerInbox extends Inbox<ReceivedAnswer> {}
+
+export class ApprovalInbox extends Inbox<ReceivedApproval> {}

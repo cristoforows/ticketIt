@@ -52,7 +52,7 @@ func (f *claimFixture) startRound(t *testing.T, claim RunnerClaim, key string) *
 func databaseSnapshot(t *testing.T, pool *pgxpool.Pool) string {
 	t.Helper()
 	var out strings.Builder
-	for _, table := range []string{"tickets", "rounds", "round_events", "round_engine_references", "round_activity", "usage_observations", "round_deliverables", "round_commands", "round_questions", "round_feedback", "runners", "badges"} {
+	for _, table := range []string{"tickets", "rounds", "round_events", "round_engine_references", "round_activity", "usage_observations", "round_deliverables", "round_commands", "round_questions", "round_feedback", "permission_requests", "permission_grants", "round_authority_checks", "runners", "badges"} {
 		var rows string
 		if err := pool.QueryRow(context.Background(), `SELECT COALESCE(json_agg(row_to_json(x) ORDER BY x.id), '[]')::text FROM `+table+` x`).Scan(&rows); err != nil {
 			t.Fatal(err)
@@ -1003,9 +1003,67 @@ func TestDecideRoundEvent(t *testing.T) {
 		"failed after an interruption":        {lockedRound{state: "interrupted", epoch: 3}, RoundEventFailed, 3, roundNotOpenCode},
 		"progress on a failed Round":          {lockedRound{state: "failed", epoch: 3}, RoundEventProgress, 3, roundNotOpenCode},
 		"stop confirmation, interrupted":      {lockedRound{state: "interrupted", epoch: 3, stopRequested: true}, RoundEventStopConfirmed, 3, roundNotOpenCode},
+		"a Permission request, running":       {open(RoundRunning, 3), RoundEventPermissionRequested, 3, ""},
+		"a Permission request while Stopping": {stopping(RoundRunning, 3), RoundEventPermissionRequested, 3, ""},
+		"a Permission request, claimed":       {open(RoundClaimed, 3), RoundEventPermissionRequested, 3, eventOutOfOrderCode},
+		"a Permission request while waiting":  {open(RoundWaitingForInput, 3), RoundEventPermissionRequested, 3, eventOutOfOrderCode},
+		"a Permission request, stale epoch":   {open(RoundRunning, 3), RoundEventPermissionRequested, 4, staleClaimEpochCode},
+		"a Permission request, ended":         {lockedRound{state: "delivered", epoch: 3}, RoundEventPermissionRequested, 3, roundNotOpenCode},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got := decideRoundEvent(tc.round, roundEvent{eventType: tc.eventType, claimEpoch: tc.epoch})
+			event := roundEvent{eventType: tc.eventType, claimEpoch: tc.epoch}
+			if tc.eventType == RoundEventResumed {
+				event.question.id = questionA
+			}
+			got := decideRoundEvent(tc.round, event)
+			switch {
+			case tc.wantCode == "" && got != nil:
+				t.Fatalf("rejected with %+v", got)
+			case tc.wantCode != "" && (got == nil || got.code != tc.wantCode || got.status != http.StatusConflict):
+				t.Fatalf("decision = %+v, want a 409 %s", got, tc.wantCode)
+			}
+		})
+	}
+}
+
+func TestDecideRoundEvent_ResumedNeedsTheSuppliedAskTheRoundWaitsOn(t *testing.T) {
+	waiting := lockedRound{state: string(RoundWaitingForInput), epoch: 3, open: true}
+	onQuestion := func(answered bool) lockedRound {
+		r := waiting
+		r.questionID, r.questionAnswered = questionA, answered
+		return r
+	}
+	onRequest := func(approved bool) lockedRound {
+		r := waiting
+		r.requestID, r.requestApproved = requestA, approved
+		return r
+	}
+	answer := func(id string) roundEvent {
+		e := roundEvent{eventType: RoundEventResumed, claimEpoch: 3}
+		e.question.id = id
+		return e
+	}
+	approval := func(id string) roundEvent {
+		e := roundEvent{eventType: RoundEventResumed, claimEpoch: 3}
+		e.permission.id = id
+		return e
+	}
+	for name, tc := range map[string]struct {
+		round    lockedRound
+		event    roundEvent
+		wantCode string
+	}{
+		"the answered question":                   {onQuestion(true), answer(questionA), ""},
+		"the unanswered question":                 {onQuestion(false), answer(questionA), answerNotSuppliedCode},
+		"another question":                        {onQuestion(true), answer(questionB), answerNotSuppliedCode},
+		"the approved request":                    {onRequest(true), approval(requestA), ""},
+		"the undecided or declined request":       {onRequest(false), approval(requestA), approvalNotSuppliedCode},
+		"another request":                         {onRequest(true), approval(requestB), approvalNotSuppliedCode},
+		"an approval while waiting on a question": {onQuestion(true), approval(requestA), approvalNotSuppliedCode},
+		"an answer while waiting on a request":    {onRequest(true), answer(questionA), answerNotSuppliedCode},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := decideRoundEvent(tc.round, tc.event)
 			switch {
 			case tc.wantCode == "" && got != nil:
 				t.Fatalf("rejected with %+v", got)
