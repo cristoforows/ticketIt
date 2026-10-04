@@ -247,8 +247,9 @@ one action and never remembered, so every `act` asks again.
 
 - `allow`: the step sends the progress note `Performed <action> on
   <resource>` and the script continues.
-- `deny`: the step reports `permission_requested` with the scope and
-  waits, logging `engine waiting for an approval`. When the `approval`
+- `deny`: the step reports `permission_requested` with the scope (and,
+  when the deny names an `expiredGrantId`, that id as `renewsGrantId`:
+  a renewal, issue #166) and waits, logging `engine waiting for an approval`. When the `approval`
   command for its `requestId` arrives, it sends `resumed` with that
   `requestId`, acknowledges the command `applied` only after that, and
   checks again. An `allow` performs the action. A second `deny` ends the
@@ -299,10 +300,10 @@ context fields. The credential is never logged.
 | `engine waiting for an answer` | `info` | `roundId`, `stepIndex`, `questionId`. |
 | `answer received` | `info` | An `answer` for the claim's epoch arrived: as `stop requested`, plus `questionId`. The text is not logged. |
 | `resume reported` | `info` | As `question raised`, `step` `resume`. |
-| `authority checked` | `info` | `roundId`, `step` `act`, `stepIndex`, `attempt`, `account`, `action`, `resource`, `decision`, and `grantId` on `allow`. |
+| `authority checked` | `info` | `roundId`, `step` `act`, `stepIndex`, `attempt`, `account`, `action`, `resource`, `decision`, `grantId` on `allow`, and `expiredGrantId` on a deny that names one. |
 | `authority check failed; retrying` | `warn` | As `authority checked`, plus `reason`, `httpStatus`, `errorCode`, `retryInMs`. |
 | `authority check refused an unsupported scope`, `authority check refused; round abandoned locally` | `error` | As `authority checked`, plus `httpStatus` and `errorCode`. |
-| `permission requested` | `info` | `roundId`, `step` `request`, `stepIndex`, `attempt`, `requestId`, the scope, `httpStatus`. |
+| `permission requested` | `info` | `roundId`, `step` `request`, `stepIndex`, `attempt`, `requestId`, the scope, `renewsGrantId` on a renewal, `httpStatus`. |
 | `engine waiting for an approval` | `info` | `roundId`, `stepIndex`, `requestId`. |
 | `approval received` | `info` | An `approval` for the claim's epoch arrived: as `stop requested`, plus `requestId` and `grantId`. |
 | `action performed` | `info` | As `progress reported`, `step` `act`, plus the scope. |

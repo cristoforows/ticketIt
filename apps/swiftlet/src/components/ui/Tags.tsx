@@ -17,6 +17,7 @@ const tag = cva("inline-block rounded-tag text-label uppercase", {
       interrupted: "border border-dashed border-status-blocked-deep bg-paper px-2 py-px font-bold tracking-label text-status-blocked-deep",
       delivered: "border border-status-in-review-deep bg-paper px-2 py-px font-bold tracking-label text-status-in-review-deep",
       estimate: "border border-muted bg-paper px-1.5 py-px font-bold tracking-label text-muted normal-case",
+      expired: "border border-muted bg-paper px-2 py-px font-bold tracking-label text-muted",
     },
   },
 });
@@ -68,6 +69,10 @@ export function DeliveredTag({ className, ...rest }: ComponentPropsWithRef<"span
 
 export function EstimateTag({ className, ...rest }: Omit<ComponentPropsWithRef<"span">, "children">) {
   return <span className={cn(tag({ kind: "estimate" }), className)} {...rest}>est.</span>;
+}
+
+export function ExpiredTag({ className, ...rest }: ComponentPropsWithRef<"span">) {
+  return <span className={cn(tag({ kind: "expired" }), className)} {...rest} />;
 }
 
 export function PendingTag({ className, ...rest }: ComponentPropsWithRef<"span">) {

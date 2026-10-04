@@ -334,7 +334,14 @@ func recordRoundEvent(ctx context.Context, pool *pgxpool.Pool, ownerID int64, ro
 		}
 		result.State, result.StartedAt, result.QuestionId = RoundWaitingForInput, utcOrNil(round.startedAt), &event.question.id
 	case RoundEventPermissionRequested:
-		if err := raisePermissionRequest(ctx, tx, ownerID, ticketID, round.id, event.permission, now); err != nil {
+		renewsGrantRowID, rejection, err := renewedGrant(ctx, tx, ownerID, round.id, event.permission, now)
+		if err != nil {
+			return recordedRoundEvent{}, err
+		}
+		if rejection != nil {
+			return recordedRoundEvent{found: true, rejection: rejection}, nil
+		}
+		if err := raisePermissionRequest(ctx, tx, ownerID, ticketID, round.id, event.permission, renewsGrantRowID, now); err != nil {
 			return recordedRoundEvent{}, err
 		}
 		result.State, result.StartedAt, result.RequestId = RoundWaitingForInput, utcOrNil(round.startedAt), &event.permission.id

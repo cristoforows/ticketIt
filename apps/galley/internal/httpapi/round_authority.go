@@ -98,22 +98,31 @@ func checkAuthority(ctx context.Context, pool *pgxpool.Pool, ownerID int64, roun
 	if rejection := decideAuthorityCheck(round, epoch); rejection != nil {
 		return AuthorityCheckResult{}, true, rejection, nil
 	}
-	var grantRowID *int64
-	var grantID *string
+	var grantRowID, expiredRowID *int64
+	var grantID, expiredID *string
 	err = tx.QueryRow(ctx, `SELECT id, public_id::text FROM permission_grants
-		WHERE owner_id = $1 AND agent_id = $2 AND ticket_id = $3 AND account = $4 AND action = $5 AND resource = $6 AND state = $7
-		ORDER BY id LIMIT 1`, ownerID, round.agentID, round.ticketID, scope.account, scope.action, scope.resource, string(PermissionGrantActive)).
+		WHERE owner_id = $1 AND agent_id = $2 AND account = $4 AND action = $5 AND resource = $6 AND state = $7
+		  AND ((form = $8 AND ticket_id = $3) OR (form = $9 AND expires_at > $10))
+		ORDER BY id LIMIT 1`, ownerID, round.agentID, round.ticketID, scope.account, scope.action, scope.resource, string(PermissionGrantActive),
+		string(PermissionGrantFormTicket), string(PermissionGrantFormTime), now).
 		Scan(&grantRowID, &grantID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return AuthorityCheckResult{}, true, nil, err
 	}
-	result := AuthorityCheckResult{Decision: AuthorityDeny}
-	if grantID != nil {
-		result = AuthorityCheckResult{Decision: AuthorityAllow, GrantId: grantID}
+	result := AuthorityCheckResult{Decision: AuthorityAllow, GrantId: grantID}
+	if grantID == nil {
+		err = tx.QueryRow(ctx, `SELECT id, public_id::text FROM permission_grants
+			WHERE owner_id = $1 AND agent_id = $2 AND account = $3 AND action = $4 AND resource = $5 AND form = $6 AND NOT expires_at > $7
+			ORDER BY id DESC LIMIT 1`, ownerID, round.agentID, scope.account, scope.action, scope.resource, string(PermissionGrantFormTime), now).
+			Scan(&expiredRowID, &expiredID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return AuthorityCheckResult{}, true, nil, err
+		}
+		result = AuthorityCheckResult{Decision: AuthorityDeny, ExpiredGrantId: expiredID}
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO round_authority_checks (owner_id, round_id, account, action, resource, claim_epoch, decision, grant_id, checked_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		ownerID, round.id, scope.account, scope.action, scope.resource, epoch, string(result.Decision), grantRowID, now); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO round_authority_checks (owner_id, round_id, account, action, resource, claim_epoch, decision, grant_id, expired_grant_id, checked_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		ownerID, round.id, scope.account, scope.action, scope.resource, epoch, string(result.Decision), grantRowID, expiredRowID, now); err != nil {
 		return AuthorityCheckResult{}, true, nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -128,10 +137,11 @@ type roundAuthorityHistory struct {
 }
 
 func roundAuthorityChecks(ctx context.Context, tx pgx.Tx, ownerID int64, roundIDs []int64) (map[int64]roundAuthorityHistory, error) {
-	rows, err := tx.Query(ctx, `SELECT c.round_id, c.account, c.action, c.resource, c.decision, g.public_id::text, c.checked_at, c.total
+	rows, err := tx.Query(ctx, `SELECT c.round_id, c.account, c.action, c.resource, c.decision, g.public_id::text, e.public_id::text, c.checked_at, c.total
 		FROM (SELECT *, row_number() OVER (PARTITION BY round_id ORDER BY id DESC) AS newest, count(*) OVER (PARTITION BY round_id) AS total
 			FROM round_authority_checks WHERE owner_id = $1 AND round_id = ANY($2)) c
 		LEFT JOIN permission_grants g ON g.owner_id = c.owner_id AND g.id = c.grant_id
+		LEFT JOIN permission_grants e ON e.owner_id = c.owner_id AND e.id = c.expired_grant_id
 		WHERE c.newest <= $3 ORDER BY c.round_id, c.id`, ownerID, roundIDs, authorityChecksShown)
 	if err != nil {
 		return nil, err
@@ -143,7 +153,7 @@ func roundAuthorityChecks(ctx context.Context, tx pgx.Tx, ownerID int64, roundID
 		var check RoundAuthorityCheck
 		var decision string
 		var total int
-		if err := rows.Scan(&roundID, &check.Account, &check.Action, &check.Resource, &decision, &check.GrantId, &check.CheckedAt, &total); err != nil {
+		if err := rows.Scan(&roundID, &check.Account, &check.Action, &check.Resource, &decision, &check.GrantId, &check.ExpiredGrantId, &check.CheckedAt, &total); err != nil {
 			return nil, err
 		}
 		check.Decision = AuthorityDecision(decision)

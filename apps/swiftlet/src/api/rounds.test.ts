@@ -36,9 +36,9 @@ const QUESTION = { id: "99999999-9999-5999-8999-999999999999", text: "Which regi
 
 const FEEDBACK = { id: "13131313-1313-4313-8313-131313131313", body: "Cover Asia too", createdAt: "2026-10-01T10:01:00Z", consumedBy: null };
 
-const REQUEST = { id: "99999999-9999-5999-8999-999999999990", account: "controlled", action: "write_note", resource: "notes/weekly-report", substituteAccount: true, requestedAt: "2026-10-01T10:00:10Z", decision: "approved", decidedAt: "2026-10-01T10:00:12Z", grantId: "12121212-1212-4121-8121-121212121212" };
+const REQUEST = { id: "99999999-9999-5999-8999-999999999990", account: "controlled", action: "write_note", resource: "notes/weekly-report", substituteAccount: true, requestedAt: "2026-10-01T10:00:10Z", decision: "approved", decidedAt: "2026-10-01T10:00:12Z", grantId: "12121212-1212-4121-8121-121212121212", renewsGrantId: null };
 
-const DENY = { account: "controlled", action: "write_note", resource: "notes/weekly-report", decision: "deny", grantId: null, checkedAt: "2026-10-01T10:00:09Z" };
+const DENY = { account: "controlled", action: "write_note", resource: "notes/weekly-report", decision: "deny", grantId: null, expiredGrantId: null, checkedAt: "2026-10-01T10:00:09Z" };
 const ALLOW = { ...DENY, decision: "allow", grantId: REQUEST.grantId, checkedAt: "2026-10-01T10:00:13Z" };
 
 const answer = (rounds: unknown[]) => vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => ({ rounds }) }));
@@ -78,6 +78,14 @@ describe("fetchTicketRounds", () => {
     expect(await fetchTicketRounds("t")).toEqual([withChecks]);
   });
 
+  it("keeps a deny that names the expired grant and the renewal request it raised", async () => {
+    const expiredGrantId = "14141414-1414-4141-8141-141414141414";
+    const renewal = { ...REQUEST, renewsGrantId: expiredGrantId };
+    const withRenewal = { ...STOPPED, permissionRequests: [renewal], authorityChecks: [{ ...DENY, expiredGrantId }, ALLOW], authorityCheckCount: 2 };
+    answer([withRenewal]);
+    expect(await fetchTicketRounds("t")).toEqual([withRenewal]);
+  });
+
   it.each([
     ["failed", "The repository is gone."],
     ["interrupted", "The engine process exited with signal 9."],
@@ -111,6 +119,10 @@ describe("fetchTicketRounds", () => {
     ["no authorityChecks field", { ...STOPPED, authorityChecks: undefined }],
     ["an allow without its grant", { ...STOPPED, authorityChecks: [{ ...ALLOW, grantId: null }], authorityCheckCount: 1 }],
     ["a deny with a grant", { ...STOPPED, authorityChecks: [{ ...DENY, grantId: REQUEST.grantId }], authorityCheckCount: 1 }],
+    ["a Permission request without renewsGrantId", { ...STOPPED, permissionRequests: [{ ...REQUEST, renewsGrantId: undefined }] }],
+    ["a check without expiredGrantId", { ...STOPPED, authorityChecks: [{ ...DENY, expiredGrantId: undefined }], authorityCheckCount: 1 }],
+    ["an allow that names an expired grant", { ...STOPPED, authorityChecks: [{ ...ALLOW, expiredGrantId: "14141414-1414-4141-8141-141414141414" }], authorityCheckCount: 1 }],
+    ["a numeric expiredGrantId", { ...STOPPED, authorityChecks: [{ ...DENY, expiredGrantId: 7 }], authorityCheckCount: 1 }],
     ["an unknown decision", { ...STOPPED, authorityChecks: [{ ...DENY, decision: "maybe" }], authorityCheckCount: 1 }],
     ["a check without checkedAt", { ...STOPPED, authorityChecks: [{ ...DENY, checkedAt: undefined }], authorityCheckCount: 1 }],
     ["no authorityCheckCount field", { ...STOPPED, authorityCheckCount: undefined }],

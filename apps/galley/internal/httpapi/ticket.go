@@ -455,7 +455,7 @@ func scanTicketRow(row ticketRowScanner, now time.Time) (Ticket, error) {
 	)
 	if err := row.Scan(
 		&ticket.Id, &ticket.Title, &status, &template, &completionCondition, &assigneeType, &ticket.AssigneeAgent, &ticket.OpenRound, &ticket.Delivery,
-		&runnerLastSeenAt, &ticket.PermissionGrants, &goal, &ctxField, &successCriteria, &constraints, &repository,
+		&runnerLastSeenAt, &ticket.PermissionGrants, &ticket.PermissionGrantCount, &goal, &ctxField, &successCriteria, &constraints, &repository,
 		&createdAt, &updatedAt, &archivedAt,
 	); err != nil {
 		return Ticket{}, err
@@ -491,7 +491,7 @@ func scanTicketRow(row ticketRowScanner, now time.Time) (Ticket, error) {
 	if ticket.Delivery != nil {
 		ticket.Delivery.DeliveredAt = ticket.Delivery.DeliveredAt.UTC()
 	}
-	normalisePermissionGrants(ticket.PermissionGrants)
+	normalisePermissionGrants(ticket.PermissionGrants, now)
 	ticket.CreatedAt = createdAt.UTC().Format(time.RFC3339)
 	ticket.UpdatedAt = updatedAt.UTC().Format(time.RFC3339)
 	state := workflowStateOf(ticket)

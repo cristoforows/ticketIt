@@ -49,15 +49,15 @@ Authorization for an **Agent** to perform actions within a resource scope, inclu
 _Avoid_: Skill when referring to authorization rather than instructions.
 
 **Temporary Permission**:
-A **Permission** for an **Agent** of one of two distinct kinds: ticket-based, ending when its specified **Ticket** reaches **Done**, or time-based, ending at its configured expiry independently of ticket completion. It authorizes repeated uses within its account, action, and resource scope; ticket and time limits are not combined in one grant.
+A **Permission** for an **Agent** of one of two distinct kinds: ticket-based, ending when its specified **Ticket** reaches **Done**, or time-based, covering the agent on any of its tickets until its expiry by Galley's clock, independently of ticket completion. It authorizes repeated uses within its account, action, and resource scope; ticket and time limits are not combined in one grant. Expiry is judged at each check and stops only that scope; the expired grant stays recorded, and renewal is a new grant.
 _Avoid_: One-time permission when referring to a ticket-bound or time-bound grant.
 
 **Permission Request**:
-An **Agent**'s ask, during a **Round**, for one account, action and resource it was denied, putting that round in **Waiting for Input**. The owner's first decision stands: an **Approval**, or a decline that leaves the round waiting until the owner stops it.
+An **Agent**'s ask, during a **Round**, for one account, action and resource it was denied, putting that round in **Waiting for Input**. It is a renewal when the denial found the agent's expired time-based grant for that scope. The owner's first decision stands: an **Approval**, or a decline that leaves the round waiting until the owner stops it.
 _Avoid_: Question when referring to an ask for authority rather than information.
 
 **Approval**:
-The owner's acceptance of a **Permission Request**, which creates a **Temporary Permission** for exactly that agent, ticket and scope and resumes the same **Round**. Later actions in that scope, in this or a later round of the ticket, need no new request.
+The owner's acceptance of a **Permission Request**, which creates a **Temporary Permission** of the kind the owner chooses for exactly that agent and scope (and, ticket-based, that ticket) and resumes the same **Round**. Later actions it covers need no new request.
 _Avoid_: Answer when referring to granting authority.
 
 **Grill Mode**:

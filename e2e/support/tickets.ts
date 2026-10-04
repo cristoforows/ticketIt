@@ -64,6 +64,8 @@ export interface PermissionRequest {
   decision: "approved" | "declined" | null;
   decidedAt: string | null;
   grantId: string | null;
+  /** The expired time grant this request renews (issue #166). */
+  renewsGrantId: string | null;
 }
 
 export interface PermissionGrant {
@@ -73,8 +75,11 @@ export interface PermissionGrant {
   action: string;
   resource: string;
   substituteAccount: boolean;
-  form: "ticket";
-  state: "active";
+  form: "ticket" | "time";
+  /** Derived from Galley's clock when read; no stored state changes at expiry (issue #166). */
+  state: "active" | "expired";
+  expiresAt: string | null;
+  remainingSeconds: number | null;
   roundId: string;
   createdAt: string;
   approvedAt: string;
@@ -86,6 +91,8 @@ export interface AuthorityCheck {
   resource: string;
   decision: "allow" | "deny";
   grantId: string | null;
+  /** On a deny, the newest expired time grant for the same Agent and scope (issue #166). */
+  expiredGrantId: string | null;
   checkedAt: string;
 }
 
@@ -164,8 +171,9 @@ export interface Ticket {
     /** Set exactly while `state` is `waiting_for_input` and no question is (issue #165). */
     permissionRequest: PermissionRequest | null;
   } | null;
-  /** The Ticket's active ticket-form grants (issue #165). */
+  /** The newest 50 grants approved on this Ticket or held for a time by its assigned Agent (issues #165, #166). */
   permissionGrants: PermissionGrant[];
+  permissionGrantCount: number;
   /** The latest Round, when it was delivered (issue #136). */
   delivery: {
     roundId: string;
@@ -296,8 +304,10 @@ export async function addFeedbackDirect(from: Api, id: string, roundId: string, 
 }
 
 /** Same purpose as changeTicketStatusDirect, for the Owner's Permission decision. */
-export async function decidePermissionDirect(from: Api, id: string, roundId: string, requestId: string, decision: "approve" | "decline"): Promise<TicketCommandResult> {
-  return ticketCommand(from, "POST", `/api/tickets/${id}/rounds/${roundId}/permission-requests/${requestId}/${decision}`, decision === "approve" ? { form: "ticket" } : undefined);
+export type GrantChoice = { form: "ticket" } | { form: "time"; expiresAt: string };
+
+export async function decidePermissionDirect(from: Api, id: string, roundId: string, requestId: string, decision: "approve" | "decline", grant: GrantChoice = { form: "ticket" }): Promise<TicketCommandResult> {
+  return ticketCommand(from, "POST", `/api/tickets/${id}/rounds/${roundId}/permission-requests/${requestId}/${decision}`, decision === "approve" ? grant : undefined);
 }
 
 export type TicketAssignee = { type: "owner" } | { type: "agent"; agentId: string };

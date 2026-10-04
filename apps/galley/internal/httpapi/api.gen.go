@@ -132,12 +132,15 @@ func (e OpenRoundState) Valid() bool {
 // Defines values for PermissionGrantForm.
 const (
 	PermissionGrantFormTicket PermissionGrantForm = "ticket"
+	PermissionGrantFormTime   PermissionGrantForm = "time"
 )
 
 // Valid indicates whether the value is a known member of the PermissionGrantForm enum.
 func (e PermissionGrantForm) Valid() bool {
 	switch e {
 	case PermissionGrantFormTicket:
+		return true
+	case PermissionGrantFormTime:
 		return true
 	default:
 		return false
@@ -146,13 +149,16 @@ func (e PermissionGrantForm) Valid() bool {
 
 // Defines values for PermissionGrantState.
 const (
-	PermissionGrantActive PermissionGrantState = "active"
+	PermissionGrantActive  PermissionGrantState = "active"
+	PermissionGrantExpired PermissionGrantState = "expired"
 )
 
 // Valid indicates whether the value is a known member of the PermissionGrantState enum.
 func (e PermissionGrantState) Valid() bool {
 	switch e {
 	case PermissionGrantActive:
+		return true
+	case PermissionGrantExpired:
 		return true
 	default:
 		return false
@@ -549,7 +555,10 @@ type ApprovalResumedData struct {
 
 // ApprovePermissionRequest defines model for ApprovePermissionRequest.
 type ApprovePermissionRequest struct {
-	// Form `ticket`: this Agent, this Ticket, this scope, for as long as the grant is active.
+	// ExpiresAt Required by the `time` form and refused with the `ticket` form. After Galley's clock and at most 30 days after it.
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
+
+	// Form `ticket`: this Agent, this Ticket, this scope, for as long as the grant is active. `time`: this Agent and this scope on any Ticket until `expiresAt`, whatever any Ticket's Status.
 	Form PermissionGrantForm `json:"form"`
 }
 
@@ -575,6 +584,9 @@ type AuthorityCheckRequest struct {
 // AuthorityCheckResult defines model for AuthorityCheckResult.
 type AuthorityCheckResult struct {
 	Decision AuthorityDecision `json:"decision"`
+
+	// ExpiredGrantId On `deny` only: the newest expired `time` grant for the Round's Agent and this scope, when one exists. A `permission_requested` for this scope names it as `renewsGrantId`.
+	ExpiredGrantId *string `json:"expiredGrantId,omitempty"`
 
 	// GrantId The grant that allowed; present exactly when `decision` is `allow`.
 	GrantId *string `json:"grantId,omitempty"`
@@ -772,21 +784,29 @@ type PermissionGrant struct {
 	ApprovedAt time.Time           `json:"approvedAt"`
 	CreatedAt  time.Time           `json:"createdAt"`
 
-	// Form `ticket`: this Agent, this Ticket, this scope, for as long as the grant is active.
-	Form     PermissionGrantForm `json:"form"`
-	Id       string              `json:"id"`
-	Resource string              `json:"resource"`
+	// ExpiresAt Set exactly for the `time` form.
+	ExpiresAt *time.Time `json:"expiresAt"`
+
+	// Form `ticket`: this Agent, this Ticket, this scope, for as long as the grant is active. `time`: this Agent and this scope on any Ticket until `expiresAt`, whatever any Ticket's Status.
+	Form PermissionGrantForm `json:"form"`
+	Id   string              `json:"id"`
+
+	// RemainingSeconds Whole seconds from Galley's clock at the read to `expiresAt`, rounded up; 0 once expired; null for the `ticket` form.
+	RemainingSeconds *int   `json:"remainingSeconds"`
+	Resource         string `json:"resource"`
 
 	// RoundId The Round whose request the Owner approved.
-	RoundId           string               `json:"roundId"`
+	RoundId string `json:"roundId"`
+
+	// State `expired`: a `time` grant whose `expiresAt` is not after Galley's clock when the grant is read. It authorizes nothing and stays recorded.
 	State             PermissionGrantState `json:"state"`
 	SubstituteAccount bool                 `json:"substituteAccount"`
 }
 
-// PermissionGrantForm `ticket`: this Agent, this Ticket, this scope, for as long as the grant is active.
+// PermissionGrantForm `ticket`: this Agent, this Ticket, this scope, for as long as the grant is active. `time`: this Agent and this scope on any Ticket until `expiresAt`, whatever any Ticket's Status.
 type PermissionGrantForm string
 
-// PermissionGrantState defines model for PermissionGrantState.
+// PermissionGrantState `expired`: a `time` grant whose `expiresAt` is not after Galley's clock when the grant is read. It authorizes nothing and stays recorded.
 type PermissionGrantState string
 
 // PermissionRequest defines model for PermissionRequest.
@@ -801,6 +821,9 @@ type PermissionRequest struct {
 
 	// Id The runner's `requestId`.
 	Id string `json:"id"`
+
+	// RenewsGrantId The expired `time` grant this request renews.
+	RenewsGrantId *string `json:"renewsGrantId"`
 
 	// RequestedAt Galley's clock.
 	RequestedAt time.Time `json:"requestedAt"`
@@ -817,6 +840,9 @@ type PermissionRequestDecision string
 type PermissionRequestedData struct {
 	Account string `json:"account"`
 	Action  string `json:"action"`
+
+	// RenewsGrantId The `expiredGrantId` a denied check returned, when this request renews that expired grant.
+	RenewsGrantId *string `json:"renewsGrantId,omitempty"`
 
 	// RequestId The request's identity, generated by the runner, one per request instance. Lowercase canonical form, not the nil UUID, and equal to the event's `idempotencyKey`.
 	RequestId string `json:"requestId"`
@@ -891,6 +917,9 @@ type RoundAuthorityCheck struct {
 	// CheckedAt Galley's clock.
 	CheckedAt time.Time         `json:"checkedAt"`
 	Decision  AuthorityDecision `json:"decision"`
+
+	// ExpiredGrantId On `deny` only: the newest expired `time` grant for the Round's Agent and this scope, when one exists.
+	ExpiredGrantId *string `json:"expiredGrantId"`
 
 	// GrantId The grant that allowed; set exactly when `decision` is `allow`.
 	GrantId  *string `json:"grantId"`
@@ -1189,7 +1218,10 @@ type Ticket struct {
 	// OpenRound Null unless the Ticket has an open Round. While it is set, every change to the Ticket's fields, Assignee, Badges, Status or position, Accept and archive is rejected with `round_open`, and `allowedActions` offers none of them.
 	OpenRound *TicketOpenRound `json:"openRound"`
 
-	// PermissionGrants Every Permission grant on this Ticket, oldest first.
+	// PermissionGrantCount How many grants apply to this Ticket; more than `permissionGrants` holds when it is truncated.
+	PermissionGrantCount int `json:"permissionGrantCount"`
+
+	// PermissionGrants The newest 50 grants that apply to this Ticket, oldest first: every grant approved on this Ticket, and every `time` grant of the Ticket's assigned Agent.
 	PermissionGrants []PermissionGrant `json:"permissionGrants"`
 
 	// Repository One Ticket repository reference (issue #59, D3 S1 check 3), available on either Template, and required before Ready only by a `coding` Agent's readiness. There is exactly one such field on a Ticket; the Coding Template surfaces it by default, but it is not a competing Basic-only concept. Plain text (e.g. an "owner/repo" name or a URL) with no format enforced yet. Always present on the wire; "" means never set or cleared -- see `goal`'s description for the same convention.

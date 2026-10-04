@@ -310,12 +310,18 @@ export function checkAuthority(request: RunnerRequest, roundId: string, body: Au
     if (payload === INVALID_JSON) {
       return { ok: false, failure: { reason: "invalid_body", error: "response is not valid JSON" } };
     }
-    if (isRecord(payload) && payload["decision"] === "allow" && typeof payload["grantId"] === "string") {
+    if (isRecord(payload) && payload["decision"] === "allow" && typeof payload["grantId"] === "string" && payload["expiredGrantId"] === undefined) {
       return { ok: true, value: { decision: "allow", grantId: payload["grantId"] } };
     }
     if (isRecord(payload) && payload["decision"] === "deny" && payload["grantId"] === undefined) {
-      return { ok: true, value: { decision: "deny" } };
+      const expired = payload["expiredGrantId"];
+      if (expired === undefined) {
+        return { ok: true, value: { decision: "deny" } };
+      }
+      if (typeof expired === "string") {
+        return { ok: true, value: { decision: "deny", expiredGrantId: expired } };
+      }
     }
-    return { ok: false, failure: { reason: "invalid_body", error: "body is not an allow naming its grant or a deny" } };
+    return { ok: false, failure: { reason: "invalid_body", error: "body is not an allow naming its grant or a deny naming at most an expired grant" } };
   });
 }

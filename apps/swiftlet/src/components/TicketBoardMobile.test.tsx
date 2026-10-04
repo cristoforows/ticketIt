@@ -14,6 +14,7 @@ const ticket = (id: string, status: string, statusChanges: string[] = [], archiv
   status,
   template: "Basic",
   permissionGrants: [],
+  permissionGrantCount: 0,
   allowedActions: { statusChangeRejections: [], statusChanges, accept, rework, stop, answer, feedback, permissionDecision },
   completionCondition: "humanAcceptance",
   assigneeType: "",

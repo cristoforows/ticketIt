@@ -1505,3 +1505,71 @@ func TestPermissionsAndAuthorityChecks_ResponsesMatchContractAndMethod405(t *tes
 		}
 	}
 }
+
+func TestTimeGrantsAndRenewals_ResponsesMatchContract(t *testing.T) {
+	f := newClaimFixture(t)
+	router, err := legacy.NewRouter(loadContract(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate := func(call runnerCall, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(call.method, call.path, strings.NewReader(call.body))
+		if call.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if call.token != "" {
+			req.Header.Set("Authorization", "Bearer "+call.token)
+		}
+		if call.cookie != nil {
+			req.AddCookie(call.cookie)
+		}
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("%s %s: status=%d, want %d; body=%s", call.method, call.path, rec.Code, want, rec.Body.String())
+		}
+		validateAgainstContract(t, router, req, rec)
+		return rec
+	}
+	queued, claim := f.runningRound(t, "contract")
+	event := func(body string) runnerCall {
+		return runnerCall{method: http.MethodPost, path: "/api/runner/rounds/" + claim.RoundId + "/events", body: body, token: f.token}
+	}
+	check := runnerCall{method: http.MethodPost, path: authorityCheckPath(claim.RoundId), body: authorityCheckBody(t, writeReport, claim.ClaimEpoch), token: f.token}
+	approve := func(requestID, body string) runnerCall {
+		return runnerCall{method: http.MethodPost, path: permissionPath(queued.Id, claim.RoundId, requestID, "approve"), body: body, cookie: f.cookie}
+	}
+	readAll := func() {
+		t.Helper()
+		for _, read := range []runnerCall{
+			{method: http.MethodGet, path: "/api/tickets/" + queued.Id, cookie: f.cookie},
+			{method: http.MethodGet, path: "/api/tickets", cookie: f.cookie},
+			{method: http.MethodGet, path: "/api/tickets/" + queued.Id + "/rounds", cookie: f.cookie},
+		} {
+			validate(read, http.StatusOK)
+		}
+	}
+	until := runnerEpoch.Add(time.Hour)
+
+	validate(event(permissionEvent(t, requestA, claim.ClaimEpoch, requestA, writeReport)), http.StatusCreated)
+	assertErrorCode(t, validate(approve(requestA, jsonText(t, map[string]any{"form": "ticket", "expiresAt": until.Format(time.RFC3339)})), http.StatusBadRequest), grantFormConflictCode)
+	assertErrorCode(t, validate(approve(requestA, timeApprovalBody(t, runnerEpoch)), http.StatusBadRequest), invalidGrantExpiryCode)
+	validate(approve(requestA, timeApprovalBody(t, until)), http.StatusOK)
+	validate(event(approvalResumedEvent(t, "resume-a", claim.ClaimEpoch, requestA)), http.StatusCreated)
+	validate(check, http.StatusOK)
+	readAll()
+
+	f.clock.Set(until)
+	rec := validate(check, http.StatusOK)
+	var denied AuthorityCheckResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &denied); err != nil || denied.ExpiredGrantId == nil {
+		t.Fatalf("check after expiry = %s, want a deny naming the expired grant", rec.Body.String())
+	}
+	readAll()
+	assertErrorCode(t, validate(event(renewalEvent(t, claim.ClaimEpoch, requestB, writeReport, uuid.NewString())), http.StatusBadRequest), invalidRenewalCode)
+	validate(event(renewalEvent(t, claim.ClaimEpoch, requestB, writeReport, *denied.ExpiredGrantId)), http.StatusCreated)
+	readAll()
+	validate(approve(requestB, timeApprovalBody(t, until.Add(time.Hour))), http.StatusOK)
+	readAll()
+}

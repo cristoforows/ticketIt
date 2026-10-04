@@ -44,6 +44,7 @@ const TICKET = {
   title: "Write the report",
   status: "InReview",
   permissionGrants: [],
+  permissionGrantCount: 0,
   allowedActions: { statusChangeRejections: [], statusChanges: ["InProgress"], accept: { available: true }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } },
   template: "Basic",
   completionCondition: "humanAcceptance",

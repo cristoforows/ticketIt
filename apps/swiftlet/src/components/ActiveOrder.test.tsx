@@ -15,6 +15,7 @@ const ACTIVE = {
   title: "Write the report",
   status: "InProgress",
   permissionGrants: [],
+  permissionGrantCount: 0,
   allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason: locked }, rework: unavailable("rework_not_available"), stop: { available: true }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } },
   template: "Basic",
   completionCondition: "humanAcceptance",
@@ -37,6 +38,7 @@ const STOPPING = {
   ...ACTIVE,
   openRound: { ...openRound, stopRequestedAt: "2026-10-01T10:00:07Z", waitingReason: "stopping", question: null, permissionRequest: null },
   permissionGrants: [],
+  permissionGrantCount: 0,
   allowedActions: { ...ACTIVE.allowedActions, stop: unavailable("stop_already_requested") },
 };
 const IDLE = { ...ACTIVE, id: "55555555-5555-4555-8555-555555555555", title: "Idle order", status: "Backlog", openRound: null, assigneeType: "", assigneeAgent: null, allowedActions: { ...ACTIVE.allowedActions, accept: unavailable("invalid_transition"), stop: unavailable("stop_not_available") } };
@@ -94,7 +96,7 @@ describe.each(views)("the active order slip on the $name", ({ prefix, row, query
   });
 
   it("labels a Blocked Ticket whose Round waits on a Permission request as Waiting for a Permission", async () => {
-    const permissionRequest = { id: "99999999-9999-5999-8999-999999999990", account: "controlled", action: "write_note", resource: "notes/weekly-report", substituteAccount: true, requestedAt: "2026-10-01T10:00:05Z", decision: null, decidedAt: null, grantId: null };
+    const permissionRequest = { id: "99999999-9999-5999-8999-999999999990", account: "controlled", action: "write_note", resource: "notes/weekly-report", substituteAccount: true, requestedAt: "2026-10-01T10:00:05Z", decision: null, decidedAt: null, grantId: null, renewsGrantId: null };
     stubGalley([{ ...ACTIVE, status: "Blocked", openRound: { ...openRound, state: "waiting_for_input", waitingReason: "waiting_for_permission", question: null, permissionRequest } }]);
     renderView();
     const slip = within(await screen.findByTestId(row(ACTIVE.id)));

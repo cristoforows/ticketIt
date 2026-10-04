@@ -1932,6 +1932,69 @@ constraints), the new rows in `round_events_test.go` and
 `TestPermissionsAndAuthorityChecks_ResponsesMatchContractAndMethod405`.
 Evidence: `docs/evidence/m5/165-live-authority.md`.
 
+## Time-based grants, expiry and renewal (issue #166)
+
+Migration `000023_time_based_grants.up.sql` widens
+`permission_grants.form` to `ticket | time` and adds:
+
+- `permission_grants.expires_at`: set exactly on the time form
+  (`permission_grants_expiry_follows_form`), after `approved_at` and at
+  most 30 days later (`permission_grants_expiry_window`). A time
+  grant's `ticket_id` is the Ticket it was approved on; it binds
+  nothing. `state` stays `active` in the row: expiry is never written.
+- `permission_requests.renews_grant_id`: the expired grant a request
+  renews. A composite foreign key ties it to a grant of the request's
+  own Owner, Agent and scope.
+- `round_authority_checks.expired_grant_id`: on a deny only, the
+  newest expired time grant for the Round's Agent and the scope.
+
+**Approve.** `.../approve` takes `{"form": "ticket"}` or
+`{"form": "time", "expiresAt": RFC3339}`, strictly decoded:
+
+| Check | Response |
+| --- | --- |
+| Unknown field, unknown form, `"expiresAt": null`, an `expiresAt` that is not RFC3339 with a zone, or the time form without one | `400 invalid_request` |
+| The ticket form with `expiresAt` | `400 grant_form_conflict` |
+| Then the #165 checks, in order | as in #165 |
+| `expiresAt` not after the approval time, or more than 30 days after it | `400 invalid_grant_expiry` |
+
+The approval time is Galley's clock (truncated to microseconds), raised
+to the request's `requested_at` if earlier. `expiresAt` is stored in UTC
+truncated to microseconds. A rejection writes nothing.
+
+**Matching.** A check is allowed by an `active` grant of the Round's
+Agent and the exact scope that is either the ticket form on the Round's
+Ticket, or the time form with `expires_at > now`, where `now` is
+Galley's clock and is recorded as `checked_at`. At exactly
+`expires_at` the answer is deny. Nothing runs at expiry, so a Round
+that already passed its check keeps that step, and the next check
+denies. A time grant is unaffected by any Ticket reaching Done.
+
+A deny answers `{"decision": "deny", "expiredGrantId"}` when an expired
+time grant exists for the Agent and scope; Michelin sends it back as
+`renewsGrantId` in `permission_requested`. Galley accepts it only when
+it names an expired time grant of the Round's Agent for the same scope
+at that moment; any other id is `400 invalid_renewal` and nothing is
+recorded. Approving a renewal creates a new grant; the expired row is
+not changed.
+
+**Reading.** Each grant carries `expiresAt` and `remainingSeconds`
+(rounded up; `null` on the ticket form). `state` is `expired` and
+`remainingSeconds` is `0` once Galley's clock reaches `expiresAt`. The
+Ticket's `permissionGrants` lists the newest 50 grants approved on this
+Ticket or held in the time form by its assigned Agent, oldest first;
+`permissionGrantCount` counts them all. Requests carry `renewsGrantId`;
+authority checks carry `expiredGrantId`.
+
+Tests: `round_time_grants_test.go` (both forms, the expiry window and
+its boundary, a clock behind the request, other Tickets, expiry between
+two checks, survival past Done, renewal and its refusals, constraints, concurrency, races with
+Stop, the grants view), the new strict-decoding rows in
+`round_permissions_test.go`, the time-form probe in
+`no_execution_side_effects_test.go`, and
+`TestTimeGrantsAndRenewals_ResponsesMatchContract`.
+Evidence: `docs/evidence/m5/166-time-based-grants.md`.
+
 ## Error shape
 
 `ErrorBody`/`ErrorDetail` are generated from
@@ -2221,7 +2284,7 @@ apps/galley/
         ├── round_endings.go       # issues #160, #161: endRound for stop_confirmed, failed and interrupted; the Stopped Badge
         ├── connected_accounts.go  # issue #165: the controlled substitute Connected Account and its scope catalogue
         ├── round_authority.go     # issue #165: the runner's live authority check and its record
-        ├── round_permissions.go   # issue #165: Permission requests, the Owner's decision, grants
+        ├── round_permissions.go   # issue #165: Permission requests, the Owner's decision, grants; issue #166: the time form, expiry and renewal
         ├── devclock.go     # issue #130: development-only clock advance for the browser suite
         └── no_execution_side_effects_test.go   # issue #60: the no-Round/queue/work-request guardrail
 ```

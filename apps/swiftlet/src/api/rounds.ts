@@ -80,7 +80,9 @@ function parseAuthorityCheck(value: unknown): RoundAuthorityCheck | undefined {
   if (
     !check ||
     ![check.account, check.action, check.resource, check.checkedAt].every((field) => typeof field === "string") ||
-    !(check.decision === "allow" ? typeof check.grantId === "string" : check.decision === "deny" && check.grantId === null)
+    !(check.decision === "allow"
+      ? typeof check.grantId === "string" && check.expiredGrantId === null
+      : check.decision === "deny" && check.grantId === null && (check.expiredGrantId === null || typeof check.expiredGrantId === "string"))
   ) {
     return undefined;
   }
@@ -90,6 +92,7 @@ function parseAuthorityCheck(value: unknown): RoundAuthorityCheck | undefined {
     resource: check.resource as string,
     decision: check.decision as RoundAuthorityCheck["decision"],
     grantId: check.grantId as string | null,
+    expiredGrantId: check.expiredGrantId as string | null,
     checkedAt: check.checkedAt as string,
   };
 }

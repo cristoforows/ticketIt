@@ -7,6 +7,7 @@ const TICKET = {
   title: "Write the report",
   status: "InReview",
   permissionGrants: [],
+  permissionGrantCount: 0,
   allowedActions: {
     statusChangeRejections: [],
     statusChanges: [],
@@ -59,6 +60,7 @@ describe("fetchTicket", () => {
       status: "InProgress",
       openRound: { ...round, stopRequestedAt: "2026-10-02T10:00:05Z", waitingReason: "stopping", question: null, permissionRequest: null },
       permissionGrants: [],
+      permissionGrantCount: 0,
       allowedActions: { ...TICKET.allowedActions, stop: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } },
     };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => stopping }));
@@ -67,17 +69,30 @@ describe("fetchTicket", () => {
     expect(ticket.allowedActions.stop).toEqual(stopping.allowedActions.stop);
   });
 
-  const PERMISSION_REQUEST = { id: "99999999-9999-5999-8999-999999999990", account: "controlled", action: "write_note", resource: "notes/weekly-report", substituteAccount: true, requestedAt: "2026-10-02T10:00:03Z", decision: null, decidedAt: null, grantId: null };
-  const GRANT = { id: "12121212-1212-4121-8121-121212121212", agent, account: "controlled", action: "write_note", resource: "notes/weekly-report", substituteAccount: true, form: "ticket", state: "active", roundId: round.id, createdAt: "2026-10-02T10:00:09Z", approvedAt: "2026-10-02T10:00:09Z" };
+  const PERMISSION_REQUEST = { id: "99999999-9999-5999-8999-999999999990", account: "controlled", action: "write_note", resource: "notes/weekly-report", substituteAccount: true, requestedAt: "2026-10-02T10:00:03Z", decision: null, decidedAt: null, grantId: null, renewsGrantId: null };
+  const GRANT = { id: "12121212-1212-4121-8121-121212121212", agent, account: "controlled", action: "write_note", resource: "notes/weekly-report", substituteAccount: true, form: "ticket", state: "active", expiresAt: null, remainingSeconds: null, roundId: round.id, createdAt: "2026-10-02T10:00:09Z", approvedAt: "2026-10-02T10:00:09Z" };
   const permissionWaiting = { ...round, state: "waiting_for_input", stopRequestedAt: null, waitingReason: "waiting_for_permission", question: null, permissionRequest: PERMISSION_REQUEST };
 
   it("reads the Permission request a waiting Round holds, the decision availability and the Ticket's grants", async () => {
-    const payload = { ...TICKET, status: "Blocked", openRound: permissionWaiting, permissionGrants: [GRANT], allowedActions: { ...TICKET.allowedActions, permissionDecision: { available: true } } };
+    const payload = { ...TICKET, status: "Blocked", openRound: permissionWaiting, permissionGrants: [GRANT], permissionGrantCount: 1, allowedActions: { ...TICKET.allowedActions, permissionDecision: { available: true } } };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => payload }));
     const ticket = await fetchTicket(TICKET.id);
     expect(ticket.openRound).toEqual(permissionWaiting);
     expect(ticket.permissionGrants).toEqual([GRANT]);
     expect(ticket.allowedActions.permissionDecision).toEqual({ available: true });
+  });
+
+  const TIME_GRANT = { ...GRANT, id: "13131313-1313-4131-8131-131313131313", form: "time", expiresAt: "2026-10-02T11:00:09Z", remainingSeconds: 3600 };
+  const EXPIRED_GRANT = { ...TIME_GRANT, id: "14141414-1414-4141-8141-141414141414", state: "expired", remainingSeconds: 0 };
+
+  it("reads live and expired time grants, a renewal request and the grant count", async () => {
+    const renewal = { ...PERMISSION_REQUEST, renewsGrantId: EXPIRED_GRANT.id };
+    const payload = { ...TICKET, status: "Blocked", openRound: { ...permissionWaiting, permissionRequest: renewal }, permissionGrants: [EXPIRED_GRANT, TIME_GRANT, GRANT], permissionGrantCount: 57, allowedActions: { ...TICKET.allowedActions, permissionDecision: { available: true } } };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => payload }));
+    const ticket = await fetchTicket(TICKET.id);
+    expect(ticket.openRound?.permissionRequest).toEqual(renewal);
+    expect(ticket.permissionGrants).toEqual([EXPIRED_GRANT, TIME_GRANT, GRANT]);
+    expect(ticket.permissionGrantCount).toBe(57);
   });
 
   it("keeps an approved request with its grant while the Round resumes", async () => {
@@ -128,9 +143,22 @@ describe("fetchTicket", () => {
     ["an unknown decision", { ...TICKET, openRound: { ...permissionWaiting, permissionRequest: { ...PERMISSION_REQUEST, decision: "deferred", decidedAt: "2026-10-02T10:00:09Z" } } }],
     ["no Permission decision availability", { ...TICKET, allowedActions: { ...TICKET.allowedActions, permissionDecision: undefined } }],
     ["no permissionGrants field", { ...TICKET, permissionGrants: undefined }],
-    ["a grant of another form", { ...TICKET, permissionGrants: [{ ...GRANT, form: "always" }] }],
-    ["a grant that is not active", { ...TICKET, permissionGrants: [{ ...GRANT, state: "revoked" }] }],
-    ["a grant without its Agent", { ...TICKET, permissionGrants: [{ ...GRANT, agent: undefined }] }],
+    ["a grant of another form", { ...TICKET, permissionGrants: [{ ...GRANT, form: "always" }], permissionGrantCount: 1 }],
+    ["a grant that is not active", { ...TICKET, permissionGrants: [{ ...GRANT, state: "revoked" }], permissionGrantCount: 1 }],
+    ["a grant without its Agent", { ...TICKET, permissionGrants: [{ ...GRANT, agent: undefined }], permissionGrantCount: 1 }],
+    ["a Permission request without renewsGrantId", { ...TICKET, openRound: { ...permissionWaiting, permissionRequest: { ...PERMISSION_REQUEST, renewsGrantId: undefined } } }],
+    ["a numeric renewsGrantId", { ...TICKET, openRound: { ...permissionWaiting, permissionRequest: { ...PERMISSION_REQUEST, renewsGrantId: 7 } } }],
+    ["no permissionGrantCount", { ...TICKET, permissionGrantCount: undefined }],
+    ["a permissionGrantCount below the grants listed", { ...TICKET, permissionGrants: [GRANT], permissionGrantCount: 0 }],
+    ["a fractional permissionGrantCount", { ...TICKET, permissionGrantCount: 0.5 }],
+    ["a ticket grant with an expiry", { ...TICKET, permissionGrants: [{ ...GRANT, expiresAt: "2026-10-02T11:00:09Z" }], permissionGrantCount: 1 }],
+    ["a ticket grant with remaining time", { ...TICKET, permissionGrants: [{ ...GRANT, remainingSeconds: 60 }], permissionGrantCount: 1 }],
+    ["an expired ticket grant", { ...TICKET, permissionGrants: [{ ...GRANT, state: "expired" }], permissionGrantCount: 1 }],
+    ["a time grant without its expiry", { ...TICKET, permissionGrants: [{ ...TIME_GRANT, expiresAt: null }], permissionGrantCount: 1 }],
+    ["a time grant without remaining time", { ...TICKET, permissionGrants: [{ ...TIME_GRANT, remainingSeconds: null }], permissionGrantCount: 1 }],
+    ["an active time grant with none left", { ...TICKET, permissionGrants: [{ ...TIME_GRANT, remainingSeconds: 0 }], permissionGrantCount: 1 }],
+    ["an expired time grant with time left", { ...TICKET, permissionGrants: [{ ...TIME_GRANT, state: "expired", remainingSeconds: 5 }], permissionGrantCount: 1 }],
+    ["a fractional remaining time", { ...TICKET, permissionGrants: [{ ...TIME_GRANT, remainingSeconds: 1.5 }], permissionGrantCount: 1 }],
   ])("rejects a Ticket with %s", async (_name, payload) => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => payload }));
     await expect(fetchTicket(TICKET.id)).rejects.toThrow("missing a required field");
@@ -191,8 +219,15 @@ describe("Permission decisions", () => {
   it("approves with the ticket form on the request's path and returns the Ticket", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => TICKET });
     vi.stubGlobal("fetch", fetchMock);
-    expect(await approvePermissionRequest("t1", "r1", "p1")).toEqual(TICKET);
+    expect(await approvePermissionRequest("t1", "r1", "p1", { form: "ticket" })).toEqual(TICKET);
     expect(fetchMock).toHaveBeenCalledWith("/api/tickets/t1/rounds/r1/permission-requests/p1/approve", expect.objectContaining({ method: "POST", body: JSON.stringify({ form: "ticket" }) }));
+  });
+
+  it("approves with the time form and its expiry", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => TICKET });
+    vi.stubGlobal("fetch", fetchMock);
+    await approvePermissionRequest("t1", "r1", "p1", { form: "time", expiresAt: "2026-10-02T11:00:00.000Z" });
+    expect(fetchMock.mock.calls[0][1].body).toBe(JSON.stringify({ form: "time", expiresAt: "2026-10-02T11:00:00.000Z" }));
   });
 
   it("declines with no body on the request's path and returns the Ticket", async () => {
@@ -206,9 +241,11 @@ describe("Permission decisions", () => {
   it.each([
     [404, "not_found", "no ticket, round or Permission request with that identifier"],
     [400, "permission_already_decided", "this Permission request is already decided"],
+    [400, "invalid_grant_expiry", "expiresAt must be after the approval and at most 30 days later"],
+    [400, "grant_form_conflict", "a ticket grant takes no expiresAt"],
   ])("surfaces Galley's %i %s as its own error", async (status, code, message) => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status, statusText: "", json: async () => ({ error: { code, message } }) }));
-    const error = await approvePermissionRequest("t1", "r1", "p1").catch((caught: unknown) => caught);
+    const error = await approvePermissionRequest("t1", "r1", "p1", { form: "ticket" }).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(GalleyError);
     expect(error).toMatchObject({ code, message });
   });

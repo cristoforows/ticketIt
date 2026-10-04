@@ -20,6 +20,7 @@ const TICKET = {
   title: "Write the report",
   status: "Backlog",
   permissionGrants: [],
+  permissionGrantCount: 0,
   allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } },
   template: "Basic",
   completionCondition: "humanAcceptance",
@@ -520,13 +521,13 @@ describe("TicketDetailPage", () => {
     });
 
     describe("a Permission request from the Agent", () => {
-      const request = { id: "99999999-9999-5999-8999-999999999990", account: "controlled", action: "write_note", resource: "notes/weekly-report", substituteAccount: true, requestedAt: "2026-10-01T10:00:06Z", decision: null, decidedAt: null, grantId: null };
+      const request = { id: "99999999-9999-5999-8999-999999999990", account: "controlled", action: "write_note", resource: "notes/weekly-report", substituteAccount: true, requestedAt: "2026-10-01T10:00:06Z", decision: null, decidedAt: null, grantId: null, renewsGrantId: null };
       const grantId = "12121212-1212-4121-8121-121212121212";
       const approved = { ...request, decision: "approved", decidedAt: "2026-10-01T10:00:08Z", grantId };
       const waitingRound = { ...running.openRound, state: "waiting_for_input", waitingReason: "waiting_for_permission", question: null, permissionRequest: request };
       const waiting = { ...running, status: "Blocked", openRound: waitingRound, allowedActions: { ...lockedActions, stop: { available: true }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: true } } };
-      const grant = { id: grantId, agent, account: "controlled", action: "write_note", resource: "notes/weekly-report", substituteAccount: true, form: "ticket", state: "active", roundId: round.id, createdAt: "2026-10-01T10:00:08Z", approvedAt: "2026-10-01T10:00:08Z" };
-      const resuming = { ...waiting, openRound: { ...waitingRound, waitingReason: "resuming", permissionRequest: approved }, permissionGrants: [grant], allowedActions: { ...waiting.allowedActions, permissionDecision: { available: false, reason: { code: "permission_already_decided", message: "this Permission request is already decided" } } } };
+      const grant = { id: grantId, agent, account: "controlled", action: "write_note", resource: "notes/weekly-report", substituteAccount: true, form: "ticket", state: "active", expiresAt: null, remainingSeconds: null, roundId: round.id, createdAt: "2026-10-01T10:00:08Z", approvedAt: "2026-10-01T10:00:08Z" };
+      const resuming = { ...waiting, openRound: { ...waitingRound, waitingReason: "resuming", permissionRequest: approved }, permissionGrants: [grant], permissionGrantCount: 1, allowedActions: { ...waiting.allowedActions, permissionDecision: { available: false, reason: { code: "permission_already_decided", message: "this Permission request is already decided" } } } };
       const approvePath = `/api/tickets/${TICKET_ID}/rounds/${round.id}/permission-requests/${request.id}/approve`;
       const waitingRecord = { ...record(), state: "waiting_for_input", permissionRequests: [request] };
       const approvedRecord = { ...waitingRecord, permissionRequests: [approved] };
@@ -551,6 +552,29 @@ describe("TicketDetailPage", () => {
         expect(screen.getByTestId("ticket-detail-permission-grant")).toHaveTextContent("atlas may write_note on notes/weekly-report (controlled)");
         expect(roundFetches(fetchMock)).toBe(roundsBefore + 1);
         expect(screen.getByTestId("ticket-detail-round-permission-request")).toHaveAttribute("data-decision", "approved");
+      });
+
+      it("approves for a time with the expiry the chosen duration names", async () => {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(new Date("2026-10-01T10:00:10Z"));
+        const fetchMock = stubRound([answer(waiting), answer(resuming)], undefined, [roundsOf(waitingRecord), roundsOf(approvedRecord)]);
+        const posts = vi.fn();
+        vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+          if (String(input) !== approvePath) return fetchMock(input);
+          posts(init?.method, init?.body);
+          return Promise.resolve(jsonResponse(resuming));
+        }));
+        try {
+          render(<TicketDetailPage ticketId={TICKET_ID} onUnauthenticated={onUnauthenticated} />);
+          await flush();
+          fireEvent.click(screen.getByTestId("ticket-detail-permission-form-time"));
+          fireEvent.change(screen.getByTestId("ticket-detail-permission-duration"), { target: { value: "28800" } });
+          fireEvent.click(screen.getByTestId("ticket-detail-permission-approve"));
+          await flush();
+          expect(posts).toHaveBeenCalledExactlyOnceWith("POST", JSON.stringify({ form: "time", expiresAt: "2026-10-01T18:00:10.000Z" }));
+        } finally {
+          vi.useRealTimers();
+        }
       });
 
       it("refreshes the receipt when Galley already recorded a decision", async () => {
