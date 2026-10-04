@@ -253,6 +253,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onRewor
                 permissionDecision={current.allowedActions.permissionDecision}
                 onDecidePermission={onDecidePermission}
                 permissionGrants={current.permissionGrants}
+                permissionGrantCount={current.permissionGrantCount}
               />
             </>
           )}

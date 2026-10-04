@@ -258,12 +258,13 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
           break;
         }
         const requestId = requestIdFor(roundId, stepIndex);
+        const renewal = first.expiredGrantId === undefined ? {} : { renewsGrantId: first.expiredGrantId };
         const requested = await sendEvent(options, deps, {
           step: "request",
           stepIndex,
-          event: envelope("permission_requested", requestId, { requestId, ...scope }),
+          event: envelope("permission_requested", requestId, { requestId, ...scope, ...renewal }),
           reported: "permission requested",
-          context: { requestId, ...scope },
+          context: { requestId, ...scope, ...renewal },
         });
         if (requested !== "sent") {
           return requested;
@@ -396,7 +397,8 @@ async function checkScope(options: EngineOptions, deps: EngineDeps, step: ActSte
     const report = await checkAuthority(request, claim.roundId, body);
     const context = { roundId: claim.roundId, step: "act", stepIndex, attempt, account: step.account, action: step.action, resource: step.resource };
     if (report.ok) {
-      logger.info("authority checked", { ...context, decision: report.value.decision, ...(report.value.grantId === undefined ? {} : { grantId: report.value.grantId }), durationMs: report.durationMs });
+      const { decision, grantId, expiredGrantId } = report.value;
+      logger.info("authority checked", { ...context, decision, ...(grantId === undefined ? {} : { grantId }), ...(expiredGrantId === undefined ? {} : { expiredGrantId }), durationMs: report.durationMs });
       return report.value;
     }
     if (report.failure.reason === "aborted" || signal.aborted) {

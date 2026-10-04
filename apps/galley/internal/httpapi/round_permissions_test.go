@@ -634,15 +634,20 @@ func TestApprove_TheBodyIsDecodedStrictly(t *testing.T) {
 	queued, claim := f.permissionRound(t, "Strict approval")
 	before := databaseSnapshot(t, f.pool)
 	for name, body := range map[string]string{
-		"no body":           "",
-		"no form":           `{}`,
-		"a time form":       `{"form":"time"}`,
-		"a full form":       `{"form":"full"}`,
-		"a null form":       `{"form":null}`,
-		"an uppercase form": `{"form":"Ticket"}`,
-		"an extra field":    `{"form":"ticket","expiresAt":"2026-10-05T00:00:00Z"}`,
-		"trailing data":     `{"form":"ticket"} {}`,
-		"not JSON":          `form=ticket`,
+		"no body":                        "",
+		"no form":                        `{}`,
+		"a time form":                    `{"form":"time"}`,
+		"a full form":                    `{"form":"full"}`,
+		"a null form":                    `{"form":null}`,
+		"an uppercase form":              `{"form":"Ticket"}`,
+		"an extra field":                 `{"form":"ticket","grantId":"x"}`,
+		"a null expiry":                  `{"form":"ticket","expiresAt":null}`,
+		"a time form with a null expiry": `{"form":"time","expiresAt":null}`,
+		"a date expiry":                  `{"form":"time","expiresAt":"2026-10-05"}`,
+		"a numeric expiry":               `{"form":"time","expiresAt":1790000000}`,
+		"an expiry with no zone":         `{"form":"time","expiresAt":"2026-10-05T00:00:00"}`,
+		"trailing data":                  `{"form":"ticket"} {}`,
+		"not JSON":                       `form=ticket`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			assertInvalidRequest(t, f.do(t, runnerCall{method: http.MethodPost, path: permissionPath(queued.Id, claim.RoundId, requestA, "approve"), body: body, cookie: f.cookie}))
@@ -748,7 +753,7 @@ func TestPermissions_TheDatabaseEnforcesTheRequestGrantAndWaitInvariants(t *test
 			SELECT owner_id, gen_random_uuid(), ticket_id, agent_id, id, account, action, $2, $3, $4, now(), `+approvedAt+` FROM permission_requests WHERE id = $1`,
 			requestRowID, resource, form, state)
 	}
-	assertViolates(t, insertGrant("time", "active", writeReport.resource, "now()"), "permission_grants_form")
+	assertViolates(t, insertGrant("full", "active", writeReport.resource, "now()"), "permission_grants_form")
 	assertViolates(t, insertGrant("ticket", "ended", writeReport.resource, "now()"), "permission_grants_state")
 	assertViolates(t, insertGrant("ticket", "active", "notes/other", "now()"), "permission_grants_request_scope_fk")
 	assertViolates(t, insertGrant("ticket", "active", writeReport.resource, "now() + interval '1 second'"), "permission_grants_approved_at_creation")

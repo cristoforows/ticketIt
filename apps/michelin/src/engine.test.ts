@@ -1001,7 +1001,7 @@ describe("the act step", () => {
   const startedAt = "2026-10-01T12:00:00Z";
 
   // A Galley whose grants the test changes between calls; each check answers from them as they are then.
-  function galley(options: { checks?: (() => Response)[] } = {}) {
+  function galley(options: { checks?: (() => Response)[]; answer?: (body: Record<string, unknown>) => Response } = {}) {
     const state = { granted: false, checks: 0, sent: [] as { path: string; body: Record<string, unknown> }[] };
     const fetchFn = vi.fn<FetchFn>(async (input, init) => {
       const path = new URL(String(input)).pathname;
@@ -1011,6 +1011,7 @@ describe("the act step", () => {
         state.checks++;
         const scripted = options.checks?.shift();
         if (scripted) return scripted();
+        if (options.answer) return options.answer(body);
         return json(state.granted ? { decision: "allow", grantId: GRANT } : { decision: "deny" });
       }
       if (path !== EVENTS_PATH) throw new Error(`unexpected ${path}`);
@@ -1163,6 +1164,9 @@ describe("the act step", () => {
     ["an allow without its grant", { decision: "allow" }],
     ["a deny naming a grant", { decision: "deny", grantId: GRANT }],
     ["another decision", { decision: "maybe" }],
+    ["an allow naming an expired grant", { decision: "allow", grantId: GRANT, expiredGrantId: GRANT }],
+    ["a deny naming an expired grant that is not a string", { decision: "deny", expiredGrantId: 7 }],
+    ["a deny naming an expired grant as null", { decision: "deny", expiredGrantId: null }],
   ])("retries a check whose result is %s", async (_name, body) => {
     const { state, fetchFn } = galley({ checks: [() => json(body)] });
     state.granted = true;
@@ -1188,6 +1192,67 @@ describe("the act step", () => {
     harness.controller.abort();
     expect(await harness.run).toBe("aborted");
     expect(kinds(state.sent)).toEqual(["execution_started", "check", "permission_requested", "permission_requested", "permission_requested"]);
+  });
+
+  describe("an expired time grant", () => {
+    const EXPIRED = "34343434-3434-4434-8434-343434343434";
+    const RENEWED = "56565656-5656-4656-8656-565656565656";
+    const READ: EngineStep = { step: "act", account: "controlled", action: "read_note", resource: "notes/weekly-report" };
+    const READ_GRANT = "78787878-7878-4878-8878-787878787878";
+
+    // write_note's time grant has expired; read_note holds a live grant throughout.
+    function expiredWrite(renewed: { value: boolean }) {
+      return galley({
+        answer: (body) => {
+          if (body["action"] === "read_note") return json({ decision: "allow", grantId: READ_GRANT });
+          return json(renewed.value ? { decision: "allow", grantId: RENEWED } : { decision: "deny", expiredGrantId: EXPIRED });
+        },
+      });
+    }
+
+    it("raises a renewal naming the expired grant only at the act step that needs it, while other act steps keep running", async () => {
+      const renewed = { value: false };
+      const { state, fetchFn } = expiredWrite(renewed);
+      const inbox = new ApprovalInbox();
+      const renewal = requestIdFor(ROUND_ID, 2);
+      inbox.deliver(renewal, { grantId: RENEWED, acknowledge: async () => void (renewed.value = true) });
+      const harness = start([START, READ, ACT, READ], fetchFn, { awaitApproval: inbox.wait });
+      expect(await harness.run).toBe("completed");
+      expect(kinds(state.sent)).toEqual(["execution_started", "check", "progress", "check", "permission_requested", "resumed", "check", "progress", "check", "progress"]);
+      const requests = state.sent.filter(({ body }) => body["type"] === "permission_requested");
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.body).toMatchObject({ idempotencyKey: renewal, data: { requestId: renewal, ...SCOPE, renewsGrantId: EXPIRED } });
+      expect(Object.keys(requests[0]?.body["data"] as object).sort()).toEqual(["account", "action", "renewsGrantId", "requestId", "resource"]);
+      expect(state.sent.filter(({ path }) => path === CHECKS_PATH).map(({ body }) => body["action"])).toEqual(["read_note", "write_note", "write_note", "read_note"]);
+      expect(harness.records().filter((record) => record["msg"] === "authority checked").map((record) => record["expiredGrantId"])).toEqual([undefined, EXPIRED, undefined, undefined]);
+      expect(harness.records().find((record) => record["msg"] === "permission requested")).toMatchObject({ requestId: renewal, renewsGrantId: EXPIRED });
+    });
+
+    it("never raises a request while every act step's scope is still granted", async () => {
+      const { state, fetchFn } = expiredWrite({ value: false });
+      const harness = start([START, READ, READ, READ], fetchFn);
+      expect(await harness.run).toBe("completed");
+      expect(kinds(state.sent)).toEqual(["execution_started", "check", "progress", "check", "progress", "check", "progress"]);
+    });
+
+    it("names no grant to renew after a plain deny", async () => {
+      const { state, fetchFn } = galley();
+      const harness = start([START, ACT], fetchFn, { awaitApproval: new ApprovalInbox().wait });
+      await vi.advanceTimersByTimeAsync(5_000);
+      const request = state.sent.find(({ body }) => body["type"] === "permission_requested");
+      expect(Object.keys(request?.body["data"] as object).sort()).toEqual(["account", "action", "requestId", "resource"]);
+      harness.stopper.abort("stop");
+      expect(await harness.run).toBe("stopped");
+    });
+
+    it("fails the Round rather than renewing twice when the scope is still denied after the approval", async () => {
+      const { state, fetchFn } = expiredWrite({ value: false });
+      const inbox = new ApprovalInbox();
+      inbox.deliver(requestIdFor(ROUND_ID, 1), { grantId: RENEWED, acknowledge: async () => {} });
+      const harness = start([START, ACT, ACT], fetchFn, { awaitApproval: inbox.wait });
+      expect(await harness.run).toBe("failed");
+      expect(kinds(state.sent)).toEqual(["execution_started", "check", "permission_requested", "resumed", "check", "failed"]);
+    });
   });
 
   it("truncates the performance note to Galley's note limit", () => {

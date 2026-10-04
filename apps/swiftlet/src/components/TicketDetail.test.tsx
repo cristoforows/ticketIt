@@ -7,6 +7,7 @@ import type { TicketRound } from "../api/rounds";
 import type { Badge, Ticket, TicketAssignee, TicketUpdate } from "../api/tickets";
 import { statusLabel } from "./ui";
 import { GalleyError } from "../api/http";
+import { remainingText, type DecidePermission } from "./PermissionPanel";
 import type { HealthView } from "./RunnerHealthPill";
 
 const TICKET: Ticket = {
@@ -14,6 +15,7 @@ const TICKET: Ticket = {
   title: "Fix login bug on Safari",
   status: "Backlog",
   permissionGrants: [],
+  permissionGrantCount: 0,
   allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } },
   template: "Basic",
   completionCondition: "humanAcceptance",
@@ -231,6 +233,7 @@ describe("open-Round lock", () => {
     badges: [{ id: BADGE.id, name: BADGE.name }],
     openRound: { id: reason.roundId, sequence: 4, state: "running", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: "2026-10-01T10:01:00Z", stopRequestedAt: null, waitingReason: "working", question: null, permissionRequest: null },
     permissionGrants: [],
+    permissionGrantCount: 0,
     allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } },
   };
 
@@ -603,6 +606,7 @@ describe("TicketDetail", () => {
         assigneeAgent: agent,
         successCriteria: "done",
         permissionGrants: [],
+        permissionGrantCount: 0,
         allowedActions: {
           ...TICKET.allowedActions,
           statusChanges: [],
@@ -777,6 +781,7 @@ describe("the Rounds section", () => {
     assigneeAgent: agent,
     openRound,
     permissionGrants: [],
+    permissionGrantCount: 0,
     allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: claimedRound.id } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } },
   });
   const health = (state: "connected" | "disconnected" | "not_paired"): HealthView => ({
@@ -1005,6 +1010,7 @@ describe("Request rework", () => {
     assigneeAgent: agent,
     delivery: { roundId: "11111111-aaaa-4aaa-8aaa-111111111111", sequence: 1, agent, deliveredAt: "2026-10-01T10:09:00Z" },
     permissionGrants: [],
+    permissionGrantCount: 0,
     allowedActions: { ...TICKET.allowedActions, accept: { available: true }, rework: { available: true } },
   };
   const withRework = (rework: Ticket["allowedActions"]["rework"]): Ticket => ({ ...reviewable, allowedActions: { ...reviewable.allowedActions, rework } });
@@ -1099,12 +1105,14 @@ describe("Stop", () => {
     assigneeAgent: agent,
     openRound: runningRound,
     permissionGrants: [],
+    permissionGrantCount: 0,
     allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: locked }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: true }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } },
   };
   const stopping: Ticket = {
     ...running,
     openRound: { ...runningRound, stopRequestedAt: "2026-10-02T10:00:05Z", waitingReason: "stopping", question: null, permissionRequest: null },
     permissionGrants: [],
+    permissionGrantCount: 0,
     allowedActions: { ...running.allowedActions, stop: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } },
   };
 
@@ -1189,6 +1197,7 @@ describe("a question from the Agent", () => {
     assigneeAgent: agent,
     openRound: waitingRound,
     permissionGrants: [],
+    permissionGrantCount: 0,
     allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: waitingRound.id } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: true }, answer: { available: true }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } },
   };
   const answeredQuestion = { ...question, answer: "Europe only", answeredAt: "2026-10-02T10:00:09Z" };
@@ -1308,6 +1317,7 @@ describe("feedback for the next Round", () => {
     assigneeAgent: agent,
     delivery,
     permissionGrants: [],
+    permissionGrantCount: 0,
     allowedActions: { statusChanges: ["Done"], statusChangeRejections: [], accept: { available: true }, rework: { available: true }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: true }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } },
   };
   const done: Ticket = { ...inReview, status: "Done", allowedActions: { ...inReview.allowedActions, statusChanges: ["Ready"], accept: { available: false, reason: { code: "accept_not_available", message: "Accept needs In Review" } } } };
@@ -1411,7 +1421,7 @@ describe("a Permission request from the Agent", () => {
   afterEach(cleanup);
 
   const agent = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kind: "research" as const };
-  const request = { id: "99999999-9999-5999-8999-999999999990", account: "controlled", action: "write_note", resource: "notes/weekly-report", substituteAccount: true, requestedAt: "2026-10-02T10:00:03Z", decision: null, decidedAt: null, grantId: null };
+  const request = { id: "99999999-9999-5999-8999-999999999990", account: "controlled", action: "write_note", resource: "notes/weekly-report", substituteAccount: true, requestedAt: "2026-10-02T10:00:03Z", decision: null, decidedAt: null, grantId: null, renewsGrantId: null };
   const grantId = "12121212-1212-4121-8121-121212121212";
   const approved = { ...request, decision: "approved" as const, decidedAt: "2026-10-02T10:00:09Z", grantId };
   const declined = { ...request, decision: "declined" as const, decidedAt: "2026-10-02T10:00:09Z" };
@@ -1433,12 +1443,12 @@ describe("a Permission request from the Agent", () => {
     openRound: waitingRound,
     allowedActions: { ...TICKET.allowedActions, statusChanges: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: waitingRound.id } }, stop: { available: true }, permissionDecision: { available: true } },
   };
-  const grant = { id: grantId, agent, account: "controlled", action: "write_note", resource: "notes/weekly-report", substituteAccount: true, form: "ticket" as const, state: "active" as const, roundId: waitingRound.id, createdAt: "2026-10-02T10:00:09Z", approvedAt: "2026-10-02T10:00:09Z" };
+  const grant = { id: grantId, agent, account: "controlled", action: "write_note", resource: "notes/weekly-report", substituteAccount: true, form: "ticket" as const, state: "active" as const, expiresAt: null, remainingSeconds: null, roundId: waitingRound.id, createdAt: "2026-10-02T10:00:09Z", approvedAt: "2026-10-02T10:00:09Z" };
   const decidedActions = { ...waiting.allowedActions, permissionDecision: { available: false, reason: { code: "permission_already_decided", message: "this Permission request is already decided" } } };
-  const resuming: Ticket = { ...waiting, openRound: { ...waitingRound, waitingReason: "resuming", permissionRequest: approved }, permissionGrants: [grant], allowedActions: decidedActions };
+  const resuming: Ticket = { ...waiting, openRound: { ...waitingRound, waitingReason: "resuming", permissionRequest: approved }, permissionGrants: [grant], permissionGrantCount: 1, allowedActions: decidedActions };
   const stillWaiting: Ticket = { ...waiting, openRound: { ...waitingRound, permissionRequest: declined }, allowedActions: decidedActions };
   const record = (fields: Partial<TicketRound>): TicketRound => ({ ...waitingRound, endedAt: null, outcomeNote: null, activity: [], earlierActivityCursor: null, usage, deliverable: null, questions: [], feedback: [], permissionRequests: [request], authorityChecks: [], authorityCheckCount: 0, ...fields });
-  const decide = () => vi.fn<(roundId: string, requestId: string, decision: "approve" | "decline") => Promise<Ticket>>();
+  const decide = () => vi.fn<DecidePermission>();
 
   it("shows the request as a receipt that labels the controlled account a substitute, with both decisions", () => {
     render(<TicketDetail ticket={waiting} onSave={vi.fn()} {...noopActions()} onDecidePermission={decide()} />);
@@ -1471,7 +1481,7 @@ describe("a Permission request from the Agent", () => {
     await waitFor(() => expect(screen.getByTestId("ticket-detail-permission-approve")).toHaveTextContent("Allowing…"));
     fireEvent.click(screen.getByTestId("ticket-detail-permission-approve"));
     fireEvent.click(screen.getByTestId("ticket-detail-permission-decline"));
-    expect(onDecide).toHaveBeenCalledExactlyOnceWith(waitingRound.id, request.id, "approve");
+    expect(onDecide).toHaveBeenCalledExactlyOnceWith(waitingRound.id, request.id, "approve", { form: "ticket" });
     finish(resuming);
     expect(await screen.findByTestId("ticket-detail-permission-approved")).toHaveTextContent("Allowed for this Ticket");
     expect(screen.getByTestId("ticket-detail-permission-grant")).toHaveTextContent("atlas may write_note on notes/weekly-report (controlled)Substitute account");
@@ -1502,7 +1512,7 @@ describe("a Permission request from the Agent", () => {
   });
 
   it("lists the Round's requests, their decisions and its authority checks", () => {
-    const deny = { account: "controlled", action: "write_note", resource: "notes/weekly-report", decision: "deny" as const, grantId: null, checkedAt: "2026-10-02T10:00:02Z" };
+    const deny = { account: "controlled", action: "write_note", resource: "notes/weekly-report", decision: "deny" as const, grantId: null, expiredGrantId: null, checkedAt: "2026-10-02T10:00:02Z" };
     const allow = { ...deny, decision: "allow" as const, grantId, checkedAt: "2026-10-02T10:00:10Z" };
     render(<TicketDetail ticket={waiting} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [record({ authorityChecks: [deny, allow], authorityCheckCount: 2 })] }} />);
     expect(screen.getByTestId("ticket-detail-round-state")).toHaveTextContent("Waiting for a Permission");
@@ -1517,14 +1527,103 @@ describe("a Permission request from the Agent", () => {
   });
 
   it("says when Galley lists only the latest authority checks", () => {
-    const allow = { account: "controlled", action: "write_note", resource: "notes/weekly-report", decision: "allow" as const, grantId, checkedAt: "2026-10-02T10:00:10Z" };
-    render(<TicketDetail ticket={{ ...waiting, openRound: null, status: "InReview" }} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [record({ state: "delivered", permissionRequests: [approved], authorityChecks: [allow], authorityCheckCount: 51 })] }} />);
+    const allow = { account: "controlled", action: "write_note", resource: "notes/weekly-report", decision: "allow" as const, grantId, expiredGrantId: null, checkedAt: "2026-10-02T10:00:10Z" };
+    render(<TicketDetail ticket={{ ...waiting, openRound: null, status: "InReview", permissionGrants: [grant], permissionGrantCount: 1 }} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [record({ state: "delivered", permissionRequests: [approved], authorityChecks: [allow], authorityCheckCount: 51 })] }} />);
     expect(screen.getByTestId("ticket-detail-round-authority-checks-truncated")).toHaveTextContent("Showing the latest 1 of 51 checks.");
     expect(screen.getByTestId("ticket-detail-round-permission-request")).toHaveTextContent("Allowed for this Ticket");
   });
 
   it("keeps the Ticket's grants on its receipt after the Round ends", () => {
-    render(<TicketDetail ticket={{ ...waiting, status: "InReview", openRound: null, permissionGrants: [grant] }} onSave={vi.fn()} {...noopActions()} />);
+    render(<TicketDetail ticket={{ ...waiting, status: "InReview", openRound: null, permissionGrants: [grant], permissionGrantCount: 1 }} onSave={vi.fn()} {...noopActions()} />);
     expect(screen.getByTestId("ticket-detail-permission-grant")).toHaveTextContent("atlas may write_note on notes/weekly-report (controlled)");
+  });
+
+  describe("the time form", () => {
+    afterEach(() => vi.useRealTimers());
+
+    const timeGrant = { ...grant, id: "13131313-1313-4131-8131-131313131313", form: "time" as const, expiresAt: "2026-10-02T11:00:09Z", remainingSeconds: 3_600 };
+    const expiredGrant = { ...timeGrant, id: "14141414-1414-4141-8141-141414141414", state: "expired" as const, expiresAt: "2026-10-01T11:00:00Z", remainingSeconds: 0 };
+
+    it("defaults to the ticket form and offers the time form with a labelled duration", () => {
+      render(<TicketDetail ticket={waiting} onSave={vi.fn()} {...noopActions()} onDecidePermission={decide()} />);
+      expect(screen.getByTestId("ticket-detail-permission-form-ticket")).toBeChecked();
+      expect(screen.queryByTestId("ticket-detail-permission-duration")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByTestId("ticket-detail-permission-form-time"));
+      expect(screen.getByLabelText("Expires after")).toBe(screen.getByTestId("ticket-detail-permission-duration"));
+      expect(within(screen.getByTestId("ticket-detail-permission-duration")).getAllByRole("option").map((option) => option.textContent)).toEqual(["1 hour", "8 hours", "1 day", "7 days"]);
+      expect(screen.getByTestId("ticket-detail-permission-approve")).toHaveTextContent("Allow for a time");
+    });
+
+    it("approves with the expiry the chosen duration names from now", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-10-02T10:00:00Z"));
+      const onDecide = decide().mockResolvedValue({ ...resuming, permissionGrants: [timeGrant], openRound: { ...waitingRound, waitingReason: "resuming", permissionRequest: { ...approved, grantId: timeGrant.id } } });
+      render(<TicketDetail ticket={waiting} onSave={vi.fn()} {...noopActions()} onDecidePermission={onDecide} />);
+      fireEvent.click(screen.getByTestId("ticket-detail-permission-form-time"));
+      fireEvent.change(screen.getByTestId("ticket-detail-permission-duration"), { target: { value: "86400" } });
+      expect(screen.getByTestId("ticket-detail-permission-expiry")).toHaveTextContent("Until about 03 Oct 2026 15:30:00 UTC+05:30");
+      fireEvent.click(screen.getByTestId("ticket-detail-permission-approve"));
+      expect(onDecide).toHaveBeenCalledExactlyOnceWith(waitingRound.id, request.id, "approve", { form: "time", expiresAt: "2026-10-03T10:00:00.000Z" });
+      expect(await screen.findByTestId("ticket-detail-permission-approved")).toHaveTextContent("Allowed for a time. The Round resumes.");
+    });
+
+    it("declines with no grant terms whichever form is chosen", () => {
+      const onDecide = decide().mockResolvedValue(stillWaiting);
+      render(<TicketDetail ticket={waiting} onSave={vi.fn()} {...noopActions()} onDecidePermission={onDecide} />);
+      fireEvent.click(screen.getByTestId("ticket-detail-permission-form-time"));
+      fireEvent.click(screen.getByTestId("ticket-detail-permission-decline"));
+      expect(onDecide).toHaveBeenCalledExactlyOnceWith(waitingRound.id, request.id, "decline");
+    });
+
+    it("explains an expiry Galley refused", async () => {
+      const onDecide = decide().mockRejectedValue(new GalleyError({ code: "invalid_grant_expiry", message: "raw" }));
+      render(<TicketDetail ticket={waiting} onSave={vi.fn()} {...noopActions()} onDecidePermission={onDecide} />);
+      fireEvent.click(screen.getByTestId("ticket-detail-permission-form-time"));
+      fireEvent.click(screen.getByTestId("ticket-detail-permission-approve"));
+      expect(await screen.findByTestId("ticket-detail-permission-error")).toHaveTextContent("Galley refused this expiry: by Galley's clock it must be in the future and at most 30 days away.");
+    });
+
+    it("lists live and expired time grants with their expiry, remaining time and form, and says when only the newest are shown", () => {
+      render(<TicketDetail ticket={{ ...waiting, status: "InReview", openRound: null, permissionGrants: [expiredGrant, timeGrant, grant], permissionGrantCount: 60 }} onSave={vi.fn()} {...noopActions()} />);
+      const listed = screen.getAllByTestId("ticket-detail-permission-grant");
+      expect(listed.map((item) => [item.getAttribute("data-form"), item.getAttribute("data-state")])).toEqual([["time", "expired"], ["time", "active"], ["ticket", "active"]]);
+      expect(within(listed[0]!).getByTestId("ticket-detail-permission-grant-expired")).toHaveTextContent("Expired");
+      expect(listed[0]).toHaveTextContent("expired 01 Oct 2026 16:30:00 UTC+05:30");
+      expect(listed[1]).toHaveTextContent("until 02 Oct 2026 16:30:09 UTC+05:30");
+      expect(within(listed[1]!).getByTestId("ticket-detail-permission-grant-remaining")).toHaveTextContent("1 h left");
+      expect(within(listed[1]!).queryByTestId("ticket-detail-permission-grant-expired")).not.toBeInTheDocument();
+      expect(listed[2]).toHaveTextContent("Allowed for this Ticket");
+      expect(screen.getByTestId("ticket-detail-permission-grants-truncated")).toHaveTextContent("Showing the latest 3 of 60 grants.");
+    });
+
+    it("marks a renewal request and the deny that named the expired grant", () => {
+      const renewal = { ...request, renewsGrantId: expiredGrant.id };
+      const asking: Ticket = { ...waiting, openRound: { ...waitingRound, permissionRequest: renewal } };
+      const deny = { account: "controlled", action: "write_note", resource: "notes/weekly-report", decision: "deny" as const, grantId: null, expiredGrantId: expiredGrant.id, checkedAt: "2026-10-02T10:00:02Z" };
+      render(<TicketDetail ticket={asking} onSave={vi.fn()} {...noopActions()} onDecidePermission={decide()} roundRecords={{ rounds: [record({ permissionRequests: [renewal], authorityChecks: [deny], authorityCheckCount: 1 })] }} />);
+      expect(screen.getByTestId("ticket-detail-permission-renewal")).toHaveTextContent("Renewal. The Agent's time-based grant for this scope expired.");
+      expect(screen.getByTestId("ticket-detail-round-permission-request")).toHaveTextContent("Renews an expired grant");
+      expect(screen.getByTestId("ticket-detail-round-authority-check-expired")).toHaveTextContent("its time-based grant expired");
+    });
+
+    it("marks neither on a first request or a plain deny", () => {
+      render(<TicketDetail ticket={waiting} onSave={vi.fn()} {...noopActions()} onDecidePermission={decide()} roundRecords={{ rounds: [record({ authorityChecks: [{ account: "controlled", action: "write_note", resource: "notes/weekly-report", decision: "deny", grantId: null, expiredGrantId: null, checkedAt: "2026-10-02T10:00:02Z" }], authorityCheckCount: 1 })] }} />);
+      expect(screen.queryByTestId("ticket-detail-permission-renewal")).not.toBeInTheDocument();
+      expect(screen.getByTestId("ticket-detail-round-permission-request")).not.toHaveTextContent("Renews");
+      expect(screen.queryByTestId("ticket-detail-round-authority-check-expired")).not.toBeInTheDocument();
+    });
+
+    it.each([
+      [59, "less than a minute left"],
+      [60, "1 min left"],
+      [3_599, "59 min left"],
+      [3_600, "1 h left"],
+      [5_400, "1 h 30 min left"],
+      [86_400, "1 d left"],
+      [2_592_000, "30 d left"],
+      [97_200, "1 d 3 h left"],
+    ])("words %i seconds left as %s", (seconds, text) => {
+      expect(remainingText(seconds)).toBe(text);
+    });
   });
 });

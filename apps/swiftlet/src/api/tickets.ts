@@ -87,13 +87,14 @@ export function parsePermissionRequest(value: unknown): PermissionRequest | unde
     return undefined;
   }
   const request = value as Record<string, unknown>;
-  const { decision, decidedAt, grantId } = request;
+  const { decision, decidedAt, grantId, renewsGrantId } = request;
   if (
     ![request.id, request.account, request.action, request.resource, request.requestedAt].every(isString) ||
     typeof request.substituteAccount !== "boolean" ||
     !(decision === null || decision === "approved" || decision === "declined") ||
     !(decidedAt === null || isString(decidedAt)) ||
     !(grantId === null || isString(grantId)) ||
+    !(renewsGrantId === null || isString(renewsGrantId)) ||
     (decision === null) !== (decidedAt === null) ||
     (decision === "approved") !== (grantId !== null)
   ) {
@@ -109,7 +110,14 @@ export function parsePermissionRequest(value: unknown): PermissionRequest | unde
     decision,
     decidedAt,
     grantId,
+    renewsGrantId,
   };
+}
+
+function isTimeGrantExpiry(grant: Record<string, unknown>): boolean {
+  const { state, expiresAt, remainingSeconds } = grant;
+  return isString(expiresAt) && Number.isSafeInteger(remainingSeconds) &&
+    (state === "active" ? (remainingSeconds as number) > 0 : state === "expired" && remainingSeconds === 0);
 }
 
 function parsePermissionGrant(value: unknown): PermissionGrant | undefined {
@@ -121,8 +129,7 @@ function parsePermissionGrant(value: unknown): PermissionGrant | undefined {
     ![grant.id, grant.account, grant.action, grant.resource, grant.roundId, grant.createdAt, grant.approvedAt].every(isString) ||
     !isAgentSummary(grant.agent) ||
     typeof grant.substituteAccount !== "boolean" ||
-    grant.form !== "ticket" ||
-    grant.state !== "active"
+    !(grant.form === "ticket" ? grant.state === "active" && grant.expiresAt === null && grant.remainingSeconds === null : grant.form === "time" && isTimeGrantExpiry(grant))
   ) {
     return undefined;
   }
@@ -134,8 +141,10 @@ function parsePermissionGrant(value: unknown): PermissionGrant | undefined {
     action: grant.action as string,
     resource: grant.resource as string,
     substituteAccount: grant.substituteAccount,
-    form: grant.form,
-    state: grant.state,
+    form: grant.form as PermissionGrant["form"],
+    state: grant.state as PermissionGrant["state"],
+    expiresAt: grant.expiresAt as string | null,
+    remainingSeconds: grant.remainingSeconds as number | null,
     roundId: grant.roundId as string,
     createdAt: grant.createdAt as string,
     approvedAt: grant.approvedAt as string,
@@ -270,7 +279,9 @@ function parseTicket(payload: unknown): Ticket {
     !feedback ||
     !permissionDecision ||
     !permissionGrants ||
-    !permissionGrants.every((grant) => grant !== undefined)
+    !permissionGrants.every((grant) => grant !== undefined) ||
+    !Number.isSafeInteger(record.permissionGrantCount) ||
+    (record.permissionGrantCount as number) < permissionGrants.length
   ) {
     throw new Error("Galley's Ticket response was missing a required field.");
   }
@@ -296,6 +307,7 @@ function parseTicket(payload: unknown): Ticket {
     openRound,
     delivery,
     permissionGrants: permissionGrants as PermissionGrant[],
+    permissionGrantCount: record.permissionGrantCount as number,
     badges: record.badges as Ticket["badges"],
     archivedAt: record.archivedAt,
     goal: record.goal,
@@ -486,8 +498,9 @@ export async function answerRoundQuestion(id: string, roundId: string, questionI
 }
 
 /** A 404 here names the Ticket, Round or Permission request together, so Galley's own message is shown. */
-export async function approvePermissionRequest(id: string, roundId: string, requestId: string): Promise<Ticket> {
-  const body: components["schemas"]["ApprovePermissionRequest"] = { form: "ticket" };
+export type GrantChoice = components["schemas"]["ApprovePermissionRequest"];
+
+export async function approvePermissionRequest(id: string, roundId: string, requestId: string, body: GrantChoice): Promise<Ticket> {
   return ticketCommand(permissionRequestPath(id, roundId, requestId, "approve"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }, "response");
 }
 

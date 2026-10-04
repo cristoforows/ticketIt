@@ -8,6 +8,7 @@ const ticket = (id: string, status: string, template = "Basic") => ({
   status,
   template,
   permissionGrants: [],
+  permissionGrantCount: 0,
   allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason: { code: "invalid_transition", message: "Unavailable" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } },
   completionCondition: "humanAcceptance",
   assigneeType: "",

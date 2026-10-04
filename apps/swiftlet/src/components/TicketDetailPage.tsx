@@ -20,6 +20,7 @@ import {
   restoreTicket,
   fetchBadges,
   TicketNotFoundError,
+  type GrantChoice,
   type Ticket,
   type Badge,
   type TicketAssignee,
@@ -193,9 +194,9 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
     }
   }
 
-  async function decidePermission(roundId: string, requestId: string, decision: "approve" | "decline"): Promise<Ticket> {
+  async function decidePermission(roundId: string, requestId: string, decision: "approve" | "decline", grant: GrantChoice = { form: "ticket" }): Promise<Ticket> {
     try {
-      const ticket = await runCommand(() => (decision === "approve" ? approvePermissionRequest : declinePermissionRequest)(ticketId, roundId, requestId));
+      const ticket = await runCommand(() => (decision === "approve" ? approvePermissionRequest(ticketId, roundId, requestId, grant) : declinePermissionRequest(ticketId, roundId, requestId)));
       void loadRounds();
       return ticket;
     } catch (error) {

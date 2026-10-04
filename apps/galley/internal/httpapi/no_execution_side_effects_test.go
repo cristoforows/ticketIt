@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -127,6 +128,10 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 	permissionPath := baseURL + "/api/tickets/" + created.Id + "/rounds/" + uuid.NewString() + "/permission-requests/" + uuid.NewString()
 	if resp := doLifecycleRequest(t, client, http.MethodPost, permissionPath+"/approve", ApprovePermissionRequest{Form: PermissionGrantFormTicket}); resp.status != http.StatusNotFound {
 		t.Fatalf("approval without a Permission request: status = %d, want 404; error=%+v", resp.status, resp.errBody)
+	}
+	expiresAt := time.Now().Add(time.Hour)
+	if resp := doLifecycleRequest(t, client, http.MethodPost, permissionPath+"/approve", ApprovePermissionRequest{Form: PermissionGrantFormTime, ExpiresAt: &expiresAt}); resp.status != http.StatusNotFound {
+		t.Fatalf("time approval without a Permission request: status = %d, want 404; error=%+v", resp.status, resp.errBody)
 	}
 	if resp := doLifecycleRequest(t, client, http.MethodPost, permissionPath+"/decline", nil); resp.status != http.StatusNotFound {
 		t.Fatalf("decline without a Permission request: status = %d, want 404; error=%+v", resp.status, resp.errBody)

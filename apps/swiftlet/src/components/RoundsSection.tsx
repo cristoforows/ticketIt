@@ -16,7 +16,7 @@ export interface RoundRecords {
 
 export type LoadEarlierActivity = (roundId: string, before: string) => Promise<RoundActivityPage>;
 
-export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEarlierActivity, answer, onAnswer, onAnswered = () => {}, delivery = null, feedback, onAddFeedback, permissionDecision, onDecidePermission, permissionGrants = [] }: {
+export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEarlierActivity, answer, onAnswer, onAnswered = () => {}, delivery = null, feedback, onAddFeedback, permissionDecision, onDecidePermission, permissionGrants = [], permissionGrantCount = permissionGrants.length }: {
   openRound: Ticket["openRound"];
   runnerHealth: HealthView;
   records?: RoundRecords;
@@ -30,6 +30,7 @@ export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEar
   permissionDecision?: Ticket["allowedActions"]["permissionDecision"];
   onDecidePermission?: DecidePermission;
   permissionGrants?: Ticket["permissionGrants"];
+  permissionGrantCount?: number;
 }) {
   const runnerLost = openRound !== null && runnerHealth.kind === "loaded" && runnerHealth.health.state !== "connected";
   const awaitingOpenRound = openRound !== null && !records.rounds?.some((candidate) => candidate.id === openRound.id);
@@ -45,9 +46,9 @@ export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEar
         <QuestionPanel roundId={openRound.id} question={openRound.question} availability={answer} onAnswer={onAnswer} onAnswered={onAnswered} />
       )}
       {openRound?.permissionRequest && permissionDecision && (
-        <PermissionPanel roundId={openRound.id} request={openRound.permissionRequest} availability={permissionDecision} onDecide={onDecidePermission} onDecided={onAnswered} />
+        <PermissionPanel roundId={openRound.id} request={openRound.permissionRequest} availability={permissionDecision} onDecide={onDecidePermission} onDecided={onAnswered} grants={permissionGrants} />
       )}
-      <PermissionGrants grants={permissionGrants} />
+      <PermissionGrants grants={permissionGrants} count={permissionGrantCount} />
       {delivery && feedback && <FeedbackPanel delivery={delivery} availability={feedback} onAddFeedback={onAddFeedback} onAdded={onAnswered} />}
       {records.error && (
         <InlineError data-testid="ticket-detail-round-records-error" className="my-2">
@@ -59,7 +60,7 @@ export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEar
       )}
       {records.rounds && (
         <ol className="m-0 flex list-none flex-col p-0">
-          {records.rounds.map((round, index) => <RoundEntry key={round.id} round={round} defaultOpen={index === 0} onLoadEarlierActivity={onLoadEarlierActivity} />)}
+          {records.rounds.map((round, index) => <RoundEntry key={round.id} round={round} defaultOpen={index === 0} onLoadEarlierActivity={onLoadEarlierActivity} grants={permissionGrants} />)}
         </ol>
       )}
     </section>
@@ -85,7 +86,7 @@ function outcomeOf(round: TicketRound): ReactNode {
   }
 }
 
-function RoundEntry({ round, defaultOpen, onLoadEarlierActivity }: { round: TicketRound; defaultOpen: boolean; onLoadEarlierActivity?: LoadEarlierActivity }) {
+function RoundEntry({ round, defaultOpen, onLoadEarlierActivity, grants }: { round: TicketRound; defaultOpen: boolean; onLoadEarlierActivity?: LoadEarlierActivity; grants: Ticket["permissionGrants"] }) {
   return (
     <li data-testid="ticket-detail-round" data-round-id={round.id} data-state={round.state}>
       <Disclosure
@@ -115,7 +116,7 @@ function RoundEntry({ round, defaultOpen, onLoadEarlierActivity }: { round: Tick
         )}
         {round.deliverable && <Deliverable deliverable={round.deliverable} />}
         <QuestionHistory questions={round.questions} awaiting={round.state === "waiting_for_input"} />
-        <PermissionHistory requests={round.permissionRequests} checks={round.authorityChecks} checkCount={round.authorityCheckCount} awaiting={round.state === "waiting_for_input"} />
+        <PermissionHistory requests={round.permissionRequests} checks={round.authorityChecks} checkCount={round.authorityCheckCount} awaiting={round.state === "waiting_for_input"} grants={grants} />
         <FeedbackHistory feedback={round.feedback} />
         <RoundRecordDetails round={round} onLoadEarlierActivity={onLoadEarlierActivity} usageLabel={round.state === "claimed" || round.state === "running" || round.state === "waiting_for_input" ? "Usage so far" : "Usage"} />
       </Disclosure>

@@ -419,7 +419,7 @@ receipt's notice and the header pill must all show the runner as
 disconnected, with no animation. Re-registering restores Starting. On a
 phone the active slip has no status toggle. Stop on the phone list shows
 Stopping, with no Stop control, on both views. `run.sh` runs it after
-`runner-permission.spec.ts` with no reset. It leaves a Round open, but no later
+`runner-time-grant.spec.ts` with no reset. It leaves a Round open, but no later
 spec needs the slot.
 
 `tests/runner-ask.spec.ts` (issue #163) has two tests. The first drives
@@ -479,6 +479,31 @@ Stop from the receipt then ends the Round as Stopped in Backlog
 grant, the request listed as declined, one check and no performed
 action. `run.sh` runs it after `runner-feedback.spec.ts` with no reset,
 and it leaves no Round open.
+
+`tests/runner-time-grant.spec.ts` (issue #166) drives a real Michelin
+through one Round that `act`s on `notes/team-digest`, then twice on
+`notes/weekly-report`, asks a question, `act`s on each again, and
+delivers. The team-digest request is approved for this Ticket through
+the API; the weekly-report request is approved in the receipt with
+**For a time** and **1 hour**, which posts `{"form": "time",
+"expiresAt"}` and returns a time grant with that expiry. The second
+weekly-report step must be allowed by the time grant with no request.
+While the Round waits on its question the spec advances the dev clock
+two hours: the grant must read `expired` with `remainingSeconds` 0 and
+its expiry unchanged. After the answer, the team-digest step must still
+be allowed by its ticket grant, and the weekly-report check must be
+denied naming the expired grant, so Michelin's request carries it as
+`renewsGrantId`. The receipt must show the renewal, the expired check
+and the **Expired** tag. Approving the renewal for **1 hour** must be
+`400 invalid_grant_expiry` (an hour from the browser's clock is already
+past by Galley's) and leave the request undecided; **1 day** creates a
+new grant while the old one stays listed as expired, and the Round
+delivers with eight checks. After Accept moves the Ticket to Done, a
+second Ticket for the same Agent, run by a second Michelin, must be
+allowed by the renewed grant with no request, and its receipt must list
+both time grants but not the first Ticket's ticket grant. `run.sh` runs
+it after `runner-permission.spec.ts` with no reset. It leaves Galley's
+dev clock two hours ahead of the browser's and no Round open.
 
 `tests/ticket-priority-order.spec.ts` reorders three Ready Tickets by
 dragging onto the upper and lower halves of board slips, then with Move

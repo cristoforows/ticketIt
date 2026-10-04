@@ -1196,3 +1196,39 @@ Tests: `TicketDetail.test.tsx` ("a Permission request from the Agent"),
 `TicketDetailPage.test.tsx` (approve, reload and the refresh on
 `permission_already_decided`), `api/tickets.test.ts` and
 `api/rounds.test.ts`.
+
+## Time-based grants and renewal (issue #166)
+
+- **Form.** Before deciding, the panel offers **For this Ticket**
+  (`ticket-detail-permission-form-ticket`, the default) or **For a
+  time** (`ticket-detail-permission-form-time`). The time form shows
+  **Expires after** (`ticket-detail-permission-duration`: 1 hour,
+  8 hours, 1 day, 7 days) and the expiry it implies
+  (`ticket-detail-permission-expiry`). Allow then reads **Allow for a
+  time** and sends `{"form": "time", "expiresAt"}`, the browser's now
+  plus the duration. Galley judges it by its own clock;
+  `invalid_grant_expiry` and `grant_form_conflict` are explained and
+  the receipt refreshes. Decline sends no form.
+- **Renewal.** A request with `renewsGrantId` shows **Renewal.**
+  (`ticket-detail-permission-renewal`) and, in the history, **Renews an
+  expired grant**. A deny that names `expiredGrantId` adds **its
+  time-based grant expired**
+  (`ticket-detail-round-authority-check-expired`). An approval reads
+  **Allowed for this Ticket** or **Allowed for a time** after the grant's
+  form, or **Allowed** when the grant is not among those listed.
+- **Grants.** Each grant carries `data-form` and `data-state`. A time
+  grant shows when it was allowed, **until** its expiry and the time
+  left (`ticket-detail-permission-grant-remaining`, from Galley's
+  `remainingSeconds`); an expired one shows an **Expired** tag
+  (`ticket-detail-permission-grant-expired`) and when it expired. When
+  `permissionGrantCount` exceeds the grants listed, **Showing the latest
+  N of M grants.** (`ticket-detail-permission-grants-truncated`).
+- **Parsing.** A ticket-form grant is `active` with null `expiresAt` and
+  `remainingSeconds`; a time grant has an `expiresAt`, and an integer
+  `remainingSeconds` above 0 when `active` or 0 when `expired`.
+  `permissionGrantCount` is an integer no smaller than the list.
+  Requests require `renewsGrantId`; checks require `expiredGrantId`,
+  null on `allow`.
+
+Tests: `TicketDetail.test.tsx` ("the time form"), `api/tickets.test.ts`
+and `api/rounds.test.ts`.
