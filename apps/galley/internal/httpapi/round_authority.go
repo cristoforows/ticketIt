@@ -22,6 +22,8 @@ type checkedRound struct {
 	id, ticketID, agentID int64
 	state                 RoundState
 	epoch                 int
+	runnerConnected       bool
+	reconcileRequired     bool
 }
 
 func (s *server) CheckRoundAuthority(w http.ResponseWriter, r *http.Request, roundId string) {
@@ -56,18 +58,26 @@ func (s *server) CheckRoundAuthority(w http.ResponseWriter, r *http.Request, rou
 	case !found:
 		writeRoundNotFound(w)
 	case rejection != nil:
+		if rejection.code == runnerDisconnectedCode || rejection.code == reconcileRequiredCode {
+			s.logger.Warn("authority check refused", "roundId", roundID, "code", rejection.code)
+		}
 		writeError(w, rejection.status, rejection.code, rejection.message)
 	default:
 		writeJSON(w, http.StatusOK, result)
 	}
 }
 
+// Neither a disconnected runner nor an unreconciled Round may be answered: an allow would vouch for execution Galley cannot see (#170).
 func decideAuthorityCheck(round checkedRound, epoch int) *roundEventRejection {
 	switch {
 	case epoch != round.epoch:
 		return &roundEventRejection{http.StatusConflict, staleClaimEpochCode, staleClaimEpochMessage}
 	case !OpenRoundState(round.state).Valid():
 		return &roundEventRejection{http.StatusConflict, roundNotOpenCode, roundNotOpenMessage}
+	case !round.runnerConnected:
+		return &roundEventRejection{http.StatusConflict, runnerDisconnectedCode, runnerDisconnectedMessage}
+	case round.reconcileRequired:
+		return &roundEventRejection{http.StatusConflict, reconcileRequiredCode, reconcileRequiredMessage}
 	case round.state != RoundRunning:
 		return &roundEventRejection{http.StatusConflict, roundNotRunningCode, roundNotRunningMessage}
 	}
@@ -89,14 +99,17 @@ func checkAuthority(ctx context.Context, pool *pgxpool.Pool, ownerID int64, roun
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	var round checkedRound
-	err = tx.QueryRow(ctx, `SELECT id, ticket_id, agent_id, state, claim_epoch FROM rounds WHERE owner_id = $1 AND public_id = $2::uuid FOR SHARE`,
-		ownerID, roundID).Scan(&round.id, &round.ticketID, &round.agentID, &round.state, &round.epoch)
+	var lastSeenAt *time.Time
+	err = tx.QueryRow(ctx, `SELECT id, ticket_id, agent_id, state, claim_epoch, reconcile_required, (SELECT last_seen_at FROM runners WHERE owner_id = rounds.owner_id)
+		FROM rounds WHERE owner_id = $1 AND public_id = $2::uuid FOR SHARE OF rounds`,
+		ownerID, roundID).Scan(&round.id, &round.ticketID, &round.agentID, &round.state, &round.epoch, &round.reconcileRequired, &lastSeenAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return AuthorityCheckResult{}, false, nil, nil
 	}
 	if err != nil {
 		return AuthorityCheckResult{}, false, nil, err
 	}
+	round.runnerConnected = runnerConnected(now, lastSeenAt)
 	if rejection := decideAuthorityCheck(round, epoch); rejection != nil {
 		return AuthorityCheckResult{}, true, rejection, nil
 	}

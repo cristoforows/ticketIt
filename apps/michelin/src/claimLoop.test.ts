@@ -3,7 +3,7 @@ import { startClaimLoop } from "./claimLoop.ts";
 import { resolveRunnerCredential } from "./credentials.ts";
 import type { EngineScript } from "./engineScript.ts";
 import type { FetchFn } from "./galley/client.ts";
-import { startHeartbeatLoop } from "./heartbeatLoop.ts";
+import { newRegistration, startHeartbeatLoop } from "./heartbeatLoop.ts";
 import { createLogger } from "./logger.ts";
 
 const GALLEY = new URL("http://galley.test:8080/");
@@ -24,6 +24,7 @@ function json(body: unknown, status = 200): Response {
 }
 
 const noWork = () => new Response(null, { status: 204 });
+const noRound = () => json({ round: null });
 const claimed = () => json(CLAIM, 201);
 const unauthenticated = () => json({ error: { code: "unauthenticated", message: "sign-in required" } }, 401);
 const refused = () => new TypeError("fetch failed", { cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:8080"), { code: "ECONNREFUSED" }) });
@@ -42,7 +43,7 @@ function credential() {
 function setup(fetchFn: FetchFn, registered = true, engineScript: EngineScript = START_HOLD, engineDeps?: Parameters<typeof startClaimLoop>[0]["engineDeps"]) {
   const lines: string[] = [];
   const logger = createLogger((line) => lines.push(line));
-  const registration = { registered };
+  const registration = { ...newRegistration(), registered };
   const loop = startClaimLoop({ galleyUrl: GALLEY, intervalMs: 1000, commandIntervalMs: 1000, fetch: fetchFn, logger, credential: credential(), registration, requestTimeoutMs: 300, engineScript, engineDeps });
   const records = () => lines.map((line) => JSON.parse(line) as Record<string, unknown>);
   return { loop, lines, records, registration };
@@ -356,7 +357,7 @@ describe("claim loop beside the heartbeat loop", () => {
   function both(handlers: Record<string, () => Response>) {
     const lines: string[] = [];
     const logger = createLogger((line) => lines.push(line));
-    const registration = { registered: false };
+    const registration = newRegistration();
     const fetchFn = vi.fn<FetchFn>(async (input) => {
       const handler = handlers[new URL(String(input)).pathname];
       if (!handler) throw new Error(`unexpected ${String(input)}`);
@@ -375,9 +376,10 @@ describe("claim loop beside the heartbeat loop", () => {
   it("claims only after registration succeeds", async () => {
     let accepted = false;
     const { paths, stop } = both({
-      "/api/runner/register": () => (accepted ? json({ registeredAt: "t" }) : unauthenticated()),
-      "/api/runner/heartbeat": () => json({ lastSeenAt: "t" }),
+      "/api/runner/register": () => (accepted ? json({ registeredAt: "t", reconcileRequired: false }) : unauthenticated()),
+      "/api/runner/heartbeat": () => json({ lastSeenAt: "t", reconcileRequired: false }),
       "/api/runner/claims": noWork,
+      "/api/runner/reconcile": noRound,
     });
 
     await vi.advanceTimersByTimeAsync(2500);
@@ -392,9 +394,10 @@ describe("claim loop beside the heartbeat loop", () => {
 
   it("keeps heartbeating while a claimed Round's script holds", async () => {
     const { paths, stop } = both({
-      "/api/runner/register": () => json({ registeredAt: "t" }),
-      "/api/runner/heartbeat": () => json({ lastSeenAt: "t" }),
+      "/api/runner/register": () => json({ registeredAt: "t", reconcileRequired: false }),
+      "/api/runner/heartbeat": () => json({ lastSeenAt: "t", reconcileRequired: false }),
       "/api/runner/claims": claimed,
+      "/api/runner/reconcile": noRound,
       [eventPath]: created,
       [commandsPath]: noCommands,
     });
@@ -408,9 +411,10 @@ describe("claim loop beside the heartbeat loop", () => {
 
   it("keeps heartbeating while claims fail", async () => {
     const { paths, stop } = both({
-      "/api/runner/register": () => json({ registeredAt: "t" }),
-      "/api/runner/heartbeat": () => json({ lastSeenAt: "t" }),
+      "/api/runner/register": () => json({ registeredAt: "t", reconcileRequired: false }),
+      "/api/runner/heartbeat": () => json({ lastSeenAt: "t", reconcileRequired: false }),
       "/api/runner/claims": () => json({ error: { code: "database_unavailable", message: "x" } }, 503),
+      "/api/runner/reconcile": noRound,
     });
 
     await vi.advanceTimersByTimeAsync(3000);

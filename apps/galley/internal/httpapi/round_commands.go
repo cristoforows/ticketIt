@@ -112,8 +112,8 @@ func (s *server) ListRoundCommands(w http.ResponseWriter, r *http.Request, round
 	writeJSON(w, http.StatusOK, RunnerCommandList{Commands: commands})
 }
 
-func pendingRoundCommands(ctx context.Context, pool *pgxpool.Pool, ownerID int64, roundID string) ([]RunnerCommand, bool, error) {
-	rows, err := pool.Query(ctx, `SELECT c.public_id::text, c.type, c.claim_epoch, c.issued_at, q.question_id::text, q.answer, p.request_id::text, g.public_id::text
+func pendingRoundCommands(ctx context.Context, db ticketDB, ownerID int64, roundID string) ([]RunnerCommand, bool, error) {
+	rows, err := db.Query(ctx, `SELECT c.public_id::text, c.type, c.claim_epoch, c.issued_at, q.question_id::text, q.answer, p.request_id::text, g.public_id::text
 		FROM rounds r
 		LEFT JOIN round_commands c ON c.owner_id = r.owner_id AND c.round_id = r.id AND c.acknowledged_at IS NULL AND r.state IN `+openRoundStatesSQL+`
 		LEFT JOIN round_questions q ON q.owner_id = c.owner_id AND q.id = c.question_id

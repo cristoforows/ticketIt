@@ -65,6 +65,10 @@ async function fakeGalley(): Promise<string> {
       res.end(JSON.stringify({ error: { code: "unauthenticated", message: "sign-in required" } }));
       return;
     }
+    if (req.url === "/api/runner/reconcile") {
+      res.end(JSON.stringify({ round: null }));
+      return;
+    }
     if (req.url === "/api/runner/claims") {
       res.statusCode = 201;
       res.end(JSON.stringify(claimBody));
@@ -96,7 +100,7 @@ async function fakeGalley(): Promise<string> {
       });
       return;
     }
-    res.end(JSON.stringify(req.url === "/api/runner/register" ? { registeredAt: "2026-10-01T12:00:00Z" } : { lastSeenAt: "2026-10-01T12:00:10Z" }));
+    res.end(JSON.stringify(req.url === "/api/runner/register" ? { registeredAt: "2026-10-01T12:00:00Z", reconcileRequired: false } : { lastSeenAt: "2026-10-01T12:00:10Z", reconcileRequired: false }));
   });
   await new Promise<void>((resolve) => server?.listen(0, "127.0.0.1", resolve));
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -166,6 +170,8 @@ describe("michelin process", () => {
     expect(messages.indexOf("runner registered")).toBeLessThan(messages.indexOf("round claimed"));
     expect(messages.indexOf("round claimed")).toBeLessThan(messages.indexOf("execution started reported"));
     expect(runnerPaths[0]).toBe("/api/runner/register");
+    expect(runnerPaths.indexOf("/api/runner/reconcile")).toBeGreaterThan(0);
+    expect(runnerPaths.indexOf("/api/runner/reconcile")).toBeLessThan(runnerPaths.indexOf("/api/runner/claims"));
     expect(messages.slice(0, messages.indexOf("engine delivered")).filter((message) => message === "round claimed")).toHaveLength(1);
     expect(eventBodies.slice(0, 6).map((body) => body["type"])).toEqual(["execution_started", "progress", "progress", "progress", "usage_observed", "delivered"]);
     expect(eventBodies[5]).toMatchObject({ idempotencyKey: `${claimBody.roundId}:7`, claimEpoch: 1, data: { summary: expect.any(String), criteriaAssessment: expect.any(String) } });

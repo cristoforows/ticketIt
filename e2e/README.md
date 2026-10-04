@@ -416,7 +416,9 @@ The second test claims directly with the runner credential and no
 Michelin, so Starting and Stopping hold still. It must show Starting on
 both views. After the dev clock passes 30 seconds, the slip, the
 receipt's notice and the header pill must all show the runner as
-disconnected, with no animation. Re-registering restores Starting. On a
+disconnected, with no animation. Re-registering shows Reconciling with
+the runner (issue #170), and a direct Reconcile reporting the Round
+running restores Starting. On a
 phone the active slip has no status toggle. Stop on the phone list shows
 Stopping, with no Stop control, on both views. `run.sh` runs it after
 `runner-revoke.spec.ts` with no reset. It leaves a Round open, but no later
@@ -550,6 +552,23 @@ A fresh approval allows the action and the Round delivers; the receipt
 lists the ended and the active grant, and the second Round's checks are
 a deny then an allow by the fresh grant. `run.sh` runs it after
 `runner-revoke.spec.ts` with no reset, and it leaves no Round open.
+
+`tests/runner-reconcile.spec.ts` (issue #170) has three tests, each
+moving Galley's dev clock forward by 31 seconds, so a clock already
+ahead does not matter. In the first, a real Michelin waits on a
+question; past the health window its heartbeat raises the Reconcile, it
+reports the Round running, and the answer then delivers the same Round,
+whose notes include *Reconciled with the runner: execution running*
+once. In the second, Michelin holds with its command poll pushed past
+the test, is paused with `SIGSTOP` while the clock passes the window and
+the Owner stops, then resumed: the Stop arrives only in the Reconcile
+answer, and the Round ends Stopped, not delivered, its Stop confirmed
+then acknowledged. In the third, Michelin is killed while holding and a
+new one started with the same credential: it reconciles holding nothing,
+the Ticket shows *Runner cannot confirm execution* on the list and the
+receipt's notice, stays In Progress and locked, and Michelin claims
+nothing. That Round stays open, so `run.sh` resets the database after
+this spec and before `active-order-slip.spec.ts`.
 
 `tests/ticket-priority-order.spec.ts` reorders three Ready Tickets by
 dragging onto the upper and lower halves of board slips, then with Move

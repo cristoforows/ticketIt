@@ -50,8 +50,8 @@ describe("delivery indicator motion", () => {
     expect(motion).toContain(`@keyframes ${keyframes}`);
   });
 
-  it("keeps the rider still while the runner is disconnected", () => {
-    expect(motion).not.toContain('[data-reason="runner_disconnected"]');
+  it.each(["runner_disconnected", "reconciling", "execution_unknown"])("keeps the rider still while the reason is %s", (reason) => {
+    expect(motion).not.toContain(`[data-reason="${reason}"]`);
     expect(rule(".delivery .delivery-rider")).toContain("inset-inline-start");
     expect(rule(".delivery .delivery-rider")).not.toContain("animation");
   });

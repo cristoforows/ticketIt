@@ -285,6 +285,7 @@ func TestAuthorityCheck_ATimeFullGrantCoversItsAgentOnEveryTicketUntilItsExpiry(
 
 	other, second := f.runningRound(t, "Another Ticket")
 	f.clock.Set(until.Add(-time.Microsecond))
+	f.reconnect(t, second)
 	for _, scope := range otherDeclaredScopes {
 		assertDecision(t, f.mustCheck(t, second, scope), AuthorityAllow, grantID)
 	}
@@ -307,6 +308,7 @@ func TestRenewal_AnExpiredFullGrantIsRenewedForTheRequestedScopeOrAgainInFull(t 
 			until := runnerEpoch.Add(time.Minute)
 			queued, claim, expired := f.fullGrantRound(t, "Renew full", PermissionGrantFormTime, until)
 			f.clock.Set(until.Add(time.Second))
+			f.reconnect(t, claim)
 			assertExpiredDeny(t, f.mustCheck(t, claim, readReport), expired)
 			oldRow := grantRow(t, f, expired)
 
@@ -428,6 +430,7 @@ func TestRenewal_AnExpiredFullGrantOnAnotherAccountIsNeverNamedOrRenewed(t *test
 	_, secondGrant := f.mustApproveWith(t, queued.Id, claim.RoundId, requestA, fullApprovalBody(t, PermissionGrantFormTime, until))
 	f.mustResumeApproval(t, claim, requestA)
 	f.clock.Set(until)
+	f.reconnect(t, claim)
 	assertExpiredDeny(t, f.mustCheck(t, claim, secondRead), secondGrant)
 	assertExpiredDeny(t, f.mustCheck(t, claim, readReport), "")
 

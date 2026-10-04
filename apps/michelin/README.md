@@ -134,6 +134,33 @@ Requests in one loop never overlap. The status and runner loops keep
 running while a Round runs, so the runner stays Connected. Each request
 times out after 5 seconds.
 
+**Reconcile (issue #170).** A successful registration, any failed
+heartbeat, or a heartbeat answering `reconcileRequired: true` sets
+Michelin's reconcile flag; only a `continue`, a `stop` or
+`{"round": null}` answer clears it. While it is set:
+
+- the claim loop sends `POST /api/runner/reconcile` with `held: []`
+  before each claim poll and skips the claim while the flag stays set;
+- with a Round held, every engine step, event and authority check first
+  waits on one Reconcile (concurrent callers share it), reporting the
+  held Round with execution `running`, or `stopped` once the engine has
+  halted. Every claim interval, an idle engine's Round is reconciled too;
+- a failed Reconcile is retried after 1 s, doubling to 30 s; a `409`,
+  `404` or other final refusal, or a `hold`, drops the Round locally,
+  sending nothing further for it and leaving it open in Galley;
+- `stop` halts the engine, which sends `stop_confirmed` and acknowledges
+  the Stop listed in the answer;
+- `report_cessation` lets the one named event through: the stop
+  confirmation is sent as Galley's `stop_confirmed` or `interrupted`.
+
+An answer raised before an in-flight Reconcile returns cannot be
+cleared by it. An authority check refused `409 reconcile_required` sets
+the flag and asks again after reconciling; `409 runner_disconnected`
+is asked again with the same retry. Logs: `reconciled` (`roundId`,
+`execution`, `disposition`, `cessationEvent`), `reconciled; no open
+round`, `reconcile failed; retrying`, `reconcile refused; round dropped
+locally`.
+
 ## Controlled engine
 
 For each claimed Round the engine follows a deterministic script. It
@@ -193,8 +220,8 @@ round abandoned locally` with Galley's error code (`400`, `401`, `404`
 `409` and `413` among them, including `observation_id_conflict`), stops that Round's script, and sends nothing
 further for it. It never closes, fails or unlocks the Round, and never
 exits. If Michelin restarts, it does not resume a Round it no longer
-holds; a Round left `claimed` or `running` is recovered by
-reconciliation, which is M5 (#6).
+holds; the restarted Michelin reconciles holding nothing, Galley
+records the Round's execution as unknown, and the Round stays open.
 
 **Stop.** A Stop for the claim's epoch ends a `wait` or a `hold` at
 once. An event already in flight, its retries and backoff included, is
@@ -229,7 +256,7 @@ answer to step <step index + 1> of <step count> on Stop command
 <commandId>`, and the answer is never acknowledged, because Galley
 stops listing an ended Round's commands. A Michelin restarted while a
 Round waits does not pick it up again: Galley holds the slot, so the
-claim answers `204` until reconciliation (M5) recovers it.
+Reconcile answers `hold` and Michelin claims nothing while it is set.
 
 **Feedback.** The claim's `ticket.feedback` lists the Owner's feedback
 no earlier Round received, as `{roundId, roundSequence, body,

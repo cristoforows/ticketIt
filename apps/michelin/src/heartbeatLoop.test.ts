@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveRunnerCredential } from "./credentials.ts";
 import type { FetchFn } from "./galley/client.ts";
-import { startHeartbeatLoop } from "./heartbeatLoop.ts";
+import { newRegistration, startHeartbeatLoop } from "./heartbeatLoop.ts";
 import { createLogger } from "./logger.ts";
 
 const GALLEY = new URL("http://galley.test:8080/");
@@ -17,7 +17,7 @@ const notRegistered = () => json({ error: { code: "runner_not_registered", messa
 
 function setup(fetchFn: FetchFn) {
   const lines: string[] = [];
-  const registration = { registered: false };
+  const registration = newRegistration();
   const logger = createLogger((line) => lines.push(line));
   const credential = resolveRunnerCredential({ MICHELIN_RUNNER_TOKEN: TOKEN }, []);
   if (!credential) throw new Error("test credential rejected");
@@ -45,8 +45,8 @@ afterEach(() => {
 describe("heartbeat loop", () => {
   it("registers on start with the bearer credential, then heartbeats on the interval", async () => {
     const fetchFn = routes({
-      "/api/runner/register": () => json({ registeredAt: "2026-10-01T12:00:00Z" }),
-      "/api/runner/heartbeat": () => json({ lastSeenAt: "2026-10-01T12:00:01Z" }),
+      "/api/runner/register": () => json({ registeredAt: "2026-10-01T12:00:00Z", reconcileRequired: false }),
+      "/api/runner/heartbeat": () => json({ lastSeenAt: "2026-10-01T12:00:01Z", reconcileRequired: false }),
     });
     const { loop, records, lines } = setup(fetchFn);
 
@@ -86,7 +86,7 @@ describe("heartbeat loop", () => {
   it("falls back to registering after a revoked credential fails a heartbeat", async () => {
     let revoked = false;
     const fetchFn = routes({
-      "/api/runner/register": () => (revoked ? unauthenticated() : json({ registeredAt: "2026-10-01T12:00:00Z" })),
+      "/api/runner/register": () => (revoked ? unauthenticated() : json({ registeredAt: "2026-10-01T12:00:00Z", reconcileRequired: false })),
       "/api/runner/heartbeat": unauthenticated,
     });
     const { loop, records } = setup(fetchFn);
@@ -101,7 +101,7 @@ describe("heartbeat loop", () => {
 
   it("re-registers at once when Galley reports the runner unregistered", async () => {
     const fetchFn = routes({
-      "/api/runner/register": () => json({ registeredAt: "2026-10-01T12:00:00Z" }),
+      "/api/runner/register": () => json({ registeredAt: "2026-10-01T12:00:00Z", reconcileRequired: false }),
       "/api/runner/heartbeat": notRegistered,
     });
     const { loop, records } = setup(fetchFn);
@@ -119,7 +119,7 @@ describe("heartbeat loop", () => {
     let up = false;
     const fetchFn = vi.fn<FetchFn>(async (input) => {
       if (!up) throw refused;
-      return new URL(String(input)).pathname.endsWith("register") ? json({ registeredAt: "t" }) : json({ lastSeenAt: "t" });
+      return new URL(String(input)).pathname.endsWith("register") ? json({ registeredAt: "t", reconcileRequired: false }) : json({ lastSeenAt: "t", reconcileRequired: false });
     });
     const { loop, records } = setup(fetchFn);
     await vi.advanceTimersByTimeAsync(0);
@@ -146,9 +146,9 @@ describe("heartbeat loop", () => {
     const refused = new TypeError("fetch failed", { cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:8080"), { code: "ECONNREFUSED" }) });
     let heartbeats = 0;
     const fetchFn = vi.fn<FetchFn>(async (input, init) => {
-      if (new URL(String(input)).pathname.endsWith("register")) return json({ registeredAt: "t" });
+      if (new URL(String(input)).pathname.endsWith("register")) return json({ registeredAt: "t", reconcileRequired: false });
       heartbeats += 1;
-      if (heartbeats > 1) return json({ lastSeenAt: "t" });
+      if (heartbeats > 1) return json({ lastSeenAt: "t", reconcileRequired: false });
       if (reason === "unreachable") throw refused;
       if (reason === "http_status") return json({ error: { code: "database_unavailable", message: "x" } }, 503);
       if (reason === "invalid_body") return new Response("<html>", { status: 200 });
@@ -172,7 +172,9 @@ describe("heartbeat loop", () => {
     ["server error", () => json({ error: { code: "database_unavailable", message: "x" } }, 503), { reason: "http_status", httpStatus: 503 }],
     ["conflict without the not-registered code", () => json({ error: { code: "other", message: "x" } }, 409), { reason: "http_status", httpStatus: 409 }],
     ["non-JSON success", () => new Response("<html>", { status: 200 }), { reason: "invalid_body" }],
-    ["success without registeredAt", () => json({}), { reason: "invalid_body" }],
+    ["success without registeredAt", () => json({ reconcileRequired: false }), { reason: "invalid_body" }],
+    ["success without reconcileRequired", () => json({ registeredAt: "t" }), { reason: "invalid_body", error: "reconcileRequired is not a boolean" }],
+    ["success with a non-boolean reconcileRequired", () => json({ registeredAt: "t", reconcileRequired: "false" }), { reason: "invalid_body" }],
   ])("classifies a %s", async (_name, respond, expected) => {
     const { loop, records } = setup(routes({ "/api/runner/register": respond }));
     await vi.advanceTimersByTimeAsync(0);
@@ -199,5 +201,59 @@ describe("heartbeat loop", () => {
     await loop.stop();
     expect(records()).toEqual([]);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  describe("reconcileRequired", () => {
+    it("is raised by every registration, even when Galley reports none owed", async () => {
+      const fetchFn = routes({
+        "/api/runner/register": () => json({ registeredAt: "t", reconcileRequired: false }),
+        "/api/runner/heartbeat": notRegistered,
+      });
+      const { loop, registration } = setup(fetchFn);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(registration).toMatchObject({ registered: true, reconcileRequired: true, reconcileRaised: 1 });
+      registration.reconcileRequired = false;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(registration).toMatchObject({ registered: true, reconcileRequired: true, reconcileRaised: 3 });
+      await loop.stop();
+    });
+
+    it("is raised by a heartbeat answering true, and never cleared by one answering false", async () => {
+      let owed = false;
+      const fetchFn = routes({
+        "/api/runner/register": () => json({ registeredAt: "t", reconcileRequired: false }),
+        "/api/runner/heartbeat": () => json({ lastSeenAt: "t", reconcileRequired: owed }),
+      });
+      const { loop, registration, records } = setup(fetchFn);
+      await vi.advanceTimersByTimeAsync(0);
+      registration.reconcileRequired = false;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(registration.reconcileRequired).toBe(false);
+      owed = true;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(registration.reconcileRequired).toBe(true);
+      expect(records().at(-1)).toMatchObject({ msg: "runner heartbeat ok", reconcileRequired: true });
+      owed = false;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(registration.reconcileRequired).toBe(true);
+      await loop.stop();
+    });
+
+    it.each([
+      ["unreachable", (): Response => { throw new TypeError("fetch failed"); }],
+      ["a server error", () => json({ error: { code: "database_unavailable", message: "x" } }, 503)],
+      ["an invalid body", () => new Response("<html>", { status: 200 })],
+      ["a rejected credential", unauthenticated],
+    ])("is raised by a heartbeat that fails: %s", async (_name, respond) => {
+      const fetchFn = routes({ "/api/runner/register": () => json({ registeredAt: "t", reconcileRequired: false }), "/api/runner/heartbeat": respond });
+      const { loop, registration } = setup(fetchFn);
+      await vi.advanceTimersByTimeAsync(0);
+      registration.reconcileRequired = false;
+      const raised = registration.reconcileRaised;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(registration.reconcileRequired).toBe(true);
+      expect(registration.reconcileRaised).toBe(raised + 1);
+      await loop.stop();
+    });
   });
 });

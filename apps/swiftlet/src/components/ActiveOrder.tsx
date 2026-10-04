@@ -15,6 +15,8 @@ export const waitingReasonLabels: Record<WaitingReason, string> = {
   resuming: "Resuming",
   stopping: "Stopping",
   runner_disconnected: "Runner disconnected",
+  reconciling: "Reconciling with the runner",
+  execution_unknown: "Runner cannot confirm execution",
 };
 
 export function DeliveryIndicator({ reason, className }: { reason: WaitingReason; className?: string }) {

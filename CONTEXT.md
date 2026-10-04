@@ -149,8 +149,16 @@ The condition of an open **Round** after the owner has requested Stop and before
 _Avoid_: Stopped while the round is still open.
 
 **Waiting Reason**:
-What an open **Round** is waiting on, as the owner sees it: Starting, Working, Waiting for your answer, Waiting for a Permission, Resuming, **Stopping**, or Runner disconnected. Lost contact with the runner outranks the others but never ends the round. It is not a **Status**.
+What an open **Round** is waiting on, as the owner sees it: Starting, Working, Waiting for your answer, Waiting for a Permission, Resuming, **Stopping**, Runner disconnected, Reconciling with the runner, or Runner cannot confirm execution (**Execution Unknown**). Lost contact with the runner outranks the others, then Execution Unknown, then a pending **Reconcile**; none ends the round. It is not a **Status**.
 _Avoid_: Status, round state when referring to this owner-facing reason.
+
+**Reconcile**:
+The runner's account to Galley, after it registers or is seen again past the health window, of the open **Round** it holds and whether that round's execution is still running. Until the round is reconciled, its authority checks are refused and the runner takes no step. A Reconcile never changes the round or its **Ticket**: Galley answers continue, stop, report the runner's own cessation, or hold, and only the runner's reported event ends the round.
+_Avoid_: Recovery when referring to this account; the round is not ended or retried by it.
+
+**Execution Unknown**:
+The condition of an open **Round** whose runner reconnected but cannot confirm its execution is running, such as after a restart. The round stays open and its **Ticket** stays locked; belief that the work stopped is never evidence that it did.
+_Avoid_: Interrupted, which needs the runner's own evidence.
 
 **Stopped**:
 The terminal outcome of a **Round** whose runner has confirmed its execution ended following the owner's explicit stop request. Its **Ticket** returns to **Backlog** with the Stopped **Badge**, an ordinary Badge the owner may remove without changing the outcome; the round's activity and usage remain part of its history. Only an explicit move to Ready starts another round.

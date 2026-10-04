@@ -17,6 +17,18 @@ export interface HeartbeatLoopOptions {
 
 export interface Registration {
   registered: boolean;
+  reconcileRequired: boolean;
+  // Counts each raising of reconcileRequired, so a Reconcile answered after a later raise cannot clear it.
+  reconcileRaised: number;
+}
+
+export function newRegistration(): Registration {
+  return { registered: false, reconcileRequired: false, reconcileRaised: 0 };
+}
+
+export function requireReconcile(registration: Registration): void {
+  registration.reconcileRequired = true;
+  registration.reconcileRaised++;
 }
 
 export interface HeartbeatLoop {
@@ -42,13 +54,22 @@ async function run(options: HeartbeatLoopOptions, signal: AbortSignal): Promise<
     const step = registration.registered ? "heartbeat" : "register";
     const result = registration.registered ? await sendHeartbeat(request) : await registerRunner(request, identity);
     if (result.ok) {
+      const { at, reconcileRequired } = result.value;
       if (registration.registered) {
-        logger.info("runner heartbeat ok", { galleyUrl: galleyUrl.href, durationMs: result.durationMs, lastSeenAt: result.value });
+        if (reconcileRequired) {
+          requireReconcile(registration);
+        }
+        logger.info("runner heartbeat ok", { galleyUrl: galleyUrl.href, durationMs: result.durationMs, lastSeenAt: at, reconcileRequired });
       } else {
+        // A new process cannot know what an earlier one left running.
+        requireReconcile(registration);
         registration.registered = true;
-        logger.info("runner registered", { galleyUrl: galleyUrl.href, durationMs: result.durationMs, registeredAt: result.value, ...identity });
+        logger.info("runner registered", { galleyUrl: galleyUrl.href, durationMs: result.durationMs, registeredAt: at, reconcileRequired, ...identity });
       }
     } else {
+      if (step === "heartbeat" && result.failure.reason !== "aborted") {
+        requireReconcile(registration);
+      }
       // Registering again rewrites registered_at in Galley, so only a lost registration or credential leads back to it.
       if (result.failure.reason === "not_registered" || result.failure.reason === "credential_rejected") {
         registration.registered = false;

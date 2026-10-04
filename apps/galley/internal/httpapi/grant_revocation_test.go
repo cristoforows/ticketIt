@@ -655,6 +655,7 @@ func TestAuthorityChanged_ExpiryIssuesNoCommandBecauseEveryCheckReadsTheClock(t 
 	f.ackAll(t, claim.RoundId)
 	before := tableJSON(t, f, "round_commands")
 	f.clock.Set(runnerEpoch.Add(time.Hour))
+	f.reconnect(t, claim)
 	assertExpiredDeny(t, f.mustCheck(t, claim, writeReport), grantID)
 	if got := tableJSON(t, f, "round_commands"); got != before || len(f.mustCommands(t, claim.RoundId)) != 0 {
 		t.Fatalf("expiry recorded commands: %s", got)

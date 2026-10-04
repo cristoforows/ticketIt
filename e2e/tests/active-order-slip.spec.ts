@@ -145,7 +145,7 @@ test("a real Michelin's Working Round shows the active slip on list and board, k
 
 // The claim is made directly with the runner credential, as in runner-claims.spec.ts: a real Michelin starts the Round
 // within milliseconds and confirms a Stop within a poll, so Starting and Stopping would not hold still to be seen.
-test("a directly claimed Round shows Starting, Runner disconnected on the slip and the receipt with the header, and Stopping once stopped from the slip, on desktop and phone", async ({ playwright, browser, request }) => {
+test("a directly claimed Round shows Starting, Runner disconnected on the slip and the receipt with the header, Reconciling after the runner registers again, and Stopping once stopped from the slip, on desktop and phone", async ({ playwright, browser, request }) => {
   const baseURL = process.env.E2E_BASE_URL;
   const api = await playwright.request.newContext({ baseURL });
   const runner = await playwright.request.newContext({ baseURL });
@@ -185,7 +185,10 @@ test("a directly claimed Round shows Starting, Runner disconnected on the slip a
     await expect(notice).toBeVisible({ timeout: 2_000 });
     await page.keyboard.press("Escape");
 
-    await calls.register();
+    expect(await calls.register()).toEqual({ registeredAt: expect.any(String), reconcileRequired: true });
+    expect((await ticket(api, queued.id)).openRound!.waitingReason).toBe("reconciling");
+    await expect(row.getByTestId("ticket-waiting-reason")).toHaveText("Reconciling with the runner", { timeout: 10_000 });
+    expect(await calls.reconcile([{ roundId: claim.roundId, claimEpoch: claim.claimEpoch, execution: "running" }])).toMatchObject({ roundId: claim.roundId, disposition: "continue" });
     await expect.poll(async () => (await ticket(api, queued.id)).openRound!.waitingReason).toBe("starting");
     await expect(row.getByTestId("ticket-waiting-reason")).toHaveText("Starting", { timeout: 10_000 });
     await expect(header).toHaveAttribute("data-health", "connected", { timeout: 15_000 });

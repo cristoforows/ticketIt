@@ -85,7 +85,7 @@ function setup(fetchFn: FetchFn, engineScript: EngineScript = START_HOLD) {
     fetch: fetchFn,
     logger,
     credential: credential(),
-    registration: { registered: true },
+    registration: { registered: true, reconcileRequired: false, reconcileRaised: 0 },
     requestTimeoutMs: 300,
     engineScript,
   });

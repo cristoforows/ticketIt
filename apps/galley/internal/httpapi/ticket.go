@@ -425,6 +425,8 @@ const ticketSelectColumns = `public_id::text, title, status, template, completio
 	   JOIN agents a ON a.owner_id = r.owner_id AND a.id = r.agent_id
 	  WHERE r.state = 'delivered'),
 	(SELECT ru.last_seen_at FROM runners ru WHERE ru.owner_id = tickets.owner_id),
+	(SELECT r.reconcile_required FROM rounds r WHERE r.owner_id = tickets.owner_id AND r.ticket_id = tickets.id AND r.state IN ` + openRoundStatesSQL + `),
+	(SELECT r.reconcile_execution FROM rounds r WHERE r.owner_id = tickets.owner_id AND r.ticket_id = tickets.id AND r.state IN ` + openRoundStatesSQL + `),
 	` + permissionGrantsJSON + `,
 	goal, context, success_criteria, constraints, repository, created_at, updated_at, archived_at`
 
@@ -449,13 +451,15 @@ func scanTicketRow(row ticketRowScanner, now time.Time) (Ticket, error) {
 		status, template, completionCondition                    string
 		assigneeType                                             sql.NullString
 		runnerLastSeenAt                                         *time.Time
+		reconcileRequired                                        *bool
+		reconcileExecution                                       *HeldExecution
 		goal, ctxField, successCriteria, constraints, repository sql.NullString
 		createdAt, updatedAt                                     time.Time
 		archivedAt                                               sql.NullTime
 	)
 	if err := row.Scan(
 		&ticket.Id, &ticket.Title, &status, &template, &completionCondition, &assigneeType, &ticket.AssigneeAgent, &ticket.OpenRound, &ticket.Delivery,
-		&runnerLastSeenAt, &ticket.PermissionGrants, &ticket.PermissionGrantCount, &goal, &ctxField, &successCriteria, &constraints, &repository,
+		&runnerLastSeenAt, &reconcileRequired, &reconcileExecution, &ticket.PermissionGrants, &ticket.PermissionGrantCount, &goal, &ctxField, &successCriteria, &constraints, &repository,
 		&createdAt, &updatedAt, &archivedAt,
 	); err != nil {
 		return Ticket{}, err
@@ -486,7 +490,7 @@ func scanTicketRow(row ticketRowScanner, now time.Time) (Ticket, error) {
 			normalisePermissionRequest(ticket.OpenRound.PermissionRequest)
 		}
 		ticket.OpenRound.WaitingReason = decideWaitingReason(ticket.OpenRound.State, ticket.OpenRound.Question, ticket.OpenRound.PermissionRequest,
-			ticket.OpenRound.StopRequestedAt != nil, runnerConnected(now, runnerLastSeenAt))
+			ticket.OpenRound.StopRequestedAt != nil, runnerConnected(now, runnerLastSeenAt), reconcileRequired != nil && *reconcileRequired, reconcileExecution)
 	}
 	if ticket.Delivery != nil {
 		ticket.Delivery.DeliveredAt = ticket.Delivery.DeliveredAt.UTC()

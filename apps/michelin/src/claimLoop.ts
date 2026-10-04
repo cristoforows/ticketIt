@@ -5,8 +5,9 @@ import { runControlledEngine, type EngineDeps } from "./engine.ts";
 import type { EngineScript } from "./engineScript.ts";
 import type { FetchFn } from "./galley/client.ts";
 import { claimWork, type ClaimResult, type PulledCommand, type RunnerClaim } from "./galley/runner.ts";
-import type { Registration } from "./heartbeatLoop.ts";
+import { requireReconcile, type Registration } from "./heartbeatLoop.ts";
 import type { Logger } from "./logger.ts";
+import { Reconciler, type HeldRoundState } from "./reconciler.ts";
 import { sleep } from "./statusLoop.ts";
 
 export interface ClaimLoopOptions {
@@ -16,7 +17,7 @@ export interface ClaimLoopOptions {
   fetch: FetchFn;
   logger: Logger;
   credential: RunnerCredential;
-  registration: Readonly<Registration>;
+  registration: Registration;
   engineScript: EngineScript;
   engineDeps?: Partial<EngineDeps>;
   requestTimeoutMs?: number;
@@ -41,10 +42,18 @@ export function startClaimLoop(options: ClaimLoopOptions): ClaimLoop {
 async function run(options: ClaimLoopOptions, signal: AbortSignal): Promise<void> {
   const { galleyUrl, intervalMs, logger, registration } = options;
   const request = { fetch: options.fetch, galleyUrl, signal, timeoutMs: options.requestTimeoutMs, credential: options.credential };
+  const reconciler = new Reconciler({ ...request, logger, registration, requestTimeoutMs: options.requestTimeoutMs, sleep: options.engineDeps?.sleep });
   while (!signal.aborted) {
     await sleep(intervalMs, signal);
     if (signal.aborted || !registration.registered) {
       continue;
+    }
+    // Holding nothing, Michelin claims only once Galley confirms the Owner has no open Round it might still be running.
+    if (registration.reconcileRequired) {
+      await reconciler.reconcile();
+      if (registration.reconcileRequired) {
+        continue;
+      }
     }
     const result = await claimWork(request);
     if (result.ok && result.value !== null) {
@@ -59,7 +68,7 @@ async function run(options: ClaimLoopOptions, signal: AbortSignal): Promise<void
         ticketTitle: ticket.title,
         feedback: ticket.feedback.length,
       });
-      await runRound(options, result.value, signal);
+      await runRound(options, result.value, signal, reconciler);
       continue;
     }
     if (!result.ok) {
@@ -68,10 +77,24 @@ async function run(options: ClaimLoopOptions, signal: AbortSignal): Promise<void
   }
 }
 
-async function runRound(options: ClaimLoopOptions, claim: RunnerClaim, signal: AbortSignal): Promise<void> {
-  const { galleyUrl, fetch, logger, credential, requestTimeoutMs } = options;
+async function runRound(options: ClaimLoopOptions, claim: RunnerClaim, signal: AbortSignal, reconciler: Reconciler): Promise<void> {
+  const { galleyUrl, fetch, logger, credential, requestTimeoutMs, registration } = options;
   const stop = new AbortController();
+  const dropped = new AbortController();
   let stopCommand: PulledCommand | undefined;
+  let halted = false;
+  const onStop = (command: PulledCommand | undefined): void => {
+    stopCommand ??= command;
+    stop.abort(stopCommand?.id);
+  };
+  const held: HeldRoundState = {
+    claim,
+    execution: () => (halted ? "stopped" : "running"),
+    onStop,
+    onDrop: () => dropped.abort(),
+  };
+  reconciler.hold(held);
+  const watch = startReconcileWatch(reconciler, options.intervalMs, AbortSignal.any([signal, dropped.signal]));
   const answers = new AnswerInbox();
   const approvals = new ApprovalInbox();
   const request = { fetch, galleyUrl, signal, timeoutMs: requestTimeoutMs, credential };
@@ -84,10 +107,7 @@ async function runRound(options: ClaimLoopOptions, claim: RunnerClaim, signal: A
     claim,
     signal,
     requestTimeoutMs,
-    onStop: (command) => {
-      stopCommand ??= command;
-      stop.abort(stopCommand.id);
-    },
+    onStop,
     onAnswer: (command) => {
       answers.deliver(command.answer.questionId, {
         text: command.answer.text,
@@ -119,6 +139,11 @@ async function runRound(options: ClaimLoopOptions, claim: RunnerClaim, signal: A
       awaitApproval: approvals.wait,
       requestTimeoutMs,
       deps: options.engineDeps,
+      reconcile: { gate: () => reconciler.gate(), require: () => requireReconcile(registration) },
+      dropped: dropped.signal,
+      onHalted: () => {
+        halted = true;
+      },
     });
     await commands.stop();
     if (outcome === "stopped" && stopCommand !== undefined) {
@@ -128,7 +153,29 @@ async function runRound(options: ClaimLoopOptions, claim: RunnerClaim, signal: A
     logger.error("engine failed unexpectedly", { roundId: claim.roundId, error: error instanceof Error ? error.message : String(error) });
   } finally {
     await commands.stop();
+    await watch.stop();
+    reconciler.release(held);
   }
+}
+
+// An engine waiting on the Owner sends nothing to gate, so an owed Reconcile is also sought on the claim interval.
+function startReconcileWatch(reconciler: Reconciler, intervalMs: number, signal: AbortSignal): { stop(): Promise<void> } {
+  const ended = new AbortController();
+  const until = AbortSignal.any([signal, ended.signal]);
+  const finished = (async () => {
+    while (!until.aborted) {
+      await sleep(intervalMs, until);
+      if (!until.aborted && reconciler.required) {
+        await reconciler.reconcile();
+      }
+    }
+  })();
+  return {
+    stop: async () => {
+      ended.abort();
+      await finished;
+    },
+  };
 }
 
 function logFailure(logger: Logger, galleyUrl: URL, result: ClaimResult & { ok: false }): void {

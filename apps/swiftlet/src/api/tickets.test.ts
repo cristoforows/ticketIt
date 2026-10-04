@@ -48,7 +48,7 @@ describe("fetchTicket", () => {
   const agent = TICKET.assigneeAgent;
   const round = { id: "66666666-6666-4666-8666-666666666666", sequence: 1, state: "running", agent, claimedAt: "2026-10-02T10:00:00Z", startedAt: "2026-10-02T10:00:01Z", waitingReason: "working", question: null, permissionRequest: null };
 
-  it.each(["starting", "working", "waiting_for_answer", "waiting_for_permission", "resuming", "stopping", "runner_disconnected"])("keeps Galley's waiting reason %s", async (waitingReason) => {
+  it.each(["starting", "working", "waiting_for_answer", "waiting_for_permission", "resuming", "stopping", "runner_disconnected", "reconciling", "execution_unknown"])("keeps Galley's waiting reason %s", async (waitingReason) => {
     const open = { ...TICKET, status: "InProgress", openRound: { ...round, stopRequestedAt: null, waitingReason } };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => open }));
     expect((await fetchTicket(TICKET.id)).openRound?.waitingReason).toBe(waitingReason);

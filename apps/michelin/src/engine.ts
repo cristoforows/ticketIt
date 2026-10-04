@@ -13,6 +13,7 @@ import {
   type RunnerClaim,
 } from "./galley/runner.ts";
 import type { Logger } from "./logger.ts";
+import type { GateResult } from "./reconciler.ts";
 import { sleep } from "./statusLoop.ts";
 
 interface PendingEvent {
@@ -45,7 +46,18 @@ export interface EngineOptions {
   awaitApproval?: AwaitApproval;
   requestTimeoutMs?: number;
   deps?: Partial<EngineDeps>;
+  reconcile?: EngineReconcile;
+  // Aborted when Galley's Reconcile answers hold or refuses the Round: the engine leaves it without reporting.
+  dropped?: AbortSignal;
+  onHalted?: () => void;
 }
+
+export interface EngineReconcile {
+  gate(): Promise<GateResult>;
+  require(): void;
+}
+
+type SendOutcome = "sent" | "abandoned" | "aborted" | "stop";
 
 const RETRY_BASE_MS = 1_000;
 const RETRY_CAP_MS = 30_000;
@@ -124,13 +136,16 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
     occurredAt: deps.now().toISOString(),
     data,
   });
-  const halt = AbortSignal.any([signal, stop]);
+  const dropped = options.dropped ?? new AbortController().signal;
+  const halt = AbortSignal.any([signal, stop, dropped]);
+  const left = (): "aborted" | "abandoned" | undefined => (signal.aborted ? "aborted" : dropped.aborted ? "abandoned" : undefined);
   const steps = options.script.steps;
   const awaitAnswer: AwaitAnswer = options.awaitAnswer ?? ((_questionId, until) => untilAborted(until).then(() => undefined));
   const awaitApproval: AwaitApproval = options.awaitApproval ?? ((_requestId, until) => untilAborted(until).then(() => undefined));
   let waitingFor: "answer" | "approval" | undefined;
   // Sent only once the engine has ceased: Galley ends the Round on this event alone.
   const stopped = async (): Promise<EngineOutcome> => {
+    options.onHalted?.();
     const commandId = typeof stop.reason === "string" ? stop.reason : undefined;
     logger.info("engine stopped", { roundId, stepIndex, ...(commandId === undefined ? {} : { commandId }) });
     const position = waitingFor !== undefined
@@ -146,12 +161,14 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
       reported: "stop confirmation reported",
       context: {},
     });
-    return outcome === "sent" ? "stopped" : outcome;
+    return outcome === "sent" ? "stopped" : outcome === "stop" ? "abandoned" : outcome;
   };
+  const settle = (outcome: Exclude<SendOutcome, "sent">): Promise<EngineOutcome> | EngineOutcome => (outcome === "stop" ? stopped() : outcome);
   let stepIndex = 0;
   for (const step of steps) {
-    if (signal.aborted) {
-      return "aborted";
+    const gone = left();
+    if (gone !== undefined) {
+      return gone;
     }
     if (stop.aborted) {
       return stopped();
@@ -203,13 +220,14 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
           context: { questionId },
         });
         if (raised !== "sent") {
-          return raised;
+          return settle(raised);
         }
         waitingFor = "answer";
         logger.info("engine waiting for an answer", { roundId, stepIndex, questionId });
         const answer = await awaitAnswer(questionId, halt);
-        if (signal.aborted) {
-          return "aborted";
+        const goneWaiting = left();
+        if (goneWaiting !== undefined) {
+          return goneWaiting;
         }
         if (stop.aborted || answer === undefined) {
           return stopped();
@@ -223,7 +241,7 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
           context: { questionId },
         });
         if (resumed !== "sent") {
-          return resumed;
+          return settle(resumed);
         }
         await answer.acknowledge();
         pending = {
@@ -247,7 +265,7 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
         const performed: PendingEvent = { step: "act", stepIndex, event: envelope("progress", `${roundId}:${stepIndex}`, { note: performedNote(step) }), reported: "action performed", context: scope };
         const first = await checkScope(options, deps, step, stepIndex);
         if (typeof first === "string") {
-          return first;
+          return settle(first);
         }
         if (first.decision === "unsupported") {
           pending = failed("the Connected Account does not declare this capability");
@@ -267,13 +285,14 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
           context: { requestId, ...scope, ...renewal },
         });
         if (requested !== "sent") {
-          return requested;
+          return settle(requested);
         }
         waitingFor = "approval";
         logger.info("engine waiting for an approval", { roundId, stepIndex, requestId });
         const approval = await awaitApproval(requestId, halt);
-        if (signal.aborted) {
-          return "aborted";
+        const goneWaiting = left();
+        if (goneWaiting !== undefined) {
+          return goneWaiting;
         }
         if (stop.aborted || approval === undefined) {
           return stopped();
@@ -287,12 +306,12 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
           context: { requestId, grantId: approval.grantId },
         });
         if (resumed !== "sent") {
-          return resumed;
+          return settle(resumed);
         }
         await approval.acknowledge();
         const second = await checkScope(options, deps, step, stepIndex);
         if (typeof second === "string") {
-          return second;
+          return settle(second);
         }
         pending = second.decision === "allow" ? performed : failed("Galley still denies it after the Owner's approval");
         break;
@@ -300,12 +319,12 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
       case "hold":
         logger.info("engine holding", { roundId });
         await untilAborted(halt);
-        return signal.aborted ? "aborted" : stopped();
+        return left() ?? stopped();
     }
     if (pending !== undefined) {
       const outcome = await sendEvent(options, deps, pending);
       if (outcome !== "sent") {
-        return outcome;
+        return settle(outcome);
       }
       if (pending.step === "deliver") {
         logger.info("engine delivered", { roundId });
@@ -328,14 +347,15 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
           context: { feedback: claim.ticket.feedback.length },
         });
         if (noted !== "sent") {
-          return noted;
+          return settle(noted);
         }
       }
     }
     stepIndex++;
   }
-  if (signal.aborted) {
-    return "aborted";
+  const gone = left();
+  if (gone !== undefined) {
+    return gone;
   }
   if (stop.aborted) {
     return stopped();
@@ -344,19 +364,43 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
   return "completed";
 }
 
-async function sendEvent(options: EngineOptions, deps: EngineDeps, pending: PendingEvent): Promise<"sent" | "abandoned" | "aborted"> {
+async function sendEvent(options: EngineOptions, deps: EngineDeps, pending: PendingEvent): Promise<SendOutcome> {
   const { logger, signal, claim } = options;
   const request = { fetch: options.fetch, galleyUrl: options.galleyUrl, signal, timeoutMs: options.requestTimeoutMs, credential: options.credential };
-  const body = JSON.stringify(pending.event);
-  const expected = {
-    type: pending.event.type,
-    observationId: pending.step === "usage" ? pending.event.idempotencyKey : undefined,
-    questionId: pending.step === "ask" || pending.step === "resume" ? (pending.context["questionId"] as string | undefined) : undefined,
-    requestId: pending.step === "request" || pending.step === "resume" ? (pending.context["requestId"] as string | undefined) : undefined,
-  };
+  let event = pending.event;
+  let cessationLetThrough = false;
   for (let attempt = 1; ; attempt++) {
+    if (options.dropped?.aborted) {
+      return "abandoned";
+    }
+    if (options.reconcile !== undefined && !cessationLetThrough) {
+      const gate = await options.reconcile.gate();
+      if (gate.kind === "aborted" || gate.kind === "drop") {
+        return gate.kind === "aborted" ? "aborted" : "abandoned";
+      }
+      if (gate.kind === "stop" && pending.step !== "stop") {
+        logger.info("reconcile asks the engine to stop", { roundId: claim.roundId, step: pending.step, stepIndex: pending.stepIndex });
+        return "stop";
+      }
+      if (gate.kind === "cessation") {
+        // Galley names a cessation only for an engine that reported itself stopped; for any other report it is not ours to send.
+        if (pending.step !== "stop") {
+          logger.error("reconcile named a cessation for a running engine; round dropped locally", { roundId: claim.roundId, step: pending.step, cessationEvent: gate.event });
+          return "abandoned";
+        }
+        cessationLetThrough = true;
+        event = { ...event, type: gate.event };
+      }
+    }
+    const body = JSON.stringify(event);
+    const expected = {
+      type: event.type,
+      observationId: pending.step === "usage" ? event.idempotencyKey : undefined,
+      questionId: pending.step === "ask" || pending.step === "resume" ? (pending.context["questionId"] as string | undefined) : undefined,
+      requestId: pending.step === "request" || pending.step === "resume" ? (pending.context["requestId"] as string | undefined) : undefined,
+    };
     const report = await reportRoundEvent(request, claim.roundId, body, expected);
-    const context = { roundId: claim.roundId, step: pending.step, stepIndex: pending.stepIndex, attempt };
+    const context = { roundId: claim.roundId, step: pending.step, stepIndex: pending.stepIndex, attempt, ...(event.type === pending.event.type ? {} : { type: event.type }) };
     if (report.ok) {
       const { result, replayed } = report.value;
       logger.info(pending.reported, {
@@ -389,11 +433,27 @@ async function sendEvent(options: EngineOptions, deps: EngineDeps, pending: Pend
 type ScopeDecision = AuthorityCheckResult | { decision: "unsupported" };
 
 // Asked of Galley each time the step runs, never remembered: a grant can end between two actions.
-async function checkScope(options: EngineOptions, deps: EngineDeps, step: ActStep, stepIndex: number): Promise<ScopeDecision | "abandoned" | "aborted"> {
+async function checkScope(options: EngineOptions, deps: EngineDeps, step: ActStep, stepIndex: number): Promise<ScopeDecision | Exclude<SendOutcome, "sent">> {
   const { logger, signal, claim } = options;
   const request = { fetch: options.fetch, galleyUrl: options.galleyUrl, signal, timeoutMs: options.requestTimeoutMs, credential: options.credential };
   const body = { account: step.account, action: step.action, resource: step.resource, epoch: claim.claimEpoch };
   for (let attempt = 1; ; attempt++) {
+    if (options.dropped?.aborted) {
+      return "abandoned";
+    }
+    if (options.reconcile !== undefined) {
+      const gate = await options.reconcile.gate();
+      switch (gate.kind) {
+        case "aborted":
+          return "aborted";
+        case "drop":
+        case "cessation":
+          return "abandoned";
+        case "stop":
+          logger.info("reconcile asks the engine to stop", { roundId: claim.roundId, step: "act", stepIndex });
+          return "stop";
+      }
+    }
     const report = await checkAuthority(request, claim.roundId, body);
     const context = { roundId: claim.roundId, step: "act", stepIndex, attempt, account: step.account, action: step.action, resource: step.resource };
     if (report.ok) {
@@ -408,7 +468,12 @@ async function checkScope(options: EngineOptions, deps: EngineDeps, step: ActSte
       logger.error("authority check refused an undeclared capability", { ...context, durationMs: report.durationMs, ...report.failure });
       return { decision: "unsupported" };
     }
-    if (!isRetryable(report.failure)) {
+    // Galley answers neither allow nor deny until it can see the runner and has reconciled the Round: ask again after both.
+    const unanswered = report.failure.reason === "http_status" && report.failure.httpStatus === 409 && UNANSWERED_CHECKS.includes(report.failure.errorCode ?? "");
+    if (report.failure.reason === "http_status" && report.failure.errorCode === "reconcile_required") {
+      options.reconcile?.require();
+    }
+    if (!unanswered && !isRetryable(report.failure)) {
       logger.error("authority check refused; round abandoned locally", { ...context, durationMs: report.durationMs, ...report.failure });
       return "abandoned";
     }
@@ -420,6 +485,8 @@ async function checkScope(options: EngineOptions, deps: EngineDeps, step: ActSte
     }
   }
 }
+
+const UNANSWERED_CHECKS: readonly string[] = ["reconcile_required", "runner_disconnected"];
 
 function untilAborted(signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
