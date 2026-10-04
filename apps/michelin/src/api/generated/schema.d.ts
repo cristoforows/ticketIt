@@ -508,6 +508,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tickets/{id}/rounds/{roundId}/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                roundId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add feedback on a delivered Round for the next Round
+         * @description Records one feedback comment on a delivered Round of an unarchived Agent-assigned Ticket in In Review or Done with no open Round; the next Round's claim carries it once. Otherwise `feedback_not_available`, changing nothing. An unknown, malformed or foreign Ticket or Round id, or a Round not of that Ticket, returns the shared 404.
+         */
+        post: operations["addRoundFeedback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/session": {
         parameters: {
             query?: never;
@@ -882,6 +905,27 @@ export interface components {
             /** @description Counted in Unicode code points. Not blank; no control characters but tab and line feed. */
             answer: string;
         };
+        AddRoundFeedbackRequest: {
+            /** @description Counted in Unicode code points. Not blank; no control characters but tab and line feed. */
+            body: string;
+        };
+        RoundFeedback: {
+            /** Format: uuid */
+            id: string;
+            body: string;
+            /**
+             * Format: date-time
+             * @description Galley's clock.
+             */
+            createdAt: string;
+            /** @description The later Round whose claim carried this feedback; null until one is claimed. */
+            consumedBy: components["schemas"]["RoundFeedbackConsumer"] | null;
+        };
+        RoundFeedbackConsumer: {
+            /** Format: uuid */
+            roundId: string;
+            sequence: number;
+        };
         TicketOpenRound: {
             /** Format: uuid */
             id: string;
@@ -934,6 +978,8 @@ export interface components {
             outcomeNote: string | null;
             /** @description Every question the Round raised, oldest first. */
             questions: components["schemas"]["RoundQuestion"][];
+            /** @description The Owner's feedback on this Round's result, oldest first. */
+            feedback: components["schemas"]["RoundFeedback"][];
         };
         RoundDeliverable: {
             bodyMarkdown: string;
@@ -1013,6 +1059,8 @@ export interface components {
             stop: components["schemas"]["TicketCommandAvailability"];
             /** @description Whether `openRound.question` can be answered. Unavailable with `answer_not_available` without one, `question_already_answered` once it is answered, and `stop_already_requested` once Stop is requested. */
             answer: components["schemas"]["TicketCommandAvailability"];
+            /** @description Whether feedback can be added to `delivery.roundId`; otherwise `feedback_not_available`. */
+            feedback: components["schemas"]["TicketCommandAvailability"];
         };
         TicketStatusChangeRejection: {
             status: components["schemas"]["TicketStatus"];
@@ -1159,6 +1207,19 @@ export interface components {
             successCriteria: string;
             constraints: string;
             repository: string;
+            /** @description The Owner's feedback no earlier Round received, oldest first. This claim consumes it; no later claim carries it again. */
+            feedback: components["schemas"]["ClaimedFeedback"][];
+        };
+        ClaimedFeedback: {
+            /**
+             * Format: uuid
+             * @description The delivered Round the feedback is about.
+             */
+            roundId: string;
+            roundSequence: number;
+            body: string;
+            /** Format: date-time */
+            createdAt: string;
         };
         /**
          * @description Grows by slice.
@@ -2238,6 +2299,42 @@ export interface operations {
                 };
             };
             /** @description Error. See `ErrorBody`. Includes `question_already_answered`, `round_not_open` and `stop_already_requested`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    addRoundFeedback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                roundId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddRoundFeedbackRequest"];
+            };
+        };
+        responses: {
+            /** @description The Ticket, with the feedback recorded. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ticket"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. Includes `feedback_not_available`. */
             default: {
                 headers: {
                     [name: string]: unknown;

@@ -31,6 +31,7 @@ var knownPublicTables = []string{
 	"round_deliverables",
 	"round_engine_references",
 	"round_events",
+	"round_feedback",
 	"round_questions",
 	"rounds",
 	"runners",
@@ -119,6 +120,10 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 	answerPath := baseURL + "/api/tickets/" + created.Id + "/rounds/" + uuid.NewString() + "/questions/" + uuid.NewString() + "/answer"
 	if resp := doLifecycleRequest(t, client, http.MethodPost, answerPath, AnswerQuestionRequest{Answer: "yes"}); resp.status != http.StatusNotFound {
 		t.Fatalf("answer without a question: status = %d, want 404; error=%+v", resp.status, resp.errBody)
+	}
+	feedbackPath := baseURL + "/api/tickets/" + created.Id + "/rounds/" + uuid.NewString() + "/feedback"
+	if resp := doLifecycleRequest(t, client, http.MethodPost, feedbackPath, AddRoundFeedbackRequest{Body: "more"}); resp.status != http.StatusNotFound {
+		t.Fatalf("feedback without a Round: status = %d, want 404; error=%+v", resp.status, resp.errBody)
 	}
 	for _, to := range []TicketStatus{Backlog, Ready} {
 		if resp := changeStatus(t, client, baseURL, created.Id, to); resp.status != http.StatusOK || len(resp.ticket.Badges) != 0 {
@@ -238,6 +243,10 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 		case "round_questions":
 			if after != before[table] {
 				t.Errorf("%s row count changed from %d to %d -- a manual action recorded a question; only a runner's question_raised event may", table, before[table], after)
+			}
+		case "round_feedback":
+			if after != before[table] {
+				t.Errorf("%s row count changed from %d to %d -- a manual lifecycle action recorded Round feedback; only the Owner's feedback command may", table, before[table], after)
 			}
 		case "round_commands":
 			if after != before[table] {

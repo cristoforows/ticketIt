@@ -15,7 +15,7 @@ const CLAIM = {
   roundId: "77777777-7777-4777-8777-777777777777",
   sequence: 2,
   claimEpoch: 1,
-  ticket: { id: "88888888-8888-4888-8888-888888888888", title: "Write the report", goal: "g", context: "c", successCriteria: "s", constraints: "", repository: "" },
+  ticket: { id: "88888888-8888-4888-8888-888888888888", title: "Write the report", goal: "g", context: "c", successCriteria: "s", constraints: "", repository: "", feedback: [] },
   agent: { id: "99999999-9999-4999-8999-999999999999", name: "atlas", kind: "research" },
 };
 
@@ -122,7 +122,7 @@ describe("claim loop", () => {
     await loop.stop();
   });
 
-  it("logs the claimed Round with no Ticket field beyond its id and title", async () => {
+  it("logs the claimed Round with no Ticket content beyond its id, title and feedback count", async () => {
     const fetchFn = routed({ claims: [noWork, claimed, noWork], events: [created] });
     const { loop, records } = setup(fetchFn);
 
@@ -135,6 +135,7 @@ describe("claim loop", () => {
       claimEpoch: 1,
       ticketId: CLAIM.ticket.id,
       ticketTitle: CLAIM.ticket.title,
+      feedback: 0,
     });
     expect(Object.keys(records()[0] ?? {})).not.toContain("goal");
     await loop.stop();
@@ -314,6 +315,11 @@ describe("claim loop", () => {
     ["a non-JSON claim", () => new Response("<html>", { status: 201 }), { reason: "invalid_body" }],
     ["a claim without a round id", () => json({ ...CLAIM, roundId: 7 }, 201), { reason: "invalid_body" }],
     ["a claim without a Ticket", () => json({ ...CLAIM, ticket: { id: "x" } }, 201), { reason: "invalid_body" }],
+    ["a claim without feedback", () => json({ ...CLAIM, ticket: { ...CLAIM.ticket, feedback: undefined } }, 201), { reason: "invalid_body", error: "ticket.feedback is not a list of feedback" }],
+    ["a claim with null feedback", () => json({ ...CLAIM, ticket: { ...CLAIM.ticket, feedback: null } }, 201), { reason: "invalid_body" }],
+    ["feedback without a Round sequence", () => json({ ...CLAIM, ticket: { ...CLAIM.ticket, feedback: [{ roundId: "r", body: "b", createdAt: "t" }] } }, 201), { reason: "invalid_body" }],
+    ["feedback with an empty body", () => json({ ...CLAIM, ticket: { ...CLAIM.ticket, feedback: [{ roundId: "r", roundSequence: 1, body: "", createdAt: "t" }] } }, 201), { reason: "invalid_body" }],
+    ["feedback with Round sequence 0", () => json({ ...CLAIM, ticket: { ...CLAIM.ticket, feedback: [{ roundId: "r", roundSequence: 0, body: "b", createdAt: "t" }] } }, 201), { reason: "invalid_body" }],
   ])("logs %s as a claim failure and keeps polling", async (_name, respond, expected) => {
     const fetchFn = sequence(respond, noWork);
     const { loop, records } = setup(fetchFn);

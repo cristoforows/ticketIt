@@ -154,6 +154,7 @@ function parseTicket(payload: unknown): Ticket {
   const rework = parseCommandAvailability(actions?.rework);
   const stop = parseCommandAvailability(actions?.stop);
   const answer = parseCommandAvailability(actions?.answer);
+  const feedback = parseCommandAvailability(actions?.feedback);
   const agent = record.assigneeAgent;
   const openRound = parseOpenRound(record.openRound);
   const delivery = parseDelivery(record.delivery);
@@ -196,7 +197,8 @@ function parseTicket(payload: unknown): Ticket {
     !accept ||
     !rework ||
     !stop ||
-    !answer
+    !answer ||
+    !feedback
   ) {
     throw new Error("Galley's Ticket response was missing a required field.");
   }
@@ -211,6 +213,7 @@ function parseTicket(payload: unknown): Ticket {
       rework,
       stop,
       answer,
+      feedback,
     },
     template: record.template as Ticket["template"],
     completionCondition: record.completionCondition as Ticket["completionCondition"],
@@ -406,6 +409,12 @@ export async function requestTicketStop(id: string): Promise<Ticket> {
 export async function answerRoundQuestion(id: string, roundId: string, questionId: string, answer: string): Promise<Ticket> {
   const path = `${TICKETS_ENDPOINT}/${encodeURIComponent(id)}/rounds/${encodeURIComponent(roundId)}/questions/${encodeURIComponent(questionId)}/answer`;
   return ticketCommand(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answer }) }, "response");
+}
+
+/** A 404 here names the Ticket or Round together, so Galley's own message is shown. */
+export async function addRoundFeedback(id: string, roundId: string, body: string): Promise<Ticket> {
+  const path = `${TICKETS_ENDPOINT}/${encodeURIComponent(id)}/rounds/${encodeURIComponent(roundId)}/feedback`;
+  return ticketCommand(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ body }) }, "response");
 }
 
 /** An Agent id Galley cannot find for this Owner shares the Ticket's 404, so its message is shown rather than "not found". */

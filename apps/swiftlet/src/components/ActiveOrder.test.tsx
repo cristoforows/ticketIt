@@ -14,7 +14,7 @@ const ACTIVE = {
   id: "44444444-4444-4444-8444-444444444444",
   title: "Write the report",
   status: "InProgress",
-  allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason: locked }, rework: unavailable("rework_not_available"), stop: { available: true }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } } },
+  allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason: locked }, rework: unavailable("rework_not_available"), stop: { available: true }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } } },
   template: "Basic",
   completionCondition: "humanAcceptance",
   assigneeType: "agent",

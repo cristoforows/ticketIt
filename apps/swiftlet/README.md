@@ -1110,3 +1110,35 @@ Tests: `TicketDetail.test.tsx` ("a question from the Agent"),
 `TicketDetailPage.test.tsx` (the POST, the reload and the refresh on
 `question_already_answered`), `ActiveOrder.test.tsx` (both labels on
 list and board), `api/tickets.test.ts` and `api/rounds.test.ts`.
+
+## Round feedback (issue #164)
+
+Swiftlet renders Galley's feedback state and decides nothing:
+
+- **Form.** While `allowedActions.feedback.available` (a delivered
+  latest Round, In Review or Done), the receipt's Rounds section shows a
+  "Feedback for the next Round" region (`FeedbackPanel`,
+  `ticket-detail-feedback`) with **Your feedback on Round N** (up to
+  10000 characters, described by a hint that the next Round receives it
+  once and it cannot be edited or deleted) and **Add feedback**
+  (`ticket-detail-feedback-submit`, disabled while blank or sending). It
+  calls `addRoundFeedback` (`POST
+  /api/tickets/{id}/rounds/{roundId}/feedback`) for `delivery.roundId`,
+  sends the text as typed, clears the draft on `201`, and reloads the
+  Round list. Several comments may be added one after another.
+- **Rejections.** `feedback_not_available` refreshes the receipt and
+  says feedback is no longer available on this Round; the form goes
+  away with the availability but the message stays. Any other refusal
+  is shown in Galley's words, the draft kept.
+- **History.** Each Round entry lists its feedback oldest first
+  (`ticket-detail-round-feedback`), each with when it was added in local
+  time and **Waiting for the next Round** or **Sent to Round N**
+  (`ticket-detail-round-feedback-consumed`).
+- **Parsing.** `parseTicket` requires `allowedActions.feedback`;
+  `parseRound` requires `feedback`, each item with `consumedBy` `null`
+  or `{roundId, sequence}`.
+
+Tests: `TicketDetail.test.tsx` ("feedback for the next Round"),
+`TicketDetailPage.test.tsx` (the POST, the reload and the refresh on
+`feedback_not_available`), `api/tickets.test.ts` and
+`api/rounds.test.ts`.

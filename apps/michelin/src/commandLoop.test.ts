@@ -15,7 +15,7 @@ const CLAIM = {
   roundId: "77777777-7777-4777-8777-777777777777",
   sequence: 1,
   claimEpoch: 2,
-  ticket: { id: "88888888-8888-4888-8888-888888888888", title: "Write the report", goal: "g", context: "c", successCriteria: "s", constraints: "", repository: "" },
+  ticket: { id: "88888888-8888-4888-8888-888888888888", title: "Write the report", goal: "g", context: "c", successCriteria: "s", constraints: "", repository: "", feedback: [] },
   agent: { id: "99999999-9999-4999-8999-999999999999", name: "atlas", kind: "research" },
 };
 const STOP = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", type: "stop", claimEpoch: 2, issuedAt: "2026-10-02T12:00:00Z" };

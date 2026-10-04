@@ -3,7 +3,7 @@ import type { AwaitAnswer } from "./answerInbox.ts";
 import type { RunnerCredential } from "./credentials.ts";
 import { NOTE_MAX_LENGTH, type EngineScript } from "./engineScript.ts";
 import type { FetchFn } from "./galley/client.ts";
-import { reportRoundEvent, type RoundEventFailure, type RoundEventRequest, type RunnerClaim } from "./galley/runner.ts";
+import { reportRoundEvent, type ClaimedFeedback, type RoundEventFailure, type RoundEventRequest, type RunnerClaim } from "./galley/runner.ts";
 import type { Logger } from "./logger.ts";
 import { sleep } from "./statusLoop.ts";
 
@@ -74,6 +74,12 @@ const ANSWER_NOTE_PREFIX = "Owner's answer: ";
 
 export function answerNote(answer: string): string {
   return [...`${ANSWER_NOTE_PREFIX}${answer}`].slice(0, NOTE_MAX_LENGTH).join("");
+}
+
+export function feedbackNote(feedback: readonly ClaimedFeedback[]): string {
+  const lines = feedback.map((item) => `Round ${item.roundSequence}: ${item.body}`);
+  const heading = `Owner's feedback received (${feedback.length} ${feedback.length === 1 ? "comment" : "comments"}):`;
+  return [...[heading, ...lines].join("\n")].slice(0, NOTE_MAX_LENGTH).join("");
 }
 
 export async function runControlledEngine(options: EngineOptions): Promise<EngineOutcome> {
@@ -224,6 +230,18 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
       if (pending.step === "interrupt") {
         logger.info("engine interrupted", { roundId });
         return "interrupted";
+      }
+      if (pending.step === "start" && claim.ticket.feedback.length > 0) {
+        const noted = await sendEvent(options, deps, {
+          step: "progress",
+          stepIndex,
+          event: envelope("progress", `${roundId}:${stepIndex}:feedback`, { note: feedbackNote(claim.ticket.feedback) }),
+          reported: "feedback reported",
+          context: { feedback: claim.ticket.feedback.length },
+        });
+        if (noted !== "sent") {
+          return noted;
+        }
       }
     }
     stepIndex++;

@@ -997,6 +997,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorBody"
+  /api/tickets/{id}/rounds/{roundId}/feedback:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid, x-go-type: string}
+      - name: roundId
+        in: path
+        required: true
+        schema: {type: string, format: uuid, x-go-type: string}
+    post:
+      operationId: addRoundFeedback
+      summary: Add feedback on a delivered Round for the next Round
+      tags: [tickets]
+      description: >-
+        Records one feedback comment on a delivered Round of an
+        unarchived Agent-assigned Ticket in In Review or Done with no open
+        Round; the next Round's claim carries it once. Otherwise `feedback_not_available`, changing nothing. An
+        unknown, malformed or foreign Ticket or Round id, or a Round not
+        of that Ticket, returns the shared 404.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddRoundFeedbackRequest"
+      responses:
+        "201":
+          description: The Ticket, with the feedback recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+        default:
+          description: Error. See `ErrorBody`. Includes `feedback_not_available`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
   /api/session:
     get:
       operationId: getSession
@@ -1695,6 +1734,41 @@ components:
           description: >-
             Counted in Unicode code points. Not blank; no control
             characters but tab and line feed.
+    AddRoundFeedbackRequest:
+      type: object
+      additionalProperties: false
+      required: [body]
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 10000
+          description: >-
+            Counted in Unicode code points. Not blank; no control
+            characters but tab and line feed.
+    RoundFeedback:
+      type: object
+      additionalProperties: false
+      required: [id, body, createdAt, consumedBy]
+      properties:
+        id: {type: string, format: uuid, x-go-type: string}
+        body: {type: string, minLength: 1, maxLength: 10000}
+        createdAt:
+          type: string
+          format: date-time
+          description: Galley's clock.
+        consumedBy:
+          description: The later Round whose claim carried this feedback; null until one is claimed.
+          oneOf:
+            - $ref: "#/components/schemas/RoundFeedbackConsumer"
+            - type: "null"
+    RoundFeedbackConsumer:
+      type: object
+      additionalProperties: false
+      required: [roundId, sequence]
+      properties:
+        roundId: {type: string, format: uuid, x-go-type: string}
+        sequence: {type: integer, minimum: 1}
     TicketOpenRound:
       type: object
       additionalProperties: false
@@ -1734,7 +1808,7 @@ components:
     TicketRound:
       type: object
       additionalProperties: false
-      required: [id, sequence, state, agent, claimedAt, startedAt, endedAt, activity, earlierActivityCursor, usage, deliverable, outcomeNote, questions]
+      required: [id, sequence, state, agent, claimedAt, startedAt, endedAt, activity, earlierActivityCursor, usage, deliverable, outcomeNote, questions, feedback]
       properties:
         id: {type: string, format: uuid, x-go-type: string}
         sequence: {type: integer, minimum: 1}
@@ -1769,6 +1843,11 @@ components:
           description: Every question the Round raised, oldest first.
           items:
             $ref: "#/components/schemas/RoundQuestion"
+        feedback:
+          type: array
+          description: The Owner's feedback on this Round's result, oldest first.
+          items:
+            $ref: "#/components/schemas/RoundFeedback"
     RoundDeliverable:
       type: object
       additionalProperties: false
@@ -1901,7 +1980,7 @@ components:
     TicketAllowedActions:
       type: object
       additionalProperties: false
-      required: [statusChanges, statusChangeRejections, accept, rework, stop, answer]
+      required: [statusChanges, statusChangeRejections, accept, rework, stop, answer, feedback]
       properties:
         statusChanges:
           type: array
@@ -1929,6 +2008,9 @@ components:
             `answer_not_available` without one, `question_already_answered`
             once it is answered, and `stop_already_requested` once Stop is
             requested.
+          $ref: "#/components/schemas/TicketCommandAvailability"
+        feedback:
+          description: Whether feedback can be added to `delivery.roundId`; otherwise `feedback_not_available`.
           $ref: "#/components/schemas/TicketCommandAvailability"
     TicketStatusChangeRejection:
       type: object
@@ -2243,7 +2325,7 @@ components:
     ClaimedTicket:
       type: object
       additionalProperties: false
-      required: [id, title, goal, context, successCriteria, constraints, repository]
+      required: [id, title, goal, context, successCriteria, constraints, repository, feedback]
       properties:
         id: {type: string, format: uuid, x-go-type: string}
         title: {type: string}
@@ -2252,6 +2334,26 @@ components:
         successCriteria: {type: string}
         constraints: {type: string}
         repository: {type: string}
+        feedback:
+          type: array
+          description: >-
+            The Owner's feedback no earlier Round received, oldest first.
+            This claim consumes it; no later claim carries it again.
+          items:
+            $ref: "#/components/schemas/ClaimedFeedback"
+    ClaimedFeedback:
+      type: object
+      additionalProperties: false
+      required: [roundId, roundSequence, body, createdAt]
+      properties:
+        roundId:
+          type: string
+          format: uuid
+          x-go-type: string
+          description: The delivered Round the feedback is about.
+        roundSequence: {type: integer, minimum: 1}
+        body: {type: string, minLength: 1, maxLength: 10000}
+        createdAt: {type: string, format: date-time}
     RoundEventType:
       type: string
       description: Grows by slice.

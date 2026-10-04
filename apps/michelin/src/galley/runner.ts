@@ -4,6 +4,7 @@ import { callGalley, INVALID_JSON, isRecord, type GalleyRequest, type Outcome, t
 
 export type RegisterRunnerRequest = components["schemas"]["RegisterRunnerRequest"];
 export type RunnerClaim = components["schemas"]["RunnerClaim"];
+export type ClaimedFeedback = components["schemas"]["ClaimedFeedback"];
 export type RoundEventRequest = components["schemas"]["RoundEventRequest"];
 export type RoundEventResult = components["schemas"]["RoundEventResult"];
 
@@ -99,10 +100,25 @@ function parseClaim(payload: unknown): RunnerClaim | string {
   if (!isRecord(ticket) || !["id", "title", "goal", "context", "successCriteria", "constraints", "repository"].every((field) => typeof ticket[field] === "string")) {
     return "ticket is not a claimed Ticket";
   }
+  if (!Array.isArray(ticket["feedback"]) || !ticket["feedback"].every(isClaimedFeedback)) {
+    return "ticket.feedback is not a list of feedback";
+  }
   if (!isRecord(agent) || typeof agent["id"] !== "string" || typeof agent["name"] !== "string" || typeof agent["kind"] !== "string") {
     return "agent is not an Agent";
   }
   return payload as RunnerClaim;
+}
+
+function isClaimedFeedback(item: unknown): boolean {
+  return (
+    isRecord(item) &&
+    typeof item["roundId"] === "string" &&
+    Number.isSafeInteger(item["roundSequence"]) &&
+    (item["roundSequence"] as number) >= 1 &&
+    typeof item["body"] === "string" &&
+    item["body"] !== "" &&
+    typeof item["createdAt"] === "string"
+  );
 }
 
 export type RoundEventFailure =

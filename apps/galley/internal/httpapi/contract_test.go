@@ -1342,3 +1342,68 @@ func TestQuestionsAndAnswers_ResponsesMatchContractAndMethod405(t *testing.T) {
 		t.Fatalf("GET answer: Allow = %q, want POST", rec.Header().Get("Allow"))
 	}
 }
+
+func TestRoundFeedback_ResponsesMatchContractAndMethod405(t *testing.T) {
+	f := newClaimFixture(t)
+	router, err := legacy.NewRouter(loadContract(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate := func(call runnerCall, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(call.method, call.path, strings.NewReader(call.body))
+		if call.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if call.token != "" {
+			req.Header.Set("Authorization", "Bearer "+call.token)
+		}
+		if call.cookie != nil {
+			req.AddCookie(call.cookie)
+		}
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("%s %s: status=%d, want %d; body=%s", call.method, call.path, rec.Code, want, rec.Body.String())
+		}
+		validateAgainstContract(t, router, req, rec)
+		return rec
+	}
+	queued, first := f.deliveredTicket(t, "contract")
+	reads := []runnerCall{
+		{method: http.MethodGet, path: "/api/tickets/" + queued.Id, cookie: f.cookie},
+		{method: http.MethodGet, path: "/api/tickets", cookie: f.cookie},
+		{method: http.MethodGet, path: "/api/tickets/" + queued.Id + "/rounds", cookie: f.cookie},
+	}
+	feedback := func(roundID, body string) runnerCall {
+		return runnerCall{method: http.MethodPost, path: feedbackPath(queued.Id, roundID), body: body, cookie: f.cookie}
+	}
+
+	assertErrorCode(t, validate(feedback(uuid.NewString(), `{"body":"yes"}`), http.StatusNotFound), "not_found")
+	validate(feedback(first.RoundId, `{"body":""}`), http.StatusBadRequest)
+	validate(runnerCall{method: http.MethodPost, path: feedbackPath(queued.Id, first.RoundId), body: `{"body":"yes"}`}, http.StatusUnauthorized)
+	validate(feedback(first.RoundId, `{"body":"Cover the EU too."}`), http.StatusCreated)
+	for _, read := range reads {
+		validate(read, http.StatusOK)
+	}
+	f.mustRework(t, queued.Id)
+	assertErrorCode(t, validate(feedback(first.RoundId, `{"body":"late"}`), http.StatusBadRequest), feedbackNotAvailableCode)
+	claim := decodeClaim(t, validate(runnerCall{method: http.MethodPost, path: "/api/runner/claims", token: f.token}, http.StatusCreated))
+	if len(claim.Ticket.Feedback) != 1 {
+		t.Fatalf("claim feedback = %+v, want one", claim.Ticket.Feedback)
+	}
+	for _, read := range reads {
+		validate(read, http.StatusOK)
+	}
+	f.deliverThroughAPI(t, claim.RoundId)
+	f.mustRework(t, queued.Id)
+	empty := decodeClaim(t, validate(runnerCall{method: http.MethodPost, path: "/api/runner/claims", token: f.token}, http.StatusCreated))
+	if empty.Ticket.Feedback == nil || len(empty.Ticket.Feedback) != 0 {
+		t.Fatalf("claim feedback = %#v, want an empty list", empty.Ticket.Feedback)
+	}
+
+	rec := f.expect(t, runnerCall{method: http.MethodGet, path: feedbackPath(queued.Id, first.RoundId), cookie: f.cookie}, http.StatusMethodNotAllowed)
+	if rec.Header().Get("Allow") != "POST" {
+		t.Fatalf("GET feedback: Allow = %q, want POST", rec.Header().Get("Allow"))
+	}
+}

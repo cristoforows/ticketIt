@@ -221,6 +221,19 @@ stops listing an ended Round's commands. A Michelin restarted while a
 Round waits does not pick it up again: Galley holds the slot, so the
 claim answers `204` until reconciliation (M5) recovers it.
 
+**Feedback.** The claim's `ticket.feedback` lists the Owner's feedback
+no earlier Round received, as `{roundId, roundSequence, body,
+createdAt}`; Galley marks it received by this claim, so a later claim
+never repeats it. A claim whose `ticket.feedback` is missing or holds an
+item without a string `roundId`, `body` (not empty) or `createdAt`, or a
+`roundSequence` that is not a positive integer, is an `invalid_body`
+claim failure. When the list is not empty, the engine reports it in one
+progress note right after `start`, with key `<roundId>:<step
+index>:feedback`: the line `Owner's feedback received (<n> comment|comments):`,
+then one line `Round <roundSequence>: <body>` per item in Galley's
+order, truncated to 2000 characters. It is sent and retried like any
+event, so a refusal abandons the Round. Scripts need no step for it.
+
 Stopping Michelin aborts a wait, a hold, an `ask`'s wait for its answer,
 a backoff and an in-flight request at once.
 
@@ -239,10 +252,11 @@ context fields. The credential is never logged.
 | `runner credential rejected` | `error` | `401` on `step` `register`, `heartbeat` or `claim`: the credential is wrong or revoked. |
 | `runner not registered with galley; registering again` | `warn` | `409 runner_not_registered`; registers immediately. |
 | `runner register failed`, `runner heartbeat failed` | `error` | See `reason` below. |
-| `round claimed` | `info` | `roundId`, `sequence`, `claimEpoch`, `ticketId`, `ticketTitle`. No other Ticket field is logged. |
+| `round claimed` | `info` | `roundId`, `sequence`, `claimEpoch`, `ticketId`, `ticketTitle`, and `feedback`, the number of feedback items. No other Ticket field is logged. |
 | `runner claim failed` | `error` | See `reason` below; polling continues. |
 | `execution started reported` | `info` | `roundId`, `step`, `stepIndex`, `attempt`, `engineReference`, `httpStatus` (`200` replay or `201`). |
 | `progress reported` | `info` | As above, plus the note's `seq` from Galley. |
+| `feedback reported` | `info` | As `progress reported`, plus `feedback`, the number of items in the note. Feedback text is not logged. |
 | `usage observation reported` | `info` | As above, plus `observationId`. |
 | `delivery reported`, `engine delivered` | `info` | As above, plus Galley's `endedAt`; then the engine returns and polling resumes. |
 | `failure reported`, `engine failed`; `interruption reported`, `engine interrupted` | `info` | As above, plus Galley's `endedAt`; then the engine returns and polling resumes. |

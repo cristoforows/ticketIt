@@ -123,15 +123,20 @@ func insertClaimedRound(ctx context.Context, tx pgx.Tx, ownerID int64, ticket Ti
 			Repository:      ticket.Repository,
 		},
 	}
+	var roundRowID int64
 	err := tx.QueryRow(ctx,
 		`INSERT INTO rounds (owner_id, public_id, ticket_id, agent_id, sequence, state, claim_epoch, claimed_at)
 		 SELECT t.owner_id, $3::uuid, t.id, t.assignee_agent_id,
 		        COALESCE((SELECT max(sequence) FROM rounds WHERE ticket_id = t.id), 0) + 1, $4,
 		        COALESCE((SELECT max(claim_epoch) FROM rounds WHERE ticket_id = t.id), 0) + 1, $5
 		   FROM tickets t WHERE t.owner_id = $1 AND t.public_id = $2::uuid
-		 RETURNING sequence, claim_epoch`,
+		 RETURNING id, sequence, claim_epoch`,
 		ownerID, ticket.Id, claim.RoundId, string(RoundClaimed), now,
-	).Scan(&claim.Sequence, &claim.ClaimEpoch)
+	).Scan(&roundRowID, &claim.Sequence, &claim.ClaimEpoch)
+	if err != nil {
+		return RunnerClaim{}, err
+	}
+	claim.Ticket.Feedback, err = consumeFeedback(ctx, tx, ownerID, roundRowID)
 	return claim, err
 }
 

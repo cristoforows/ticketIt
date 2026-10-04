@@ -120,6 +120,10 @@ _Avoid_: Clarification interview when referring to a question raised during a ro
 The owner's reply to a **Question**. The first one recorded is the answer; it is delivered to the round's runner, which resumes the same **Round**.
 _Avoid_: Feedback or rework when referring to a reply that continues an open round.
 
+**Round Feedback**:
+The owner's comment on a delivered **Round** while its **Ticket** is **In Review** or **Done**, for the next round. The next round, started by rework or by moving a Done ticket back to **Ready**, receives all feedback no earlier round received, once; feedback cannot be edited or deleted.
+_Avoid_: Answer when referring to a comment for a later round; review feedback when referring to comments outside ticketIt.
+
 **Interrupted**:
 The terminal outcome of a **Round** whose runner reported, with its own evidence, that the work stopped unexpectedly before delivery; lost contact alone never makes a round Interrupted. The **Ticket** becomes **Blocked**, and the round's activity, usage and the runner's evidence remain part of its history. Returning execution capacity does not start another round; only the owner's explicit move back to **Ready** does.
 _Avoid_: Failed when only an unexpected interruption, rather than a work failure, is known.

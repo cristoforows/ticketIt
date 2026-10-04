@@ -28,6 +28,8 @@ export interface Round {
   startedAt: string | null;
   endedAt: string | null;
   questions: RoundQuestion[];
+  /** The Owner's feedback on this Round, oldest first (issue #164). */
+  feedback: RoundFeedback[];
   /** Michelin's evidence or explanation, set exactly when `state` is `stopped` (issue #160), `failed` or `interrupted` (issue #161). */
   outcomeNote: string | null;
   /** Galley's latest 50 notes, oldest first (issue #162). */
@@ -45,6 +47,13 @@ export interface RoundQuestion {
   askedAt: string;
   answer: string | null;
   answeredAt: string | null;
+}
+
+export interface RoundFeedback {
+  id: string;
+  body: string;
+  createdAt: string;
+  consumedBy: { roundId: string; sequence: number } | null;
 }
 
 export interface RoundActivityNote {
@@ -93,6 +102,7 @@ export interface Ticket {
     rework: { available: boolean; reason?: ErrorDetail };
     stop: { available: boolean; reason?: ErrorDetail };
     answer: { available: boolean; reason?: ErrorDetail };
+    feedback: { available: boolean; reason?: ErrorDetail };
     statusChangeRejections: { status: TicketStatus; reason: ErrorDetail }[];
   };
   requestingAgentWork: boolean;
@@ -233,6 +243,11 @@ export async function stopRoundThroughGalley(from: Api, id: string, timeout = 15
 /** Same purpose as changeTicketStatusDirect, for answering a Round's question. */
 export async function answerQuestionDirect(from: Api, id: string, roundId: string, questionId: string, answer: string): Promise<TicketCommandResult> {
   return ticketCommand(from, "POST", `/api/tickets/${id}/rounds/${roundId}/questions/${questionId}/answer`, { answer });
+}
+
+/** Same purpose as changeTicketStatusDirect, for feedback on a delivered Round. */
+export async function addFeedbackDirect(from: Api, id: string, roundId: string, body: string): Promise<TicketCommandResult> {
+  return ticketCommand(from, "POST", `/api/tickets/${id}/rounds/${roundId}/feedback`, { body });
 }
 
 export type TicketAssignee = { type: "owner" } | { type: "agent"; agentId: string };

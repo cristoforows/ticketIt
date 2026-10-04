@@ -419,7 +419,7 @@ receipt's notice and the header pill must all show the runner as
 disconnected, with no animation. Re-registering restores Starting. On a
 phone the active slip has no status toggle. Stop on the phone list shows
 Stopping, with no Stop control, on both views. `run.sh` runs it after
-`runner-ask.spec.ts` with no reset. It leaves a Round open, but no later
+`runner-feedback.spec.ts` with no reset. It leaves a Round open, but no later
 spec needs the slot.
 
 `tests/runner-ask.spec.ts` (issue #163) has two tests. The first drives
@@ -440,6 +440,21 @@ resumes, and the Round ends Stopped in Backlog with its question listed
 as Not answered; a late answer is `400 round_not_open`. `run.sh` runs it
 after `runner-interrupted.spec.ts` with no reset, and it leaves no Round
 open.
+
+`tests/runner-feedback.spec.ts` (issue #164) has two tests, each with a
+real Michelin whose one script delivers every Round. The first adds two
+comments on Round 1 in the In Review receipt (each `201`, listed as
+Waiting for the next Round), then requests rework there. Round 2's
+activity must open with `Owner's feedback received (2 comments):` and
+one `Round 1: …` line per comment, and Round 1's comments must read
+Sent to Round 2. A second rework with no new feedback claims Round 3,
+whose activity has no feedback note; Michelin's `round claimed` logs
+`feedback` 0, 2, 0. The second test accepts Round 1 to Done, adds a
+comment on the Done receipt, and moves the Ticket back to Ready from
+the receipt, the reopen route; Round 2's activity must carry it, and
+Round 1, still a delivered Round, then takes another comment (`201`,
+unconsumed) while a 10001-character one is `400 invalid_request`. `run.sh` runs it after `runner-ask.spec.ts`
+with no reset, and it leaves both Tickets Done with no Round open.
 
 `tests/ticket-priority-order.spec.ts` reorders three Ready Tickets by
 dragging onto the upper and lower halves of board slips, then with Move

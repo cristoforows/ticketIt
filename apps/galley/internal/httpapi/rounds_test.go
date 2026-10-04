@@ -7,6 +7,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -192,10 +193,10 @@ func TestClaim_CreatesOneRoundAndLeavesTheTicketReady(t *testing.T) {
 	}
 	want := RunnerClaim{
 		RoundId: claim.RoundId, Sequence: 1, ClaimEpoch: 1,
-		Ticket: ClaimedTicket{Id: queued.Id, Title: "Investigate the leak", Goal: "Find the cause", Context: "ctx", SuccessCriteria: "A written cause", Constraints: "none"},
+		Ticket: ClaimedTicket{Id: queued.Id, Title: "Investigate the leak", Goal: "Find the cause", Context: "ctx", SuccessCriteria: "A written cause", Constraints: "none", Feedback: []ClaimedFeedback{}},
 		Agent:  TicketAssigneeAgent{Id: f.agent.Id, Name: "Researcher", Kind: AgentKindResearch},
 	}
-	if claim != want {
+	if !reflect.DeepEqual(claim, want) {
 		t.Fatalf("claim = %+v, want %+v", claim, want)
 	}
 	if got := readTicketRowFacts(t, f.pool, queued.Id); got.status != before.status || got.assigneeType != before.assigneeType ||

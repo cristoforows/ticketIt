@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GalleyError } from "./http";
-import { answerRoundQuestion, fetchTicket } from "./tickets";
+import { addRoundFeedback, answerRoundQuestion, fetchTicket } from "./tickets";
 
 const TICKET = {
   id: "44444444-4444-4444-8444-444444444444",
@@ -14,7 +14,7 @@ const TICKET = {
       available: false,
       reason: { code: "agent_readiness_incomplete", message: "this Ticket needs a goal", missing: ["goal"] },
     },
-    stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } },
+    stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } },
   },
   template: "Basic",
   completionCondition: "humanAcceptance",
@@ -57,7 +57,7 @@ describe("fetchTicket", () => {
       ...TICKET,
       status: "InProgress",
       openRound: { ...round, stopRequestedAt: "2026-10-02T10:00:05Z", waitingReason: "stopping", question: null },
-      allowedActions: { ...TICKET.allowedActions, stop: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } } },
+      allowedActions: { ...TICKET.allowedActions, stop: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } } },
     };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => stopping }));
     const ticket = await fetchTicket(TICKET.id);
@@ -90,6 +90,7 @@ describe("fetchTicket", () => {
     ["an unknown waitingReason", { ...TICKET, openRound: { ...round, stopRequestedAt: null, waitingReason: "waiting_for_input" } }],
     ["no Stop availability", { ...TICKET, allowedActions: { ...TICKET.allowedActions, stop: undefined } }],
     ["no Answer availability", { ...TICKET, allowedActions: { ...TICKET.allowedActions, answer: undefined } }],
+    ["no Feedback availability", { ...TICKET, allowedActions: { ...TICKET.allowedActions, feedback: undefined } }],
     ["a waiting Round without its question", { ...TICKET, openRound: { ...waiting, question: null } }],
     ["a running Round with a question", { ...TICKET, openRound: { ...waiting, state: "running", waitingReason: "working" } }],
     ["an open Round with no question field", { ...TICKET, openRound: { ...round, stopRequestedAt: null, question: undefined } }],
@@ -117,6 +118,33 @@ describe("answerRoundQuestion", () => {
   ])("surfaces Galley's %i %s as its own error", async (status, code, message) => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status, statusText: "", json: async () => ({ error: { code, message } }) }));
     const error = await answerRoundQuestion("t1", "r1", "q1", "Europe").catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(GalleyError);
+    expect(error).toMatchObject({ code, message });
+  });
+});
+
+describe("addRoundFeedback", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("posts the feedback to the Round's path and returns the Ticket", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 201, statusText: "", json: async () => TICKET });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await addRoundFeedback("t1", "r1", "Cover Asia too")).toEqual(TICKET);
+    expect(fetchMock).toHaveBeenCalledWith("/api/tickets/t1/rounds/r1/feedback", expect.objectContaining({ method: "POST", body: JSON.stringify({ body: "Cover Asia too" }) }));
+  });
+
+  it("reads the Feedback availability", async () => {
+    const payload = { ...TICKET, allowedActions: { ...TICKET.allowedActions, feedback: { available: true } } };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 201, statusText: "", json: async () => payload }));
+    expect((await addRoundFeedback("t1", "r1", "Cover Asia too")).allowedActions.feedback).toEqual({ available: true });
+  });
+
+  it.each([
+    [404, "not_found", "no round with that identifier"],
+    [400, "feedback_not_available", "Feedback needs a Ticket in In Review or Done (current status Ready)"],
+  ])("surfaces Galley's %i %s as its own error", async (status, code, message) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status, statusText: "", json: async () => ({ error: { code, message } }) }));
+    const error = await addRoundFeedback("t1", "r1", "Cover Asia too").catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(GalleyError);
     expect(error).toMatchObject({ code, message });
   });

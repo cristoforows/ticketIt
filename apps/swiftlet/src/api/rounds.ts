@@ -9,6 +9,7 @@ export type RoundUsage = components["schemas"]["RoundUsage"];
 export type UsageCount = components["schemas"]["UsageCount"];
 export type RoundDeliverable = components["schemas"]["RoundDeliverable"];
 export type RoundActivityPage = components["schemas"]["RoundActivityPage"];
+export type RoundFeedback = components["schemas"]["RoundFeedback"];
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
@@ -53,6 +54,21 @@ function parseQuestions(value: unknown): RoundQuestion[] | undefined {
   const questions = Array.isArray(value) ? value.map(parseRoundQuestion) : undefined;
   return questions?.every((question) => question !== undefined) ? (questions as RoundQuestion[]) : undefined;
 }
+
+function parseFeedbackItem(value: unknown): RoundFeedback | undefined {
+  const item = record(value);
+  if (!item || typeof item.id !== "string" || typeof item.body !== "string" || typeof item.createdAt !== "string") return undefined;
+  if (item.consumedBy === null) return { id: item.id, body: item.body, createdAt: item.createdAt, consumedBy: null };
+  const consumer = record(item.consumedBy);
+  if (!consumer || typeof consumer.roundId !== "string" || typeof consumer.sequence !== "number") return undefined;
+  return { id: item.id, body: item.body, createdAt: item.createdAt, consumedBy: { roundId: consumer.roundId, sequence: consumer.sequence } };
+}
+
+function parseFeedback(value: unknown): RoundFeedback[] | undefined {
+  const feedback = Array.isArray(value) ? value.map(parseFeedbackItem) : undefined;
+  return feedback?.every((item) => item !== undefined) ? (feedback as RoundFeedback[]) : undefined;
+}
+
 const NOTED_STATES: readonly TicketRound["state"][] = ["stopped", "failed", "interrupted"];
 
 function parseRound(value: unknown): TicketRound | undefined {
@@ -75,7 +91,8 @@ function parseRound(value: unknown): TicketRound | undefined {
   const deliverable = round.state === "delivered" ? parseDeliverable(round.deliverable) : round.deliverable === null ? null : undefined;
   const outcomeNote = NOTED_STATES.includes(round.state as TicketRound["state"]) ? (typeof round.outcomeNote === "string" ? round.outcomeNote : undefined) : round.outcomeNote === null ? null : undefined;
   const questions = parseQuestions(round.questions);
-  if (!usage || deliverable === undefined || outcomeNote === undefined || !activity || !questions) return undefined;
+  const feedback = parseFeedback(round.feedback);
+  if (!usage || deliverable === undefined || outcomeNote === undefined || !activity || !questions || !feedback) return undefined;
   const { id, name, kind } = round.agent;
   return {
     id: round.id,
@@ -91,6 +108,7 @@ function parseRound(value: unknown): TicketRound | undefined {
     usage,
     deliverable,
     questions,
+    feedback,
   };
 }
 

@@ -24,11 +24,14 @@ const STOPPED = {
   activity: [{ seq: 1, note: "Reading the Ticket", occurredAt: "2026-10-01T10:00:10Z" }],
   earlierActivityCursor: null,
   questions: [],
+  feedback: [],
   usage,
   deliverable: null,
 };
 
 const QUESTION = { id: "99999999-9999-5999-8999-999999999999", text: "Which region?", askedAt: "2026-10-01T10:00:10Z", answer: null, answeredAt: null };
+
+const FEEDBACK = { id: "13131313-1313-4313-8313-131313131313", body: "Cover Asia too", createdAt: "2026-10-01T10:01:00Z", consumedBy: null };
 
 const answer = (rounds: unknown[]) => vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => ({ rounds }) }));
 
@@ -44,6 +47,21 @@ describe("fetchTicketRounds", () => {
     const waiting = { ...STOPPED, state: "waiting_for_input", startedAt: "2026-10-01T10:00:05Z", endedAt: null, outcomeNote: null, questions: [{ ...QUESTION, answer: "Europe", answeredAt: "2026-10-01T10:00:20Z" }, { ...QUESTION, id: "88888888-8888-5888-8888-888888888888" }] };
     answer([waiting]);
     expect(await fetchTicketRounds("t")).toEqual([waiting]);
+  });
+
+  it("keeps a Round's feedback, waiting or sent to the Round that received it", async () => {
+    const delivered = {
+      ...STOPPED,
+      state: "delivered",
+      outcomeNote: null,
+      deliverable: { bodyMarkdown: "b", summary: "s", criteriaAssessment: "c" },
+      feedback: [
+        { ...FEEDBACK, consumedBy: { roundId: "77777777-7777-4777-8777-777777777777", sequence: 2 } },
+        { ...FEEDBACK, id: "12121212-1212-4212-8212-121212121212" },
+      ],
+    };
+    answer([delivered]);
+    expect(await fetchTicketRounds("t")).toEqual([delivered]);
   });
 
   it.each([
@@ -70,6 +88,10 @@ describe("fetchTicketRounds", () => {
     ["no questions field", { ...STOPPED, questions: undefined }],
     ["a question without askedAt", { ...STOPPED, questions: [{ ...QUESTION, askedAt: undefined }] }],
     ["an answer without answeredAt", { ...STOPPED, questions: [{ ...QUESTION, answer: "Europe" }] }],
+    ["no feedback field", { ...STOPPED, feedback: undefined }],
+    ["feedback without its body", { ...STOPPED, feedback: [{ ...FEEDBACK, body: undefined }] }],
+    ["feedback with no consumedBy field", { ...STOPPED, feedback: [{ ...FEEDBACK, consumedBy: undefined }] }],
+    ["feedback consumed by a Round without its sequence", { ...STOPPED, feedback: [{ ...FEEDBACK, consumedBy: { roundId: "77777777-7777-4777-8777-777777777777" } }] }],
   ])("refuses %s", async (_name, round) => {
     answer([round]);
     await expect(fetchTicketRounds("t")).rejects.toThrow("Galley's Round list was missing a required field.");
