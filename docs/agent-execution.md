@@ -76,7 +76,7 @@ Do not combine ticket and time limits in a single grant. Permission requests def
 
 When a time-based permission expires during a round, check current permissions before each new tool action. Already-dispatched actions may finish; the agent can continue work that remains permitted. Request renewed access only when necessary to proceed, using the existing Waiting for Input flow to continue the same round after approval.
 
-Manual revocation takes effect for subsequent tool actions, as do newly approved grants. Execution snapshots do not preserve revoked authority. Handling already-dispatched actions during revocation remains to be specified.
+Manual revocation takes effect for subsequent tool actions, as do newly approved grants. Execution snapshots do not preserve revoked authority. Revocation also requests Stop of each open round the grant covers; an action already allowed may complete and stays recorded, and nothing completed is undone ([D8](open-decisions.md)).
 
 GitHub is required for the initial coding deliverable workflow. Additional account integrations and detailed action/resource scopes remain undecided.
 
@@ -176,11 +176,13 @@ Agents investigate available context and make reasonable, reversible assumptions
 
 A necessary question pauses an open round as Waiting for Input and blocks the ticket. The ticket retains its locked card treatment, animation, and View/Stop round controls while awaiting input. An answer continues that same round. Waiting time is distinguished from active work time.
 
-Agent-delivered work enters In Review. Human review is required in the first iteration, and completion follows the ticket's retained condition: acceptance in ticketIt or merging its reviewed PR. It must not be inferred from the agent or execution engine. More customizable completion rules are deferred to a subsequent iteration.
+Agent-delivered work enters In Review. Human review is required in the first iteration, and completion follows the ticket's retained condition: acceptance in ticketIt or merging its reviewed PR. It must not be inferred from the agent or execution engine. More customizable completion rules are deferred to a subsequent iteration. An agent ticket in Done is reopened by returning it to Ready; round feedback added in In Review or Done reaches the next round once, whether it comes from rework or reopening.
 
 ### Failure
 
 If the agent cannot complete the work after investigation and reasonable attempts, end the round as Failed and move the ticket to Blocked. Preserve usage, available partial work, and a clear explanation of the failure.
+
+Galley also limits each round's active time and consecutive denied actions. A breach requests Stop, and the round then ends as Failed with Galley's explanation ([D8](open-decisions.md)); spending budgets are deferred.
 
 The owner can adjust the ticket or permissions, then explicitly return it to Ready to request another round. An agent may correct mistakes within an ongoing round, but failure does not automatically launch another round.
 
@@ -204,4 +206,4 @@ The consolidated decision register is [open-decisions.md](open-decisions.md). En
 - Direct-host execution integration and worktree setup/cleanup; container isolation is targeted for v2.
 - GitHub review/merge synchronization and handling of closed or already-merged PRs.
 - Detailed permission and resource-scoping rules.
-- Execution limits and remaining usage-accounting decisions; see `usage-accounting.md`.
+- Remaining usage-accounting decisions; see `usage-accounting.md`.

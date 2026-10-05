@@ -357,6 +357,8 @@ directly with the runner credential, no Michelin) and
 Michelin is killed on purpose to show the Round stays open) and
 `runner-activity.spec.ts`. Each reset migrates the database and restarts
 Galley, as at the start of the run. No spec depends on another's data.
+Ending those Rounds by Owner attestation instead is
+[#198](https://github.com/cristoforows/ticketIt/issues/198).
 
 `tests/runner-rework.spec.ts` (issue #137) drives two real Michelin
 processes with different scripts. The first delivers Round 1 and is

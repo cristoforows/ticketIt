@@ -102,7 +102,7 @@ of that history is erased. The following owner transitions apply with no open Ro
 | In Review | In Progress | Yes | Manual rework; no new execution Round. |
 | In Review | Done (human-acceptance condition) | Via explicit Accept | Same owner action as acceptance of Agent-delivered work. |
 | In Review | Done (reviewed-PR-merge condition) | Not via plain status-set | Use the shared evidence mechanism selected by D2. |
-| Done | Ready | Yes, subject to D4 for an already-merged PR | Reopening never restores expired ticket-based Permissions. |
+| Done | Ready | Yes, subject to D4 for an already-merged PR | The reopen route for an Agent Ticket, carrying any unconsumed Round Feedback to the next Round (M5.6, [#154](https://github.com/cristoforows/ticketIt/issues/154)). Reopening never restores expired ticket-based Permissions (M5.11). |
 | Other skips, such as Backlog → In Progress/Done or Ready → In Review/Done | Rejected | Follow the manual sequence and completion condition above. |
 
 Backlog → Blocked is retained by the Owner's decision in [#87](https://github.com/cristoforows/ticketIt/issues/87).
@@ -169,8 +169,9 @@ Round is open. Archive/restore retain their existing rules.
 
 **Options:** retain strict execution-owned transitions (accepted), or allow an
 emergency manual override for an abandoned runner (not adopted here). The latter
-could falsely declare cessation while work remains active. D5 owns stranded-runner
-recovery; this decision does not invent an override or weaken confirmed Stop.
+could falsely declare cessation while work remains active. D5's Owner-attested
+recovery (M5.13) ends a stranded Round Interrupted; this decision does not invent an
+override or weaken confirmed Stop.
 
 ## Implementation rules and verification examples
 
@@ -194,8 +195,8 @@ or runtime tests already implement this decision.
   attestation. Choose once for both assignee kinds; still owned by M8.
 - **D4:** closed-unmerged PRs, reopening after merge, merge during a Round, and
   repository/template changes after delivery. Preserve prior work; still owned by M8.
-- **D5:** stranded runner and stop recovery. Open-Round locks and confirmed cessation
-  remain required; still owned by M5.
+- **D5:** resolved by Owner-attested recovery (M5.13). Open-Round locks and confirmed
+  cessation remain required.
 - Other model/provider, permission-enforcement, and execution-limit choices remain
   tracked in [open-decisions.md](../open-decisions.md). Permissive assignment is not
   a decision to bypass authority checks or declare a failed integration gate passed.
