@@ -114,7 +114,7 @@ describe("TicketBoard", () => {
 
   it("shows the active slip with Galley's waiting reason only on slips with an open Round", async () => {
     const agent = { id: "a1", name: "Builder", kind: "coding" };
-    const round = { id: "r1", sequence: 1, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null, waitingReason: "starting", question: null, permissionRequest: null };
+    const round = { id: "r1", sequence: 1, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null, limitBreach: null, waitingReason: "starting", question: null, permissionRequest: null };
     stubTickets([
       { ...ticket("claimed", "Ready"), assigneeType: "agent", assigneeAgent: agent, openRound: { ...round, state: "claimed" } },
       { ...ticket("running", "Ready"), assigneeType: "agent", assigneeAgent: agent, openRound: { ...round, state: "running", startedAt: "2026-10-01T10:01:00Z", waitingReason: "working" } },
@@ -135,7 +135,7 @@ describe("TicketBoard", () => {
 
   it("shows the waiting reason Galley publishes rather than one derived from the Round", async () => {
     const agent = { id: "a1", name: "Builder", kind: "coding" };
-    const round = { id: "r1", sequence: 1, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: "2026-10-01T10:01:00Z", state: "running", stopRequestedAt: null, question: null, permissionRequest: null };
+    const round = { id: "r1", sequence: 1, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: "2026-10-01T10:01:00Z", state: "running", stopRequestedAt: null, limitBreach: null, question: null, permissionRequest: null };
     stubTickets([
       { ...ticket("lost", "InProgress"), assigneeType: "agent", assigneeAgent: agent, openRound: { ...round, waitingReason: "runner_disconnected" } },
       { ...ticket("told", "InProgress"), assigneeType: "agent", assigneeAgent: agent, openRound: { ...round, waitingReason: "stopping" } },
@@ -149,7 +149,7 @@ describe("TicketBoard", () => {
 
   it("marks a Ticket with an open Round, claimed or running, with a named lock glyph and keeps it from being dragged", async () => {
     const agent = { id: "a1", name: "Builder", kind: "coding" };
-    const round = { id: "r1", sequence: 3, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null, waitingReason: "starting", question: null, permissionRequest: null };
+    const round = { id: "r1", sequence: 3, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null, limitBreach: null, waitingReason: "starting", question: null, permissionRequest: null };
     stubTickets([
       { ...ticket("claimed", "Ready"), assigneeType: "agent", assigneeAgent: agent, openRound: { ...round, state: "claimed" } },
       { ...ticket("running", "Ready"), assigneeType: "agent", assigneeAgent: agent, openRound: { ...round, state: "running", startedAt: "2026-10-01T10:01:00Z", waitingReason: "working" } },
@@ -426,7 +426,7 @@ describe("TicketBoard", () => {
 
 describe("TicketBoard refreshing while a Ticket awaits execution", () => {
   const agent = { id: "a1", name: "Builder", kind: "coding" };
-  const round = { id: "r1", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null, waitingReason: "starting", question: null, permissionRequest: null };
+  const round = { id: "r1", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null, limitBreach: null, waitingReason: "starting", question: null, permissionRequest: null };
   const claimed = { ...ticket("work", "Ready"), assigneeType: "agent", assigneeAgent: agent, openRound: round };
   const running = { ...claimed, status: "InProgress", openRound: { ...round, state: "running", startedAt: "2026-10-01T10:00:05Z", waitingReason: "working" } };
   const settled = { ...claimed, openRound: null };
@@ -495,7 +495,7 @@ describe("TicketBoard refreshing while a Ticket awaits execution", () => {
   });
 
   it("shows Stopping on the locked slip once Galley reports the Stop request, still in its Status column", async () => {
-    const stopping = { ...running, openRound: { ...running.openRound, stopRequestedAt: "2026-10-01T10:00:07Z", waitingReason: "stopping", question: null, permissionRequest: null } };
+    const stopping = { ...running, openRound: { ...running.openRound, stopRequestedAt: "2026-10-01T10:00:07Z", limitBreach: null, waitingReason: "stopping", question: null, permissionRequest: null } };
     stubLists([list(running, other), list(stopping, other)]);
     render(<TicketBoard onUnauthenticated={() => {}} />);
     await flush();

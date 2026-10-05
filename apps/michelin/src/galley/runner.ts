@@ -184,7 +184,13 @@ export function reportRoundEvent(request: RunnerRequest, roundId: string, body: 
   });
 }
 
-const END_STATES: Partial<Record<RoundEventRequest["type"], RoundEventResult["state"]>> = { delivered: "delivered", stop_confirmed: "stopped", failed: "failed", interrupted: "interrupted" };
+// A Stop a technical limit requested ends the Round failed rather than stopped (#172).
+const END_STATES: Partial<Record<RoundEventRequest["type"], readonly RoundEventResult["state"][]>> = {
+  delivered: ["delivered"],
+  stop_confirmed: ["stopped", "failed"],
+  failed: ["failed"],
+  interrupted: ["interrupted"],
+};
 
 const QUESTION_STATES: Partial<Record<RoundEventRequest["type"], RoundEventResult["state"]>> = {
   question_raised: "waiting_for_input",
@@ -204,8 +210,8 @@ function parseRoundEventResult(payload: unknown, roundId: string, expected: Roun
     return `type is not ${expected.type}`;
   }
   const endState = END_STATES[expected.type];
-  if (endState !== undefined && state !== endState) {
-    return `state is not ${endState}`;
+  if (endState !== undefined && !endState.includes(state as RoundEventResult["state"])) {
+    return `state is not ${endState.join(" or ")}`;
   }
   const questionState = QUESTION_STATES[expected.type];
   if (questionState !== undefined && state !== questionState) {

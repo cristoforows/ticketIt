@@ -28,7 +28,7 @@ const STOPPED = {
   feedback: [],
   permissionRequests: [],
   authorityChecks: [],
-  authorityCheckCount: 0, attestation: null,
+  authorityCheckCount: 0, attestation: null, limitBreach: null,
   usage,
   deliverable: null,
 };
@@ -96,7 +96,15 @@ describe("fetchTicketRounds", () => {
     expect(await fetchTicketRounds("t")).toEqual([ended]);
   });
 
+  it("keeps the limit breach of a Round a technical limit ended Failed", async () => {
+    const failed = { ...STOPPED, state: "failed", outcomeNote: "Technical limit reached: 10 consecutive denied authority checks (limit 10).", limitBreach: { kind: "denial_loop", limit: 10, measured: 10, breachedAt: "2026-10-01T10:00:08Z" } };
+    answer([failed]);
+    expect(await fetchTicketRounds("t")).toEqual([failed]);
+  });
+
   it.each([
+    ["no limitBreach field", { ...STOPPED, limitBreach: undefined }],
+    ["a limitBreach of an unknown kind", { ...STOPPED, state: "failed", limitBreach: { kind: "budget", limit: 1, measured: 1, breachedAt: "2026-10-01T10:00:08Z" } }],
     ["a stopped Round without its note", { ...STOPPED, outcomeNote: null }],
     ["a stopped Round with no outcomeNote field", { ...STOPPED, outcomeNote: undefined }],
     ["a running Round with a note", { ...STOPPED, state: "running", endedAt: null }],

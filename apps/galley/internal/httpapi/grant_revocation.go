@@ -110,8 +110,7 @@ func (s *server) RevokePermissionGrant(w http.ResponseWriter, r *http.Request, g
 }
 
 // Lock order: the Owner's priority lock, each covered Ticket row, then the grant row. The priority lock keeps the covered
-// Rounds from being claimed or ending before the commit. The grant row comes last: an authority check holds its Round
-// row while it waits for the grant row, and the runner event path holds the priority lock while it waits for that Round.
+// Rounds from being claimed or ending before the commit, and serialises the revoke with every authority check.
 func revokeGrantForOwner(ctx context.Context, pool *pgxpool.Pool, ownerID int64, grantID string, now time.Time) (PermissionGrant, bool, *transitionRejection, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {

@@ -357,6 +357,24 @@ func (e RoundHolderHealth) Valid() bool {
 	}
 }
 
+// Defines values for RoundLimitBreachKind.
+const (
+	LimitDenialLoop RoundLimitBreachKind = "denial_loop"
+	LimitWallClock  RoundLimitBreachKind = "wall_clock"
+)
+
+// Valid indicates whether the value is a known member of the RoundLimitBreachKind enum.
+func (e RoundLimitBreachKind) Valid() bool {
+	switch e {
+	case LimitDenialLoop:
+		return true
+	case LimitWallClock:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RoundState.
 const (
 	RoundClaimed         RoundState = "claimed"
@@ -1287,6 +1305,17 @@ type RoundFeedbackConsumer struct {
 // RoundHolderHealth The runner that claimed the Round, as Galley saw it at the attestation. `replaced`: it is not the Owner's current runner.
 type RoundHolderHealth string
 
+// RoundLimitBreach Measured by Galley alone, never from a usage figure, while the Round is `running` and no Stop is requested. `wall_clock`: seconds the Round has spent `running` reached `GALLEY_ROUND_MAX_ACTIVE_DURATION`. `denial_loop`: denied authority checks since the Round's last allowed one reached `GALLEY_ROUND_MAX_CONSECUTIVE_DENIALS`. A breach requests Stop once, sharing the Owner's one Stop per Round.
+type RoundLimitBreach struct {
+	BreachedAt time.Time            `json:"breachedAt"`
+	Kind       RoundLimitBreachKind `json:"kind"`
+	Limit      int64                `json:"limit"`
+	Measured   int64                `json:"measured"`
+}
+
+// RoundLimitBreachKind defines model for RoundLimitBreachKind.
+type RoundLimitBreachKind string
+
 // RoundQuestion defines model for RoundQuestion.
 type RoundQuestion struct {
 	Answer     *string    `json:"answer"`
@@ -1601,6 +1630,9 @@ type TicketOpenRound struct {
 	ClaimedAt time.Time           `json:"claimedAt"`
 	Id        string              `json:"id"`
 
+	// LimitBreach Set when a technical limit requested this Stop.
+	LimitBreach *RoundLimitBreach `json:"limitBreach"`
+
 	// PermissionRequest The Permission request the Round waits on; see `question`.
 	PermissionRequest *PermissionRequest `json:"permissionRequest"`
 
@@ -1647,6 +1679,9 @@ type TicketRound struct {
 	// Feedback The Owner's feedback on this Round's result, oldest first.
 	Feedback []RoundFeedback `json:"feedback"`
 	Id       string          `json:"id"`
+
+	// LimitBreach The technical limit the Round breached; null when none.
+	LimitBreach *RoundLimitBreach `json:"limitBreach"`
 
 	// OutcomeNote Set exactly when `state` is `stopped`, `failed` or `interrupted`.
 	OutcomeNote *string `json:"outcomeNote"`

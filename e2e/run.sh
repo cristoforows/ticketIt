@@ -608,8 +608,25 @@ log "running tests/runner-attest.spec.ts (the Owner attests that a killed michel
   E2E_GITHUBFAKE_BASE_URL="$GITHUBFAKE_URL" \
   npx playwright test tests/runner-attest.spec.ts) || RUNNER_ATTEST_EXIT=$?
 
+# tests/runner-limit-wall-clock.spec.ts (issue #172) needs the Owner's slot free:
+# runner-attest.spec.ts leaves both its Round 2s delivered. It leaves Galley's
+# dev clock four hours further ahead, and its Round failed.
+RUNNER_LIMIT_WALL_CLOCK_EXIT=0
+log "running tests/runner-limit-wall-clock.spec.ts (a real michelin's Round past the active-time limit by the dev clock is stopped by Galley and ends Failed, Blocked, with the limit named) against the same galley"
+(cd "$SCRIPT_DIR" && E2E_BASE_URL="$SWIFTLET_BASE_URL" GALLEY_BASE_URL="$GALLEY_BASE_URL" \
+  E2E_GITHUBFAKE_BASE_URL="$GITHUBFAKE_URL" \
+  npx playwright test tests/runner-limit-wall-clock.spec.ts) || RUNNER_LIMIT_WALL_CLOCK_EXIT=$?
+
+# tests/runner-limit-denials.spec.ts (issue #172) needs the Owner's slot free:
+# runner-limit-wall-clock.spec.ts leaves its Round failed and its Ticket Blocked.
+RUNNER_LIMIT_DENIALS_EXIT=0
+log "running tests/runner-limit-denials.spec.ts (a real michelin's retry_act denial loop is stopped by Galley at the denied-check limit and ends Failed, Blocked) against the same galley"
+(cd "$SCRIPT_DIR" && E2E_BASE_URL="$SWIFTLET_BASE_URL" GALLEY_BASE_URL="$GALLEY_BASE_URL" \
+  E2E_GITHUBFAKE_BASE_URL="$GITHUBFAKE_URL" \
+  npx playwright test tests/runner-limit-denials.spec.ts) || RUNNER_LIMIT_DENIALS_EXIT=$?
+
 # tests/active-order-slip.spec.ts (issue #162) needs the Owner's slot free:
-# runner-attest.spec.ts leaves both its Round 2s delivered.
+# runner-limit-denials.spec.ts leaves its Round failed and its Ticket Blocked.
 # Its second test claims directly with the runner credential and leaves that
 # Round open with Stop requested, so it runs after every spec that needs the
 # slot, and no reset follows.
@@ -686,6 +703,8 @@ log "runner-revoke.spec.ts exit code: $RUNNER_REVOKE_EXIT"
 log "runner-grant-done.spec.ts exit code: $RUNNER_GRANT_DONE_EXIT"
 log "runner-reconcile.spec.ts exit code: $RUNNER_RECONCILE_EXIT"
 log "runner-attest.spec.ts exit code: $RUNNER_ATTEST_EXIT"
+log "runner-limit-wall-clock.spec.ts exit code: $RUNNER_LIMIT_WALL_CLOCK_EXIT"
+log "runner-limit-denials.spec.ts exit code: $RUNNER_LIMIT_DENIALS_EXIT"
 log "active-order-slip.spec.ts exit code: $ACTIVE_ORDER_SLIP_EXIT"
 log "status-failure.spec.ts exit code: $STATUS_FAILURE_EXIT"
 log "backend-failure.spec.ts exit code: $FAILURE_EXIT"
@@ -694,7 +713,7 @@ if [ "$STATUS_EXIT" -ne 0 ] || [ "$AUTH_EXIT" -ne 0 ] || [ "$RESTART_BEFORE_EXIT
   || [ "$LIFECYCLE_BEFORE_EXIT" -ne 0 ] || [ "$BADGES_BEFORE_EXIT" -ne 0 ] || [ "$RESTORE_BEFORE_EXIT" -ne 0 ] || [ "$TICKET_BEFORE_EXIT" -ne 0 ] || [ "$REFINEMENT_BEFORE_EXIT" -ne 0 ] \
   || [ "$RESTART_AFTER_EXIT" -ne 0 ] || [ "$BADGES_AFTER_EXIT" -ne 0 ] || [ "$RESTORE_AFTER_EXIT" -ne 0 ] || [ "$TICKET_AFTER_EXIT" -ne 0 ] || [ "$REFINEMENT_AFTER_EXIT" -ne 0 ] \
   || [ "$LIFECYCLE_AFTER_EXIT" -ne 0 ] || [ "$TICKET_DETAIL_EXIT" -ne 0 ] || [ "$REFINEMENT_EXIT" -ne 0 ] \
-  || [ "$TEMPLATES_EXIT" -ne 0 ] || [ "$LIFECYCLE_EXIT" -ne 0 ] || [ "$ALLOWED_ACTIONS_EXIT" -ne 0 ] || [ "$BOARD_EXIT" -ne 0 ] || [ "$BOARD_MOVES_EXIT" -ne 0 ] || [ "$BOARD_MOBILE_EXIT" -ne 0 ] || [ "$PRIORITY_ORDER_EXIT" -ne 0 ] || [ "$MODAL_EXIT" -ne 0 ] || [ "$BADGE_FILTER_EXIT" -ne 0 ] || [ "$ARCHIVE_EXIT" -ne 0 ] || [ "$CAPTURE_EXIT" -ne 0 ] || [ "$AGENTS_EXIT" -ne 0 ] || [ "$RUNNER_EXIT" -ne 0 ] || [ "$RUNNER_CLAIMS_EXIT" -ne 0 ] || [ "$RUNNER_ENGINE_EXIT" -ne 0 ] || [ "$RUNNER_ACTIVITY_EXIT" -ne 0 ] || [ "$RUNNER_DELIVERY_EXIT" -ne 0 ] || [ "$RUNNER_REWORK_EXIT" -ne 0 ] || [ "$RUNNER_STOP_EXIT" -ne 0 ] || [ "$RUNNER_FAILED_EXIT" -ne 0 ] || [ "$RUNNER_INTERRUPTED_EXIT" -ne 0 ] || [ "$RUNNER_ASK_EXIT" -ne 0 ] || [ "$RUNNER_FEEDBACK_EXIT" -ne 0 ] || [ "$RUNNER_PERMISSION_EXIT" -ne 0 ] || [ "$RUNNER_TIME_GRANT_EXIT" -ne 0 ] || [ "$RUNNER_FULL_ACCESS_EXIT" -ne 0 ] || [ "$RUNNER_REVOKE_EXIT" -ne 0 ] || [ "$RUNNER_GRANT_DONE_EXIT" -ne 0 ] || [ "$RUNNER_RECONCILE_EXIT" -ne 0 ] || [ "$RUNNER_ATTEST_EXIT" -ne 0 ] || [ "$ACTIVE_ORDER_SLIP_EXIT" -ne 0 ] || [ "$AGENT_READINESS_EXIT" -ne 0 ] || [ "$STATUS_FAILURE_EXIT" -ne 0 ] \
+  || [ "$TEMPLATES_EXIT" -ne 0 ] || [ "$LIFECYCLE_EXIT" -ne 0 ] || [ "$ALLOWED_ACTIONS_EXIT" -ne 0 ] || [ "$BOARD_EXIT" -ne 0 ] || [ "$BOARD_MOVES_EXIT" -ne 0 ] || [ "$BOARD_MOBILE_EXIT" -ne 0 ] || [ "$PRIORITY_ORDER_EXIT" -ne 0 ] || [ "$MODAL_EXIT" -ne 0 ] || [ "$BADGE_FILTER_EXIT" -ne 0 ] || [ "$ARCHIVE_EXIT" -ne 0 ] || [ "$CAPTURE_EXIT" -ne 0 ] || [ "$AGENTS_EXIT" -ne 0 ] || [ "$RUNNER_EXIT" -ne 0 ] || [ "$RUNNER_CLAIMS_EXIT" -ne 0 ] || [ "$RUNNER_ENGINE_EXIT" -ne 0 ] || [ "$RUNNER_ACTIVITY_EXIT" -ne 0 ] || [ "$RUNNER_DELIVERY_EXIT" -ne 0 ] || [ "$RUNNER_REWORK_EXIT" -ne 0 ] || [ "$RUNNER_STOP_EXIT" -ne 0 ] || [ "$RUNNER_FAILED_EXIT" -ne 0 ] || [ "$RUNNER_INTERRUPTED_EXIT" -ne 0 ] || [ "$RUNNER_ASK_EXIT" -ne 0 ] || [ "$RUNNER_FEEDBACK_EXIT" -ne 0 ] || [ "$RUNNER_PERMISSION_EXIT" -ne 0 ] || [ "$RUNNER_TIME_GRANT_EXIT" -ne 0 ] || [ "$RUNNER_FULL_ACCESS_EXIT" -ne 0 ] || [ "$RUNNER_REVOKE_EXIT" -ne 0 ] || [ "$RUNNER_GRANT_DONE_EXIT" -ne 0 ] || [ "$RUNNER_RECONCILE_EXIT" -ne 0 ] || [ "$RUNNER_ATTEST_EXIT" -ne 0 ] || [ "$RUNNER_LIMIT_WALL_CLOCK_EXIT" -ne 0 ] || [ "$RUNNER_LIMIT_DENIALS_EXIT" -ne 0 ] || [ "$ACTIVE_ORDER_SLIP_EXIT" -ne 0 ] || [ "$AGENT_READINESS_EXIT" -ne 0 ] || [ "$STATUS_FAILURE_EXIT" -ne 0 ] \
   || [ "$FAILURE_EXIT" -ne 0 ]; then
   log "SUITE FAILED"
   exit 1

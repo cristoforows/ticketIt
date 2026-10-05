@@ -130,7 +130,7 @@ func raisePermissionRequest(ctx context.Context, tx pgx.Tx, ownerID int64, ticke
 		RETURNING id`, ownerID, roundID, request.id, request.scope.account, request.scope.action, request.scope.resource, now, renewsGrantRowID, renewsFullAccess).Scan(&requestRowID); err != nil {
 		return err
 	}
-	return moveRoundAndTicket(ctx, tx, ownerID, ticketID, roundID, RoundRunning, RoundWaitingForInput, roundAsk{permissionRequestID: &requestRowID})
+	return moveRoundAndTicket(ctx, tx, ownerID, ticketID, roundID, RoundRunning, RoundWaitingForInput, roundAsk{permissionRequestID: &requestRowID}, now)
 }
 
 type grantTerms struct {

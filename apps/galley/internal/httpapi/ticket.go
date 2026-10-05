@@ -414,6 +414,8 @@ const ticketSelectColumns = `public_id::text, title, status, template, completio
 	          'agent', json_build_object('id', a.public_id, 'name', a.name, 'kind', a.kind),
 	          'claimedAt', r.claimed_at, 'startedAt', r.started_at,
 	          'stopRequestedAt', (SELECT c.issued_at FROM round_commands c WHERE c.owner_id = r.owner_id AND c.round_id = r.id AND c.type = 'stop'),
+	          'limitBreach', (SELECT json_build_object('kind', b.kind, 'limit', b."limit", 'measured', b.measured, 'breachedAt', b.breached_at)
+	             FROM round_limit_breaches b WHERE b.owner_id = r.owner_id AND b.round_id = r.id),
 	          'question', (SELECT ` + roundQuestionJSON + ` FROM round_questions q WHERE q.owner_id = r.owner_id AND q.id = r.waiting_question_id),
 	          'permissionRequest', (SELECT ` + permissionRequestJSON + ` FROM permission_requests p
 	             WHERE p.owner_id = r.owner_id AND p.id = r.waiting_permission_request_id))
@@ -486,6 +488,9 @@ func scanTicketRow(row ticketRowScanner, now time.Time) (Ticket, error) {
 		ticket.OpenRound.ClaimedAt = ticket.OpenRound.ClaimedAt.UTC()
 		ticket.OpenRound.StartedAt = utcOrNil(ticket.OpenRound.StartedAt)
 		ticket.OpenRound.StopRequestedAt = utcOrNil(ticket.OpenRound.StopRequestedAt)
+		if ticket.OpenRound.LimitBreach != nil {
+			ticket.OpenRound.LimitBreach.BreachedAt = ticket.OpenRound.LimitBreach.BreachedAt.UTC()
+		}
 		if ticket.OpenRound.Question != nil {
 			normaliseQuestionTimes(ticket.OpenRound.Question)
 		}

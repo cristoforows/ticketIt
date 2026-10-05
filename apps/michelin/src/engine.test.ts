@@ -426,6 +426,17 @@ describe("a Stop request", () => {
     expect(harness.records().filter((record) => record["msg"] === "round event failed; retrying").map((record) => record["retryInMs"])).toEqual([1000, 2000, 4000]);
   });
 
+  it("accepts a confirmation that ends a Round a technical limit stopped as failed", async () => {
+    const fetchFn = vi.fn<FetchFn>(async (_url, init) =>
+      (JSON.parse(String(init?.body)) as SentEvent).type === "stop_confirmed" ? json({ ...stoppedResult, state: "failed" }, 201) : created(),
+    );
+    const harness = start([START, HOLD], fetchFn);
+    await vi.advanceTimersByTimeAsync(10);
+    harness.stopper.abort(COMMAND_ID);
+    expect(await harness.run).toBe("stopped");
+    expect(harness.records().at(-1)).toMatchObject({ msg: "stop confirmation reported", httpStatus: 201 });
+  });
+
   it("accepts a replayed confirmation and a Round stopped before it started", async () => {
     const fetchFn = vi.fn<FetchFn>(async () => json({ ...stoppedResult, startedAt: null }, 200));
     const harness = start([wait(60_000), START], fetchFn);
@@ -437,7 +448,7 @@ describe("a Stop request", () => {
   });
 
   it.each([
-    ["a wrong state", { state: "running" }, "state is not stopped"],
+    ["a wrong state", { state: "running" }, "state is not stopped or failed"],
     ["no endedAt", { endedAt: undefined }, "endedAt is not a string"],
     ["another Round", { roundId: "66666666-6666-4666-8666-666666666666" }, "roundId is not the Round the event was sent for"],
   ])("retries a confirmation answered with %s", async (_name, wrong, why) => {
@@ -1293,8 +1304,87 @@ describe("the act step", () => {
     });
   });
 
+  describe("retry_act", () => {
+    const RETRY = (times: number, intervalMs = 100): EngineStep => ({ step: "retry_act", ...SCOPE, times, intervalMs });
+    const AFTER: EngineStep = { step: "progress", note: "after the retries" };
+
+    it("asks again on each deny without a Permission request, waiting intervalMs between, then goes on", async () => {
+      const { state, fetchFn } = galley();
+      const harness = start([START, RETRY(3, 500), AFTER], fetchFn);
+      await vi.advanceTimersByTimeAsync(10);
+      expect(state.checks).toBe(1);
+      await vi.advanceTimersByTimeAsync(400);
+      expect(state.checks).toBe(1);
+      await vi.advanceTimersByTimeAsync(200);
+      expect(state.checks).toBe(2);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await harness.run).toBe("completed");
+      expect(kinds(state.sent)).toEqual(["execution_started", "check", "check", "check", "progress"]);
+      expect(state.sent.filter(({ path }) => path === CHECKS_PATH).map(({ body }) => body)).toEqual([0, 1, 2].map(() => ({ ...SCOPE, epoch: 3 })));
+      expect(harness.records().find((record) => record["msg"] === "engine gave up retrying a denied action")).toMatchObject({ stepIndex: 1, times: 3, ...SCOPE });
+    });
+
+    it("performs the action at the first allow and checks no more", async () => {
+      const deny = () => json({ decision: "deny" });
+      const { state, fetchFn } = galley({ checks: [deny, deny, () => json({ decision: "allow", grantId: GRANT })] });
+      const harness = start([START, RETRY(10, 0), AFTER], fetchFn, { instantSleep: true });
+      expect(await harness.run).toBe("completed");
+      expect(harness.sleeps).toEqual([0, 0]);
+      expect(kinds(state.sent)).toEqual(["execution_started", "check", "check", "check", "progress", "progress"]);
+      expect(state.sent[4]?.body).toMatchObject({ idempotencyKey: `${ROUND_ID}:1`, data: { note: "Performed write_note on notes/weekly-report" } });
+      expect(harness.records().find((record) => record["msg"] === "action performed")).toMatchObject({ attempt: 3 });
+    });
+
+    it("checks for a Stop between attempts and confirms it", async () => {
+      const { state, fetchFn } = galley();
+      const harness = start([START, RETRY(1000, 1000), AFTER], fetchFn);
+      await vi.advanceTimersByTimeAsync(2_500);
+      expect(state.checks).toBe(3);
+      harness.stopper.abort("stop");
+      expect(await harness.run).toBe("stopped");
+      expect(state.checks).toBe(3);
+      expect(kinds(state.sent)).toEqual(["execution_started", "check", "check", "check", "stop_confirmed"]);
+    });
+
+    it("ends with failed when Galley answers the confirmation of a breached Round that way", async () => {
+      const { state, fetchFn } = galley();
+      fetchFn.mockImplementation(((original) => async (input, init) =>
+        JSON.parse(String(init?.body))["type"] === "stop_confirmed" ? json({ roundId: ROUND_ID, type: "stop_confirmed", state: "failed", startedAt, endedAt: startedAt }, 201) : original(input, init))(fetchFn.getMockImplementation()!));
+      const harness = start([START, RETRY(1000, 1000)], fetchFn);
+      await vi.advanceTimersByTimeAsync(1_500);
+      harness.stopper.abort("stop");
+      expect(await harness.run).toBe("stopped");
+      expect(kinds(state.sent)).toEqual(["execution_started", "check", "check"]);
+      expect(fetchFn).toHaveBeenCalledTimes(4);
+      expect(harness.records().at(-1)).toMatchObject({ msg: "stop confirmation reported", httpStatus: 201 });
+    });
+
+    it("does not count a refused check as an attempt", async () => {
+      const { state, fetchFn } = galley({ checks: [error(409, "runner_disconnected"), error(409, "runner_disconnected")] });
+      const harness = start([START, RETRY(2, 0), AFTER], fetchFn, { instantSleep: true });
+      expect(await harness.run).toBe("completed");
+      expect(state.checks).toBe(4);
+      expect(harness.records().filter((record) => record["msg"] === "authority checked")).toHaveLength(2);
+    });
+
+    it("fails the Round on an undeclared capability without retrying", async () => {
+      const { state, fetchFn } = galley({ checks: [error(400, "capability_not_supported")] });
+      const harness = start([START, RETRY(5, 0), AFTER], fetchFn, { instantSleep: true });
+      expect(await harness.run).toBe("failed");
+      expect(kinds(state.sent)).toEqual(["execution_started", "check", "failed"]);
+      expect(state.sent.at(-1)?.body).toMatchObject({ data: { explanation: "Could not write_note on notes/weekly-report with the controlled account: the Connected Account does not declare this capability" } });
+    });
+
+    it("abandons the Round locally when Galley refuses the check outright", async () => {
+      const { state, fetchFn } = galley({ checks: [error(409, "stale_claim_epoch")] });
+      const harness = start([START, RETRY(5, 0), AFTER], fetchFn, { instantSleep: true });
+      expect(await harness.run).toBe("abandoned");
+      expect(kinds(state.sent)).toEqual(["execution_started", "check"]);
+    });
+  });
+
   it("truncates the performance note to Galley's note limit", () => {
-    expect([...performedNote({ step: "act", account: "controlled", action: "a".repeat(200), resource: "界".repeat(2000) })]).toHaveLength(2000);
+    expect([...performedNote({ account: "controlled", action: "a".repeat(200), resource: "界".repeat(2000) })]).toHaveLength(2000);
   });
 });
 

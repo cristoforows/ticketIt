@@ -281,7 +281,7 @@ func (s *server) RunnerHeartbeat(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), runnerTimeout)
 	defer cancel()
 	now := s.clockNow()
-	required, found, err := recordHeartbeat(ctx, s.pool, runner, now)
+	required, found, err := recordHeartbeat(ctx, s.pool, runner, s.limits, now)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to record the heartbeat")
 		return
@@ -298,12 +298,17 @@ func heartbeatAfterAGap(now time.Time, previous *time.Time) bool {
 	return !runnerConnected(now, previous)
 }
 
-func recordHeartbeat(ctx context.Context, pool *pgxpool.Pool, runner authenticatedRunner, now time.Time) (bool, bool, error) {
+// Lock order: the Owner's priority lock, the runner row, then the open Round's Ticket and Round rows, so the limit check
+// runs under the event path's order. Nothing holding a Ticket or Round row waits for a runner row.
+func recordHeartbeat(ctx context.Context, pool *pgxpool.Pool, runner authenticatedRunner, limits roundLimits, now time.Time) (bool, bool, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return false, false, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockOwnerPriority(ctx, tx, runner.ownerID); err != nil {
+		return false, false, err
+	}
 	var previous *time.Time
 	err = tx.QueryRow(ctx, `UPDATE runners r SET last_seen_at = $2
 		FROM (SELECT id, last_seen_at FROM runners WHERE id = $1 FOR UPDATE) old
@@ -314,8 +319,17 @@ func recordHeartbeat(ctx context.Context, pool *pgxpool.Pool, runner authenticat
 	if err != nil {
 		return false, false, err
 	}
+	open, err := lockOwnerOpenRound(ctx, tx, runner.ownerID)
+	if err != nil {
+		return false, false, err
+	}
 	if heartbeatAfterAGap(now, previous) {
 		if err := flagOwnerOpenRound(ctx, tx, runner.ownerID); err != nil {
+			return false, false, err
+		}
+	}
+	if open != nil {
+		if err := enforceRoundLimits(ctx, tx, runner.ownerID, open.roundRowID, open.lock, limits, now); err != nil {
 			return false, false, err
 		}
 	}

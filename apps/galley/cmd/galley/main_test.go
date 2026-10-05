@@ -36,6 +36,25 @@ func TestRun_ConfigurationFailure(t *testing.T) {
 	}
 }
 
+func TestRun_InvalidRoundLimitFailsStartup(t *testing.T) {
+	for _, env := range []map[string]string{
+		{"GALLEY_ROUND_MAX_ACTIVE_DURATION": "0s"},
+		{"GALLEY_ROUND_MAX_CONSECUTIVE_DENIALS": "1001"},
+	} {
+		var name string
+		for name = range env {
+		}
+		env["DATABASE_URL"] = "postgres://localhost:5432/unused"
+		env["GALLEY_OWNER_GITHUB_LOGIN"] = "test-owner"
+		env["GALLEY_OAUTH_GITHUB_CLIENT_ID"] = "test-client-id"
+		env["GALLEY_OAUTH_GITHUB_CLIENT_SECRET"] = "test-client-secret"
+		err := run(context.Background(), fakeGetenv(env), &bytes.Buffer{}, nil)
+		if err == nil || !strings.Contains(err.Error(), name) {
+			t.Errorf("run() with %v = %v, want an error naming %s", env, err, name)
+		}
+	}
+}
+
 // TestRun_ServesStatusThenShutsDownCleanly boots the real server on an
 // OS-assigned port, confirms GET /api/status actually serves over a
 // real socket, requests shutdown by canceling ctx (the same path

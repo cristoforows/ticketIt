@@ -1335,3 +1335,31 @@ only on Interrupted Rounds, and the Ticket parser requires
 
 Tests: `TicketDetail.test.tsx`, `ActiveOrder.test.tsx`,
 `ui/slip.test.ts`, `api/rounds.test.ts` and `api/tickets.test.ts`.
+
+## Technical limits (issue #172)
+
+Galley stops a running Round that reaches its active-time or
+denied-check limit, and records the breach as `limitBreach` on the open
+Round and on the Round record. Swiftlet renders what Galley returns:
+
+- **Stopping.** While the Stop a breach requested is pending, the slip's
+  waiting reason and the detail's `StoppingTag` read **Technical limit
+  reached. Stopping the Round.** instead of Stopping, and the open
+  Round's entry names the limit with the same line as Failed below.
+- **Failed.** A breached Round ends Failed. Above Galley's explanation
+  under **Outcome**, the entry shows
+  (`ticket-detail-round-limit-breach`) **Active time limit reached:
+  <measured> of <limit>** or **Denied-check limit reached: <measured> of
+  <limit>**. A duration is printed from whole seconds as Go's
+  `time.Duration` prints it (`14401` is `4h0m1s`, `90` is `1m30s`), so it
+  reads like Galley's explanation, whatever the browser's locale. A
+  Round a breach did not end Failed (a late `delivered`, or an
+  attestation) names no limit.
+- **Parsing.** `parseLimitBreach` (`api/limitBreach.ts`) requires
+  `limitBreach` on both shapes: `null`, or a known `kind`, safe integers
+  `limit` of at least 1 and `measured` of at least `limit`, and a
+  `breachedAt` string. An open Round with a breach must have
+  `stopRequestedAt`.
+
+Tests: `api/limitBreach.test.ts`, `api/tickets.test.ts`,
+`api/rounds.test.ts`, `ActiveOrder.test.tsx` and `TicketDetail.test.tsx`.

@@ -256,7 +256,7 @@ describe("TicketDetailPage", () => {
 
   describe("an open Round", () => {
     const agent = { id: AGENTS[0].id, name: "atlas", kind: "research" };
-    const claimedRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null, waitingReason: "starting", question: null, permissionRequest: null };
+    const claimedRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null, limitBreach: null, waitingReason: "starting", question: null, permissionRequest: null };
     const claimed = { ...TICKET, status: "Ready", assigneeType: "agent", assigneeAgent: agent, successCriteria: "done", openRound: claimedRound };
 
     it("shows Claimed by runner from Galley's openRound", async () => {
@@ -309,7 +309,7 @@ describe("TicketDetailPage", () => {
 
   describe("refreshing while execution may change the Ticket", () => {
     const agent = { id: AGENTS[0].id, name: "atlas", kind: "research" };
-    const round = { id: "66666666-6666-4666-8666-666666666666", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null, waitingReason: "starting", question: null, permissionRequest: null };
+    const round = { id: "66666666-6666-4666-8666-666666666666", sequence: 1, state: "claimed", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null, limitBreach: null, waitingReason: "starting", question: null, permissionRequest: null };
     const lockedActions = { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: round.id } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } };
     const claimed = { ...TICKET, status: "Ready", assigneeType: "agent", assigneeAgent: agent, openRound: round, allowedActions: lockedActions };
     const running = { ...claimed, status: "InProgress", openRound: { ...round, state: "running", startedAt: "2026-10-01T10:00:05Z", waitingReason: "working" }, updatedAt: "2026-10-01T10:00:05Z" };
@@ -337,7 +337,7 @@ describe("TicketDetailPage", () => {
       feedback: [],
       permissionRequests: [],
       authorityChecks: [],
-      authorityCheckCount: 0, attestation: null,
+      authorityCheckCount: 0, attestation: null, limitBreach: null,
       usage,
       deliverable: null,
     });
@@ -444,7 +444,7 @@ describe("TicketDetailPage", () => {
 
     it("requests Stop through POST /api/tickets/:id/stop, shows Stopping, and keeps refreshing the still-open Round", async () => {
       const stoppable = { ...running, allowedActions: { ...lockedActions, stop: { available: true }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } } };
-      const stopping = { ...running, openRound: { ...running.openRound, stopRequestedAt: "2026-10-01T10:00:07Z", waitingReason: "stopping", question: null, permissionRequest: null }, allowedActions: { ...lockedActions, stop: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } } };
+      const stopping = { ...running, openRound: { ...running.openRound, stopRequestedAt: "2026-10-01T10:00:07Z", limitBreach: null, waitingReason: "stopping", question: null, permissionRequest: null }, allowedActions: { ...lockedActions, stop: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } } };
       const fetchMock = stubRound([answer(stoppable), answer(stopping)]);
       const posts = vi.fn();
       vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -598,7 +598,7 @@ describe("TicketDetailPage", () => {
         const live = { ...grant, coveredOpenRounds: [{ roundId: round.id, sequence: round.sequence, ticketId: TICKET_ID, ticketTitle: running.title }] };
         const working = { ...resuming, openRound: { ...waitingRound, state: "running", waitingReason: "working", permissionRequest: null }, permissionGrants: [live] };
         const revokedGrant = { ...grant, state: "revoked", revokedAt: "2026-10-01T10:00:20Z", endedAt: null, allowedActions: { revoke: { available: false, reason: { code: "grant_already_revoked", message: "this grant is already revoked" } } } };
-        const stopping = { ...working, openRound: { ...working.openRound, stopRequestedAt: "2026-10-01T10:00:20Z", waitingReason: "stopping" }, permissionGrants: [revokedGrant] };
+        const stopping = { ...working, openRound: { ...working.openRound, stopRequestedAt: "2026-10-01T10:00:20Z", limitBreach: null, waitingReason: "stopping" }, permissionGrants: [revokedGrant] };
 
         it("posts the revoke, then reloads the Ticket to show the grant Revoked and the Round Stopping", async () => {
           const fetchMock = stubRound([answer(working), answer(stopping)], undefined, [roundsOf(record())]);

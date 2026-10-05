@@ -46,6 +46,16 @@ export interface Round {
   deliverable: { bodyMarkdown: string; summary: string; criteriaAssessment: string } | null;
   /** Set exactly when the Owner's attestation ended the Round (issue #171). */
   attestation: RoundAttestation | null;
+  /** The technical limit that requested this Round's Stop (issue #172). */
+  limitBreach: RoundLimitBreach | null;
+}
+
+export interface RoundLimitBreach {
+  kind: "wall_clock" | "denial_loop";
+  /** Seconds for wall_clock, denied checks for denial_loop. */
+  limit: number;
+  measured: number;
+  breachedAt: string;
 }
 
 export type AttestationBasis = "runner_process_ended" | "runner_host_off" | "other";
@@ -194,6 +204,8 @@ export interface Ticket {
     question: RoundQuestion | null;
     /** Set exactly while `state` is `waiting_for_input` and no question is (issue #165). */
     permissionRequest: PermissionRequest | null;
+    /** Set when a technical limit requested the Stop (issue #172). */
+    limitBreach: RoundLimitBreach | null;
   } | null;
   /** The newest 50 grants approved on this Ticket or held for a time by its assigned Agent (issues #165, #166). */
   permissionGrants: PermissionGrant[];

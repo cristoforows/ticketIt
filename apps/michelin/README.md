@@ -200,6 +200,7 @@ makes no model or provider call. Each reporting step sends one event to
 | `interrupt` | `interrupted` | `<roundId>:<step index>` | End the Round as Interrupted with `evidence` (the progress note's limits), otherwise as `fail`. Only the last step. |
 | `ask` | `question_raised`, then `resumed` | the `questionId`; then `<roundId>:<step index>` | Raise `question` (the progress note's limits) and wait for the Owner's answer. `questionId` is a UUID v5 of `ask:<step index>` in the Round's id, so a restarted engine raises the same question under the same id. See "Questions" below. |
 | `act` | `progress`; or `permission_requested`, then `resumed`, then `progress` | `<roundId>:<step index>`; the `requestId`, then `<roundId>:<step index>:resumed` | Perform `action` on `resource` through Connected Account `account` (each 1 to 200 characters, not blank, no control characters), once Galley's live authority check allows it. `requestId` is a UUID v5 of `act:<step index>` in the Round's id. See "Permissions" below. |
+| `retry_act` | `progress` when allowed | `<roundId>:<step index>` | Check the scope of `act` (the same `account`, `action` and `resource`) up to `times` times (1 to 1000), `intervalMs` apart (0 to 60000, default 100), never asking for a Permission. See "Permissions" below. |
 | `hold` | none | none | Wait until Michelin stops. Only the last step, so a script ends with at most one of `hold`, `deliver`, `fail` and `interrupt`. |
 
 With `MICHELIN_ENGINE_SCRIPT` unset, the script is: `start`; progress
@@ -318,6 +319,16 @@ account (issue #167) makes no difference to Michelin.
 - Other refusals abandon the Round locally, as for events. Network
   failures and `5xx` are retried with the events' backoff.
 
+A `retry_act` step simulates an engine stuck retrying a denied action,
+the loop Galley's denial limit ends (issue #172). Each attempt is one
+answered check: a `deny` waits `intervalMs` and checks again, an `allow`
+sends the `act` step's progress note and ends the step, and after
+`times` denials the step logs `engine gave up retrying a denied action`
+and the script goes on. The Stop is checked between attempts. A refusal
+Galley answers neither way (`runner_disconnected`, `reconcile_required`,
+a network failure) is retried inside the attempt and is not counted;
+`capability_not_supported` and other refusals end the step as for `act`.
+
 A declined request sends no command, so the step keeps waiting until a
 Stop, which it confirms with the evidence `Stopped while waiting for the
 approval to step <step index + 1> of <step count> on Stop command
@@ -370,7 +381,8 @@ context fields. The credential is never logged.
 | `stop requested` | `info` | A `stop` for the claim's epoch arrived: `roundId`, `commandId`, `type`, `commandEpoch`, `claimEpoch`. |
 | `authority changed; the next action checks it again` | `info` | As `stop requested`, for an `authority_changed`. |
 | `engine stopped` | `info` | The engine halted at `stepIndex` for the Stop `commandId`. |
-| `stop confirmation reported` | `info` | `roundId`, `step` `stop`, `attempt`, `httpStatus`, Galley's `endedAt`. |
+| `stop confirmation reported` | `info` | `roundId`, `step` `stop`, `attempt`, `httpStatus`, Galley's `endedAt`. Galley answers `stopped`, or `failed` when a technical limit requested the Stop (issue #172); either is accepted. |
+| `engine gave up retrying a denied action` | `info` | `roundId`, `stepIndex`, the scope, `times`. |
 | `command for another claim epoch ignored` | `warn` | As `stop requested`; the command is acknowledged `ignored`. |
 | `unknown command left unacknowledged` | `warn` | As `stop requested`, for a type this Michelin does not know. |
 | `round commands poll failed` | `error` | `roundId`, `reason`, `httpStatus`, `errorCode`; polling continues. |

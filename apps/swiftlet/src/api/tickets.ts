@@ -5,6 +5,7 @@
  */
 import type { components } from "./generated/schema";
 import { isAgentSummary } from "./agents";
+import { parseLimitBreach } from "./limitBreach";
 import { authenticatedFetch, errorMessage, GalleyError, parseErrorDetail } from "./http";
 
 export type Ticket = components["schemas"]["Ticket"];
@@ -207,6 +208,10 @@ function parseOpenRound(value: unknown): Ticket["openRound"] | undefined {
   if (question === undefined || permissionRequest === undefined || asks !== (round.state === "waiting_for_input" ? 1 : 0)) {
     return undefined;
   }
+  const limitBreach = parseLimitBreach(round.limitBreach);
+  if (limitBreach === undefined || (limitBreach !== null && round.stopRequestedAt === null)) {
+    return undefined;
+  }
   const agent = round.agent;
   return {
     id: round.id,
@@ -219,6 +224,7 @@ function parseOpenRound(value: unknown): Ticket["openRound"] | undefined {
     waitingReason: round.waitingReason as WaitingReason,
     question,
     permissionRequest,
+    limitBreach,
   };
 }
 

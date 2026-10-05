@@ -1880,3 +1880,58 @@ func TestAttestCessationAndFencing_ResponsesMatchContractAndMethod405(t *testing
 		t.Fatalf("Allow = %q, want POST", rec.Header().Get("Allow"))
 	}
 }
+
+func TestLimitBreach_ResponsesMatchContract(t *testing.T) {
+	for _, kind := range []RoundLimitBreachKind{LimitWallClock, LimitDenialLoop} {
+		t.Run(string(kind), func(t *testing.T) {
+			f := newLimitFixture(t, testMaxActive, 1)
+			router, err := legacy.NewRouter(loadContract(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			validate := func(call runnerCall, want int) *httptest.ResponseRecorder {
+				t.Helper()
+				req := httptest.NewRequest(call.method, call.path, strings.NewReader(call.body))
+				if call.body != "" {
+					req.Header.Set("Content-Type", "application/json")
+				}
+				if call.token != "" {
+					req.Header.Set("Authorization", "Bearer "+call.token)
+				}
+				if call.cookie != nil {
+					req.AddCookie(call.cookie)
+				}
+				rec := httptest.NewRecorder()
+				f.handler.ServeHTTP(rec, req)
+				if rec.Code != want {
+					t.Fatalf("%s %s: status=%d, want %d; body=%s", call.method, call.path, rec.Code, want, rec.Body.String())
+				}
+				validateAgainstContract(t, router, req, rec)
+				return rec
+			}
+			queued, claim := f.runningRound(t, "contract "+string(kind))
+			ticket := runnerCall{method: http.MethodGet, path: "/api/tickets/" + queued.Id, cookie: f.cookie}
+			rounds := runnerCall{method: http.MethodGet, path: "/api/tickets/" + queued.Id + "/rounds", cookie: f.cookie}
+			if got := decodeTicketBody(t, validate(ticket, http.StatusOK)); got.OpenRound == nil || got.OpenRound.LimitBreach != nil {
+				t.Fatalf("openRound = %+v, want a null limitBreach", got.OpenRound)
+			}
+			validate(rounds, http.StatusOK)
+			if kind == LimitWallClock {
+				f.advance(testMaxActive)
+				validate(runnerCall{method: http.MethodPost, path: "/api/runner/heartbeat", token: f.token}, http.StatusOK)
+			} else {
+				validate(runnerCall{method: http.MethodPost, path: authorityCheckPath(claim.RoundId), body: authorityCheckBody(t, writeReport, claim.ClaimEpoch), token: f.token}, http.StatusOK)
+			}
+			if got := decodeTicketBody(t, validate(ticket, http.StatusOK)); got.OpenRound == nil || got.OpenRound.LimitBreach == nil || got.OpenRound.LimitBreach.Kind != kind {
+				t.Fatalf("openRound = %+v, want a %s limitBreach", got.OpenRound, kind)
+			}
+			validate(runnerCall{method: http.MethodGet, path: "/api/tickets", cookie: f.cookie}, http.StatusOK)
+			validate(rounds, http.StatusOK)
+			validate(runnerCall{method: http.MethodPost, path: "/api/runner/rounds/" + claim.RoundId + "/events", body: stopConfirmedEvent(t, "s1", claim.ClaimEpoch, stopEvidence), token: f.token}, http.StatusCreated)
+			if got := decodeRounds(t, validate(rounds, http.StatusOK)); got[0].State != RoundFailed || got[0].LimitBreach == nil || got[0].LimitBreach.Kind != kind {
+				t.Fatalf("rounds = %+v, want a failed Round with its %s limitBreach", got[0], kind)
+			}
+			validate(ticket, http.StatusOK)
+		})
+	}
+}

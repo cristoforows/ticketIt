@@ -54,7 +54,7 @@ func deliverRound(ctx context.Context, tx pgx.Tx, ownerID int64, ticketID string
 		return time.Time{}, err
 	}
 	var endedAt time.Time
-	if err := tx.QueryRow(ctx, `UPDATE rounds SET state = $3, ended_at = GREATEST($4::timestamptz, started_at)
+	if err := tx.QueryRow(ctx, `UPDATE rounds SET state = $3, ended_at = GREATEST($4::timestamptz, started_at), `+leaveRunningSQL("$4")+`
 		WHERE id = $1 AND owner_id = $2 RETURNING ended_at`, roundID, ownerID, string(RoundDelivered), now).Scan(&endedAt); err != nil {
 		return time.Time{}, err
 	}

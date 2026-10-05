@@ -2,6 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import type { AwaitAnswer, AwaitApproval } from "./answerInbox.ts";
 import type { RunnerCredential } from "./credentials.ts";
 import { NOTE_MAX_LENGTH, type ActStep, type EngineScript } from "./engineScript.ts";
+
+type ActScope = Pick<ActStep, "account" | "action" | "resource">;
 import type { FetchFn } from "./galley/client.ts";
 import {
   checkAuthority,
@@ -112,11 +114,11 @@ export function answerNote(answer: string): string {
   return [...`${ANSWER_NOTE_PREFIX}${answer}`].slice(0, NOTE_MAX_LENGTH).join("");
 }
 
-export function performedNote(step: ActStep): string {
+export function performedNote(step: ActScope): string {
   return [...`Performed ${step.action} on ${step.resource}`].slice(0, NOTE_MAX_LENGTH).join("");
 }
 
-function deniedExplanation(step: ActStep, why: string): string {
+function deniedExplanation(step: ActScope, why: string): string {
   return [...`Could not ${step.action} on ${step.resource} with the ${step.account} account: ${why}`].slice(0, NOTE_MAX_LENGTH).join("");
 }
 
@@ -378,6 +380,44 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
         pending = second.decision === "allow" ? performed : failed("Galley still denies it after the Owner's approval");
         break;
       }
+      case "retry_act": {
+        const scope = { account: step.account, action: step.action, resource: step.resource };
+        // Each attempt is one answered check: a refusal is retried inside checkScope and is not an attempt.
+        for (let attempt = 1; attempt <= step.times; attempt++) {
+          if (attempt > 1) {
+            await deps.sleep(step.intervalMs, halt);
+            const goneRetrying = left();
+            if (goneRetrying !== undefined) {
+              return goneRetrying;
+            }
+            if (stop.aborted) {
+              return stopped();
+            }
+          }
+          const checked = await checkScope(options, deps, step, stepIndex);
+          if (typeof checked === "string") {
+            return settle(checked);
+          }
+          if (checked.decision === "unsupported") {
+            pending = {
+              step: "fail",
+              stepIndex,
+              event: envelope("failed", `${roundId}:${stepIndex}:failed`, { explanation: deniedExplanation(step, "the Connected Account does not declare this capability") }),
+              reported: "failure reported",
+              context: scope,
+            };
+            break;
+          }
+          if (checked.decision === "allow") {
+            pending = { step: "act", stepIndex, event: envelope("progress", `${roundId}:${stepIndex}`, { note: performedNote(step) }), reported: "action performed", context: { ...scope, attempt } };
+            break;
+          }
+        }
+        if (pending === undefined) {
+          logger.info("engine gave up retrying a denied action", { roundId, stepIndex, ...scope, times: step.times });
+        }
+        break;
+      }
       case "hold":
         logger.info("engine holding", { roundId });
         await untilAborted(halt);
@@ -502,7 +542,7 @@ async function sendEvent(options: EngineOptions, deps: EngineDeps, pending: Pend
 type ScopeDecision = AuthorityCheckResult | { decision: "unsupported" };
 
 // Asked of Galley each time the step runs, never remembered: a grant can end between two actions.
-async function checkScope(options: EngineOptions, deps: EngineDeps, step: ActStep, stepIndex: number): Promise<ScopeDecision | Exclude<SendOutcome, "sent">> {
+async function checkScope(options: EngineOptions, deps: EngineDeps, step: ActScope, stepIndex: number): Promise<ScopeDecision | Exclude<SendOutcome, "sent">> {
   const { logger, signal, claim } = options;
   const request = { fetch: options.fetch, galleyUrl: options.galleyUrl, signal, timeoutMs: options.requestTimeoutMs, credential: options.credential };
   const body = { account: step.account, action: step.action, resource: step.resource, epoch: claim.claimEpoch };

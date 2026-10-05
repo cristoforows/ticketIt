@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { LIMIT_STOPPING_LABEL } from "../api/limitBreach";
 import { UnauthenticatedError } from "../api/session";
 import { requestTicketStop, type Ticket } from "../api/tickets";
 import type { CollectionRoute } from "../router";
@@ -67,7 +68,7 @@ export function ActiveOrder({ ticket, view, onStopped, onUnauthenticated, classN
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <DeliveryIndicator reason={reason} />
         <p data-testid={`${prefix}-waiting-reason`} className="m-0 text-label font-bold tracking-label text-ink uppercase">
-          {waitingReasonLabels[reason]}
+          {reason === "stopping" && ticket.openRound.limitBreach ? LIMIT_STOPPING_LABEL : waitingReasonLabels[reason]}
         </p>
       </div>
       <div className="flex flex-wrap gap-2">

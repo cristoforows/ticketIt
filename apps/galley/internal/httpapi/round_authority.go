@@ -52,7 +52,7 @@ func (s *server) CheckRoundAuthority(w http.ResponseWriter, r *http.Request, rou
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
-	result, found, rejection, err := checkAuthority(ctx, s.pool, runner.ownerID, runner.id, roundID, scope, req.Epoch, s.clockNow())
+	result, found, rejection, err := checkAuthority(ctx, s.pool, runner.ownerID, runner.id, roundID, scope, req.Epoch, s.limits, s.clockNow())
 	switch {
 	case err != nil:
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to check authority")
@@ -88,11 +88,11 @@ func decideAuthorityCheck(round checkedRound, epoch int) *roundEventRejection {
 }
 
 // The grant is read in the check's own transaction, never from the claim: a grant committed before the check is honoured.
-// The Round row is share-locked so it cannot end or change epoch between the decision and its record. The allowing grant
-// row is share-locked too, so a revoke waits for this check to commit and a check queued behind a revoke skips the
-// revoked row: no allow commits after its grant's revocation.
+// Lock order is the event path's, which the limit check after the record needs: the Owner's priority lock, the Ticket row,
+// then the Round row, share-locked so it cannot end or change epoch between the decision and its record. A revoke takes
+// the priority lock first too, so a check never commits an allow after its grant's revocation.
 // A full-access grant matches any scope of its account, so the scope must be declared before any grant is read.
-func checkAuthority(ctx context.Context, pool *pgxpool.Pool, ownerID, runnerID int64, roundID string, scope permissionScope, epoch int, now time.Time) (AuthorityCheckResult, bool, *roundEventRejection, error) {
+func checkAuthority(ctx context.Context, pool *pgxpool.Pool, ownerID, runnerID int64, roundID string, scope permissionScope, epoch int, limits roundLimits, now time.Time) (AuthorityCheckResult, bool, *roundEventRejection, error) {
 	if reason := undeclaredCapability(scope); reason != "" {
 		return AuthorityCheckResult{}, true, &roundEventRejection{http.StatusBadRequest, capabilityNotSupportedCode, reason}, nil
 	}
@@ -101,6 +101,22 @@ func checkAuthority(ctx context.Context, pool *pgxpool.Pool, ownerID, runnerID i
 		return AuthorityCheckResult{}, false, nil, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	var ticketID string
+	err = tx.QueryRow(ctx, `SELECT t.public_id::text FROM rounds r JOIN tickets t ON t.owner_id = r.owner_id AND t.id = r.ticket_id
+		WHERE r.owner_id = $1 AND r.public_id = $2::uuid`, ownerID, roundID).Scan(&ticketID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return AuthorityCheckResult{}, false, nil, nil
+	}
+	if err != nil {
+		return AuthorityCheckResult{}, false, nil, err
+	}
+	if err := lockOwnerPriority(ctx, tx, ownerID); err != nil {
+		return AuthorityCheckResult{}, false, nil, err
+	}
+	lock, found, err := lockTicketForMutation(ctx, tx, ownerID, ticketID)
+	if err != nil || !found {
+		return AuthorityCheckResult{}, found, nil, err
+	}
 	var round checkedRound
 	var lastSeenAt *time.Time
 	var holderID *int64
@@ -143,6 +159,9 @@ func checkAuthority(ctx context.Context, pool *pgxpool.Pool, ownerID, runnerID i
 	if _, err := tx.Exec(ctx, `INSERT INTO round_authority_checks (owner_id, round_id, account, action, resource, claim_epoch, decision, grant_id, expired_grant_id, checked_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
 		ownerID, round.id, scope.account, scope.action, scope.resource, epoch, string(result.Decision), grantRowID, expiredRowID, now); err != nil {
+		return AuthorityCheckResult{}, true, nil, err
+	}
+	if err := enforceRoundLimits(ctx, tx, ownerID, round.id, lock, limits, now); err != nil {
 		return AuthorityCheckResult{}, true, nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {

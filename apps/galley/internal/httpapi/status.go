@@ -64,6 +64,7 @@ type server struct {
 	now          func() time.Time
 	devClock     *devClock
 	logger       *slog.Logger
+	limits       roundLimits
 }
 
 // newServer computes the fixed status fields once. startedAt is
@@ -80,8 +81,9 @@ func newServer(cfg config.Config, startedAt time.Time, pool *pgxpool.Pool, now f
 			Environment: StatusResponseEnvironment(cfg.Environment),
 			StartedAt:   startedAt.UTC().Format(time.RFC3339),
 		},
-		pool: pool,
-		cfg:  cfg,
+		pool:   pool,
+		cfg:    cfg,
+		limits: roundLimitsOf(cfg),
 		githubClient: &auth.GitHubClient{
 			BaseURL:      cfg.OAuthGitHubBaseURL,
 			APIBaseURL:   cfg.OAuthGitHubAPIBaseURL,

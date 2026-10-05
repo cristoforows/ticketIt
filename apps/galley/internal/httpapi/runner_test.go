@@ -51,9 +51,14 @@ var runnerEpoch = time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 
 func newRunnerFixture(t *testing.T) runnerFixture {
 	t.Helper()
+	return newRunnerFixtureWith(t, config.Config{Environment: config.EnvDevelopment, Version: "dev"})
+}
+
+func newRunnerFixtureWith(t *testing.T, cfg config.Config) runnerFixture {
+	t.Helper()
 	pool := postgres.NewEmptyMigratedTestPool(t)
 	clock := &fakeClock{now: runnerEpoch}
-	handler := NewHandlerWithClock(config.Config{Environment: config.EnvDevelopment, Version: "dev"}, time.Now(), pool, testLogger(&bytes.Buffer{}), clock.Now)
+	handler := NewHandlerWithClock(cfg, time.Now(), pool, testLogger(&bytes.Buffer{}), clock.Now)
 	return runnerFixture{handler: handler, pool: pool, cookie: mintTestSessionCookie(t, pool), clock: clock}
 }
 
