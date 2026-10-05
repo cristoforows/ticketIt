@@ -12,12 +12,12 @@ M1's bounded adapter experiments ran 18–19 September 2026; what they learned f
 | --- | --- | --- | --- |
 | D1 | Enforceable OpenCode action boundary and disconnect behavior | Prove live admission for every enabled path. Registered-tool hooks may not cover model-only continuation, shell internals, provider tools, or direct APIs. Respect the accepted direct-host v1 scope, but do not advertise unsupported granular controls. If required behavior cannot be gated, choose an integration change or obtain an explicit requirement decision. | [M1 proofs](https://github.com/cristoforows/ticketIt/issues/2); [M8 live coding gate](https://github.com/cristoforows/ticketIt/issues/9) |
 | D2 | Human-review evidence for PR completion and agent merge authority | A personal PR may be authored through the same identity that reviews/merges it; a separate GitHub approval may not be available. Define what demonstrates owner review and ensure agent access cannot silently replace the human completion decision. Evaluate owner-controlled merge plus a clearly bounded supported action surface. | [M8 review/merge implementation](https://github.com/cristoforows/ticketIt/issues/9) |
-| D3 | Agent/template compatibility and human-assigned workflow | **Resolved by Owner:** any Agent may be assigned regardless of Template; validate required inputs and actual action prerequisites, not a template/capability whitelist. Preserve completion conditions, human workflow, open-Round locks, and confirmed Stop. Temporary MVP limits must be explicit implementation limits with follow-up work. See the [accepted decision](decisions/d3-agent-template-compatibility.md) and [Owner comment](https://github.com/cristoforows/ticketIt/issues/13#issuecomment-5743245026). | Apply in M2, M4, and M8; D2/D4/D5 remain open |
+| D3 | Agent/template compatibility and human-assigned workflow | **Resolved by Owner:** any Agent may be assigned regardless of Template; validate required inputs and actual action prerequisites, not a template/capability whitelist. Preserve completion conditions, human workflow, open-Round locks, and confirmed Stop. Temporary MVP limits must be explicit implementation limits with follow-up work. See the [accepted decision](decisions/d3-agent-template-compatibility.md) and [Owner comment](https://github.com/cristoforows/ticketIt/issues/13#issuecomment-5743245026). | Apply in M2, M4, and M8; D2/D4 remain open |
 | D4 | Exceptional PR and template/repository changes | Define closed-unmerged PRs, reopening a ticket after merge, merge arrival during an open round, and changes to repository/template after delivery. Same-PR reuse is approved only until merge. Preserve prior deliveries; never infer a new PR or successful completion without a defined transition. | [M8 coding lifecycle](https://github.com/cristoforows/ticketIt/issues/9) |
-| D5 | Stranded runner and stop recovery | A lost connection does not prove execution ended, yet editing/archive require an ended round. Define evidence and owner recovery authority when a runner never returns. Evaluate explicit recovery with stale-execution fencing; no automatic duplicate execution or false stop confirmation. | [M5 controlled recovery](https://github.com/cristoforows/ticketIt/issues/6) |
+| D5 | Stranded runner and stop recovery | **Resolved by Owner** ([#171](https://github.com/cristoforows/ticketIt/issues/171)): Owner-attested recovery. The Owner attests that a stranded Round's execution ceased; Galley records what it observed and ends the Round Interrupted, even with a Stop pending, and the Ticket goes to Blocked. Claims are idempotency-keyed and runner events are fenced to the claiming runner; lost contact still ends nothing. See [M5.13](evidence/m5/171-stranded-round-recovery.md). | Shipped in [M5](evidence/m5/README.md); adapters verified in M7/M8 |
 | D6 | Grill Mode configuration and scheduling | Choose its model/profile, context access, field-application review, and scheduling relative to the single active round. Preparation needs the local service but is not an execution round. Evaluate the native configuration plus persisted interview state; do not silently create a parallel execution lane. | [M7 preparation workflow](https://github.com/cristoforows/ticketIt/issues/8) |
 | D7 | Runtime/provider selections | Owner to choose R2 or Supabase Storage. Select application/PostgreSQL hosting, native OpenRouter model, and OpenCode model/auth source. OpenRouter is approved for native research, not automatically every OpenCode configuration. Validate tool/search support and below-$10/month hosting. | [M6 storage](https://github.com/cristoforows/ticketIt/issues/7); [M7 native model](https://github.com/cristoforows/ticketIt/issues/8); [M8 OpenCode](https://github.com/cristoforows/ticketIt/issues/9); [M10 hosting](https://github.com/cristoforows/ticketIt/issues/11) |
-| D8 | In-flight manual revocation and non-budget execution limits | Subsequent actions must observe revoked authority. Define already-dispatched handling and reasonable technical loop/time limits separately from deferred spending budgets. Cancellation cannot promise to undo completed external effects. | [M5 control rules](https://github.com/cristoforows/ticketIt/issues/6); verify in M7/M8 adapters |
+| D8 | In-flight manual revocation and non-budget execution limits | **Resolved by Owner**: revoke also requests Stop of each open Round the grant covers; an already-allowed action may complete and nothing completed is undone ([#168](https://github.com/cristoforows/ticketIt/issues/168), [M5.10](evidence/m5/168-revocation.md)). Per Round, a wall-clock limit on active time and a limit on consecutive denied checks; a breach requests Stop and ends the Round Failed. Defaults 4h and 10, revisited for real engines; spending budgets stay deferred ([#172](https://github.com/cristoforows/ticketIt/issues/172), [M5.14](evidence/m5/172-technical-limits.md)). | Shipped in [M5](evidence/m5/README.md); verify in M7/M8 adapters |
 | D9 | Version and workspace retention/cleanup | Historical input/delivery preservation is approved. Define recipe/skill retirement, partial-output handling, and worktree cleanup without removing retained versions or owner work. Prefer explicit cleanup over unapproved destructive automation. | [M6 input versions](https://github.com/cristoforows/ticketIt/issues/7); [M7 Reports](https://github.com/cristoforows/ticketIt/issues/8); [M8 workspaces](https://github.com/cristoforows/ticketIt/issues/9) |
 
 ## What M1 learned, per decision
@@ -139,6 +139,8 @@ directly.
 
 ### D5 — Stranded runner and stop recovery — process-death findings
 
+**Resolved** after M1 by the Owner's decision on [#171](https://github.com/cristoforows/ticketIt/issues/171); see "What M5 observed." The findings below remain inputs for M7 and M8.
+
 M1 ran process-death scenarios on both engines and recorded consistent
 findings neither of which resolves D5, but both of which are concrete
 inputs for the real claim-epoch/runner-report reconciliation M5 owns:
@@ -194,6 +196,8 @@ admission mechanism findings (S2) apply to whichever choices D7 eventually
 makes, but do not lean toward any of them.
 
 ### D8 — In-flight manual revocation and non-budget execution limits — in-flight and limit findings
+
+**Resolved** after M1 by the Owner's decisions on [#168](https://github.com/cristoforows/ticketIt/issues/168) and [#172](https://github.com/cristoforows/ticketIt/issues/172); see "What M5 observed." The findings below remain inputs for M7 and M8.
 
 - **Already-dispatched actions complete.** Across every admission
   substitute M1 built (the ledger itself, the OpenCode bridge, the native
@@ -413,6 +417,35 @@ A delivered Coding Ticket stays In Review with Accept refused (`reviewed_pr_merg
 ### D3 — Implemented, not further resolved
 
 Readiness follows the Agent's kind, never the Template; Agent-assigned In Progress, In Review and Blocked are execution-owned; assignment and field edits are locked during an open Round ([#128](https://github.com/cristoforows/ticketIt/issues/128), [#133](https://github.com/cristoforows/ticketIt/issues/133)). `TestNoTemplateToCapabilityMapping` is unchanged.
+
+## What M5 observed, per decision
+
+[M5's gate](evidence/m5/README.md) on #159–#172 records the Owner's D5 and D8 decisions as shipped. D1, D6, D7 and D9 are untouched: M5 runs only Michelin's controlled engine against the substitute Connected Account, with no OpenCode, Grill Mode, provider or cleanup behaviour.
+
+### D5 — Resolved: Owner-attested recovery
+
+The Owner decided on [#171](https://github.com/cristoforows/ticketIt/issues/171) that the Owner attests a stranded Round's cessation ([M5.13](evidence/m5/171-stranded-round-recovery.md)):
+
+- `POST /api/tickets/{id}/rounds/{roundId}/attest-cessation` takes a basis (`runner_process_ended`, `runner_host_off`, or `other` with a note). It is offered unless the claiming runner is the Owner's current runner, connected, and its last Reconcile did not report `unknown`.
+- The Round ends Interrupted, even with a Stop pending, which is never delivered; the Ticket moves to Blocked and the slot is freed. A later report is `round_not_open`.
+- The attestation records what Galley observed (holder health, last seen, last Reconcile belief). It is the Owner's assertion, not Galley's proof.
+- The M4 inputs are closed: claims carry an `idempotencyKey` and replay with `200`; events, checks and acknowledgements from another runner are `409 runner_not_holder`; Michelin stops retrying a report after 5 minutes and reconciles. [M5.12](evidence/m5/170-reconcile.md)'s Reconcile answers `hold` for unknown execution. No timeout ends a Round.
+
+Two processes sharing one credential are one runner ([#193](https://github.com/cristoforows/ticketIt/issues/193)). The Owner's reconfirmation of the choices made inside the decision is [#196](https://github.com/cristoforows/ticketIt/issues/196).
+
+### D8 — Resolved: revocation requests Stop; two technical limits
+
+- The Owner decided on [#168](https://github.com/cristoforows/ticketIt/issues/168) that revoke also requests Stop ([M5.10](evidence/m5/168-revocation.md)). A revoked grant allows no later check; each open Round it covers gets the Owner's one Stop and an `authority_changed` command. An action allowed before the revocation may complete and stays recorded. Expiry sends no command.
+- The Owner decided on [#172](https://github.com/cristoforows/ticketIt/issues/172) on per-Round limits ([M5.14](evidence/m5/172-technical-limits.md)): active time (`GALLEY_ROUND_MAX_ACTIVE_DURATION`, default 4h) and consecutive denied checks (`GALLEY_ROUND_MAX_CONSECUTIVE_DENIALS`, default 10), measured by Galley alone. A breach requests Stop once; `stop_confirmed` then ends the Round Failed with Galley's explanation and the Ticket goes to Blocked. There are no per-Agent, per-Ticket or per-Owner overrides.
+- Spending budgets stay deferred ([#194](https://github.com/cristoforows/ticketIt/issues/194)). Real-engine defaults are [#192](https://github.com/cristoforows/ticketIt/issues/192); in-flight revocation and orphaned host processes per adapter are [#188](https://github.com/cristoforows/ticketIt/issues/188) and [#189](https://github.com/cristoforows/ticketIt/issues/189).
+
+### D3 — Done → Ready is the reopen route
+
+Following [#154](https://github.com/cristoforows/ticketIt/issues/154), [#164](https://github.com/cristoforows/ticketIt/issues/164) keeps Done → Ready through the status command as the way to reopen an Agent Ticket; Round Feedback is optional on it and on rework ([M5.6](evidence/m5/164-round-feedback.md)). Reopening never revives the ticket grants that ended at Done, and a fresh grant works ([M5.11](evidence/m5/169-grants-end-at-done.md)). `TestNoTemplateToCapabilityMapping` is unchanged.
+
+### D2 / D4 — Unchanged
+
+The reviewed-PR merge path to Done must end ticket grants as the other paths do ([#191](https://github.com/cristoforows/ticketIt/issues/191)).
 
 ## Engineering decisions within the approved design
 

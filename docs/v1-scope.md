@@ -75,7 +75,7 @@ Ticket status, round outcome, and archive visibility are separate concepts.
 | Execution actually stops unexpectedly | Blocked | Interrupted; explicit recovery required |
 | Michelin loses contact with Galley | Locked, Runner disconnected | Pause new actions; intact state may continue on reconnect |
 
-Do not automatically launch new rounds after failure, interruption, or stop. Reconnection of intact execution is continuation, not a retry of an ended round. Exact review evidence and exceptional PR cases remain open.
+Do not automatically launch new rounds after failure, interruption, or stop. Reconnection of intact execution is continuation, not a retry of an ended round. A round whose runner never returns stays open and locked until the owner attests that its execution ceased; it then ends Interrupted ([D5](open-decisions.md)). Per round, Galley limits active time and consecutive denied actions; a breach requests Stop and the round ends Failed ([D8](open-decisions.md)). An agent ticket in Done is reopened by returning it to Ready; round feedback added in In Review or Done reaches the next round once, whether it comes from rework or reopening. Exact review evidence and exceptional PR cases remain open.
 
 Human-assigned tickets do not trigger agents and are moved into In Progress by the owner. Title alone is sufficient for human Ready/In Progress; the owner may manually mark their own work Blocked and resume it. Manual progression, rework, and rejected status skips follow [D3](decisions/d3-agent-template-compatibility.md#2-human-assigned-workflow) and retain the completion condition. Human work creates no new Round but preserves earlier Agent history. Reviewed-merge evidence remains D2's decision and is implemented in M8 for both assignee kinds; no early manual Done shortcut is introduced.
 
@@ -121,7 +121,7 @@ Temporary grants have exactly two distinct forms:
 
 Never combine ticket and time restrictions into a single grant. Default requests to the current ticket; owner can choose time-based access. Either can be manually revoked. Repeated actions are allowed while the grant is valid.
 
-Check live authority before subsequent tool actions. Expired authority does not stop otherwise permitted work; request renewal only when necessary. Already-dispatched actions may complete on expiry. In-flight handling of manual revocation remains open.
+Check live authority before subsequent tool actions. Expired authority does not stop otherwise permitted work; request renewal only when necessary. Already-dispatched actions may complete on expiry. Manual revocation denies every later check at once and requests Stop of each open round the grant covers; an action already allowed may complete, and nothing completed is undone ([D8](open-decisions.md)).
 
 GitHub OAuth sign-in is separate from authorizing account actions. Michelin uses a locally configured fine-grained PAT and direct GitHub API calls, verifies account identity, and may use separately configured SSH for Git. The development agent's `gh` profile is not a product runtime dependency.
 
@@ -139,7 +139,7 @@ Track all ticket-attributable AI usage: Grill Mode preparation plus every round,
 
 Dashboard: date-range tokens/cost/active-time totals; ticket preparation/execution/total cost and round count; per-round agent, model, tokens, cost, active time, and waiting time. Filters cover ticket, agent, model, and date.
 
-Distinguish estimates and reported costs; missing data is unknown rather than zero. Track spending only in v1; budget enforcement is deferred.
+Distinguish estimates and reported costs; missing data is unknown rather than zero. Track spending only in v1; budget enforcement is deferred, separately from the technical limits above.
 
 ## Deferred scope
 
