@@ -68,7 +68,7 @@ describe("TicketBoard on phones", () => {
   it("gives an active slip its own View and Stop, with no actions toggle covering them, and no edit, move or reorder", async () => {
     const reason = { code: "round_open", message: "this Ticket has an open Round; it can be changed once the Round ends", roundId: "r1" };
     const agent = { id: "a1", name: "Builder", kind: "coding" };
-    const openRound = { id: "r1", sequence: 1, state: "running", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: "2026-10-01T10:00:01Z", stopRequestedAt: null, waitingReason: "working", question: null, permissionRequest: null };
+    const openRound = { id: "r1", sequence: 1, state: "running", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: "2026-10-01T10:00:01Z", stopRequestedAt: null, limitBreach: null, waitingReason: "working", question: null, permissionRequest: null };
     stubTickets([
       { ...ticket("locked", "Backlog"), assigneeType: "agent", assigneeAgent: agent, openRound, allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason }, rework, stop: { available: true }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } } },
       ticket("next", "Backlog", ["Ready"]),

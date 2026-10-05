@@ -583,6 +583,26 @@ claim and deliver Round 2 with epoch 2. `run.sh` runs it after
 `runner-reconcile.spec.ts` and before `active-order-slip.spec.ts`, with
 no reset.
 
+`tests/runner-limit-wall-clock.spec.ts` (issue #172) holds a real
+Michelin's Round, pauses the process (`SIGSTOP`) and walks the dev clock
+past Galley's default 4h active-time limit in 20 s steps, sending a
+heartbeat with the runner's credential after each step: Galley measures
+only when the runner calls it, and a gap past the 30 s health window
+would put the Round into Reconciling instead. The Ticket shows
+*Technical limit reached. Stopping the Round.* and the open Round's entry
+names the limit; after `SIGCONT` the Michelin confirms the Stop and
+Galley ends the Round Failed with the limit named, the Ticket Blocked
+without the Stopped Badge. It reads the measure from Galley rather than
+the browser's clock, and leaves Galley's clock four hours further ahead.
+
+`tests/runner-limit-denials.spec.ts` (issue #172) runs a real Michelin
+whose `retry_act` step checks a never-granted scope every 100 ms without
+asking for a Permission. At Galley's default limit of 10 denied checks
+the Round is stopped and ends Failed with *Denied-check limit reached:
+10 of 10* above Galley's explanation. Both specs run after
+`runner-attest.spec.ts` and before `active-order-slip.spec.ts`, with no
+reset; `run.sh` checks their exit codes.
+
 `tests/ticket-priority-order.spec.ts` reorders three Ready Tickets by
 dragging onto the upper and lower halves of board slips, then with Move
 up and Move down in the list. After each step the rendered order must

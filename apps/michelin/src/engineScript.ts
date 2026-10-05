@@ -26,12 +26,22 @@ export interface ActStep {
   resource: string;
 }
 
+export interface RetryActStep {
+  step: "retry_act";
+  account: string;
+  action: string;
+  resource: string;
+  times: number;
+  intervalMs: number;
+}
+
 export type EngineStep =
   | { step: "start" }
   | { step: "wait"; ms: number }
   | { step: "progress"; note: string }
   | { step: "ask"; question: string }
   | ActStep
+  | RetryActStep
   | UsageStep
   | DeliverStep
   | { step: "hold" }
@@ -49,6 +59,9 @@ export const MAX_USAGE_COUNT = Number.MAX_SAFE_INTEGER;
 export const BODY_MARKDOWN_MAX_BYTES = 1_048_576;
 export const SUMMARY_MAX_LENGTH = 2000;
 export const CRITERIA_ASSESSMENT_MAX_LENGTH = 10_000;
+export const MAX_RETRY_TIMES = 1000;
+export const MAX_RETRY_INTERVAL_MS = 60_000;
+export const DEFAULT_RETRY_INTERVAL_MS = 100;
 
 export const DEFAULT_ENGINE_SCRIPT: EngineScript = {
   steps: [
@@ -91,7 +104,7 @@ export const DEFAULT_ENGINE_SCRIPT: EngineScript = {
   ],
 };
 
-const SUPPORTED_STEPS = "start, wait, progress, ask, act, usage, deliver, hold, fail, interrupt";
+const SUPPORTED_STEPS = "start, wait, progress, ask, act, retry_act, usage, deliver, hold, fail, interrupt";
 
 const ACT_KEYS = ["account", "action", "resource"];
 
@@ -192,10 +205,20 @@ function parseStep(raw: unknown, index: number, total: number, problems: string[
       }
       break;
     case "act":
+    case "retry_act":
       for (const key of ACT_KEYS) {
         known.add(key);
         if (!validScopeField(fields[key])) {
           problems.push(`${at}: "${key}" must be 1 to ${LABEL_MAX_LENGTH} characters, not blank, without control characters`);
+        }
+      }
+      if (name === "retry_act") {
+        known.add("times").add("intervalMs");
+        if (!integerIn(fields["times"], 1, MAX_RETRY_TIMES)) {
+          problems.push(`${at}: "times" must be an integer from 1 to ${MAX_RETRY_TIMES}`);
+        }
+        if (fields["intervalMs"] !== undefined && !integerIn(fields["intervalMs"], 0, MAX_RETRY_INTERVAL_MS)) {
+          problems.push(`${at}: "intervalMs" must be an integer from 0 to ${MAX_RETRY_INTERVAL_MS}`);
         }
       }
       break;
@@ -224,6 +247,15 @@ function parseStep(raw: unknown, index: number, total: number, problems: string[
       return { step: "ask", question: fields["question"] as string };
     case "act":
       return { step: "act", account: fields["account"] as string, action: fields["action"] as string, resource: fields["resource"] as string };
+    case "retry_act":
+      return {
+        step: "retry_act",
+        account: fields["account"] as string,
+        action: fields["action"] as string,
+        resource: fields["resource"] as string,
+        times: fields["times"] as number,
+        intervalMs: (fields["intervalMs"] ?? DEFAULT_RETRY_INTERVAL_MS) as number,
+      };
     case "usage":
       return {
         step: "usage",
@@ -245,6 +277,10 @@ function parseStep(raw: unknown, index: number, total: number, problems: string[
     default:
       return { step: name as "start" | "hold" };
   }
+}
+
+function integerIn(value: unknown, min: number, max: number): boolean {
+  return Number.isInteger(value) && (value as number) >= min && (value as number) <= max;
 }
 
 function hasControl(text: string, allowed: string): boolean {

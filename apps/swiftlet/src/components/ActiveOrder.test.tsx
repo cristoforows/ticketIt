@@ -9,7 +9,7 @@ const jsonResponse = (body: unknown, status = 200): MockResponse => ({ ok: statu
 const agent = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kind: "research" };
 const locked = { code: "round_open", message: "Locked while atlas works on Round 2", roundId: "66666666-6666-4666-8666-666666666666" };
 const unavailable = (code: string) => ({ available: false, reason: { code, message: code } });
-const openRound = { id: locked.roundId, sequence: 2, state: "running", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: "2026-10-01T10:00:01Z", stopRequestedAt: null, waitingReason: "working", question: null, permissionRequest: null };
+const openRound = { id: locked.roundId, sequence: 2, state: "running", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: "2026-10-01T10:00:01Z", stopRequestedAt: null, limitBreach: null, waitingReason: "working", question: null, permissionRequest: null };
 const ACTIVE = {
   id: "44444444-4444-4444-8444-444444444444",
   title: "Write the report",
@@ -36,7 +36,7 @@ const ACTIVE = {
 };
 const STOPPING = {
   ...ACTIVE,
-  openRound: { ...openRound, stopRequestedAt: "2026-10-01T10:00:07Z", waitingReason: "stopping", question: null, permissionRequest: null },
+  openRound: { ...openRound, stopRequestedAt: "2026-10-01T10:00:07Z", limitBreach: null, waitingReason: "stopping", question: null, permissionRequest: null },
   permissionGrants: [],
   permissionGrantCount: 0,
   allowedActions: { ...ACTIVE.allowedActions, stop: unavailable("stop_already_requested") },
@@ -83,6 +83,14 @@ describe.each(views)("the active order slip on the $name", ({ prefix, row, query
     const indicator = slip.getByTestId("delivery-indicator");
     expect(indicator).toHaveAttribute("aria-hidden", "true");
     expect(indicator).toHaveAttribute("data-reason", waitingReason);
+  });
+
+  it("labels a Stop a technical limit requested", async () => {
+    stubGalley([{ ...STOPPING, openRound: { ...STOPPING.openRound, limitBreach: { kind: "wall_clock", limit: 14400, measured: 14400, breachedAt: "2026-10-01T10:00:07Z" } } }]);
+    renderView();
+    const slip = within(await screen.findByTestId(row(ACTIVE.id)));
+    expect(slip.getByTestId(`${prefix}-waiting-reason`)).toHaveTextContent(/^Technical limit reached\. Stopping the Round\.$/);
+    expect(slip.getByTestId("delivery-indicator")).toHaveAttribute("data-reason", "stopping");
   });
 
   it.each([

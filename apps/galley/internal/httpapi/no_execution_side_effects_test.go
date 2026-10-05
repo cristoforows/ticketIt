@@ -37,6 +37,7 @@ var knownPublicTables = []string{
 	"round_engine_references",
 	"round_events",
 	"round_feedback",
+	"round_limit_breaches",
 	"round_questions",
 	"rounds",
 	"runners",
@@ -267,6 +268,10 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 		case "round_attestations":
 			if after != before[table] {
 				t.Errorf("%s row count changed from %d to %d -- a manual lifecycle action recorded an attestation; only the Owner's attest-cessation command may", table, before[table], after)
+			}
+		case "round_limit_breaches":
+			if after != before[table] {
+				t.Errorf("%s row count changed from %d to %d -- a manual lifecycle action recorded a limit breach; only Galley's limit check on a runner's heartbeat, event or authority check may", table, before[table], after)
 			}
 		case "round_feedback":
 			if after != before[table] {

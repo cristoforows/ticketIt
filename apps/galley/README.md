@@ -168,6 +168,8 @@ than starting in an unknown state.
 | `GALLEY_OAUTH_GITHUB_BASE_URL` | `https://github.com` | Authorize/token endpoint host. Tests point this at a local fixture. |
 | `GALLEY_OAUTH_GITHUB_API_BASE_URL` | `https://api.github.com` | Identity (`/user`) endpoint host. Tests point this at a local fixture. |
 | `GALLEY_BASE_URL`     | `http://localhost:8080` in development; required in production | Browser-facing HTTP(S) origin with host and no path, query, or fragment; builds the fixed OAuth `redirect_uri`. See below. |
+| `GALLEY_ROUND_MAX_ACTIVE_DURATION` | `4h` | A Round's active-time limit: a Go duration of whole seconds from `1s` to `168h`. See "Technical execution limits" below. |
+| `GALLEY_ROUND_MAX_CONSECUTIVE_DENIALS` | `10` | A Round's denied-check limit: an integer from `1` to `1000`. See "Technical execution limits" below. |
 | `GALLEY_SESSION_TTL`  | `720h`        | Session lifetime (database expiry and cookie `Expires`), a positive Go duration (`time.ParseDuration`, e.g. `12h`, `168h`). |
 
 Example of a configuration failure:
@@ -2408,6 +2410,63 @@ request over it, triggers shutdown, and then proves the socket was
 released by successfully re-binding the exact same address — and
 manually with a real process and `kill -TERM`/`kill -INT` (see
 `docs/evidence/m2/49-galley-boot.md`).
+
+## Technical execution limits (issue #172)
+
+Galley alone measures two limits on each Round and stops a running
+Round that reaches either. Reported usage figures play no part.
+
+- **Active time** (`wall_clock`): time the Round spends `running` by
+  Galley's clock, summed across every spell. `claimed` and
+  `waiting_for_input` do not count; time with the runner disconnected
+  does. `rounds.active_ms` holds the closed spells and
+  `rounds.active_since` the open one, set only while `running`. Every
+  transition into `running` (`execution_started`, `resumed`) sets it and
+  every one out (`question_raised`, `permission_requested`, `delivered`,
+  `failed`, `interrupted`, `stop_confirmed`, attestation) folds it in, through
+  `enterRunningSQL` and `leaveRunningSQL` (`round_limits.go`). The
+  breach records seconds, floored. Migration 000029 counts a Round
+  running at the migration from its `started_at`, since no earlier
+  record says when it last left `running`; ended and waiting Rounds
+  start at `0`.
+- **Denial streak** (`denial_loop`): recorded `deny` checks since the
+  Round's last recorded `allow`. A refused check is never recorded, so
+  never counts. The check that reaches the limit still answers `deny`.
+
+`decideLimitBreach` breaches a `running` Round with no Stop requested
+when active time is at least the limit, or else the streak is. It runs
+in three places, each under the Owner's priority lock, then the Ticket
+row, then the Round row:
+
+1. the heartbeat transaction, after the Reconcile flag (lock order:
+   priority lock, runner row, Ticket row, Round row);
+2. after any accepted event that leaves the Round `running`;
+3. the authority-check transaction, after the check is recorded. The
+   check now takes the priority lock and the Ticket row, so checks and
+   revocations for one Owner are serialised.
+
+There is no background job, so a Round whose runner sends nothing is
+measured at its next heartbeat. A breach inserts one
+`round_limit_breaches` row and requests the Stop through `requestStop`,
+in one transaction: it shares the Owner's one Stop per Round, a Round
+whose Stop is already requested is never breached, and a second
+evaluation adds nothing. `limitBreach` (`kind`, `limit`, `measured`,
+`breachedAt`) is on the Ticket's `openRound` and on each Round record.
+
+`stop_confirmed` on a breached Round ends it **Failed**, not Stopped:
+the Ticket moves to Blocked without the Stopped Badge, activity and
+usage are kept, and the explanation is Galley's — `Technical limit
+reached: active time 4h0m1s exceeded the 4h0m0s limit.` or `Technical
+limit reached: 10 consecutive denied authority checks (limit 10).` The
+runner's evidence is not stored. Without a breach, `stop_confirmed`
+still ends Stopped. A late `delivered` or `failed` sent before the
+runner saw the Stop ends the Round as it says; an attestation ends it
+Interrupted. The breach row stays in every case. A Failed Round starts
+no new Round until the Owner moves the Ticket to Ready.
+
+Tests: `round_limits_test.go`, `TestLimitBreach_ResponsesMatchContract`,
+`config_test.go`, `TestRun_InvalidRoundLimitFailsStartup` and
+`TestMigration29_CountsARunningRoundFromItsStart`.
 
 ## Local PostgreSQL setup
 

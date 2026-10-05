@@ -49,16 +49,23 @@ describe("fetchTicket", () => {
   const round = { id: "66666666-6666-4666-8666-666666666666", sequence: 1, state: "running", agent, claimedAt: "2026-10-02T10:00:00Z", startedAt: "2026-10-02T10:00:01Z", waitingReason: "working", question: null, permissionRequest: null };
 
   it.each(["starting", "working", "waiting_for_answer", "waiting_for_permission", "resuming", "stopping", "runner_disconnected", "runner_replaced", "reconciling", "execution_unknown"])("keeps Galley's waiting reason %s", async (waitingReason) => {
-    const open = { ...TICKET, status: "InProgress", openRound: { ...round, stopRequestedAt: null, waitingReason } };
+    const open = { ...TICKET, status: "InProgress", openRound: { ...round, stopRequestedAt: null, limitBreach: null, waitingReason } };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => open }));
     expect((await fetchTicket(TICKET.id)).openRound?.waitingReason).toBe(waitingReason);
+  });
+
+  it("keeps the limit breach that requested a Stop", async () => {
+    const limitBreach = { kind: "wall_clock", limit: 14400, measured: 14400, breachedAt: "2026-10-02T10:00:05Z" };
+    const payload = { ...TICKET, status: "InProgress", openRound: { ...round, stopRequestedAt: "2026-10-02T10:00:05Z", limitBreach, waitingReason: "stopping" } };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => payload }));
+    expect((await fetchTicket(TICKET.id)).openRound?.limitBreach).toEqual(limitBreach);
   });
 
   it("reads the Stop availability and when Stop was requested", async () => {
     const stopping = {
       ...TICKET,
       status: "InProgress",
-      openRound: { ...round, stopRequestedAt: "2026-10-02T10:00:05Z", waitingReason: "stopping", question: null, permissionRequest: null },
+      openRound: { ...round, stopRequestedAt: "2026-10-02T10:00:05Z", limitBreach: null, waitingReason: "stopping", question: null, permissionRequest: null },
       permissionGrants: [],
       permissionGrantCount: 0,
       allowedActions: { ...TICKET.allowedActions, stop: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } },
@@ -66,12 +73,13 @@ describe("fetchTicket", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => stopping }));
     const ticket = await fetchTicket(TICKET.id);
     expect(ticket.openRound?.stopRequestedAt).toBe("2026-10-02T10:00:05Z");
+    expect(ticket.openRound?.limitBreach).toBeNull();
     expect(ticket.allowedActions.stop).toEqual(stopping.allowedActions.stop);
   });
 
   const PERMISSION_REQUEST = { id: "99999999-9999-5999-8999-999999999990", account: "controlled", action: "write_note", resource: "notes/weekly-report", substituteAccount: true, requestedAt: "2026-10-02T10:00:03Z", decision: null, decidedAt: null, grantId: null, renewsGrantId: null };
   const GRANT = { id: "12121212-1212-4121-8121-121212121212", agent, account: "controlled", full: false, action: "write_note", resource: "notes/weekly-report", substituteAccount: true, form: "ticket", state: "active", expiresAt: null, remainingSeconds: null, roundId: round.id, createdAt: "2026-10-02T10:00:09Z", approvedAt: "2026-10-02T10:00:09Z", revokedAt: null, endedAt: null, allowedActions: { revoke: { available: true } }, coveredOpenRounds: [] };
-  const permissionWaiting = { ...round, state: "waiting_for_input", stopRequestedAt: null, waitingReason: "waiting_for_permission", question: null, permissionRequest: PERMISSION_REQUEST };
+  const permissionWaiting = { ...round, state: "waiting_for_input", stopRequestedAt: null, limitBreach: null, waitingReason: "waiting_for_permission", question: null, permissionRequest: PERMISSION_REQUEST };
 
   it("reads the Permission request a waiting Round holds, the decision availability and the Ticket's grants", async () => {
     const payload = { ...TICKET, status: "Blocked", openRound: permissionWaiting, permissionGrants: [GRANT], permissionGrantCount: 1, allowedActions: { ...TICKET.allowedActions, permissionDecision: { available: true }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } } };
@@ -149,7 +157,7 @@ describe("fetchTicket", () => {
   });
 
   const question = { id: "99999999-9999-5999-8999-999999999999", text: "Which region?", askedAt: "2026-10-02T10:00:03Z", answer: null, answeredAt: null };
-  const waiting = { ...round, state: "waiting_for_input", stopRequestedAt: null, waitingReason: "waiting_for_answer", question, permissionRequest: null };
+  const waiting = { ...round, state: "waiting_for_input", stopRequestedAt: null, limitBreach: null, waitingReason: "waiting_for_answer", question, permissionRequest: null };
 
   it("reads the question a waiting Round holds and the Answer availability", async () => {
     const payload = { ...TICKET, status: "Blocked", openRound: waiting, allowedActions: { ...TICKET.allowedActions, answer: { available: true } } };
@@ -167,20 +175,23 @@ describe("fetchTicket", () => {
   });
 
   it.each([
+    ["an open Round without limitBreach", { ...TICKET, openRound: { ...round, stopRequestedAt: null, limitBreach: undefined } }],
+    ["a limitBreach without a Stop", { ...TICKET, openRound: { ...round, stopRequestedAt: null, limitBreach: { kind: "denial_loop", limit: 1, measured: 1, breachedAt: "2026-10-02T10:00:05Z" } } }],
+    ["a malformed limitBreach", { ...TICKET, openRound: { ...round, stopRequestedAt: "2026-10-02T10:00:05Z", limitBreach: { kind: "denial_loop", limit: 2, measured: 1, breachedAt: "2026-10-02T10:00:05Z" } } }],
     ["an open Round without stopRequestedAt", { ...TICKET, openRound: round }],
     ["a numeric stopRequestedAt", { ...TICKET, openRound: { ...round, stopRequestedAt: 5 } }],
-    ["an open Round without waitingReason", { ...TICKET, openRound: { ...round, stopRequestedAt: null, waitingReason: undefined } }],
-    ["an unknown waitingReason", { ...TICKET, openRound: { ...round, stopRequestedAt: null, waitingReason: "waiting_for_input" } }],
+    ["an open Round without waitingReason", { ...TICKET, openRound: { ...round, stopRequestedAt: null, limitBreach: null, waitingReason: undefined } }],
+    ["an unknown waitingReason", { ...TICKET, openRound: { ...round, stopRequestedAt: null, limitBreach: null, waitingReason: "waiting_for_input" } }],
     ["no Stop availability", { ...TICKET, allowedActions: { ...TICKET.allowedActions, stop: undefined } }],
     ["no Answer availability", { ...TICKET, allowedActions: { ...TICKET.allowedActions, answer: undefined } }],
     ["no Feedback availability", { ...TICKET, allowedActions: { ...TICKET.allowedActions, feedback: undefined } }],
     ["a waiting Round without its question", { ...TICKET, openRound: { ...waiting, question: null, permissionRequest: null } }],
     ["a running Round with a question", { ...TICKET, openRound: { ...waiting, state: "running", waitingReason: "working" } }],
-    ["an open Round with no question field", { ...TICKET, openRound: { ...round, stopRequestedAt: null, question: undefined } }],
+    ["an open Round with no question field", { ...TICKET, openRound: { ...round, stopRequestedAt: null, limitBreach: null, question: undefined } }],
     ["a question with an answer but no answeredAt", { ...TICKET, openRound: { ...waiting, question: { ...question, answer: "Yes" } } }],
     ["a question without its text", { ...TICKET, openRound: { ...waiting, question: { ...question, text: undefined } } }],
     ["a waiting Round with both a question and a Permission request", { ...TICKET, openRound: { ...waiting, permissionRequest: PERMISSION_REQUEST } }],
-    ["a running Round with a Permission request", { ...TICKET, openRound: { ...round, stopRequestedAt: null, permissionRequest: PERMISSION_REQUEST } }],
+    ["a running Round with a Permission request", { ...TICKET, openRound: { ...round, stopRequestedAt: null, limitBreach: null, permissionRequest: PERMISSION_REQUEST } }],
     ["an open Round with no permissionRequest field", { ...TICKET, openRound: { ...waiting, permissionRequest: undefined } }],
     ["a Permission request without substituteAccount", { ...TICKET, openRound: { ...permissionWaiting, permissionRequest: { ...PERMISSION_REQUEST, substituteAccount: undefined } } }],
     ["a decision without decidedAt", { ...TICKET, openRound: { ...permissionWaiting, permissionRequest: { ...PERMISSION_REQUEST, decision: "declined" } } }],

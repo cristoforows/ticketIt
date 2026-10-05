@@ -145,7 +145,7 @@ The terminal outcome of a **Round** whose runner reported, with its own evidence
 _Avoid_: Failed when only an unexpected interruption, rather than a work failure, is known.
 
 **Stopping**:
-The condition of an open **Round** after the owner has requested Stop and before its execution is confirmed to have ended. It is not a **Status**: the **Ticket** keeps its Status and stays locked until the round ends as **Stopped**.
+The condition of an open **Round** after the owner, or a **Technical Limit**, has requested Stop and before its execution is confirmed to have ended. It is not a **Status**: the **Ticket** keeps its Status and stays locked until the round ends as **Stopped**.
 _Avoid_: Stopped while the round is still open.
 
 **Waiting Reason**:
@@ -169,12 +169,16 @@ The owner's explicit statement, with its basis, that a **Stranded Round**'s exec
 _Avoid_: Stop, which needs the runner's confirmation; force-close.
 
 **Stopped**:
-The terminal outcome of a **Round** whose runner has confirmed its execution ended following the owner's explicit stop request. Its **Ticket** returns to **Backlog** with the Stopped **Badge**, an ordinary Badge the owner may remove without changing the outcome; the round's activity and usage remain part of its history. Only an explicit move to Ready starts another round.
+The terminal outcome of a **Round** whose runner has confirmed its execution ended following the owner's explicit stop request, not a **Technical Limit**'s. Its **Ticket** returns to **Backlog** with the Stopped **Badge**, an ordinary Badge the owner may remove without changing the outcome; the round's activity and usage remain part of its history. Only an explicit move to Ready starts another round.
 _Avoid_: Interrupted when the round ended through an intentional stop request.
 
 **Failed**:
-The terminal outcome of a **Round** whose agent cannot complete the work after investigation and reasonable attempts. The **Ticket** becomes **Blocked**, and the round's activity, usage and the runner's explanation of the failure remain part of its history. Only the owner's explicit move back to **Ready** starts another round.
+The terminal outcome of a **Round** whose agent cannot complete the work after investigation and reasonable attempts, or whose runner confirmed the Stop a **Technical Limit** requested. The **Ticket** becomes **Blocked**, and the round's activity, usage and the runner's explanation of the failure, or Galley's of the limit, remain part of its history. Only the owner's explicit move back to **Ready** starts another round.
 _Avoid_: Interrupted for a known inability to complete the work; stopped for an outcome not requested by the owner.
+
+**Technical Limit**:
+A bound Galley alone measures on a running **Round**: its active time, counted only while it is running, and its consecutive denied authority checks since the last allowed one. Reaching either requests Stop once, through the owner's Stop, unless a Stop is already requested; the round is **Stopping** until the runner confirms, then **Failed**. It is a safeguard against runaway work, not a budget, and reported usage plays no part.
+_Avoid_: Budget, quota or timeout; time alone never ends a round.
 
 ## Example dialogue
 

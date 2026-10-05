@@ -1,5 +1,6 @@
 import type { components } from "./generated/schema";
 import { isAgentSummary } from "./agents";
+import { parseLimitBreach } from "./limitBreach";
 import { authenticatedFetch, GalleyError, isNullableString, parseErrorDetail } from "./http";
 import { parsePermissionRequest, parseRoundQuestion, TicketNotFoundError, type PermissionRequest, type RoundQuestion } from "./tickets";
 
@@ -165,7 +166,8 @@ function parseRound(value: unknown): TicketRound | undefined {
   const authorityChecks = parseAuthorityChecks(round.authorityChecks);
   const authorityCheckCount = round.authorityCheckCount;
   const attestation = round.attestation === null ? null : round.state === "interrupted" ? parseAttestation(round.attestation) : undefined;
-  if (!usage || deliverable === undefined || outcomeNote === undefined || !activity || !questions || !feedback || !permissionRequests || !authorityChecks || attestation === undefined) return undefined;
+  const limitBreach = parseLimitBreach(round.limitBreach);
+  if (!usage || deliverable === undefined || outcomeNote === undefined || !activity || !questions || !feedback || !permissionRequests || !authorityChecks || attestation === undefined || limitBreach === undefined) return undefined;
   if (!Number.isSafeInteger(authorityCheckCount) || (authorityCheckCount as number) < authorityChecks.length) return undefined;
   const { id, name, kind } = round.agent;
   return {
@@ -187,6 +189,7 @@ function parseRound(value: unknown): TicketRound | undefined {
     authorityChecks,
     authorityCheckCount: authorityCheckCount as number,
     attestation,
+    limitBreach,
   };
 }
 

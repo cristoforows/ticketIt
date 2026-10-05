@@ -34,6 +34,18 @@ var roundEndings = map[RoundEventType]roundEnding{
 	RoundEventInterrupted:   {state: RoundInterrupted, ticketStatus: Blocked},
 }
 
+// A Stop a technical limit requested ends the Round Failed: the Owner did not ask for it (#172).
+func stopConfirmedEnding(breach *RoundLimitBreach, evidence string) roundEnding {
+	if breach == nil {
+		ending := roundEndings[RoundEventStopConfirmed]
+		ending.note = evidence
+		return ending
+	}
+	ending := roundEndings[RoundEventFailed]
+	ending.note = limitBreachExplanation(*breach)
+	return ending
+}
+
 func ticketStatusHeldBy(state RoundState) TicketStatus {
 	switch state {
 	case RoundClaimed:
@@ -64,7 +76,7 @@ func validateOutcomeNoteData(raw []byte, field string) (string, string) {
 func endRound(ctx context.Context, tx pgx.Tx, ownerID int64, ticketID string, roundID int64, from RoundState, ending roundEnding, now time.Time) (time.Time, error) {
 	var endedAt time.Time
 	if err := tx.QueryRow(ctx, `UPDATE rounds SET state = $3, outcome_note = $4, ended_at = GREATEST($5::timestamptz, COALESCE(started_at, claimed_at)),
-			waiting_question_id = NULL, waiting_permission_request_id = NULL
+			waiting_question_id = NULL, waiting_permission_request_id = NULL, `+leaveRunningSQL("$5")+`
 		WHERE id = $1 AND owner_id = $2 RETURNING ended_at`, roundID, ownerID, string(ending.state), ending.note, now).Scan(&endedAt); err != nil {
 		return time.Time{}, err
 	}

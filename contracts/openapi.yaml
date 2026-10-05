@@ -1362,7 +1362,9 @@ paths:
       description: >-
         Records last-seen. When the previous last-seen is absent or at
         least the 30 s health window old by Galley's clock, the Owner's
-        open Round, if any, is flagged as needing a Reconcile. A
+        open Round, if any, is flagged as needing a Reconcile. Then
+        Galley checks that Round's technical limits (see
+        `RoundLimitBreach`). A
         credential that has not registered since it was issued returns
         `409 runner_not_registered`.
       security:
@@ -1519,14 +1521,18 @@ paths:
         Owner's slot and moves the Ticket from In Progress to In Review,
         never Done. `stop_confirmed` ends the Round as `stopped` with its
         evidence, frees the slot and moves the Ticket to Backlog with the
-        Stopped Badge. `failed` and `interrupted` end the Round as
+        Stopped Badge; on a Round with a `limitBreach` it ends the Round
+        as `failed` instead, with Galley's explanation of the breach, and
+        moves the Ticket to Blocked without the Badge. `failed` and `interrupted` end the Round as
         `failed` or `interrupted` with the explanation or evidence, free
         the slot and move the Ticket to Blocked; no Round starts until
         the Owner moves it to Ready. A body over 8 MiB
         is `413 request_too_large`. A
         rejection changes nothing. An unknown, malformed or foreign Round
         id returns the shared 404. A runner that is not Connected is
-        still accepted, and an event is not a heartbeat.
+        still accepted, and an event is not a heartbeat. After an
+        accepted event, Galley checks the Round's technical limits (see
+        `RoundLimitBreach`).
       security:
         - runnerBearer: []
       requestBody:
@@ -1589,7 +1595,10 @@ paths:
         runner_disconnected` while the runner is not connected by
         Galley's clock, `409 reconcile_required` while the Round awaits a
         Reconcile, and `409 round_not_running` for one claimed or waiting
-        for input. A rejection records nothing and is not a deny. An
+        for input. A rejection records nothing and is not a deny. A
+        recorded check is followed by the Round's technical limits (see
+        `RoundLimitBreach`); the check that reaches the denial limit
+        still answers `deny`. An
         unknown, malformed or foreign Round id returns the shared 404.
       security:
         - runnerBearer: []
@@ -2326,7 +2335,7 @@ components:
     TicketOpenRound:
       type: object
       additionalProperties: false
-      required: [id, sequence, state, agent, claimedAt, startedAt, stopRequestedAt, waitingReason, question, permissionRequest]
+      required: [id, sequence, state, agent, claimedAt, startedAt, stopRequestedAt, limitBreach, waitingReason, question, permissionRequest]
       properties:
         id: {type: string, format: uuid, x-go-type: string}
         sequence: {type: integer, minimum: 1}
@@ -2341,6 +2350,11 @@ components:
           type: [string, "null"]
           format: date-time
           description: When the Owner requested Stop; the Ticket shows Stopping. Not a Status.
+        limitBreach:
+          description: Set when a technical limit requested this Stop.
+          oneOf:
+            - $ref: "#/components/schemas/RoundLimitBreach"
+            - type: "null"
         waitingReason:
           $ref: "#/components/schemas/RoundWaitingReason"
         question:
@@ -2370,7 +2384,7 @@ components:
     TicketRound:
       type: object
       additionalProperties: false
-      required: [id, sequence, state, agent, claimedAt, startedAt, endedAt, activity, earlierActivityCursor, usage, deliverable, outcomeNote, questions, feedback, permissionRequests, authorityChecks, authorityCheckCount, attestation]
+      required: [id, sequence, state, agent, claimedAt, startedAt, endedAt, activity, earlierActivityCursor, usage, deliverable, outcomeNote, questions, feedback, permissionRequests, authorityChecks, authorityCheckCount, attestation, limitBreach]
       properties:
         id: {type: string, format: uuid, x-go-type: string}
         sequence: {type: integer, minimum: 1}
@@ -2430,6 +2444,33 @@ components:
           oneOf:
             - $ref: "#/components/schemas/RoundAttestation"
             - type: "null"
+        limitBreach:
+          description: The technical limit the Round breached; null when none.
+          oneOf:
+            - $ref: "#/components/schemas/RoundLimitBreach"
+            - type: "null"
+    RoundLimitBreachKind:
+      type: string
+      enum: [wall_clock, denial_loop]
+      x-enum-varnames: [LimitWallClock, LimitDenialLoop]
+    RoundLimitBreach:
+      type: object
+      additionalProperties: false
+      required: [kind, limit, measured, breachedAt]
+      description: >-
+        Measured by Galley alone, never from a usage figure, while the
+        Round is `running` and no Stop is requested. `wall_clock`:
+        seconds the Round has spent `running` reached
+        `GALLEY_ROUND_MAX_ACTIVE_DURATION`. `denial_loop`: denied
+        authority checks since the Round's last allowed one reached
+        `GALLEY_ROUND_MAX_CONSECUTIVE_DENIALS`. A breach requests Stop
+        once, sharing the Owner's one Stop per Round.
+      properties:
+        kind:
+          $ref: "#/components/schemas/RoundLimitBreachKind"
+        limit: {type: integer, minimum: 1, format: int64}
+        measured: {type: integer, minimum: 1, format: int64}
+        breachedAt: {type: string, format: date-time}
     AttestationBasis:
       type: string
       enum: [runner_process_ended, runner_host_off, other]

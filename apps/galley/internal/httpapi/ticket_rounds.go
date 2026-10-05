@@ -32,7 +32,7 @@ func (s *server) ListTicketRounds(w http.ResponseWriter, r *http.Request, id str
 	writeJSON(w, http.StatusOK, TicketRoundList{Rounds: rounds})
 }
 
-// One read-only snapshot, so a Round's activity, usage, questions, feedback, Permission requests, authority checks and attestation agree with each other and with the Round.
+// One read-only snapshot, so a Round's activity, usage, questions, feedback, Permission requests, authority checks, attestation and limit breach agree with each other and with the Round.
 func listRoundsForTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64, ticketID string) ([]TicketRound, bool, error) {
 	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
@@ -105,6 +105,10 @@ func listRoundsForTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64,
 	if err != nil {
 		return nil, false, err
 	}
+	breaches, err := roundLimitBreaches(ctx, tx, ownerID, ids)
+	if err != nil {
+		return nil, false, err
+	}
 	for i, id := range ids {
 		rounds[i].Activity = activity[id].Activity
 		rounds[i].EarlierActivityCursor = activity[id].EarlierActivityCursor
@@ -127,6 +131,7 @@ func listRoundsForTicket(ctx context.Context, pool *pgxpool.Pool, ownerID int64,
 		}
 		rounds[i].AuthorityCheckCount = checks[id].count
 		rounds[i].Attestation = attestations[id]
+		rounds[i].LimitBreach = breaches[id]
 	}
 	return rounds, true, nil
 }

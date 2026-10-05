@@ -232,7 +232,7 @@ describe("open-Round lock", () => {
     assigneeType: "agent",
     assigneeAgent: agent,
     badges: [{ id: BADGE.id, name: BADGE.name }],
-    openRound: { id: reason.roundId, sequence: 4, state: "running", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: "2026-10-01T10:01:00Z", stopRequestedAt: null, waitingReason: "working", question: null, permissionRequest: null },
+    openRound: { id: reason.roundId, sequence: 4, state: "running", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: "2026-10-01T10:01:00Z", stopRequestedAt: null, limitBreach: null, waitingReason: "working", question: null, permissionRequest: null },
     permissionGrants: [],
     permissionGrantCount: 0,
     allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } },
@@ -627,7 +627,7 @@ describe("TicketDetail", () => {
       });
 
       it("shows Claimed by runner only while Galley reports the open Round as claimed", () => {
-        const round = { id: "r1", sequence: 1, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null, waitingReason: "starting" as const, question: null, permissionRequest: null };
+        const round = { id: "r1", sequence: 1, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null, limitBreach: null, waitingReason: "starting" as const, question: null, permissionRequest: null };
         const { rerender } = render(<TicketDetail ticket={{ ...agentTicket, status: "Ready", openRound: { ...round, state: "claimed" } }} onSave={vi.fn()} {...noopActions()} />);
         expect(screen.getByTestId("ticket-detail-claimed")).toHaveTextContent("Claimed by runner");
         expect(screen.queryByTestId("ticket-detail-queued")).not.toBeInTheDocument();
@@ -744,7 +744,7 @@ describe("the Rounds section", () => {
   afterEach(cleanup);
 
   const agent = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kind: "research" as const };
-  const claimedRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 3, state: "claimed" as const, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null, waitingReason: "starting" as const, question: null, permissionRequest: null };
+  const claimedRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 3, state: "claimed" as const, agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: null, stopRequestedAt: null, limitBreach: null, waitingReason: "starting" as const, question: null, permissionRequest: null };
   const runningRound = { ...claimedRound, state: "running" as const, startedAt: "2026-10-01T10:01:00Z", waitingReason: "working" as const };
   const usage = {
     observations: 0,
@@ -773,7 +773,7 @@ describe("the Rounds section", () => {
     feedback: [],
     permissionRequests: [],
     authorityChecks: [],
-    authorityCheckCount: 0, attestation: null,
+    authorityCheckCount: 0, attestation: null, limitBreach: null,
   });
   const roundTicket = (openRound: Ticket["openRound"], status: Ticket["status"] = "Ready"): Ticket => ({
     ...REFINED_TICKET,
@@ -1139,6 +1139,32 @@ describe("the Rounds section", () => {
       expect(screen.queryByTestId("ticket-detail-locked")).not.toBeInTheDocument();
     });
 
+    it.each([
+      [{ kind: "wall_clock" as const, limit: 14400, measured: 14401 }, "Active time limit reached: 4h0m1s of 4h0m0s", "Technical limit reached: active time 4h0m1s exceeded the 4h0m0s limit."],
+      [{ kind: "denial_loop" as const, limit: 10, measured: 10 }, "Denied-check limit reached: 10 of 10", "Technical limit reached: 10 consecutive denied authority checks (limit 10)."],
+    ])("puts the breached limit above Galley's explanation on a Failed Round", (breach, label, explanation) => {
+      const failed: TicketRound = { ...recordOf(runningRound), state: "failed", endedAt: "2026-10-01T10:05:00Z", outcomeNote: explanation, limitBreach: { ...breach, breachedAt: "2026-10-01T10:04:00Z" } };
+      render(<TicketDetail ticket={roundTicket(null, "Blocked")} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [failed] }} />);
+      const outcome = within(entries()[0]).getByRole("region", { name: "Outcome" });
+      expect(within(outcome).getByTestId("ticket-detail-round-limit-breach")).toHaveTextContent(new RegExp(`^${label}$`));
+      expect(within(outcome).getByTestId("ticket-detail-round-outcome-note")).toHaveTextContent(explanation);
+      expect(within(outcome).getByTestId("ticket-detail-round-limit-breach").compareDocumentPosition(within(outcome).getByTestId("ticket-detail-round-outcome-note")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("names the breached limit on a Round that is still Stopping", () => {
+      const stopping: TicketRound = { ...recordOf(runningRound), limitBreach: { kind: "denial_loop", limit: 10, measured: 10, breachedAt: "2026-10-01T10:04:00Z" } };
+      render(<TicketDetail ticket={roundTicket(null)} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [stopping] }} />);
+      const entry = within(entries()[0]);
+      expect(entry.getByTestId("ticket-detail-round-limit-breach")).toHaveTextContent(/^Denied-check limit reached: 10 of 10$/);
+      expect(entry.queryByRole("region", { name: "Outcome" })).not.toBeInTheDocument();
+    });
+
+    it("names no limit on a Round a breach did not end Failed", () => {
+      const delivered: TicketRound = { ...recordOf(runningRound), state: "stopped", endedAt: "2026-10-01T10:05:00Z", outcomeNote: "Stopped", limitBreach: { kind: "denial_loop", limit: 1, measured: 1, breachedAt: "2026-10-01T10:04:00Z" } };
+      render(<TicketDetail ticket={roundTicket(null, "Backlog")} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [delivered] }} />);
+      expect(screen.queryByTestId("ticket-detail-round-limit-breach")).not.toBeInTheDocument();
+    });
+
     it("shows the records error beside the last good list", () => {
       render(<TicketDetail ticket={deliveredTicket} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [round2, round1], error: "503" }} />);
       expect(screen.getByTestId("ticket-detail-round-records-error")).toHaveTextContent("503");
@@ -1244,7 +1270,7 @@ describe("Stop", () => {
   });
 
   const agent = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kind: "research" as const };
-  const runningRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 2, state: "running" as const, agent, claimedAt: "2026-10-02T10:00:00Z", startedAt: "2026-10-02T10:00:01Z", stopRequestedAt: null, waitingReason: "working" as const, question: null, permissionRequest: null };
+  const runningRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 2, state: "running" as const, agent, claimedAt: "2026-10-02T10:00:00Z", startedAt: "2026-10-02T10:00:01Z", stopRequestedAt: null, limitBreach: null, waitingReason: "working" as const, question: null, permissionRequest: null };
   const locked = { code: "round_open", message: "Locked while atlas works on Round 2", roundId: runningRound.id };
   const running: Ticket = {
     ...REFINED_TICKET,
@@ -1258,7 +1284,7 @@ describe("Stop", () => {
   };
   const stopping: Ticket = {
     ...running,
-    openRound: { ...runningRound, stopRequestedAt: "2026-10-02T10:00:05Z", waitingReason: "stopping", question: null, permissionRequest: null },
+    openRound: { ...runningRound, stopRequestedAt: "2026-10-02T10:00:05Z", limitBreach: null, waitingReason: "stopping", question: null, permissionRequest: null },
     permissionGrants: [],
     permissionGrantCount: 0,
     allowedActions: { ...running.allowedActions, stop: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } },
@@ -1292,8 +1318,14 @@ describe("Stop", () => {
     expect(screen.queryByTestId("ticket-detail-stop-button")).not.toBeInTheDocument();
   });
 
+  it("says a technical limit is stopping the Round when Galley recorded a breach", () => {
+    const limited: Ticket = { ...stopping, openRound: { ...stopping.openRound!, limitBreach: { kind: "denial_loop", limit: 10, measured: 10, breachedAt: "2026-10-02T10:00:05Z" } } };
+    render(<TicketDetail ticket={limited} onSave={vi.fn()} {...noopActions()} />);
+    expect(screen.getByTestId("ticket-detail-stopping")).toHaveTextContent(/^Technical limit reached\. Stopping the Round\.$/);
+  });
+
   it("shows Stopping beside the claimed tag for a claimed Round", () => {
-    const claimedStopping: Ticket = { ...stopping, status: "Ready", openRound: { ...runningRound, state: "claimed", startedAt: null, stopRequestedAt: "2026-10-02T10:00:05Z", waitingReason: "stopping", question: null, permissionRequest: null } };
+    const claimedStopping: Ticket = { ...stopping, status: "Ready", openRound: { ...runningRound, state: "claimed", startedAt: null, stopRequestedAt: "2026-10-02T10:00:05Z", limitBreach: null, waitingReason: "stopping", question: null, permissionRequest: null } };
     render(<TicketDetail ticket={claimedStopping} onSave={vi.fn()} {...noopActions()} />);
     expect(screen.getByTestId("ticket-detail-claimed")).toBeInTheDocument();
     expect(screen.getByTestId("ticket-detail-stopping")).toHaveTextContent("Stopping…");
@@ -1327,7 +1359,7 @@ describe("a question from the Agent", () => {
 
   const agent = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kind: "research" as const };
   const question = { id: "99999999-9999-5999-8999-999999999999", text: "Which region should the report cover?", askedAt: "2026-10-02T10:00:03Z", answer: null, answeredAt: null };
-  const waitingRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 1, state: "waiting_for_input" as const, agent, claimedAt: "2026-10-02T10:00:00Z", startedAt: "2026-10-02T10:00:01Z", stopRequestedAt: null, waitingReason: "waiting_for_answer" as const, question, permissionRequest: null };
+  const waitingRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 1, state: "waiting_for_input" as const, agent, claimedAt: "2026-10-02T10:00:00Z", startedAt: "2026-10-02T10:00:01Z", stopRequestedAt: null, limitBreach: null, waitingReason: "waiting_for_answer" as const, question, permissionRequest: null };
   const notAvailable = { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } };
   const usage = {
     observations: 0,
@@ -1408,7 +1440,7 @@ describe("a question from the Agent", () => {
   });
 
   it("names why an answer cannot be sent when Galley offers none", () => {
-    const stopping: Ticket = { ...waiting, openRound: { ...waitingRound, stopRequestedAt: "2026-10-02T10:00:05Z", waitingReason: "stopping" }, allowedActions: { ...waiting.allowedActions, stop: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } }, answer: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } } } };
+    const stopping: Ticket = { ...waiting, openRound: { ...waitingRound, stopRequestedAt: "2026-10-02T10:00:05Z", limitBreach: null, waitingReason: "stopping" }, allowedActions: { ...waiting.allowedActions, stop: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } }, answer: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } } } };
     render(<TicketDetail ticket={stopping} onSave={vi.fn()} {...noopActions()} onAnswer={answerQuestion()} />);
     expect(screen.getByTestId("ticket-detail-question-text")).toHaveTextContent("Which region should the report cover?");
     expect(screen.queryByTestId("ticket-detail-answer-form")).not.toBeInTheDocument();
@@ -1486,7 +1518,7 @@ describe("feedback for the next Round", () => {
     feedback,
     permissionRequests: [],
     authorityChecks: [],
-    authorityCheckCount: 0, attestation: null,
+    authorityCheckCount: 0, attestation: null, limitBreach: null,
   });
   const addFeedback = () => vi.fn<(roundId: string, body: string) => Promise<Ticket>>();
 
@@ -1573,7 +1605,7 @@ describe("a Permission request from the Agent", () => {
   const grantId = "12121212-1212-4121-8121-121212121212";
   const approved = { ...request, decision: "approved" as const, decidedAt: "2026-10-02T10:00:09Z", grantId };
   const declined = { ...request, decision: "declined" as const, decidedAt: "2026-10-02T10:00:09Z" };
-  const waitingRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 1, state: "waiting_for_input" as const, agent, claimedAt: "2026-10-02T10:00:00Z", startedAt: "2026-10-02T10:00:01Z", stopRequestedAt: null, waitingReason: "waiting_for_permission" as const, question: null, permissionRequest: request };
+  const waitingRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 1, state: "waiting_for_input" as const, agent, claimedAt: "2026-10-02T10:00:00Z", startedAt: "2026-10-02T10:00:01Z", stopRequestedAt: null, limitBreach: null, waitingReason: "waiting_for_permission" as const, question: null, permissionRequest: request };
   const usage = {
     observations: 0,
     complete: true,
@@ -1609,7 +1641,7 @@ describe("a Permission request from the Agent", () => {
   });
 
   it("offers no decision Galley does not advertise, and names why", () => {
-    const stopping: Ticket = { ...waiting, openRound: { ...waitingRound, stopRequestedAt: "2026-10-02T10:00:05Z", waitingReason: "stopping" }, allowedActions: { ...waiting.allowedActions, permissionDecision: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } } };
+    const stopping: Ticket = { ...waiting, openRound: { ...waitingRound, stopRequestedAt: "2026-10-02T10:00:05Z", limitBreach: null, waitingReason: "stopping" }, allowedActions: { ...waiting.allowedActions, permissionDecision: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } } };
     render(<TicketDetail ticket={stopping} onSave={vi.fn()} {...noopActions()} onDecidePermission={decide()} />);
     expect(screen.queryByTestId("ticket-detail-permission-actions")).not.toBeInTheDocument();
     expect(screen.getByTestId("ticket-detail-permission-unavailable")).toHaveTextContent("Stop is already requested for this Round");
@@ -1887,7 +1919,7 @@ describe("revoking a grant", () => {
   afterEach(cleanup);
 
   const agent = { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "atlas", kind: "research" as const };
-  const runningRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 2, state: "running" as const, agent, claimedAt: "2026-10-02T10:00:00Z", startedAt: "2026-10-02T10:00:01Z", stopRequestedAt: null, waitingReason: "working" as const, question: null, permissionRequest: null };
+  const runningRound = { id: "66666666-6666-4666-8666-666666666666", sequence: 2, state: "running" as const, agent, claimedAt: "2026-10-02T10:00:00Z", startedAt: "2026-10-02T10:00:01Z", stopRequestedAt: null, limitBreach: null, waitingReason: "working" as const, question: null, permissionRequest: null };
   const covered = { roundId: runningRound.id, sequence: 2, ticketId: REFINED_TICKET.id, ticketTitle: "Write the weekly report" };
   const grant = { id: "12121212-1212-4121-8121-121212121212", agent, account: "controlled", full: false, action: "write_note", resource: "notes/weekly-report", substituteAccount: false, form: "ticket" as const, state: "active" as const, expiresAt: null, remainingSeconds: null, roundId: runningRound.id, createdAt: "2026-10-02T10:00:09Z", approvedAt: "2026-10-02T10:00:09Z", revokedAt: null, endedAt: null, allowedActions: { revoke: { available: true } }, coveredOpenRounds: [covered] };
   const revoked = { ...grant, state: "revoked" as const, revokedAt: "2026-10-02T10:05:00Z", endedAt: null, allowedActions: { revoke: { available: false, reason: { code: "grant_already_revoked", message: "this grant is already revoked" } } }, coveredOpenRounds: [] };
@@ -1901,7 +1933,7 @@ describe("revoking a grant", () => {
     permissionGrantCount: 1,
     allowedActions: { ...TICKET.allowedActions, statusChanges: [], stop: { available: true } },
   };
-  const stopping: Ticket = { ...running, openRound: { ...runningRound, stopRequestedAt: "2026-10-02T10:05:00Z", waitingReason: "stopping" }, permissionGrants: [revoked], allowedActions: { ...running.allowedActions, stop: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } } } };
+  const stopping: Ticket = { ...running, openRound: { ...runningRound, stopRequestedAt: "2026-10-02T10:05:00Z", limitBreach: null, waitingReason: "stopping" }, permissionGrants: [revoked], allowedActions: { ...running.allowedActions, stop: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } } } };
   const openDialog = () => {
     fireEvent.click(screen.getByTestId("ticket-detail-permission-grant-revoke"));
     return screen.getByRole("dialog", { name: "Revoke this grant?" });

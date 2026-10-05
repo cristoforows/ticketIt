@@ -17,6 +17,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/cristoforows/ticketIt/apps/galley/internal/config"
 )
 
 type claimFixture struct {
@@ -27,7 +29,12 @@ type claimFixture struct {
 
 func newClaimFixture(t *testing.T) *claimFixture {
 	t.Helper()
-	f := &claimFixture{runnerFixture: newRunnerFixture(t)}
+	return newClaimFixtureWith(t, config.Config{Environment: config.EnvDevelopment, Version: "dev"})
+}
+
+func newClaimFixtureWith(t *testing.T, cfg config.Config) *claimFixture {
+	t.Helper()
+	f := &claimFixture{runnerFixture: newRunnerFixtureWith(t, cfg)}
 	f.agent = createAgentForTest(t, f.handler, f.cookie, "Researcher", AgentKindResearch)
 	f.token = f.pair(t).Token
 	f.register(t, f.token, http.StatusOK)
@@ -142,7 +149,7 @@ func (f *claimFixture) deliverThroughAPI(t *testing.T, roundID string) {
 func closeRoundDirect(t *testing.T, pool *pgxpool.Pool, roundID string) {
 	t.Helper()
 	tag, err := pool.Exec(context.Background(), `WITH closed AS (
-			UPDATE rounds SET state = 'delivered', started_at = COALESCE(started_at, claimed_at), ended_at = COALESCE(started_at, claimed_at)
+			UPDATE rounds SET state = 'delivered', started_at = COALESCE(started_at, claimed_at), ended_at = COALESCE(started_at, claimed_at), active_since = NULL
 			 WHERE public_id = $1::uuid RETURNING owner_id, id)
 		INSERT INTO round_deliverables (owner_id, round_id, body_markdown, summary, criteria_assessment)
 		SELECT owner_id, id, 'Closed by SQL', 'Closed by SQL', 'Closed by SQL' FROM closed`, roundID)
@@ -581,7 +588,7 @@ func TestRounds_IdentityIsGalleyIssuedAndHasNoEngineReference(t *testing.T) {
 		columns = append(columns, name)
 	}
 	rows.Close()
-	want := []string{"agent_id", "claim_epoch", "claim_idempotency_key", "claim_payload", "claimed_at", "ended_at", "id", "outcome_note", "owner_id", "public_id", "reconcile_execution", "reconcile_required", "reconciled_at", "runner_id", "sequence", "started_at", "state", "ticket_id", "waiting_permission_request_id", "waiting_question_id"}
+	want := []string{"active_ms", "active_since", "agent_id", "claim_epoch", "claim_idempotency_key", "claim_payload", "claimed_at", "ended_at", "id", "outcome_note", "owner_id", "public_id", "reconcile_execution", "reconcile_required", "reconciled_at", "runner_id", "sequence", "started_at", "state", "ticket_id", "waiting_permission_request_id", "waiting_question_id"}
 	if !equalStrings(columns, want) {
 		t.Fatalf("rounds columns = %v, want %v (an engine execution reference is a separate record, ADR 0002)", columns, want)
 	}

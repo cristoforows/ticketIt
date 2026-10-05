@@ -133,7 +133,7 @@ func (s *server) ReportRoundEvent(w http.ResponseWriter, r *http.Request, roundI
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
-	recorded, err := recordRoundEvent(ctx, s.pool, runner.ownerID, runner.id, roundID, event, s.clockNow())
+	recorded, err := recordRoundEvent(ctx, s.pool, runner.ownerID, runner.id, roundID, event, s.limits, s.clockNow())
 	switch {
 	case isTicketGuardFailure(err):
 		s.logger.Error("round event refused: "+err.Error(), "roundId", roundID, "eventType", event.eventType)
@@ -233,7 +233,7 @@ func validateExecutionStartedData(raw []byte) (string, string) {
 // The runner event path is the one writer allowed to change a Ticket under its own open Round,
 // so it takes the raw row lock and never lockMutableTicket. Lock order: the Owner's priority
 // lock, the Ticket row, then the Round row.
-func recordRoundEvent(ctx context.Context, pool *pgxpool.Pool, ownerID, runnerID int64, roundID string, event roundEvent, now time.Time) (recordedRoundEvent, error) {
+func recordRoundEvent(ctx context.Context, pool *pgxpool.Pool, ownerID, runnerID int64, roundID string, event roundEvent, limits roundLimits, now time.Time) (recordedRoundEvent, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return recordedRoundEvent{}, err
@@ -252,7 +252,8 @@ func recordRoundEvent(ctx context.Context, pool *pgxpool.Pool, ownerID, runnerID
 	if err := lockOwnerPriority(ctx, tx, ownerID); err != nil {
 		return recordedRoundEvent{}, err
 	}
-	if _, found, err := lockTicketForMutation(ctx, tx, ownerID, ticketID); err != nil || !found {
+	lock, found, err := lockTicketForMutation(ctx, tx, ownerID, ticketID)
+	if err != nil || !found {
 		return recordedRoundEvent{}, err
 	}
 	var round lockedRound
@@ -326,6 +327,13 @@ func recordRoundEvent(ctx context.Context, pool *pgxpool.Pool, ownerID, runnerID
 	case RoundEventStopConfirmed, RoundEventFailed, RoundEventInterrupted:
 		ending := roundEndings[event.eventType]
 		ending.note = event.outcomeNote
+		if event.eventType == RoundEventStopConfirmed {
+			breach, err := roundLimitBreach(ctx, tx, ownerID, round.id)
+			if err != nil {
+				return recordedRoundEvent{}, err
+			}
+			ending = stopConfirmedEnding(breach, event.outcomeNote)
+		}
 		endedAt, err := endRound(ctx, tx, ownerID, ticketID, round.id, RoundState(round.state), ending, now)
 		if err != nil {
 			return recordedRoundEvent{}, err
@@ -350,7 +358,7 @@ func recordRoundEvent(ctx context.Context, pool *pgxpool.Pool, ownerID, runnerID
 		}
 		result.State, result.StartedAt, result.RequestId = RoundWaitingForInput, utcOrNil(round.startedAt), &event.permission.id
 	case RoundEventResumed:
-		if err := resumeRound(ctx, tx, ownerID, ticketID, round.id); err != nil {
+		if err := resumeRound(ctx, tx, ownerID, ticketID, round.id, now); err != nil {
 			return recordedRoundEvent{}, err
 		}
 		result.StartedAt = utcOrNil(round.startedAt)
@@ -358,6 +366,11 @@ func recordRoundEvent(ctx context.Context, pool *pgxpool.Pool, ownerID, runnerID
 			result.QuestionId = &event.question.id
 		} else {
 			result.RequestId = &event.permission.id
+		}
+	}
+	if result.State == RoundRunning {
+		if err := enforceRoundLimits(ctx, tx, ownerID, round.id, lock, limits, now); err != nil {
+			return recordedRoundEvent{}, err
 		}
 	}
 	encoded, err := json.Marshal(result)
@@ -412,7 +425,7 @@ func roundStateTakes(state RoundState, eventType RoundEventType) bool {
 
 func startRound(ctx context.Context, tx pgx.Tx, ownerID int64, ticketID string, roundID int64, engineReference string, now time.Time) (time.Time, error) {
 	var startedAt time.Time
-	if err := tx.QueryRow(ctx, `UPDATE rounds SET state = $3, started_at = GREATEST($4::timestamptz, claimed_at)
+	if err := tx.QueryRow(ctx, `UPDATE rounds SET state = $3, started_at = GREATEST($4::timestamptz, claimed_at), `+enterRunningSQL("$4")+`
 		WHERE id = $1 AND owner_id = $2 RETURNING started_at`, roundID, ownerID, string(RoundRunning), now).Scan(&startedAt); err != nil {
 		return time.Time{}, err
 	}

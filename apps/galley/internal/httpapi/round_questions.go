@@ -82,20 +82,24 @@ func raiseQuestion(ctx context.Context, tx pgx.Tx, ownerID int64, ticketID strin
 		ownerID, roundID, question.id, question.text, now).Scan(&questionRowID); err != nil {
 		return err
 	}
-	return moveRoundAndTicket(ctx, tx, ownerID, ticketID, roundID, RoundRunning, RoundWaitingForInput, roundAsk{questionID: &questionRowID})
+	return moveRoundAndTicket(ctx, tx, ownerID, ticketID, roundID, RoundRunning, RoundWaitingForInput, roundAsk{questionID: &questionRowID}, now)
 }
 
-func resumeRound(ctx context.Context, tx pgx.Tx, ownerID int64, ticketID string, roundID int64) error {
-	return moveRoundAndTicket(ctx, tx, ownerID, ticketID, roundID, RoundWaitingForInput, RoundRunning, roundAsk{})
+func resumeRound(ctx context.Context, tx pgx.Tx, ownerID int64, ticketID string, roundID int64, now time.Time) error {
+	return moveRoundAndTicket(ctx, tx, ownerID, ticketID, roundID, RoundWaitingForInput, RoundRunning, roundAsk{}, now)
 }
 
 type roundAsk struct {
 	questionID, permissionRequestID *int64
 }
 
-func moveRoundAndTicket(ctx context.Context, tx pgx.Tx, ownerID int64, ticketID string, roundID int64, from, to RoundState, ask roundAsk) error {
-	if _, err := tx.Exec(ctx, `UPDATE rounds SET state = $3, waiting_question_id = $4, waiting_permission_request_id = $5 WHERE id = $1 AND owner_id = $2`,
-		roundID, ownerID, string(to), ask.questionID, ask.permissionRequestID); err != nil {
+func moveRoundAndTicket(ctx context.Context, tx pgx.Tx, ownerID int64, ticketID string, roundID int64, from, to RoundState, ask roundAsk, now time.Time) error {
+	activeTime := leaveRunningSQL("$6")
+	if to == RoundRunning {
+		activeTime = enterRunningSQL("$6")
+	}
+	if _, err := tx.Exec(ctx, `UPDATE rounds SET state = $3, waiting_question_id = $4, waiting_permission_request_id = $5, `+activeTime+` WHERE id = $1 AND owner_id = $2`,
+		roundID, ownerID, string(to), ask.questionID, ask.permissionRequestID, now); err != nil {
 		return err
 	}
 	tag, err := tx.Exec(ctx, `UPDATE tickets SET status = $3, updated_at = now()

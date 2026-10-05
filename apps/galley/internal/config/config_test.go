@@ -79,6 +79,12 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.SessionTTL != 720*time.Hour {
 		t.Errorf("SessionTTL = %v, want %v", cfg.SessionTTL, 720*time.Hour)
 	}
+	if cfg.RoundMaxActiveDuration != 4*time.Hour {
+		t.Errorf("RoundMaxActiveDuration = %v, want %v", cfg.RoundMaxActiveDuration, 4*time.Hour)
+	}
+	if cfg.RoundMaxConsecutiveDenials != 10 {
+		t.Errorf("RoundMaxConsecutiveDenials = %d, want 10", cfg.RoundMaxConsecutiveDenials)
+	}
 	if got, want := cfg.Addr(), ":8080"; got != want {
 		t.Errorf("Addr() = %q, want %q", got, want)
 	}
@@ -86,15 +92,17 @@ func TestLoad_Defaults(t *testing.T) {
 
 func TestLoad_ExplicitProductionSettings(t *testing.T) {
 	cfg, err := Load(fakeGetenv(withValidAuthEnv(map[string]string{
-		"GALLEY_HOST":                      "127.0.0.1",
-		"GALLEY_PORT":                      "9090",
-		"GALLEY_ENVIRONMENT":               "production",
-		"GALLEY_VERSION":                   "1.2.3",
-		"DATABASE_URL":                     validDatabaseURL,
-		"GALLEY_BASE_URL":                  "https://ticketit.example.com",
-		"GALLEY_OAUTH_GITHUB_BASE_URL":     "https://github.example.com",
-		"GALLEY_OAUTH_GITHUB_API_BASE_URL": "https://api.github.example.com",
-		"GALLEY_SESSION_TTL":               "12h30m",
+		"GALLEY_HOST":                          "127.0.0.1",
+		"GALLEY_PORT":                          "9090",
+		"GALLEY_ENVIRONMENT":                   "production",
+		"GALLEY_VERSION":                       "1.2.3",
+		"DATABASE_URL":                         validDatabaseURL,
+		"GALLEY_BASE_URL":                      "https://ticketit.example.com",
+		"GALLEY_OAUTH_GITHUB_BASE_URL":         "https://github.example.com",
+		"GALLEY_OAUTH_GITHUB_API_BASE_URL":     "https://api.github.example.com",
+		"GALLEY_SESSION_TTL":                   "12h30m",
+		"GALLEY_ROUND_MAX_ACTIVE_DURATION":     "90m",
+		"GALLEY_ROUND_MAX_CONSECUTIVE_DENIALS": "25",
 	})))
 	if err != nil {
 		t.Fatalf("Load() returned unexpected error: %v", err)
@@ -112,6 +120,9 @@ func TestLoad_ExplicitProductionSettings(t *testing.T) {
 		OAuthGitHubAPIBaseURL: "https://api.github.example.com",
 		BaseURL:               "https://ticketit.example.com",
 		SessionTTL:            12*time.Hour + 30*time.Minute,
+
+		RoundMaxActiveDuration:     90 * time.Minute,
+		RoundMaxConsecutiveDenials: 25,
 	}
 	if cfg != want {
 		t.Errorf("Load() = %+v, want %+v", cfg, want)
@@ -306,6 +317,61 @@ func TestLoad_InvalidSessionTTL(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), "GALLEY_SESSION_TTL") {
 				t.Errorf("error %q does not mention GALLEY_SESSION_TTL", err.Error())
+			}
+		})
+	}
+}
+
+func TestLoad_RoundLimitBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		duration, denials string
+		wantDuration      time.Duration
+		wantDenials       int
+	}{
+		{"1s", "1", time.Second, 1},
+		{"168h", "1000", 168 * time.Hour, 1000},
+		{"167h59m59s", "999", 168*time.Hour - time.Second, 999},
+		{"4h0m0s", "10", 4 * time.Hour, 10},
+	} {
+		t.Run(tc.duration+"/"+tc.denials, func(t *testing.T) {
+			env := withValidAuthEnv(map[string]string{"DATABASE_URL": validDatabaseURL,
+				"GALLEY_ROUND_MAX_ACTIVE_DURATION": tc.duration, "GALLEY_ROUND_MAX_CONSECUTIVE_DENIALS": tc.denials})
+			cfg, err := Load(fakeGetenv(env))
+			if err != nil {
+				t.Fatalf("Load() returned unexpected error: %v", err)
+			}
+			if cfg.RoundMaxActiveDuration != tc.wantDuration || cfg.RoundMaxConsecutiveDenials != tc.wantDenials {
+				t.Errorf("limits = %v, %d; want %v, %d", cfg.RoundMaxActiveDuration, cfg.RoundMaxConsecutiveDenials, tc.wantDuration, tc.wantDenials)
+			}
+		})
+	}
+}
+
+func TestLoad_InvalidRoundMaxActiveDuration(t *testing.T) {
+	for _, raw := range []string{"4", "four hours", "4d", "0", "0s", "-1h", "-1s", "168h0m1s", "169h", "999ms", "1500ms", "4h0.5s", " "} {
+		t.Run(raw, func(t *testing.T) {
+			env := withValidAuthEnv(map[string]string{"DATABASE_URL": validDatabaseURL, "GALLEY_ROUND_MAX_ACTIVE_DURATION": raw})
+			_, err := Load(fakeGetenv(env))
+			if err == nil {
+				t.Fatalf("Load() with GALLEY_ROUND_MAX_ACTIVE_DURATION=%q: expected error, got nil", raw)
+			}
+			if !strings.Contains(err.Error(), "GALLEY_ROUND_MAX_ACTIVE_DURATION") || !strings.Contains(err.Error(), `"168h"`) {
+				t.Errorf("error %q does not name GALLEY_ROUND_MAX_ACTIVE_DURATION and its range", err.Error())
+			}
+		})
+	}
+}
+
+func TestLoad_InvalidRoundMaxConsecutiveDenials(t *testing.T) {
+	for _, raw := range []string{"0", "-1", "1001", "10.5", "ten", "1e3", " 10", "0x10"} {
+		t.Run(raw, func(t *testing.T) {
+			env := withValidAuthEnv(map[string]string{"DATABASE_URL": validDatabaseURL, "GALLEY_ROUND_MAX_CONSECUTIVE_DENIALS": raw})
+			_, err := Load(fakeGetenv(env))
+			if err == nil {
+				t.Fatalf("Load() with GALLEY_ROUND_MAX_CONSECUTIVE_DENIALS=%q: expected error, got nil", raw)
+			}
+			if !strings.Contains(err.Error(), "GALLEY_ROUND_MAX_CONSECUTIVE_DENIALS") || !strings.Contains(err.Error(), "1 to 1000") {
+				t.Errorf("error %q does not name GALLEY_ROUND_MAX_CONSECUTIVE_DENIALS and its range", err.Error())
 			}
 		})
 	}

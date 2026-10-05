@@ -42,6 +42,11 @@ const (
 	DefaultOAuthGitHubBaseURL    = "https://github.com"
 	DefaultOAuthGitHubAPIBaseURL = "https://api.github.com"
 	DefaultSessionTTL            = 30 * 24 * time.Hour
+
+	DefaultRoundMaxActiveDuration     = 4 * time.Hour
+	MaxRoundMaxActiveDuration         = 168 * time.Hour
+	DefaultRoundMaxConsecutiveDenials = 10
+	MaxRoundMaxConsecutiveDenials     = 1000
 )
 
 // Config is Galley's fully validated runtime configuration.
@@ -101,6 +106,11 @@ type Config struct {
 	// whatever a caller claims.
 	BaseURL    string
 	SessionTTL time.Duration
+
+	// Per-Round technical limits (#172). A breach is recorded in whole
+	// seconds, so the duration must be a whole number of seconds.
+	RoundMaxActiveDuration     time.Duration
+	RoundMaxConsecutiveDenials int
 }
 
 // Addr returns the "host:port" address to pass to net.Listen.
@@ -235,6 +245,22 @@ func Load(getenv func(string) string) (Config, error) {
 		}
 	}
 
+	roundMaxActiveDuration := DefaultRoundMaxActiveDuration
+	if raw := getenv("GALLEY_ROUND_MAX_ACTIVE_DURATION"); raw != "" {
+		roundMaxActiveDuration, err = time.ParseDuration(raw)
+		if err != nil || roundMaxActiveDuration < time.Second || roundMaxActiveDuration > MaxRoundMaxActiveDuration || roundMaxActiveDuration%time.Second != 0 {
+			return Config{}, fmt.Errorf("invalid GALLEY_ROUND_MAX_ACTIVE_DURATION %q: must be a Go duration of whole seconds from \"1s\" to \"168h\", such as \"4h\"", raw)
+		}
+	}
+
+	roundMaxConsecutiveDenials := DefaultRoundMaxConsecutiveDenials
+	if raw := getenv("GALLEY_ROUND_MAX_CONSECUTIVE_DENIALS"); raw != "" {
+		roundMaxConsecutiveDenials, err = strconv.Atoi(raw)
+		if err != nil || roundMaxConsecutiveDenials < 1 || roundMaxConsecutiveDenials > MaxRoundMaxConsecutiveDenials {
+			return Config{}, fmt.Errorf("invalid GALLEY_ROUND_MAX_CONSECUTIVE_DENIALS %q: must be an integer from 1 to %d, such as \"10\"", raw, MaxRoundMaxConsecutiveDenials)
+		}
+	}
+
 	return Config{
 		Host:                  host,
 		Port:                  port,
@@ -248,5 +274,8 @@ func Load(getenv func(string) string) (Config, error) {
 		OAuthGitHubAPIBaseURL: oauthGitHubAPIBaseURL,
 		BaseURL:               baseURL,
 		SessionTTL:            sessionTTL,
+
+		RoundMaxActiveDuration:     roundMaxActiveDuration,
+		RoundMaxConsecutiveDenials: roundMaxConsecutiveDenials,
 	}, nil
 }

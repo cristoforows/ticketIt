@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { limitBreachLabel } from "../api/limitBreach";
 import type { RoundActivityNote, RoundActivityPage, RoundDeliverable, TicketRound } from "../api/rounds";
 import type { Ticket } from "../api/tickets";
 import { FeedbackHistory, FeedbackPanel, type AddFeedback } from "./FeedbackPanel";
@@ -126,9 +127,15 @@ function RoundEntry({ round, defaultOpen, onLoadEarlierActivity, grants }: { rou
           {round.state === "failed" && <ReceiptLine label="Failed at" data-testid="ticket-detail-round-failed-at">{round.endedAt && <LocalTime iso={round.endedAt} />}</ReceiptLine>}
           {round.state === "interrupted" && <ReceiptLine label="Interrupted at" data-testid="ticket-detail-round-interrupted-at">{round.endedAt && <LocalTime iso={round.endedAt} />}</ReceiptLine>}
         </dl>
+        {round.limitBreach && round.endedAt === null && (
+          <p data-testid="ticket-detail-round-limit-breach" className="my-1 mt-3 font-bold">{limitBreachLabel(round.limitBreach)}</p>
+        )}
         {round.outcomeNote !== null && (
           <section aria-label="Outcome" className="mt-3">
             <FieldLabel as="h4">Outcome</FieldLabel>
+            {round.state === "failed" && round.limitBreach && (
+              <p data-testid="ticket-detail-round-limit-breach" className="my-1 font-bold">{limitBreachLabel(round.limitBreach)}</p>
+            )}
             <p data-testid="ticket-detail-round-outcome-note" className="my-1 break-words whitespace-pre-wrap">{round.outcomeNote}</p>
           </section>
         )}

@@ -11,6 +11,7 @@ import type { DecidePermission, RevokeGrant } from "./PermissionPanel";
 import type { AttestCessation } from "./AttestCessation";
 import type { AnswerQuestion } from "./QuestionPanel";
 import { RoundsSection, type LoadEarlierActivity, type RoundRecords } from "./RoundsSection";
+import { LIMIT_STOPPING_LABEL } from "../api/limitBreach";
 import { BadgeTag, ClaimedTag, DeliveredTag, ErrorMessage, FieldHint, FieldLabel, FieldNote, FieldValue, InlineError, LocalTime, LockGlyph, PrimaryButton, QueuedTag, ReceiptLine, Rule, SecondaryButton, Select, StatusTag, statusLabel, StoppingTag, TextInput, Textarea, ticketSerial } from "./ui";
 
 interface TicketDetailProps {
@@ -198,7 +199,7 @@ export function TicketDetail({ ticket, onSave, onChangeStatus, onAccept, onRewor
               <ClaimedTag data-testid="ticket-detail-claimed">Claimed by runner</ClaimedTag>
             )}
             {current.openRound?.stopRequestedAt && (
-              <StoppingTag data-testid="ticket-detail-stopping">Stopping…</StoppingTag>
+              <StoppingTag data-testid="ticket-detail-stopping">{current.openRound.limitBreach ? LIMIT_STOPPING_LABEL : "Stopping…"}</StoppingTag>
             )}
             {current.delivery && (
               <DeliveredTag data-testid="ticket-detail-delivered">Delivered by {current.delivery.agent.name}</DeliveredTag>
