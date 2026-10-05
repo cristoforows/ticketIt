@@ -567,8 +567,21 @@ then acknowledged. In the third, Michelin is killed while holding and a
 new one started with the same credential: it reconciles holding nothing,
 the Ticket shows *Runner cannot confirm execution* on the list and the
 receipt's notice, stays In Progress and locked, and Michelin claims
-nothing. That Round stays open, so `run.sh` resets the database after
-this spec and before `active-order-slip.spec.ts`.
+nothing. The test then attests through the API that its execution has
+ceased, freeing the slot without a database reset.
+
+`tests/runner-attest.spec.ts` (issue #171) has two tests. In the first,
+a real Michelin holding a Round is killed; attestation is refused while
+it still counts as connected, then the dev clock passes the health
+window, the receipt shows Runner disconnected, and the Owner attests in
+the browser's dialog (Keep waiting first, then I ended the Michelin
+process). In the second, a restarted Michelin cannot confirm the Round
+and the Owner attests with Other and a note. Both Rounds end Interrupted
+with *Ended by your attestation* on the receipt, the Ticket moves to
+Blocked, a repeat returns the stored Round, and Ready lets a Michelin
+claim and deliver Round 2 with epoch 2. `run.sh` runs it after
+`runner-reconcile.spec.ts` and before `active-order-slip.spec.ts`, with
+no reset.
 
 `tests/ticket-priority-order.spec.ts` reorders three Ready Tickets by
 dragging onto the upper and lower halves of board slips, then with Move

@@ -1313,3 +1313,25 @@ note (`ticket-detail-reconciling`). Runner disconnected outranks both.
 
 Tests: `TicketDetail.test.tsx`, `ActiveOrder.test.tsx`,
 `ui/slip.test.ts` and `api/tickets.test.ts`.
+
+## Stranded-Round recovery (issue #171)
+
+`runner_replaced` (**Runner replaced**) joins the waiting reasons; the
+rider stays still and the receipt shows a notice
+(`ticket-detail-runner-replaced`). While
+`allowedActions.attestCessation` is available, the open Round offers
+**Attest that execution has ceased** (`ticket-detail-attest-open`),
+which opens an accessible dialog (`ticket-detail-attest-dialog`) with
+the fixed warning copy, a fieldset of three radios (I ended the Michelin
+process, The machine running Michelin is off, Other) and a note
+(required with Other, at most 1000 characters; a blank optional note is
+omitted). Keep waiting has focus on open; confirm stays disabled until a
+basis, and with Other a note, is chosen. On success the Ticket and
+Rounds reload; a refusal shows Galley's message inline. An Interrupted
+Round with an `attestation` shows **Ended by your attestation** with the
+basis, note and time. The Round parser requires `attestation`, allowed
+only on Interrupted Rounds, and the Ticket parser requires
+`attestCessation`.
+
+Tests: `TicketDetail.test.tsx`, `ActiveOrder.test.tsx`,
+`ui/slip.test.ts`, `api/rounds.test.ts` and `api/tickets.test.ts`.

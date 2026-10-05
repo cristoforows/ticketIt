@@ -46,7 +46,7 @@ func TestDecideWaitingReason(t *testing.T) {
 		{OpenRoundWaitingForInput, nil, undecidedRequest, false, false, WaitingRunnerDisconnected},
 		{OpenRoundWaitingForInput, nil, approvedRequest, true, false, WaitingRunnerDisconnected},
 	} {
-		got := decideWaitingReason(tc.state, tc.question, tc.request, tc.stopRequested, tc.runnerConnected, false, nil)
+		got := decideWaitingReason(tc.state, tc.question, tc.request, tc.stopRequested, tc.runnerConnected, false, false, nil)
 		if got != tc.want {
 			t.Errorf("decideWaitingReason(%s, question=%+v, request=%+v, stopRequested=%t, connected=%t) = %s, want %s", tc.state, tc.question, tc.request, tc.stopRequested, tc.runnerConnected, got, tc.want)
 		}
@@ -132,7 +132,7 @@ func TestWaitingReason_AClaimedRoundLosingItsRunnerIsRunnerDisconnected(t *testi
 	f.assertWaitingReason(t, queued.Id, WaitingStarting)
 }
 
-func TestWaitingReason_NoPairedRunnerIsRunnerDisconnected(t *testing.T) {
+func TestWaitingReason_NoPairedRunnerIsRunnerDisconnectedAndARepairedOneIsRunnerReplaced(t *testing.T) {
 	f := newClaimFixture(t)
 	queued, claim := f.claimTicket(t, "Revoked")
 	f.startRound(t, claim, "start")
@@ -145,10 +145,10 @@ func TestWaitingReason_NoPairedRunnerIsRunnerDisconnected(t *testing.T) {
 	repaired := f.pair(t).Token
 	f.assertWaitingReason(t, queued.Id, WaitingRunnerDisconnected)
 	f.register(t, repaired, http.StatusOK)
-	f.assertWaitingReason(t, queued.Id, WaitingReconciling)
+	f.assertWaitingReason(t, queued.Id, WaitingRunnerReplaced)
 	f.token = repaired
-	f.mustReconcile(t, reconcileBody(t, heldRound(claim, HeldRunning)))
-	f.assertWaitingReason(t, queued.Id, WaitingWorking)
+	assertErrorBody(t, f.reconcile(t, reconcileBody(t, heldRound(claim, HeldRunning))), http.StatusConflict, runnerNotHolderCode, runnerNotHolderMessage)
+	f.assertWaitingReason(t, queued.Id, WaitingRunnerReplaced)
 }
 
 func TestWaitingReason_ReadsOnlyTheOwnersRunner(t *testing.T) {

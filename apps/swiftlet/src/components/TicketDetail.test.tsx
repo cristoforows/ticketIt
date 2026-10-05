@@ -17,7 +17,7 @@ const TICKET: Ticket = {
   status: "Backlog",
   permissionGrants: [],
   permissionGrantCount: 0,
-  allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } },
+  allowedActions: { statusChangeRejections: [], statusChanges: ["Ready", "Blocked"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } },
   template: "Basic",
   completionCondition: "humanAcceptance",
   assigneeType: "",
@@ -184,7 +184,7 @@ describe("archive presentation", () => {
 
   it("keeps archived Tickets readable and disables their mutating controls with Galley's reason", () => {
     const reason = { code: "archived_ticket", message: "archived tickets are read-only" };
-    render(<TicketDetail ticket={{ ...TICKET, archivedAt: "2026-09-29T10:00:00Z", badges: [{ id: BADGE.id, name: BADGE.name }], allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } } }} onSave={vi.fn()} {...noopActions()} />);
+    render(<TicketDetail ticket={{ ...TICKET, archivedAt: "2026-09-29T10:00:00Z", badges: [{ id: BADGE.id, name: BADGE.name }], allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } } }} onSave={vi.fn()} {...noopActions()} />);
     expect(screen.getByTestId("ticket-detail-archived")).toHaveTextContent(reason.message);
     expect(screen.getByTestId("ticket-detail-badges")).toHaveTextContent(BADGE.name);
     for (const name of ["Edit", "Archive", "Add badge", "Remove Urgent", "Assign"]) {
@@ -209,7 +209,7 @@ describe("archive presentation", () => {
 
   it("shows Ready becoming Backlog after Restore and unlocks editing", async () => {
     const reason = { code: "archived_ticket", message: "archived tickets are read-only" };
-    const archived = { ...TICKET, status: "Ready" as const, archivedAt: "2026-09-29T10:00:00Z", allowedActions: { statusChangeRejections: [], statusChanges: [] as Ticket["status"][], accept: { available: false, reason }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } } };
+    const archived = { ...TICKET, status: "Ready" as const, archivedAt: "2026-09-29T10:00:00Z", allowedActions: { statusChangeRejections: [], statusChanges: [] as Ticket["status"][], accept: { available: false, reason }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } } };
     const restored: Ticket = { ...TICKET, status: "Backlog", archivedAt: null };
     const onRestore = vi.fn().mockResolvedValue(restored);
     render(<TicketDetail ticket={archived} onSave={vi.fn()} {...noopActions()} onRestore={onRestore} />);
@@ -235,7 +235,7 @@ describe("open-Round lock", () => {
     openRound: { id: reason.roundId, sequence: 4, state: "running", agent, claimedAt: "2026-10-01T10:00:00Z", startedAt: "2026-10-01T10:01:00Z", stopRequestedAt: null, waitingReason: "working", question: null, permissionRequest: null },
     permissionGrants: [],
     permissionGrantCount: 0,
-    allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } },
+    allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } },
   };
 
   it("shows who holds the lock and keeps every field readable", () => {
@@ -267,7 +267,7 @@ describe("open-Round lock", () => {
 
   it("unlocks once Galley reports no open Round", () => {
     const { rerender } = render(<TicketDetail ticket={locked} onSave={vi.fn()} {...noopActions()} />);
-    rerender(<TicketDetail ticket={{ ...locked, openRound: null, allowedActions: { statusChangeRejections: [], statusChanges: ["Backlog"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } } }} onSave={vi.fn()} {...noopActions()} />);
+    rerender(<TicketDetail ticket={{ ...locked, openRound: null, allowedActions: { statusChangeRejections: [], statusChanges: ["Backlog"], accept: { available: false, reason: { code: "invalid_transition", message: "Accept requires In Review" } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } } }} onSave={vi.fn()} {...noopActions()} />);
     expect(screen.queryByTestId("ticket-detail-locked")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled();
     expect(screen.getByTestId("ticket-detail-status-button-Backlog")).toBeEnabled();
@@ -755,7 +755,7 @@ describe("the Rounds section", () => {
     outputTokens: { sum: null, complete: true, estimated: false },
     activeMs: { sum: null, complete: true, estimated: false },
   };
-  const recordOf = (round: NonNullable<Ticket["openRound"]>): TicketRound => ({ ...round, endedAt: null, outcomeNote: null, activity: [], earlierActivityCursor: null, usage, deliverable: null, questions: [], feedback: [], permissionRequests: [], authorityChecks: [], authorityCheckCount: 0 });
+  const recordOf = (round: NonNullable<Ticket["openRound"]>): TicketRound => ({ ...round, endedAt: null, outcomeNote: null, activity: [], earlierActivityCursor: null, usage, deliverable: null, questions: [], feedback: [], permissionRequests: [], authorityChecks: [], authorityCheckCount: 0, attestation: null });
   const deliveredRecord = (sequence: number, id: string): TicketRound => ({
     id,
     sequence,
@@ -773,7 +773,7 @@ describe("the Rounds section", () => {
     feedback: [],
     permissionRequests: [],
     authorityChecks: [],
-    authorityCheckCount: 0,
+    authorityCheckCount: 0, attestation: null,
   });
   const roundTicket = (openRound: Ticket["openRound"], status: Ticket["status"] = "Ready"): Ticket => ({
     ...REFINED_TICKET,
@@ -783,7 +783,7 @@ describe("the Rounds section", () => {
     openRound,
     permissionGrants: [],
     permissionGrantCount: 0,
-    allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: claimedRound.id } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } },
+    allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: claimedRound.id } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } },
   });
   const health = (state: "connected" | "disconnected" | "not_paired"): HealthView => ({
     kind: "loaded",
@@ -872,6 +872,117 @@ describe("the Rounds section", () => {
     expect(note).toHaveAttribute("role", "status");
     expect(note).toHaveTextContent(/^Reconciling with the runner$/);
     expect(screen.queryByTestId("ticket-detail-execution-unknown")).not.toBeInTheDocument();
+  });
+
+  it("notices a Round whose claiming runner was replaced, styled like Runner disconnected", () => {
+    const replaced = { ...runningRound, waitingReason: "runner_replaced" as const };
+    render(<TicketDetail ticket={roundTicket(replaced, "InProgress")} onSave={vi.fn()} {...noopActions()} runnerHealth={health("connected")} roundRecords={{ rounds: [recordOf(replaced)] }} />);
+    const notice = within(screen.getByTestId("ticket-detail-rounds")).getByTestId("ticket-detail-runner-replaced");
+    expect(notice).toHaveAttribute("role", "status");
+    expect(notice).toHaveTextContent(/^Runner replaced The runner that claimed this Round was replaced\. It stays open and the Ticket stays locked\.$/);
+    expect(notice).toHaveClass("border-2", "border-status-blocked-deep", "p-2", "text-status-blocked-deep");
+    expect(screen.queryByTestId("ticket-detail-execution-unknown")).not.toBeInTheDocument();
+  });
+
+  describe("attesting that execution has ceased", () => {
+    const attestable = (round: NonNullable<Ticket["openRound"]> = { ...runningRound, waitingReason: "runner_disconnected" }): Ticket => {
+      const base = roundTicket(round, "InProgress");
+      return { ...base, allowedActions: { ...base.allowedActions, attestCessation: { available: true } } };
+    };
+    const COPY = "ticketIt cannot tell whether this Round is still running. Confirm only after making sure it has stopped, for example by ending the Michelin process or switching off its machine. If it is still running, its work continues outside ticketIt. The Round will end as Interrupted and the Ticket will move to Blocked. Nothing already done is undone.";
+    const open = () => fireEvent.click(screen.getByRole("button", { name: "Attest that execution has ceased" }));
+    const dialog = () => screen.getByRole("dialog", { name: "Attest that execution has ceased" });
+
+    it("is offered only when Galley says it is available", () => {
+      const { rerender } = render(<TicketDetail ticket={roundTicket(runningRound, "InProgress")} onSave={vi.fn()} {...noopActions()} runnerHealth={health("connected")} roundRecords={{ rounds: [recordOf(runningRound)] }} />);
+      expect(screen.queryByTestId("ticket-detail-attest")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Attest that execution has ceased" })).not.toBeInTheDocument();
+      rerender(<TicketDetail ticket={attestable()} onSave={vi.fn()} {...noopActions()} runnerHealth={health("disconnected")} onAttestCessation={vi.fn()} roundRecords={{ rounds: [recordOf(runningRound)] }} />);
+      expect(screen.getByRole("button", { name: "Attest that execution has ceased" })).toBeEnabled();
+    });
+
+    it("confirms in an accessible dialog with the exact copy, three bases and Keep waiting focused", () => {
+      render(<TicketDetail ticket={attestable()} onSave={vi.fn()} {...noopActions()} runnerHealth={health("disconnected")} onAttestCessation={vi.fn()} />);
+      open();
+      const box = dialog();
+      expect(box).toHaveAccessibleDescription(COPY);
+      expect(within(box).getByTestId("ticket-detail-attest-copy")).toHaveTextContent(COPY);
+      const group = within(box).getByRole("group", { name: "How you know it stopped" });
+      expect(within(group).getAllByRole("radio").map((radio) => radio.closest("label")?.textContent)).toEqual(["I ended the Michelin process", "The machine running Michelin is off", "Other"]);
+      expect(within(box).getByRole("button", { name: "Keep waiting" })).toHaveFocus();
+      expect(within(box).getByRole("button", { name: "Attest that execution has ceased" })).toBeDisabled();
+      expect(within(box).getByRole("textbox")).toHaveAttribute("maxLength", "1000");
+    });
+
+    it("Keep waiting closes without attesting", () => {
+      const onAttestCessation = vi.fn();
+      render(<TicketDetail ticket={attestable()} onSave={vi.fn()} {...noopActions()} runnerHealth={health("disconnected")} onAttestCessation={onAttestCessation} />);
+      open();
+      fireEvent.click(within(dialog()).getByRole("button", { name: "Keep waiting" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(onAttestCessation).not.toHaveBeenCalled();
+    });
+
+    it("requires a note with Other and sends the basis and note", async () => {
+      const blocked = { ...roundTicket(null, "Blocked") };
+      const onAttestCessation = vi.fn().mockResolvedValue(blocked);
+      render(<TicketDetail ticket={attestable()} onSave={vi.fn()} {...noopActions()} runnerHealth={health("disconnected")} onAttestCessation={onAttestCessation} />);
+      open();
+      const box = dialog();
+      const confirm = within(box).getByRole("button", { name: "Attest that execution has ceased" });
+      fireEvent.click(within(box).getByRole("radio", { name: "Other" }));
+      expect(within(box).getByRole("textbox", { name: "Note (required)" })).toBeRequired();
+      expect(confirm).toBeDisabled();
+      fireEvent.change(within(box).getByRole("textbox"), { target: { value: "   " } });
+      expect(confirm).toBeDisabled();
+      fireEvent.change(within(box).getByRole("textbox"), { target: { value: "Unplugged the laptop" } });
+      fireEvent.click(confirm);
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(onAttestCessation).toHaveBeenCalledWith(runningRound.id, { basis: "other", note: "Unplugged the laptop" });
+      expect(screen.getByTestId("ticket-detail-status")).toHaveTextContent("Blocked");
+    });
+
+    it("sends a basis without a blank optional note", async () => {
+      const onAttestCessation = vi.fn().mockResolvedValue(roundTicket(null, "Blocked"));
+      render(<TicketDetail ticket={attestable()} onSave={vi.fn()} {...noopActions()} runnerHealth={health("disconnected")} onAttestCessation={onAttestCessation} />);
+      open();
+      fireEvent.click(within(dialog()).getByRole("radio", { name: "The machine running Michelin is off" }));
+      expect(within(dialog()).getByRole("textbox", { name: "Note (optional)" })).not.toBeRequired();
+      fireEvent.click(within(dialog()).getByRole("button", { name: "Attest that execution has ceased" }));
+      await waitFor(() => expect(onAttestCessation).toHaveBeenCalledWith(runningRound.id, { basis: "runner_host_off" }));
+    });
+
+    it("shows Galley's refusal", async () => {
+      const onAttestCessation = vi.fn().mockRejectedValue(new GalleyError({ code: "attestation_not_available", message: "attestation needs an open Round" }));
+      render(<TicketDetail ticket={attestable()} onSave={vi.fn()} {...noopActions()} runnerHealth={health("disconnected")} onAttestCessation={onAttestCessation} />);
+      open();
+      fireEvent.click(within(dialog()).getByRole("radio", { name: "I ended the Michelin process" }));
+      fireEvent.click(within(dialog()).getByRole("button", { name: "Attest that execution has ceased" }));
+      expect(await screen.findByTestId("ticket-detail-attest-error")).toHaveTextContent("attestation needs an open Round");
+    });
+
+    it("shows an Interrupted Round as ended by your attestation, with the basis, note and time", () => {
+      const ended: TicketRound = {
+        ...recordOf(runningRound),
+        state: "interrupted",
+        endedAt: "2026-10-01T10:05:00Z",
+        outcomeNote: "Ended by Owner attestation: other.",
+        attestation: { attestedAt: "2026-10-01T10:05:00Z", basis: "other", note: "Unplugged the laptop", roundState: "running", claimEpoch: 1, holderLastSeenAt: "2026-10-01T10:02:00Z", holderHealth: "disconnected", reconcileExecution: null },
+      };
+      render(<TicketDetail ticket={roundTicket(null, "Blocked")} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [ended] }} />);
+      const record = screen.getByTestId("ticket-detail-round-attestation");
+      expect(within(record).getByRole("heading", { name: "Ended by your attestation" })).toBeInTheDocument();
+      expect(within(record).getByTestId("ticket-detail-round-attestation-basis")).toHaveTextContent("Other");
+      expect(within(record).getByTestId("ticket-detail-round-attestation-note")).toHaveTextContent("Unplugged the laptop");
+      expect(within(record).getByTestId("ticket-detail-round-attestation-at")).toHaveTextContent("Attested 01 Oct 2026 15:35:00 UTC+05:30");
+      expect(screen.getByTestId("ticket-detail-round-interrupted")).toHaveTextContent("Interrupted");
+    });
+
+    it("shows no attestation record for an Interrupted Round the runner ended", () => {
+      const ended: TicketRound = { ...recordOf(runningRound), state: "interrupted", endedAt: "2026-10-01T10:05:00Z", outcomeNote: "lost the shell" };
+      render(<TicketDetail ticket={roundTicket(null, "Blocked")} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [ended] }} />);
+      expect(screen.queryByTestId("ticket-detail-round-attestation")).not.toBeInTheDocument();
+    });
   });
 
   it.each(["execution_unknown", "reconciling"] as const)("lets Runner disconnected outrank %s on the receipt", (waitingReason) => {
@@ -1143,14 +1254,14 @@ describe("Stop", () => {
     openRound: runningRound,
     permissionGrants: [],
     permissionGrantCount: 0,
-    allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: locked }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: true }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } },
+    allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: locked }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: true }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } },
   };
   const stopping: Ticket = {
     ...running,
     openRound: { ...runningRound, stopRequestedAt: "2026-10-02T10:00:05Z", waitingReason: "stopping", question: null, permissionRequest: null },
     permissionGrants: [],
     permissionGrantCount: 0,
-    allowedActions: { ...running.allowedActions, stop: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } },
+    allowedActions: { ...running.allowedActions, stop: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } },
   };
 
   it("is offered only when Galley says Stop is available, and is not disabled by the Round's lock", () => {
@@ -1235,11 +1346,11 @@ describe("a question from the Agent", () => {
     openRound: waitingRound,
     permissionGrants: [],
     permissionGrantCount: 0,
-    allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: waitingRound.id } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: true }, answer: { available: true }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } },
+    allowedActions: { statusChanges: [], statusChangeRejections: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: waitingRound.id } }, rework: { available: false, reason: { code: "rework_not_available", message: "Rework unavailable" } }, stop: { available: true }, answer: { available: true }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } },
   };
   const answeredQuestion = { ...question, answer: "Europe only", answeredAt: "2026-10-02T10:00:09Z" };
   const resuming: Ticket = { ...waiting, openRound: { ...waitingRound, waitingReason: "resuming", question: answeredQuestion }, allowedActions: { ...waiting.allowedActions, answer: { available: false, reason: { code: "question_already_answered", message: "This question already has an answer" } } } };
-  const record = (fields: Partial<TicketRound>): TicketRound => ({ ...waitingRound, endedAt: null, outcomeNote: null, activity: [], earlierActivityCursor: null, usage, deliverable: null, questions: [question], feedback: [], permissionRequests: [], authorityChecks: [], authorityCheckCount: 0, ...fields });
+  const record = (fields: Partial<TicketRound>): TicketRound => ({ ...waitingRound, endedAt: null, outcomeNote: null, activity: [], earlierActivityCursor: null, usage, deliverable: null, questions: [question], feedback: [], permissionRequests: [], authorityChecks: [], authorityCheckCount: 0, attestation: null, ...fields });
   const answerQuestion = () => vi.fn<(roundId: string, questionId: string, answer: string) => Promise<Ticket>>();
 
   it("shows the question with an answer form, sending nothing while the answer is blank", () => {
@@ -1355,7 +1466,7 @@ describe("feedback for the next Round", () => {
     delivery,
     permissionGrants: [],
     permissionGrantCount: 0,
-    allowedActions: { statusChanges: ["Done"], statusChangeRejections: [], accept: { available: true }, rework: { available: true }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: true }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } },
+    allowedActions: { statusChanges: ["Done"], statusChangeRejections: [], accept: { available: true }, rework: { available: true }, stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: true }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } },
   };
   const done: Ticket = { ...inReview, status: "Done", allowedActions: { ...inReview.allowedActions, statusChanges: ["Ready"], accept: { available: false, reason: { code: "accept_not_available", message: "Accept needs In Review" } } } };
   const deliveredRecord = (sequence: number, id: string, feedback: TicketRound["feedback"]): TicketRound => ({
@@ -1375,7 +1486,7 @@ describe("feedback for the next Round", () => {
     feedback,
     permissionRequests: [],
     authorityChecks: [],
-    authorityCheckCount: 0,
+    authorityCheckCount: 0, attestation: null,
   });
   const addFeedback = () => vi.fn<(roundId: string, body: string) => Promise<Ticket>>();
 
@@ -1478,13 +1589,13 @@ describe("a Permission request from the Agent", () => {
     assigneeType: "agent",
     assigneeAgent: agent,
     openRound: waitingRound,
-    allowedActions: { ...TICKET.allowedActions, statusChanges: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: waitingRound.id } }, stop: { available: true }, permissionDecision: { available: true } },
+    allowedActions: { ...TICKET.allowedActions, statusChanges: [], accept: { available: false, reason: { code: "round_open", message: "locked", roundId: waitingRound.id } }, stop: { available: true }, permissionDecision: { available: true }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } },
   };
   const grant = { id: grantId, agent, account: "controlled", full: false, action: "write_note", resource: "notes/weekly-report", substituteAccount: true, form: "ticket" as const, state: "active" as const, expiresAt: null, remainingSeconds: null, roundId: waitingRound.id, createdAt: "2026-10-02T10:00:09Z", approvedAt: "2026-10-02T10:00:09Z", revokedAt: null, endedAt: null, allowedActions: { revoke: { available: true } }, coveredOpenRounds: [] };
-  const decidedActions = { ...waiting.allowedActions, permissionDecision: { available: false, reason: { code: "permission_already_decided", message: "this Permission request is already decided" } } };
+  const decidedActions = { ...waiting.allowedActions, permissionDecision: { available: false, reason: { code: "permission_already_decided", message: "this Permission request is already decided" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } };
   const resuming: Ticket = { ...waiting, openRound: { ...waitingRound, waitingReason: "resuming", permissionRequest: approved }, permissionGrants: [grant], permissionGrantCount: 1, allowedActions: decidedActions };
   const stillWaiting: Ticket = { ...waiting, openRound: { ...waitingRound, permissionRequest: declined }, allowedActions: decidedActions };
-  const record = (fields: Partial<TicketRound>): TicketRound => ({ ...waitingRound, endedAt: null, outcomeNote: null, activity: [], earlierActivityCursor: null, usage, deliverable: null, questions: [], feedback: [], permissionRequests: [request], authorityChecks: [], authorityCheckCount: 0, ...fields });
+  const record = (fields: Partial<TicketRound>): TicketRound => ({ ...waitingRound, endedAt: null, outcomeNote: null, activity: [], earlierActivityCursor: null, usage, deliverable: null, questions: [], feedback: [], permissionRequests: [request], authorityChecks: [], authorityCheckCount: 0, attestation: null, ...fields });
   const decide = () => vi.fn<DecidePermission>();
 
   it("shows the request as a receipt that labels the controlled account a substitute, with both decisions", () => {
@@ -1498,14 +1609,14 @@ describe("a Permission request from the Agent", () => {
   });
 
   it("offers no decision Galley does not advertise, and names why", () => {
-    const stopping: Ticket = { ...waiting, openRound: { ...waitingRound, stopRequestedAt: "2026-10-02T10:00:05Z", waitingReason: "stopping" }, allowedActions: { ...waiting.allowedActions, permissionDecision: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } } } };
+    const stopping: Ticket = { ...waiting, openRound: { ...waitingRound, stopRequestedAt: "2026-10-02T10:00:05Z", waitingReason: "stopping" }, allowedActions: { ...waiting.allowedActions, permissionDecision: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } } };
     render(<TicketDetail ticket={stopping} onSave={vi.fn()} {...noopActions()} onDecidePermission={decide()} />);
     expect(screen.queryByTestId("ticket-detail-permission-actions")).not.toBeInTheDocument();
     expect(screen.getByTestId("ticket-detail-permission-unavailable")).toHaveTextContent("Stop is already requested for this Round");
   });
 
   it("shows no Permission panel for a Round that waits on none", () => {
-    const running: Ticket = { ...waiting, status: "InProgress", openRound: { ...waitingRound, state: "running", waitingReason: "working", permissionRequest: null }, allowedActions: { ...waiting.allowedActions, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "unavailable" } } } };
+    const running: Ticket = { ...waiting, status: "InProgress", openRound: { ...waitingRound, state: "running", waitingReason: "working", permissionRequest: null }, allowedActions: { ...waiting.allowedActions, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "unavailable" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } } };
     render(<TicketDetail ticket={running} onSave={vi.fn()} {...noopActions()} onDecidePermission={decide()} />);
     expect(screen.queryByTestId("ticket-detail-permission")).not.toBeInTheDocument();
   });
@@ -1551,7 +1662,7 @@ describe("a Permission request from the Agent", () => {
   it("lists the Round's requests, their decisions and its authority checks", () => {
     const deny = { account: "controlled", action: "write_note", resource: "notes/weekly-report", decision: "deny" as const, grantId: null, expiredGrantId: null, checkedAt: "2026-10-02T10:00:02Z" };
     const allow = { ...deny, decision: "allow" as const, grantId, checkedAt: "2026-10-02T10:00:10Z" };
-    render(<TicketDetail ticket={waiting} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [record({ authorityChecks: [deny, allow], authorityCheckCount: 2 })] }} />);
+    render(<TicketDetail ticket={waiting} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [record({ authorityChecks: [deny, allow], authorityCheckCount: 2, attestation: null })] }} />);
     expect(screen.getByTestId("ticket-detail-round-state")).toHaveTextContent("Waiting for a Permission");
     const listed = screen.getByTestId("ticket-detail-round-permission-request");
     expect(listed).toHaveAttribute("data-decision", "pending");
@@ -1565,7 +1676,7 @@ describe("a Permission request from the Agent", () => {
 
   it("says when Galley lists only the latest authority checks", () => {
     const allow = { account: "controlled", action: "write_note", resource: "notes/weekly-report", decision: "allow" as const, grantId, expiredGrantId: null, checkedAt: "2026-10-02T10:00:10Z" };
-    render(<TicketDetail ticket={{ ...waiting, openRound: null, status: "InReview", permissionGrants: [grant], permissionGrantCount: 1 }} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [record({ state: "delivered", permissionRequests: [approved], authorityChecks: [allow], authorityCheckCount: 51 })] }} />);
+    render(<TicketDetail ticket={{ ...waiting, openRound: null, status: "InReview", permissionGrants: [grant], permissionGrantCount: 1 }} onSave={vi.fn()} {...noopActions()} roundRecords={{ rounds: [record({ state: "delivered", permissionRequests: [approved], authorityChecks: [allow], authorityCheckCount: 51, attestation: null })] }} />);
     expect(screen.getByTestId("ticket-detail-round-authority-checks-truncated")).toHaveTextContent("Showing the latest 1 of 51 checks.");
     expect(screen.getByTestId("ticket-detail-round-permission-request")).toHaveTextContent("Allowed for this Ticket");
   });
@@ -1637,14 +1748,14 @@ describe("a Permission request from the Agent", () => {
       const renewal = { ...request, renewsGrantId: expiredGrant.id };
       const asking: Ticket = { ...waiting, openRound: { ...waitingRound, permissionRequest: renewal } };
       const deny = { account: "controlled", action: "write_note", resource: "notes/weekly-report", decision: "deny" as const, grantId: null, expiredGrantId: expiredGrant.id, checkedAt: "2026-10-02T10:00:02Z" };
-      render(<TicketDetail ticket={asking} onSave={vi.fn()} {...noopActions()} onDecidePermission={decide()} roundRecords={{ rounds: [record({ permissionRequests: [renewal], authorityChecks: [deny], authorityCheckCount: 1 })] }} />);
+      render(<TicketDetail ticket={asking} onSave={vi.fn()} {...noopActions()} onDecidePermission={decide()} roundRecords={{ rounds: [record({ permissionRequests: [renewal], authorityChecks: [deny], authorityCheckCount: 1, attestation: null })] }} />);
       expect(screen.getByTestId("ticket-detail-permission-renewal")).toHaveTextContent("Renewal. The Agent's time-based grant for this scope expired.");
       expect(screen.getByTestId("ticket-detail-round-permission-request")).toHaveTextContent("Renews an expired grant");
       expect(screen.getByTestId("ticket-detail-round-authority-check-expired")).toHaveTextContent("its time-based grant expired");
     });
 
     it("marks neither on a first request or a plain deny", () => {
-      render(<TicketDetail ticket={waiting} onSave={vi.fn()} {...noopActions()} onDecidePermission={decide()} roundRecords={{ rounds: [record({ authorityChecks: [{ account: "controlled", action: "write_note", resource: "notes/weekly-report", decision: "deny", grantId: null, expiredGrantId: null, checkedAt: "2026-10-02T10:00:02Z" }], authorityCheckCount: 1 })] }} />);
+      render(<TicketDetail ticket={waiting} onSave={vi.fn()} {...noopActions()} onDecidePermission={decide()} roundRecords={{ rounds: [record({ authorityChecks: [{ account: "controlled", action: "write_note", resource: "notes/weekly-report", decision: "deny", grantId: null, expiredGrantId: null, checkedAt: "2026-10-02T10:00:02Z" }], authorityCheckCount: 1, attestation: null })] }} />);
       expect(screen.queryByTestId("ticket-detail-permission-renewal")).not.toBeInTheDocument();
       expect(screen.getByTestId("ticket-detail-round-permission-request")).not.toHaveTextContent("Renews");
       expect(screen.queryByTestId("ticket-detail-round-authority-check-expired")).not.toBeInTheDocument();
@@ -1745,7 +1856,7 @@ describe("a Permission request from the Agent", () => {
         const allow = { account: "controlled", action: "post_message", resource: "channels/general", decision: "allow" as const, grantId: fullGrant.id, expiredGrantId: null, checkedAt: "2026-10-02T10:00:10Z" };
         const exact = { ...allow, action: "write_note", resource: "notes/weekly-report", grantId };
         const asking: Ticket = { ...waiting, openRound: { ...waitingRound, permissionRequest: renewal }, permissionGrants: [expiredFull, grant, fullGrant], permissionGrantCount: 3 };
-        render(<TicketDetail ticket={asking} onSave={vi.fn()} {...noopActions()} onDecidePermission={decide()} roundRecords={{ rounds: [record({ permissionRequests: [renewal], authorityChecks: [allow, exact], authorityCheckCount: 2 })] }} />);
+        render(<TicketDetail ticket={asking} onSave={vi.fn()} {...noopActions()} onDecidePermission={decide()} roundRecords={{ rounds: [record({ permissionRequests: [renewal], authorityChecks: [allow, exact], authorityCheckCount: 2, attestation: null })] }} />);
         expect(screen.getByTestId("ticket-detail-permission-renewal")).toHaveTextContent("Renewal. The Agent's time-based full access to the controlled account expired.");
         const checks = screen.getAllByTestId("ticket-detail-round-authority-check");
         expect(checks[0]).toHaveTextContent("Allowed post_message on channels/general (controlled) · by full access");

@@ -4,7 +4,8 @@ import type { RunnerCredential } from "./credentials.ts";
 import { runControlledEngine, type EngineDeps } from "./engine.ts";
 import type { EngineScript } from "./engineScript.ts";
 import type { FetchFn } from "./galley/client.ts";
-import { claimWork, type ClaimResult, type PulledCommand, type RunnerClaim } from "./galley/runner.ts";
+import { randomUUID } from "node:crypto";
+import { claimKeyOutlives, claimWork, type ClaimResult, type PulledCommand, type RunnerClaim } from "./galley/runner.ts";
 import { requireReconcile, type Registration } from "./heartbeatLoop.ts";
 import type { Logger } from "./logger.ts";
 import { Reconciler, type HeldRoundState } from "./reconciler.ts";
@@ -14,6 +15,7 @@ export interface ClaimLoopOptions {
   galleyUrl: URL;
   intervalMs: number;
   commandIntervalMs: number;
+  reportRetryMaxMs?: number;
   fetch: FetchFn;
   logger: Logger;
   credential: RunnerCredential;
@@ -43,19 +45,24 @@ async function run(options: ClaimLoopOptions, signal: AbortSignal): Promise<void
   const { galleyUrl, intervalMs, logger, registration } = options;
   const request = { fetch: options.fetch, galleyUrl, signal, timeoutMs: options.requestTimeoutMs, credential: options.credential };
   const reconciler = new Reconciler({ ...request, logger, registration, requestTimeoutMs: options.requestTimeoutMs, sleep: options.engineDeps?.sleep });
+  // Held in memory only: a restarted Michelin cannot ask again, and Galley holds the Round it may have created.
+  let pendingKey: string | undefined;
   while (!signal.aborted) {
     await sleep(intervalMs, signal);
     if (signal.aborted || !registration.registered) {
       continue;
     }
-    // Holding nothing, Michelin claims only once Galley confirms the Owner has no open Round it might still be running.
-    if (registration.reconcileRequired) {
+    // Holding nothing, Michelin claims only once Galley confirms the Owner has no open Round it might still be running;
+    // a claim still awaiting its answer is asked first, since that Round may be the one.
+    if (pendingKey === undefined && registration.reconcileRequired) {
       await reconciler.reconcile();
       if (registration.reconcileRequired) {
         continue;
       }
     }
-    const result = await claimWork(request);
+    const key = pendingKey ?? randomUUID();
+    const result = await claimWork(request, key);
+    pendingKey = claimKeyOutlives(result) ? key : undefined;
     if (result.ok && result.value !== null) {
       const { roundId, sequence, claimEpoch, ticket } = result.value;
       logger.info("round claimed", {
@@ -139,7 +146,8 @@ async function runRound(options: ClaimLoopOptions, claim: RunnerClaim, signal: A
       awaitApproval: approvals.wait,
       requestTimeoutMs,
       deps: options.engineDeps,
-      reconcile: { gate: () => reconciler.gate(), require: () => requireReconcile(registration) },
+      reconcile: { gate: () => reconciler.gate(), require: () => requireReconcile(registration), settle: () => reconciler.reconcile(), intervalMs: options.intervalMs },
+      reportRetryMaxMs: options.reportRetryMaxMs,
       dropped: dropped.signal,
       onHalted: () => {
         halted = true;

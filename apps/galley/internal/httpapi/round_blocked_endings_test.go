@@ -184,18 +184,30 @@ func TestFailedAndInterrupted_NoRoundStartsUntilTheOwnerMovesTheTicketToReady(t 
 	}
 }
 
-func TestFailedAndInterrupted_OnAClaimedRoundIsEventOutOfOrderAndChangesNothing(t *testing.T) {
-	for _, e := range blockedEndings {
-		t.Run(e.name(), func(t *testing.T) {
-			f := newClaimFixture(t)
-			queued, claim := f.claimTicket(t, "Never started")
-			before := databaseSnapshot(t, f.pool)
-			assertErrorBody(t, f.endAs(t, e, claim), http.StatusConflict, eventOutOfOrderCode, eventOutOfOrderMessage(e.eventType, RoundClaimed))
-			assertSnapshotUnchanged(t, f.pool, before, string(e.eventType)+" on a claimed Round")
-			if got := f.ticket(t, queued.Id); got.Status != Ready || got.OpenRound == nil {
-				t.Fatalf("Ticket = %s %+v, want Ready with its Round still open", got.Status, got.OpenRound)
-			}
-		})
+func TestFailed_OnAClaimedRoundIsEventOutOfOrderAndChangesNothing(t *testing.T) {
+	e := blockedEndings[0]
+	f := newClaimFixture(t)
+	queued, claim := f.claimTicket(t, "Never started")
+	before := databaseSnapshot(t, f.pool)
+	assertErrorBody(t, f.endAs(t, e, claim), http.StatusConflict, eventOutOfOrderCode, eventOutOfOrderMessage(e.eventType, RoundClaimed))
+	assertSnapshotUnchanged(t, f.pool, before, string(e.eventType)+" on a claimed Round")
+	if got := f.ticket(t, queued.Id); got.Status != Ready || got.OpenRound == nil {
+		t.Fatalf("Ticket = %s %+v, want Ready with its Round still open", got.Status, got.OpenRound)
+	}
+}
+
+func TestInterrupted_EndsAClaimedRoundWithoutAStartAndBlocksTheTicket(t *testing.T) {
+	e := blockedEndings[1]
+	f := newClaimFixture(t)
+	queued, claim := f.claimTicket(t, "Never started")
+	f.clock.Set(runnerEpoch.Add(3 * time.Second))
+	f.mustEndAs(t, e, claim)
+	if got := f.ticket(t, queued.Id); got.Status != Blocked || got.OpenRound != nil {
+		t.Fatalf("Ticket = %s %+v, want Blocked with no open Round", got.Status, got.OpenRound)
+	}
+	rounds := decodeRounds(t, f.listRounds(t, queued.Id))
+	if r := rounds[0]; r.State != RoundInterrupted || r.StartedAt != nil || r.EndedAt == nil || !r.EndedAt.Equal(runnerEpoch.Add(3*time.Second)) || r.OutcomeNote == nil || *r.OutcomeNote != e.note {
+		t.Fatalf("round = %+v, want interrupted, never started, ended at Galley's clock with the evidence", r)
 	}
 }
 
@@ -707,6 +719,11 @@ func TestRounds_TheDatabaseEnforcesTheFailedAndInterruptedOutcomes(t *testing.T)
 		return err
 	}
 	sequence := 1
+	sequence++
+	if err := insert(sequence, "interrupted", "NULL", "now()", "a claimed Round"); err != nil {
+		t.Fatalf("an interrupted Round that never started: %v", err)
+	}
+	assertViolates(t, insert(97, "failed", "NULL", "now()", "n"), "rounds_timestamps_follow_state")
 	for _, state := range []string{"failed", "interrupted"} {
 		for _, tc := range []struct {
 			name, started, ended string
@@ -714,8 +731,8 @@ func TestRounds_TheDatabaseEnforcesTheFailedAndInterruptedOutcomes(t *testing.T)
 			constraint           string
 		}{
 			{"without a note", "now()", "now()", nil, "rounds_outcome_note_follows_state"},
-			{"without a start", "NULL", "now()", "n", "rounds_timestamps_follow_state"},
 			{"without an end", "now()", "NULL", "n", "rounds_timestamps_follow_state"},
+			{"without a start or an end", "NULL", "NULL", "n", "rounds_timestamps_follow_state"},
 			{"with an empty note", "now()", "now()", "", "rounds_outcome_note_length"},
 			{"with a note over 2000 characters", "now()", "now()", strings.Repeat("界", 2001), "rounds_outcome_note_length"},
 			{"ended before it started", "now()", "now() - interval '1 hour'", "n", "rounds_timestamps_ordered"},

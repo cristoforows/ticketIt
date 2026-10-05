@@ -88,7 +88,7 @@ afterEach(() => {
 });
 
 describe("claim loop", () => {
-  it("polls with the bearer credential and no body, quietly while Galley has no work", async () => {
+  it("polls with the bearer credential and a fresh idempotency key, quietly while Galley has no work", async () => {
     const fetchFn = sequence(noWork);
     const { loop, records } = setup(fetchFn);
 
@@ -101,7 +101,10 @@ describe("claim loop", () => {
     expect(String(url)).toBe("http://galley.test:8080/api/runner/claims");
     expect(init?.method).toBe("POST");
     expect((init?.headers as Record<string, string>)["authorization"]).toBe(`Bearer ${TOKEN}`);
-    expect(init?.body).toBeUndefined();
+    expect((init?.headers as Record<string, string>)["content-type"]).toBe("application/json");
+    const keys = fetchFn.mock.calls.map(([, call]) => (JSON.parse(String(call?.body)) as { idempotencyKey: string }).idempotencyKey);
+    expect(keys[0]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(new Set(keys).size).toBe(3);
     expect(records()).toEqual([]);
     await loop.stop();
   });
@@ -312,7 +315,7 @@ describe("claim loop", () => {
   it.each([
     ["an unreachable Galley", (): Response => { throw refused(); }, { reason: "unreachable", code: "ECONNREFUSED" }],
     ["a server error", () => json({ error: { code: "database_unavailable", message: "x" } }, 503), { reason: "http_status", httpStatus: 503 }],
-    ["a 200 instead of 201 or 204", () => json(CLAIM, 200), { reason: "http_status", httpStatus: 200 }],
+    ["a 202 instead of 200, 201 or 204", () => json(CLAIM, 202), { reason: "http_status", httpStatus: 202 }],
     ["a non-JSON claim", () => new Response("<html>", { status: 201 }), { reason: "invalid_body" }],
     ["a claim without a round id", () => json({ ...CLAIM, roundId: 7 }, 201), { reason: "invalid_body" }],
     ["a claim without a Ticket", () => json({ ...CLAIM, ticket: { id: "x" } }, 201), { reason: "invalid_body" }],
@@ -421,5 +424,92 @@ describe("claim loop beside the heartbeat loop", () => {
     expect(paths().filter((path) => path === "/api/runner/heartbeat")).toHaveLength(3);
     expect(paths().filter((path) => path === "/api/runner/claims").length).toBeGreaterThanOrEqual(5);
     await stop();
+  });
+});
+
+describe("the claim idempotency key", () => {
+  const claimKeys = (fetchFn: ReturnType<typeof vi.fn<FetchFn>>) =>
+    fetchFn.mock.calls
+      .filter(([input]) => new URL(String(input)).pathname === "/api/runner/claims")
+      .map(([, init]) => (JSON.parse(String(init?.body)) as { idempotencyKey: string }).idempotencyKey);
+
+  it.each([
+    ["an unreachable Galley", unreachable],
+    ["a 500", () => json({ error: { code: "internal_error", message: "x" } }, 500)],
+    ["a 503", () => json({ error: { code: "database_unavailable", message: "x" } }, 503)],
+    ["a non-JSON 201", () => new Response("<html>", { status: 201 })],
+    ["a 201 that is not a claim", () => json({ ...CLAIM, roundId: 7 }, 201)],
+  ])("is asked again after %s", async (_name, failure) => {
+    const fetchFn = sequence(failure, noWork, noWork);
+    const { loop } = setup(fetchFn);
+    await vi.advanceTimersByTimeAsync(3000);
+    const keys = claimKeys(fetchFn);
+    expect(keys).toHaveLength(3);
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2]).not.toBe(keys[1]);
+    await loop.stop();
+  });
+
+  it("is asked again after a timeout", async () => {
+    let calls = 0;
+    const fetchFn = vi.fn<FetchFn>((input, init) => (++calls === 1 ? hang(input, init) : Promise.resolve(noWork())));
+    const { loop } = setup(fetchFn);
+    await vi.advanceTimersByTimeAsync(3500);
+    const keys = claimKeys(fetchFn);
+    expect(keys.length).toBeGreaterThanOrEqual(3);
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2]).not.toBe(keys[1]);
+    await loop.stop();
+  });
+
+  it.each([
+    ["a 204", noWork],
+    ["a 401", unauthenticated],
+    ["a 409 idempotency_key_conflict", () => json({ error: { code: "idempotency_key_conflict", message: "x" } }, 409)],
+    ["a 409 claim_not_replayable", () => json({ error: { code: "claim_not_replayable", message: "x" } }, 409)],
+    ["a 400", () => json({ error: { code: "invalid_request", message: "x" } }, 400)],
+  ])("is dropped after %s", async (_name, answer) => {
+    const fetchFn = sequence(answer, noWork);
+    const { loop } = setup(fetchFn);
+    await vi.advanceTimersByTimeAsync(2000);
+    const keys = claimKeys(fetchFn);
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).not.toBe(keys[0]);
+    await loop.stop();
+  });
+
+  it.each([
+    ["201", 201],
+    ["200 replay", 200],
+  ])("is dropped after a %s claim, and the next claim after the Round uses a new key", async (_name, status) => {
+    const fetchFn = routed({ claims: [unreachable, () => json(CLAIM, status), noWork], events: [created] });
+    const { loop, records } = setup(fetchFn, true, { steps: [{ step: "start" }] });
+    await vi.advanceTimersByTimeAsync(4000);
+    const keys = claimKeys(fetchFn);
+    expect(keys.length).toBeGreaterThanOrEqual(3);
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2]).not.toBe(keys[1]);
+    expect(records().filter((record) => record["msg"] === "round claimed")).toEqual([expect.objectContaining({ roundId: CLAIM.roundId })]);
+    await loop.stop();
+  });
+
+  it("is asked again before any Reconcile while holding nothing", async () => {
+    const paths: string[] = [];
+    const claims = [unreachable, noWork];
+    const fetchFn = vi.fn<FetchFn>(async (input) => {
+      const path = new URL(String(input)).pathname;
+      paths.push(path);
+      if (path === "/api/runner/claims") return (claims.length > 1 ? claims.shift()! : claims[0]!)();
+      if (path === "/api/runner/reconcile") return noRound();
+      throw new Error(`unexpected ${String(input)}`);
+    });
+    const { loop, registration } = setup(fetchFn);
+    await vi.advanceTimersByTimeAsync(1000);
+    registration.reconcileRequired = true;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(paths.slice(0, 3)).toEqual(["/api/runner/claims", "/api/runner/claims", "/api/runner/reconcile"]);
+    const keys = claimKeys(fetchFn);
+    expect(keys[1]).toBe(keys[0]);
+    await loop.stop();
   });
 });

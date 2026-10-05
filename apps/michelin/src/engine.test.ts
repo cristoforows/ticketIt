@@ -5,6 +5,7 @@ import { DEFAULT_ENGINE_SCRIPT, type DeliverStep, type EngineStep } from "./engi
 import { resolveRunnerCredential } from "./credentials.ts";
 import type { FetchFn } from "./galley/client.ts";
 import type { RunnerClaim } from "./galley/runner.ts";
+import type { ReconcileOutcome } from "./reconciler.ts";
 import { createLogger } from "./logger.ts";
 
 const GALLEY = new URL("http://galley.test:8080/");
@@ -208,7 +209,7 @@ describe("retrying a failed report", () => {
     const bodies = fetchFn.mock.calls.map(([, init]) => String(init?.body));
     expect(new Set(bodies).size).toBe(1);
     expect(harness.references).toHaveLength(1);
-    expect(harness.clockReads).toBe(1);
+    expect(harness.clockReads).toBe(1 + 3);
     const warnings = harness.records().filter((record) => record["level"] === "warn");
     expect(warnings.map((record) => [record["attempt"], record["retryInMs"]])).toEqual([[1, 1000], [2, 2000], [3, 4000]]);
     expect(warnings[0]).toMatchObject({ msg: "round event failed; retrying", roundId: ROUND_ID, step: "start", stepIndex: 0 });
@@ -603,7 +604,7 @@ describe("progress and usage steps", () => {
     const bodies = fetchFn.mock.calls.map(([, init]) => String(init?.body));
     expect(bodies).toHaveLength(4);
     expect(new Set(bodies.slice(1)).size).toBe(1);
-    expect(harness.clockReads).toBe(2);
+    expect(harness.clockReads).toBe(2 + 2);
   });
 
   it.each([
@@ -693,7 +694,7 @@ describe("the deliver step", () => {
     const bodies = fetchFn.mock.calls.map(([, init]) => String(init?.body));
     expect(bodies).toHaveLength(5);
     expect(new Set(bodies.slice(1)).size).toBe(1);
-    expect(harness.clockReads).toBe(2);
+    expect(harness.clockReads).toBe(2 + 3);
     expect(harness.records().find((record) => record["msg"] === "delivery reported")).toMatchObject({ attempt: 4, httpStatus: 200, replayed: true });
   });
 
@@ -1344,5 +1345,149 @@ describe("feedback from earlier Rounds", () => {
     expect([...note]).toHaveLength(2000);
     expect(note.startsWith("Owner's feedback received (3 comments):\nRound 1: 界")).toBe(true);
     expect(feedbackNote(long)).toBe(note);
+  });
+});
+
+describe("the report retry bound", () => {
+  const PROGRESS: EngineStep = { step: "progress", note: "Reading" };
+  const DELIVERY: EngineStep = { step: "deliver", bodyMarkdown: "# Done", summary: "Done.", criteriaAssessment: "Met." };
+  const progressed = () => json({ roundId: ROUND_ID, type: "progress", state: "running", startedAt: "2026-10-01T12:00:00Z", seq: 1 }, 201);
+  const ended = (type: string, state: string, status = 201) => () => json({ roundId: ROUND_ID, type, state, startedAt: "2026-10-01T12:00:00Z", endedAt: "2026-10-01T12:10:00Z" }, status);
+
+  function bounded(steps: EngineStep[], fetchFn: FetchFn, retryMaxMs: number, answers: ReconcileOutcome[] = []) {
+    let clock = Date.UTC(2026, 9, 1, 12, 0, 0);
+    const lines: string[] = [];
+    const sleeps: number[] = [];
+    let halted = 0;
+    const settle = vi.fn(async (): Promise<ReconcileOutcome> => answers.shift() ?? { kind: "aborted" });
+    const run = runControlledEngine({
+      galleyUrl: GALLEY,
+      fetch: fetchFn,
+      logger: createLogger((line) => lines.push(line)),
+      credential: credential(),
+      claim: CLAIM,
+      script: { steps },
+      signal: new AbortController().signal,
+      stop: new AbortController().signal,
+      requestTimeoutMs: 300,
+      reportRetryMaxMs: retryMaxMs,
+      reconcile: { gate: async () => ({ kind: "proceed" }), require: () => {}, settle, intervalMs: 5000 },
+      onHalted: () => {
+        halted++;
+      },
+      deps: {
+        now: () => new Date(clock),
+        sleep: async (ms: number) => {
+          sleeps.push(ms);
+          clock += ms;
+        },
+      },
+    });
+    const records = () => lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+    return { run, sleeps, records, settle, halted: () => halted };
+  }
+  const bodies = (fetchFn: ReturnType<typeof sequence>) => fetchFn.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as { type: string; idempotencyKey: string; data: Record<string, string> });
+
+  it("halts exactly at the bound, measured from the first failed attempt on the engine's clock", async () => {
+    const fetchFn = sequence(created, refused);
+    const harness = bounded([START, PROGRESS, DELIVERY], fetchFn, 7000);
+    expect(await harness.run).toBe("aborted");
+    expect(fetchFn).toHaveBeenCalledTimes(1 + 4);
+    expect(harness.sleeps).toEqual([1000, 2000, 4000, 5000]);
+    expect(harness.halted()).toBe(1);
+    expect(harness.records().find((record) => record["msg"] === "report retry exhausted; round halted locally")).toMatchObject({ level: "error", roundId: ROUND_ID, step: "progress", type: "progress", retryMaxMs: 7000 });
+    expect(bodies(fetchFn).map((body) => body.type)).not.toContain("delivered");
+  });
+
+  it("keeps retrying just under the bound", async () => {
+    const fetchFn = sequence(created, refused);
+    const harness = bounded([START, PROGRESS], fetchFn, 7001);
+    expect(await harness.run).toBe("aborted");
+    expect(fetchFn).toHaveBeenCalledTimes(1 + 5);
+    expect(harness.sleeps).toEqual([1000, 2000, 4000, 8000, 5000]);
+  });
+
+  it("restarts the measure for each report", async () => {
+    const fetchFn = sequence(created, refused, refused, refused, progressed, refused, refused, refused, ended("delivered", "delivered"));
+    const harness = bounded([START, PROGRESS, DELIVERY], fetchFn, 7000);
+    expect(await harness.run).toBe("delivered");
+    expect(harness.halted()).toBe(0);
+  });
+
+  it("reconciles at claim cadence without bound, then reports the cessation Galley names with evidence for an unsent progress report", async () => {
+    const fetchFn = sequence(created, refused, refused, refused, refused, ended("interrupted", "interrupted"));
+    const harness = bounded([START, PROGRESS, DELIVERY], fetchFn, 7000, [{ kind: "continue" }, { kind: "none" }, { kind: "cessation", event: "interrupted" }]);
+    expect(await harness.run).toBe("interrupted");
+    expect(harness.settle).toHaveBeenCalledTimes(3);
+    expect(harness.sleeps).toEqual([1000, 2000, 4000, 5000, 5000, 5000]);
+    const sent = bodies(fetchFn).at(-1)!;
+    expect(sent).toMatchObject({ type: "interrupted", idempotencyKey: `${ROUND_ID}:halted`, claimEpoch: 3 });
+    expect(sent.data["evidence"]).toBe("Halted locally at step 2 of 3 (progress) at 2026-10-01T12:00:07.000Z: report retry bound of 7000 ms reached");
+    expect(harness.records().find((record) => record["msg"] === "cessation reported")).toMatchObject({ unsent: "progress", httpStatus: 201 });
+  });
+
+  it("sends the stop_confirmed cessation Galley names when a Stop was requested", async () => {
+    const fetchFn = sequence(created, refused, refused, refused, refused, ended("stop_confirmed", "stopped"));
+    const harness = bounded([START, PROGRESS], fetchFn, 7000, [{ kind: "cessation", event: "stop_confirmed" }]);
+    expect(await harness.run).toBe("stopped");
+    expect(bodies(fetchFn).at(-1)).toMatchObject({ type: "stop_confirmed", idempotencyKey: `${ROUND_ID}:halted` });
+  });
+
+  it.each([
+    ["delivered", DELIVERY, ended("delivered", "delivered"), "delivered"],
+    ["failed", { step: "fail", explanation: "no data" } as EngineStep, ended("failed", "failed"), "failed"],
+    ["interrupted", { step: "interrupt", evidence: "lost the shell" } as EngineStep, ended("interrupted", "interrupted"), "interrupted"],
+  ])("sends an unsent %s report itself, byte for byte, in place of the named cessation", async (type, step, answer, outcome) => {
+    const fetchFn = sequence(created, refused, refused, refused, refused, answer);
+    const harness = bounded([START, step], fetchFn, 7000, [{ kind: "cessation", event: "interrupted" }]);
+    expect(await harness.run).toBe(outcome);
+    const raw = fetchFn.mock.calls.map(([, init]) => String(init?.body));
+    expect(new Set(raw.slice(1)).size).toBe(1);
+    expect(bodies(fetchFn).at(-1)).toMatchObject({ type, idempotencyKey: `${ROUND_ID}:1` });
+  });
+
+  it("accepts a replay of the unsent report as its one effect", async () => {
+    const fetchFn = sequence(created, refused, refused, refused, refused, ended("delivered", "delivered", 200));
+    const harness = bounded([START, DELIVERY], fetchFn, 7000, [{ kind: "cessation", event: "interrupted" }]);
+    expect(await harness.run).toBe("delivered");
+    expect(harness.records().find((record) => record["msg"] === "delivery reported")).toMatchObject({ replayed: true, httpStatus: 200 });
+    expect(fetchFn).toHaveBeenCalledTimes(6);
+  });
+
+  it.each([
+    ["409 round_not_open", error(409, "round_not_open")],
+    ["409 runner_not_holder", error(409, "runner_not_holder")],
+    ["400", error(400, "invalid_request")],
+  ])("drops the Round when the cessation gets a %s", async (_name, refusal) => {
+    const fetchFn = sequence(created, refused, refused, refused, refused, refusal);
+    const harness = bounded([START, PROGRESS], fetchFn, 7000, [{ kind: "cessation", event: "interrupted" }]);
+    expect(await harness.run).toBe("abandoned");
+    expect(fetchFn).toHaveBeenCalledTimes(6);
+  });
+
+  it.each([
+    ["hold", { kind: "hold" } as ReconcileOutcome, "abandoned"],
+    ["drop", { kind: "drop" } as ReconcileOutcome, "abandoned"],
+    ["aborted", { kind: "aborted" } as ReconcileOutcome, "aborted"],
+  ])("leaves the Round unreported when the Reconcile answers %s", async (_name, answer, outcome) => {
+    const fetchFn = sequence(created, refused);
+    const harness = bounded([START, PROGRESS], fetchFn, 7000, [answer]);
+    expect(await harness.run).toBe(outcome);
+    expect(fetchFn).toHaveBeenCalledTimes(5);
+  });
+
+  it("reconciles again when the cessation itself reaches the bound", async () => {
+    const fetchFn = sequence(created, refused, refused, refused, refused, refused, refused, refused, refused, ended("interrupted", "interrupted"));
+    const harness = bounded([START, PROGRESS], fetchFn, 7000, [{ kind: "cessation", event: "interrupted" }, { kind: "cessation", event: "interrupted" }]);
+    expect(await harness.run).toBe("interrupted");
+    expect(harness.settle).toHaveBeenCalledTimes(2);
+    expect(new Set(bodies(fetchFn).slice(5).map((body) => body.idempotencyKey))).toEqual(new Set([`${ROUND_ID}:halted`]));
+  });
+
+  it("without a Reconcile to ask, abandons the Round", async () => {
+    const fetchFn = sequence(created, refused);
+    const harness = start([START, PROGRESS], fetchFn, { instantSleep: true });
+    expect(await harness.run).toBe("abandoned");
+    expect(harness.records().filter((record) => record["msg"] === "report retry exhausted; round halted locally")).toHaveLength(1);
   });
 });

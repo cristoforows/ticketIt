@@ -7,10 +7,12 @@ package httpapi
 // a Permission: only Stop ends that wait. A Round awaiting Reconcile
 // outranks the Round's own waits: Galley does not yet know the runner
 // still holds the Round.
-func decideWaitingReason(state OpenRoundState, question *RoundQuestion, request *PermissionRequest, stopRequested, runnerConnected, reconcileRequired bool, recordedExecution *HeldExecution) RoundWaitingReason {
+func decideWaitingReason(state OpenRoundState, question *RoundQuestion, request *PermissionRequest, stopRequested, runnerConnected, runnerReplaced, reconcileRequired bool, recordedExecution *HeldExecution) RoundWaitingReason {
 	switch {
 	case !runnerConnected:
 		return WaitingRunnerDisconnected
+	case runnerReplaced:
+		return WaitingRunnerReplaced
 	case reconcileRequired && recordedExecution != nil && *recordedExecution == HeldUnknown:
 		return WaitingExecutionUnknown
 	case reconcileRequired:

@@ -425,6 +425,8 @@ const ticketSelectColumns = `public_id::text, title, status, template, completio
 	   JOIN agents a ON a.owner_id = r.owner_id AND a.id = r.agent_id
 	  WHERE r.state = 'delivered'),
 	(SELECT ru.last_seen_at FROM runners ru WHERE ru.owner_id = tickets.owner_id),
+	(SELECT ru.id FROM runners ru WHERE ru.owner_id = tickets.owner_id),
+	(SELECT r.runner_id FROM rounds r WHERE r.owner_id = tickets.owner_id AND r.ticket_id = tickets.id AND r.state IN ` + openRoundStatesSQL + `),
 	(SELECT r.reconcile_required FROM rounds r WHERE r.owner_id = tickets.owner_id AND r.ticket_id = tickets.id AND r.state IN ` + openRoundStatesSQL + `),
 	(SELECT r.reconcile_execution FROM rounds r WHERE r.owner_id = tickets.owner_id AND r.ticket_id = tickets.id AND r.state IN ` + openRoundStatesSQL + `),
 	` + permissionGrantsJSON + `,
@@ -451,6 +453,7 @@ func scanTicketRow(row ticketRowScanner, now time.Time) (Ticket, error) {
 		status, template, completionCondition                    string
 		assigneeType                                             sql.NullString
 		runnerLastSeenAt                                         *time.Time
+		currentRunnerID, holderID                                *int64
 		reconcileRequired                                        *bool
 		reconcileExecution                                       *HeldExecution
 		goal, ctxField, successCriteria, constraints, repository sql.NullString
@@ -459,7 +462,7 @@ func scanTicketRow(row ticketRowScanner, now time.Time) (Ticket, error) {
 	)
 	if err := row.Scan(
 		&ticket.Id, &ticket.Title, &status, &template, &completionCondition, &assigneeType, &ticket.AssigneeAgent, &ticket.OpenRound, &ticket.Delivery,
-		&runnerLastSeenAt, &reconcileRequired, &reconcileExecution, &ticket.PermissionGrants, &ticket.PermissionGrantCount, &goal, &ctxField, &successCriteria, &constraints, &repository,
+		&runnerLastSeenAt, &currentRunnerID, &holderID, &reconcileRequired, &reconcileExecution, &ticket.PermissionGrants, &ticket.PermissionGrantCount, &goal, &ctxField, &successCriteria, &constraints, &repository,
 		&createdAt, &updatedAt, &archivedAt,
 	); err != nil {
 		return Ticket{}, err
@@ -489,8 +492,13 @@ func scanTicketRow(row ticketRowScanner, now time.Time) (Ticket, error) {
 		if ticket.OpenRound.PermissionRequest != nil {
 			normalisePermissionRequest(ticket.OpenRound.PermissionRequest)
 		}
+	}
+	cessation := cessationFacts{archived: ticket.ArchivedAt != nil, roundOpen: ticket.OpenRound != nil, recordedExecution: reconcileExecution}
+	if ticket.OpenRound != nil {
+		connected := runnerConnected(now, runnerLastSeenAt)
+		cessation.holderHealth = holderHealthOf(holderID, currentRunnerID, connected)
 		ticket.OpenRound.WaitingReason = decideWaitingReason(ticket.OpenRound.State, ticket.OpenRound.Question, ticket.OpenRound.PermissionRequest,
-			ticket.OpenRound.StopRequestedAt != nil, runnerConnected(now, runnerLastSeenAt), reconcileRequired != nil && *reconcileRequired, reconcileExecution)
+			ticket.OpenRound.StopRequestedAt != nil, connected, cessation.holderHealth == HolderReplaced, reconcileRequired != nil && *reconcileRequired, reconcileExecution)
 	}
 	if ticket.Delivery != nil {
 		ticket.Delivery.DeliveredAt = ticket.Delivery.DeliveredAt.UTC()
@@ -499,7 +507,7 @@ func scanTicketRow(row ticketRowScanner, now time.Time) (Ticket, error) {
 	ticket.CreatedAt = createdAt.UTC().Format(time.RFC3339)
 	ticket.UpdatedAt = updatedAt.UTC().Format(time.RFC3339)
 	state := workflowStateOf(ticket)
-	ticket.AllowedActions = allowedActionsForTicket(state, ticket.CompletionCondition)
+	ticket.AllowedActions = allowedActionsForTicket(state, ticket.CompletionCondition, cessation)
 	ticket.RequestingAgentWork = decideAgentWorkRequest(state)
 	return ticket, nil
 }

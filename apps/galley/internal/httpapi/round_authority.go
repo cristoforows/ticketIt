@@ -22,6 +22,7 @@ type checkedRound struct {
 	id, ticketID, agentID int64
 	state                 RoundState
 	epoch                 int
+	callerHolds           bool
 	runnerConnected       bool
 	reconcileRequired     bool
 }
@@ -51,7 +52,7 @@ func (s *server) CheckRoundAuthority(w http.ResponseWriter, r *http.Request, rou
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
-	result, found, rejection, err := checkAuthority(ctx, s.pool, runner.ownerID, roundID, scope, req.Epoch, s.clockNow())
+	result, found, rejection, err := checkAuthority(ctx, s.pool, runner.ownerID, runner.id, roundID, scope, req.Epoch, s.clockNow())
 	switch {
 	case err != nil:
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to check authority")
@@ -70,6 +71,8 @@ func (s *server) CheckRoundAuthority(w http.ResponseWriter, r *http.Request, rou
 // Neither a disconnected runner nor an unreconciled Round may be answered: an allow would vouch for execution Galley cannot see (#170).
 func decideAuthorityCheck(round checkedRound, epoch int) *roundEventRejection {
 	switch {
+	case !round.callerHolds:
+		return runnerNotHolderRejection()
 	case epoch != round.epoch:
 		return &roundEventRejection{http.StatusConflict, staleClaimEpochCode, staleClaimEpochMessage}
 	case !OpenRoundState(round.state).Valid():
@@ -89,7 +92,7 @@ func decideAuthorityCheck(round checkedRound, epoch int) *roundEventRejection {
 // row is share-locked too, so a revoke waits for this check to commit and a check queued behind a revoke skips the
 // revoked row: no allow commits after its grant's revocation.
 // A full-access grant matches any scope of its account, so the scope must be declared before any grant is read.
-func checkAuthority(ctx context.Context, pool *pgxpool.Pool, ownerID int64, roundID string, scope permissionScope, epoch int, now time.Time) (AuthorityCheckResult, bool, *roundEventRejection, error) {
+func checkAuthority(ctx context.Context, pool *pgxpool.Pool, ownerID, runnerID int64, roundID string, scope permissionScope, epoch int, now time.Time) (AuthorityCheckResult, bool, *roundEventRejection, error) {
 	if reason := undeclaredCapability(scope); reason != "" {
 		return AuthorityCheckResult{}, true, &roundEventRejection{http.StatusBadRequest, capabilityNotSupportedCode, reason}, nil
 	}
@@ -100,15 +103,17 @@ func checkAuthority(ctx context.Context, pool *pgxpool.Pool, ownerID int64, roun
 	defer func() { _ = tx.Rollback(ctx) }()
 	var round checkedRound
 	var lastSeenAt *time.Time
-	err = tx.QueryRow(ctx, `SELECT id, ticket_id, agent_id, state, claim_epoch, reconcile_required, (SELECT last_seen_at FROM runners WHERE owner_id = rounds.owner_id)
+	var holderID *int64
+	err = tx.QueryRow(ctx, `SELECT id, ticket_id, agent_id, runner_id, state, claim_epoch, reconcile_required, (SELECT last_seen_at FROM runners WHERE owner_id = rounds.owner_id)
 		FROM rounds WHERE owner_id = $1 AND public_id = $2::uuid FOR SHARE OF rounds`,
-		ownerID, roundID).Scan(&round.id, &round.ticketID, &round.agentID, &round.state, &round.epoch, &round.reconcileRequired, &lastSeenAt)
+		ownerID, roundID).Scan(&round.id, &round.ticketID, &round.agentID, &holderID, &round.state, &round.epoch, &round.reconcileRequired, &lastSeenAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return AuthorityCheckResult{}, false, nil, nil
 	}
 	if err != nil {
 		return AuthorityCheckResult{}, false, nil, err
 	}
+	round.callerHolds = runnerHolds(holderID, runnerID)
 	round.runnerConnected = runnerConnected(now, lastSeenAt)
 	if rejection := decideAuthorityCheck(round, epoch); rejection != nil {
 		return AuthorityCheckResult{}, true, rejection, nil

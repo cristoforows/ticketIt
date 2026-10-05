@@ -968,6 +968,9 @@ func TestClaim_ResponsesMatchContractAndMethod405(t *testing.T) {
 	validate := func(call runnerCall, want int) *httptest.ResponseRecorder {
 		t.Helper()
 		req := httptest.NewRequest(call.method, call.path, strings.NewReader(call.body))
+		if call.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
 		if call.token != "" {
 			req.Header.Set("Authorization", "Bearer "+call.token)
 		}
@@ -982,12 +985,18 @@ func TestClaim_ResponsesMatchContractAndMethod405(t *testing.T) {
 		validateAgainstContract(t, router, req, rec)
 		return rec
 	}
-	claim := runnerCall{method: http.MethodPost, path: "/api/runner/claims", token: f.token}
-	validate(claim, http.StatusNoContent)
+	validate(claimCall(f.token), http.StatusNoContent)
 	queued := f.queue(t, "contract")
-	validate(claim, http.StatusCreated)
-	validate(claim, http.StatusNoContent)
+	claim := claimCall(f.token)
+	created := validate(claim, http.StatusCreated)
+	if replayed := validate(claim, http.StatusOK); replayed.Body.String() != created.Body.String() {
+		t.Fatalf("replay body = %s, want the 201 body %s", replayed.Body.String(), created.Body.String())
+	}
+	validate(claimCall(f.token), http.StatusNoContent)
+	validate(runnerCall{method: http.MethodPost, path: "/api/runner/claims", token: f.token, body: `{"idempotencyKey":""}`}, http.StatusBadRequest)
 	validate(runnerCall{method: http.MethodPost, path: "/api/runner/claims", cookie: f.cookie}, http.StatusUnauthorized)
+	f.startRound(t, decodeClaim(t, created), "start")
+	assertErrorCode(t, validate(claim, http.StatusConflict), claimNotReplayableCode)
 	validate(runnerCall{method: http.MethodGet, path: "/api/tickets/" + queued.Id, cookie: f.cookie}, http.StatusOK)
 	validate(runnerCall{method: http.MethodGet, path: "/api/tickets", cookie: f.cookie}, http.StatusOK)
 	validate(runnerCall{method: http.MethodPost, path: "/api/tickets/" + queued.Id + "/archive", cookie: f.cookie}, http.StatusBadRequest)
@@ -1187,7 +1196,9 @@ func TestFailedAndInterrupted_ResponsesMatchContract(t *testing.T) {
 		report := func(key, note string) runnerCall {
 			return runnerCall{method: http.MethodPost, path: path, body: e.event(t, key, claim.ClaimEpoch, note), token: f.token}
 		}
-		validate(report("e1", e.note), http.StatusConflict)
+		if e.state == RoundFailed {
+			validate(report("e1", e.note), http.StatusConflict)
+		}
 		f.startRound(t, claim, "start")
 		validate(report("e1", " "), http.StatusBadRequest)
 		validate(report("e1", e.note), http.StatusCreated)
@@ -1388,7 +1399,7 @@ func TestRoundFeedback_ResponsesMatchContractAndMethod405(t *testing.T) {
 	}
 	f.mustRework(t, queued.Id)
 	assertErrorCode(t, validate(feedback(first.RoundId, `{"body":"late"}`), http.StatusBadRequest), feedbackNotAvailableCode)
-	claim := decodeClaim(t, validate(runnerCall{method: http.MethodPost, path: "/api/runner/claims", token: f.token}, http.StatusCreated))
+	claim := decodeClaim(t, validate(claimCall(f.token), http.StatusCreated))
 	if len(claim.Ticket.Feedback) != 1 {
 		t.Fatalf("claim feedback = %+v, want one", claim.Ticket.Feedback)
 	}
@@ -1397,7 +1408,7 @@ func TestRoundFeedback_ResponsesMatchContractAndMethod405(t *testing.T) {
 	}
 	f.deliverThroughAPI(t, claim.RoundId)
 	f.mustRework(t, queued.Id)
-	empty := decodeClaim(t, validate(runnerCall{method: http.MethodPost, path: "/api/runner/claims", token: f.token}, http.StatusCreated))
+	empty := decodeClaim(t, validate(claimCall(f.token), http.StatusCreated))
 	if empty.Ticket.Feedback == nil || len(empty.Ticket.Feedback) != 0 {
 		t.Fatalf("claim feedback = %#v, want an empty list", empty.Ticket.Feedback)
 	}
@@ -1797,6 +1808,74 @@ func TestReconcile_ResponsesMatchContractAndMethod405(t *testing.T) {
 	validate(runnerCall{method: http.MethodPost, path: "/api/runner/reconcile", body: reconcileBody(t), cookie: f.cookie}, http.StatusUnauthorized)
 
 	rec := f.expect(t, runnerCall{method: http.MethodGet, path: "/api/runner/reconcile", token: f.token}, http.StatusMethodNotAllowed)
+	if rec.Header().Get("Allow") != "POST" {
+		t.Fatalf("Allow = %q, want POST", rec.Header().Get("Allow"))
+	}
+}
+
+func TestAttestCessationAndFencing_ResponsesMatchContractAndMethod405(t *testing.T) {
+	f := newClaimFixture(t)
+	router, err := legacy.NewRouter(loadContract(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate := func(call runnerCall, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(call.method, call.path, strings.NewReader(call.body))
+		if call.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if call.token != "" {
+			req.Header.Set("Authorization", "Bearer "+call.token)
+		}
+		if call.cookie != nil {
+			req.AddCookie(call.cookie)
+		}
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("%s %s: status=%d, want %d; body=%s", call.method, call.path, rec.Code, want, rec.Body.String())
+		}
+		validateAgainstContract(t, router, req, rec)
+		return rec
+	}
+	queued, claim, stop := f.stoppedRound(t, "contract", true)
+	oldToken := f.token
+	attest := func(body string) runnerCall {
+		return runnerCall{method: http.MethodPost, path: attestPath(queued.Id, claim.RoundId), body: body, cookie: f.cookie}
+	}
+	ticket := runnerCall{method: http.MethodGet, path: "/api/tickets/" + queued.Id, cookie: f.cookie}
+	rounds := runnerCall{method: http.MethodGet, path: "/api/tickets/" + queued.Id + "/rounds", cookie: f.cookie}
+
+	validate(ticket, http.StatusOK)
+	assertErrorCode(t, validate(attest(attestBody(AttestationRunnerHostOff, "")), http.StatusBadRequest), attestationNotAvailableCode)
+	assertErrorCode(t, validate(attest(`{"basis":"other"}`), http.StatusBadRequest), "invalid_request")
+	validate(runnerCall{method: http.MethodPost, path: attestPath(queued.Id, uuid.NewString()), body: attestBody(AttestationRunnerHostOff, ""), cookie: f.cookie}, http.StatusNotFound)
+	validate(runnerCall{method: http.MethodPost, path: attestPath(queued.Id, claim.RoundId), body: attestBody(AttestationRunnerHostOff, "")}, http.StatusUnauthorized)
+
+	f.token = f.repair(t)
+	validate(ticket, http.StatusOK)
+	notHolder := func(call runnerCall) {
+		t.Helper()
+		assertErrorCode(t, validate(call, http.StatusConflict), runnerNotHolderCode)
+	}
+	notHolder(runnerCall{method: http.MethodPost, path: "/api/runner/rounds/" + claim.RoundId + "/events", body: progressEvent(t, "nh", claim.ClaimEpoch, eventOccurredAt, "x"), token: f.token})
+	notHolder(runnerCall{method: http.MethodPost, path: authorityCheckPath(claim.RoundId), body: authorityCheckBody(t, writeReport, claim.ClaimEpoch), token: f.token})
+	notHolder(runnerCall{method: http.MethodPost, path: "/api/runner/reconcile", body: reconcileBody(t, heldRound(claim, HeldRunning)), token: f.token})
+	notHolder(runnerCall{method: http.MethodPost, path: ackPath(claim.RoundId, stop.Id), body: `{"outcome":"applied"}`, token: f.token})
+	validate(runnerCall{method: http.MethodGet, path: "/api/runner/rounds/" + claim.RoundId + "/commands", token: f.token}, http.StatusOK)
+	validate(runnerCall{method: http.MethodPost, path: "/api/runner/reconcile", body: reconcileBody(t), token: f.token}, http.StatusOK)
+	validate(runnerCall{method: http.MethodPost, path: "/api/runner/claims", body: `{"idempotencyKey":"` + uuid.NewString() + `"}`, token: f.token}, http.StatusNoContent)
+	validate(runnerCall{method: http.MethodGet, path: "/api/runner/rounds/" + claim.RoundId + "/commands", token: oldToken}, http.StatusUnauthorized)
+
+	first := validate(attest(attestBody(AttestationOther, "Ended it by hand.")), http.StatusOK)
+	if again := validate(attest(attestBody(AttestationRunnerHostOff, "")), http.StatusOK); again.Body.String() != first.Body.String() {
+		t.Fatalf("repeat = %s, want %s", again.Body.String(), first.Body.String())
+	}
+	validate(rounds, http.StatusOK)
+	validate(ticket, http.StatusOK)
+
+	rec := f.expect(t, runnerCall{method: http.MethodGet, path: attestPath(queued.Id, claim.RoundId), cookie: f.cookie}, http.StatusMethodNotAllowed)
 	if rec.Header().Get("Allow") != "POST" {
 		t.Fatalf("Allow = %q, want POST", rec.Header().Get("Allow"))
 	}

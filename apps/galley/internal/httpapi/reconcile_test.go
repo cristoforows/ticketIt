@@ -82,7 +82,7 @@ func TestDecideWaitingReason_ReconcileRows(t *testing.T) {
 		{"unflagged answered", OpenRoundWaitingForInput, answered, false, true, false, &running, WaitingResuming},
 		{"unflagged claimed", OpenRoundClaimed, nil, false, true, false, nil, WaitingStarting},
 	} {
-		if got := decideWaitingReason(tc.state, tc.question, nil, tc.stopRequested, tc.connected, tc.required, tc.recordedExecution); got != tc.want {
+		if got := decideWaitingReason(tc.state, tc.question, nil, tc.stopRequested, tc.connected, false, tc.required, tc.recordedExecution); got != tc.want {
 			t.Errorf("%s: got %s, want %s", tc.name, got, tc.want)
 		}
 	}
@@ -356,17 +356,28 @@ func TestReconcile_TheNamedCessationEventEndsTheRoundThroughTheEventLadder(t *te
 			t.Fatalf("Ticket = %s %+v, want Blocked with no open Round", ticket.Status, ticket.OpenRound)
 		}
 	})
-	// The documented limitation: interrupted is the ladder's only cessation without Stop and it takes only a running Round.
-	t.Run("interrupted is refused for a claimed Round and it stays open", func(t *testing.T) {
+	t.Run("interrupted ends a claimed Round", func(t *testing.T) {
 		f := newClaimFixture(t)
 		queued, claim := f.claimTicket(t, "Claimed")
 		got := f.mustReconcile(t, reconcileBody(t, heldRound(claim, HeldStopped))).Round
 		if *got.CessationEvent != CessationInterrupted {
 			t.Fatalf("cessation = %s", *got.CessationEvent)
 		}
-		assertErrorBody(t, f.endAs(t, blockedEndings[1], claim), http.StatusConflict, eventOutOfOrderCode, eventOutOfOrderMessage(RoundEventInterrupted, RoundClaimed))
-		if ticket := f.ticket(t, queued.Id); ticket.OpenRound == nil {
-			t.Fatal("the claimed Round ended")
+		f.mustEndAs(t, blockedEndings[1], claim)
+		if ticket := f.ticket(t, queued.Id); ticket.OpenRound != nil || ticket.Status != Blocked {
+			t.Fatalf("Ticket = %s %+v, want Blocked with no open Round", ticket.Status, ticket.OpenRound)
+		}
+	})
+	t.Run("interrupted ends a Round waiting for input", func(t *testing.T) {
+		f := newClaimFixture(t)
+		queued, claim := f.waitingRound(t, "Waiting")
+		got := f.mustReconcile(t, reconcileBody(t, heldRound(claim, HeldStopped))).Round
+		if *got.CessationEvent != CessationInterrupted {
+			t.Fatalf("cessation = %s", *got.CessationEvent)
+		}
+		f.mustEndAs(t, blockedEndings[1], claim)
+		if ticket := f.ticket(t, queued.Id); ticket.OpenRound != nil || ticket.Status != Blocked {
+			t.Fatalf("Ticket = %s %+v, want Blocked with no open Round", ticket.Status, ticket.OpenRound)
 		}
 	})
 }

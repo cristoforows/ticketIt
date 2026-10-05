@@ -133,7 +133,7 @@ func (s *server) ReportRoundEvent(w http.ResponseWriter, r *http.Request, roundI
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
-	recorded, err := recordRoundEvent(ctx, s.pool, runner.ownerID, roundID, event, s.clockNow())
+	recorded, err := recordRoundEvent(ctx, s.pool, runner.ownerID, runner.id, roundID, event, s.clockNow())
 	switch {
 	case isTicketGuardFailure(err):
 		s.logger.Error("round event refused: "+err.Error(), "roundId", roundID, "eventType", event.eventType)
@@ -233,7 +233,7 @@ func validateExecutionStartedData(raw []byte) (string, string) {
 // The runner event path is the one writer allowed to change a Ticket under its own open Round,
 // so it takes the raw row lock and never lockMutableTicket. Lock order: the Owner's priority
 // lock, the Ticket row, then the Round row.
-func recordRoundEvent(ctx context.Context, pool *pgxpool.Pool, ownerID int64, roundID string, event roundEvent, now time.Time) (recordedRoundEvent, error) {
+func recordRoundEvent(ctx context.Context, pool *pgxpool.Pool, ownerID, runnerID int64, roundID string, event roundEvent, now time.Time) (recordedRoundEvent, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return recordedRoundEvent{}, err
@@ -256,7 +256,8 @@ func recordRoundEvent(ctx context.Context, pool *pgxpool.Pool, ownerID int64, ro
 		return recordedRoundEvent{}, err
 	}
 	var round lockedRound
-	err = tx.QueryRow(ctx, `SELECT r.id, r.state, r.claim_epoch, r.state IN `+openRoundStatesSQL+`, r.started_at,
+	var holderID *int64
+	err = tx.QueryRow(ctx, `SELECT r.id, r.runner_id, r.state, r.claim_epoch, r.state IN `+openRoundStatesSQL+`, r.started_at,
 			EXISTS (SELECT 1 FROM round_commands c WHERE c.owner_id = r.owner_id AND c.round_id = r.id AND c.type = $3),
 			COALESCE(q.question_id::text, ''), COALESCE(q.answered_at IS NOT NULL, false),
 			COALESCE(p.request_id::text, ''), COALESCE(p.decision = $4, false)
@@ -264,13 +265,16 @@ func recordRoundEvent(ctx context.Context, pool *pgxpool.Pool, ownerID int64, ro
 		LEFT JOIN round_questions q ON q.owner_id = r.owner_id AND q.id = r.waiting_question_id
 		LEFT JOIN permission_requests p ON p.owner_id = r.owner_id AND p.id = r.waiting_permission_request_id
 		WHERE r.owner_id = $1 AND r.public_id = $2::uuid FOR UPDATE OF r`, ownerID, roundID, string(RunnerCommandStop), string(PermissionApproved)).
-		Scan(&round.id, &round.state, &round.epoch, &round.open, &round.startedAt, &round.stopRequested, &round.questionID, &round.questionAnswered,
+		Scan(&round.id, &holderID, &round.state, &round.epoch, &round.open, &round.startedAt, &round.stopRequested, &round.questionID, &round.questionAnswered,
 			&round.requestID, &round.requestApproved)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return recordedRoundEvent{}, nil
 	}
 	if err != nil {
 		return recordedRoundEvent{}, err
+	}
+	if !runnerHolds(holderID, runnerID) {
+		return recordedRoundEvent{found: true, rejection: runnerNotHolderRejection()}, nil
 	}
 
 	var storedHash []byte
@@ -390,16 +394,17 @@ func decideRoundEvent(round lockedRound, event roundEvent) *roundEventRejection 
 	return nil
 }
 
-// Progress, usage, delivery, failure and interruption are facts about execution, which Galley knows began only once execution_started is recorded.
+// Progress, usage, delivery and failure are facts about execution, which Galley knows began only once execution_started is recorded.
+// Cessation can be reported from any open state: Reconcile names interrupted for any of them (#171).
 func roundStateTakes(state RoundState, eventType RoundEventType) bool {
 	switch eventType {
 	case RoundEventExecutionStarted:
 		return state == RoundClaimed
-	case RoundEventProgress, RoundEventUsageObserved, RoundEventDelivered, RoundEventFailed, RoundEventInterrupted, RoundEventQuestionRaised, RoundEventPermissionRequested:
+	case RoundEventProgress, RoundEventUsageObserved, RoundEventDelivered, RoundEventFailed, RoundEventQuestionRaised, RoundEventPermissionRequested:
 		return state == RoundRunning
 	case RoundEventResumed:
 		return state == RoundWaitingForInput
-	case RoundEventStopConfirmed:
+	case RoundEventStopConfirmed, RoundEventInterrupted:
 		return state == RoundClaimed || state == RoundRunning || state == RoundWaitingForInput
 	}
 	return false

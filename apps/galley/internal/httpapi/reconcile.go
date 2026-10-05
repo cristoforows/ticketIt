@@ -78,10 +78,13 @@ type reconcilingRound struct {
 	required          bool
 	recordedExecution *HeldExecution
 	stopRequested     bool
+	callerHolds       bool
 }
 
 func decideReconcileTarget(round reconcilingRound, held HeldRound) *roundEventRejection {
 	switch {
+	case !round.callerHolds:
+		return runnerNotHolderRejection()
 	case held.ClaimEpoch != round.epoch:
 		return &roundEventRejection{http.StatusConflict, staleClaimEpochCode, staleClaimEpochMessage}
 	case !OpenRoundState(round.state).Valid():
@@ -117,7 +120,7 @@ func (s *server) ReconcileRunner(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
-	result, found, rejection, err := reconcileRound(ctx, s.pool, runner.ownerID, held, s.clockNow())
+	result, found, rejection, err := reconcileRound(ctx, s.pool, runner.ownerID, runner.id, held, s.clockNow())
 	switch {
 	case err != nil:
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to reconcile")
@@ -132,7 +135,7 @@ func (s *server) ReconcileRunner(w http.ResponseWriter, r *http.Request) {
 
 // Lock order is the event ladder's: the Owner's priority lock, the Ticket row, then the Round row. The Ticket row lock
 // also serialises the activity note's seq with every event's.
-func reconcileRound(ctx context.Context, pool *pgxpool.Pool, ownerID int64, held *HeldRound, now time.Time) (ReconcileResult, bool, *roundEventRejection, error) {
+func reconcileRound(ctx context.Context, pool *pgxpool.Pool, ownerID, runnerID int64, held *HeldRound, now time.Time) (ReconcileResult, bool, *roundEventRejection, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return ReconcileResult{}, false, nil, err
@@ -163,12 +166,13 @@ func reconcileRound(ctx context.Context, pool *pgxpool.Pool, ownerID int64, held
 	}
 	var round reconcilingRound
 	var recorded *string
-	err = tx.QueryRow(ctx, `SELECT r.id, r.public_id::text, r.state, r.claim_epoch, t.status, r.reconcile_required, r.reconcile_execution,
+	var holderID *int64
+	err = tx.QueryRow(ctx, `SELECT r.id, r.public_id::text, r.runner_id, r.state, r.claim_epoch, t.status, r.reconcile_required, r.reconcile_execution,
 			EXISTS (SELECT 1 FROM round_commands c WHERE c.owner_id = r.owner_id AND c.round_id = r.id AND c.type = $4)
 		FROM rounds r JOIN tickets t ON t.owner_id = r.owner_id AND t.id = r.ticket_id
 		WHERE r.owner_id = $1 AND t.public_id = $2::uuid AND ($3::uuid IS NULL AND r.state IN `+openRoundStatesSQL+` OR r.public_id = $3::uuid)
 		FOR UPDATE OF r`, ownerID, ticketID, heldRoundID(held), string(RunnerCommandStop)).
-		Scan(&round.id, &round.publicID, &round.state, &round.epoch, &round.ticketStatus, &round.required, &recorded, &round.stopRequested)
+		Scan(&round.id, &round.publicID, &holderID, &round.state, &round.epoch, &round.ticketStatus, &round.required, &recorded, &round.stopRequested)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ReconcileResult{}, held == nil, nil, nil
 	}
@@ -179,6 +183,7 @@ func reconcileRound(ctx context.Context, pool *pgxpool.Pool, ownerID int64, held
 		execution := HeldExecution(*recorded)
 		round.recordedExecution = &execution
 	}
+	round.callerHolds = runnerHolds(holderID, runnerID)
 	belief := HeldUnknown
 	if held != nil {
 		if rejection := decideReconcileTarget(round, *held); rejection != nil {
@@ -187,6 +192,10 @@ func reconcileRound(ctx context.Context, pool *pgxpool.Pool, ownerID int64, held
 		belief = held.Execution
 	}
 	decision := decideReconcile(belief, round.stopRequested)
+	// Another runner's Round: answered as unknown, but that runner's Reconcile says nothing about this Round's execution, so nothing is recorded.
+	if !round.callerHolds {
+		return ReconcileResult{Round: reconciledRound(round, decision, []RunnerCommand{})}, true, nil, nil
+	}
 	required := decision.required(round.required)
 	executionChanged := round.recordedExecution == nil || *round.recordedExecution != decision.execution
 	if executionChanged || required != round.required {
@@ -200,14 +209,18 @@ func reconcileRound(ctx context.Context, pool *pgxpool.Pool, ownerID int64, held
 			return ReconcileResult{}, true, nil, err
 		}
 	}
-	commands, _, err := pendingRoundCommands(ctx, tx, ownerID, round.publicID)
+	commands, _, err := pendingRoundCommands(ctx, tx, ownerID, runnerID, round.publicID)
 	if err != nil {
 		return ReconcileResult{}, true, nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return ReconcileResult{}, true, nil, err
 	}
-	return ReconcileResult{Round: &ReconciledRound{
+	return ReconcileResult{Round: reconciledRound(round, decision, commands)}, true, nil, nil
+}
+
+func reconciledRound(round reconcilingRound, decision reconcileDecision, commands []RunnerCommand) *ReconciledRound {
+	return &ReconciledRound{
 		RoundId:        round.publicID,
 		State:          OpenRoundState(round.state),
 		TicketStatus:   round.ticketStatus,
@@ -215,7 +228,7 @@ func reconcileRound(ctx context.Context, pool *pgxpool.Pool, ownerID int64, held
 		Disposition:    decision.disposition,
 		CessationEvent: decision.cessationEvent,
 		Commands:       commands,
-	}}, true, nil, nil
+	}
 }
 
 func heldRoundID(held *HeldRound) *string {

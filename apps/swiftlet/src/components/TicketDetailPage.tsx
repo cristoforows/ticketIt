@@ -30,7 +30,7 @@ import {
 } from "../api/tickets";
 import { fetchAgents, type Agent } from "../api/agents";
 import { GalleyError } from "../api/http";
-import { fetchRoundActivity, fetchTicketRounds } from "../api/rounds";
+import { attestRoundCessation, fetchRoundActivity, fetchTicketRounds, type AttestCessationRequest } from "../api/rounds";
 import { collectionPath, collectionQuery, fullPageReturnPath, navigate, useEditRequested } from "../router";
 import { Link } from "./Link";
 import type { RoundRecords } from "./RoundsSection";
@@ -221,6 +221,20 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
     }
   }
 
+  async function attestCessation(roundId: string, body: AttestCessationRequest): Promise<Ticket> {
+    try {
+      const ticket = await runCommand(async () => {
+        await attestRoundCessation(ticketId, roundId, body);
+        return fetchTicket(ticketId);
+      });
+      void loadRounds();
+      return ticket;
+    } catch (error) {
+      if (error instanceof GalleyError || error instanceof TicketNotFoundError) void refreshTicket();
+      throw error;
+    }
+  }
+
   function assign(assignee: TicketAssignee): Promise<Ticket> {
     return runCommand(() => assignTicket(ticketId, assignee));
   }
@@ -290,6 +304,7 @@ export function TicketDetailPage({ ticketId, onUnauthenticated, presentation = "
       onAddFeedback={addFeedback}
       onDecidePermission={decidePermission}
       onRevokeGrant={revokeGrant}
+      onAttestCessation={attestCessation}
       onArchived={() => (onArchiveSucceeded ? onArchiveSucceeded() : navigate(fullPageReturnPath()))}
     />
   );

@@ -2188,6 +2188,69 @@ ungated events, lock order and concurrency) and
 `TestReconcile_ResponsesMatchContractAndMethod405`.
 Evidence: `docs/evidence/m5/170-reconcile.md`.
 
+## Stranded-Round recovery (issue #171)
+
+Migration `000028_stranded_round_recovery.up.sql` adds to `rounds`
+`runner_id` (the claiming runner; no foreign key, so it survives a
+re-pair), `claim_idempotency_key` and `claim_payload`, all three set
+together, with the unique partial index
+`rounds_claim_idempotency_key_unique` on `(owner_id, key)`. It lets a
+`claimed` Round end `interrupted`, and adds `round_attestations`.
+
+**Claim idempotency.** `POST /api/runner/claims` requires
+`{"idempotencyKey"}` (`400` without it). In the claim transaction, after
+the Owner's priority lock, the key is looked up: the same runner's key
+whose Round is still `claimed` replays the stored claim with `200`;
+another runner's key is `409 idempotency_key_conflict`; a key whose
+Round is no longer `claimed` is `409 claim_not_replayable`. Only then
+come the existing `204` answers (not connected, slot taken) and `201`.
+A replay never answers `204` and does not consume feedback again.
+Concurrent claims with one key create one Round.
+
+**Fencing.** A Round is held by the runner whose `runner_id` it
+carries; a null `runner_id` (claimed before this migration) is held by
+nobody. Round events, authority checks, Reconcile and command acks from
+any other runner are `409 runner_not_holder`, after the Round lookup and
+before replay. Its command pull answers `{"commands": []}`, and its
+`held: []` Reconcile answers `hold` with no commands and records
+nothing. A re-paired credential is a new runner, and the old credential
+is `401`. Two Michelin processes sharing one credential are one runner
+to Galley and are not fenced from each other. The waiting reason
+`runner_replaced` (after Runner disconnected, before
+`execution_unknown`) marks a Round whose holder is not the paired
+runner.
+
+**Attestation.** `POST /api/tickets/{id}/rounds/{roundId}/attest-cessation`
+(Owner session) takes `{"basis": "runner_process_ended" |
+"runner_host_off" | "other", "note"?}`; the note is 1–1000 characters
+and required with `other`. Bad bodies are `400 invalid_request` before
+the lookup; unknown, foreign or mismatched ids are the shared `404`. It
+is available while the Ticket is unarchived and the Round open, unless a
+connected runner holds it and has not recorded its execution
+`unknown`; otherwise `400 attestation_not_available`.
+`allowedActions.attestCessation` is computed by the same decision.
+
+In one transaction, under the event ladder's lock order (the Owner's
+priority lock, the Ticket row, the Round row; the `runners` row is read
+unlocked), it records what Galley observed (state, epoch, holder
+health and last-seen, recorded execution), ends the Round `interrupted`
+with `Ended by Owner attestation: <basis label>.` as its outcome note
+and one activity note, moves the Ticket to Blocked, and frees the slot
+and the lock. Activity, usage and any pending Stop stay recorded; the
+Stop is never delivered. A repeat answers `200` with the stored Round.
+Whichever of the attestation and a runner's ending reaches the ladder
+first wins; later reports are `409 round_not_open`. `GET .../rounds`
+carries `attestation` (null unless the Round ended this way). Ready then
+claims a new Round with a new epoch.
+
+Tests: `stranded_round_test.go` (claim key ladder and concurrency,
+fencing, replaced waiting reason), `round_attestation_test.go`
+(decision table, allowed-action parity in every state, effects, repeat,
+400/404, late reports, races and lock order on real PostgreSQL,
+constraints) and
+`TestAttestCessationAndFencing_ResponsesMatchContractAndMethod405`.
+Evidence: `docs/evidence/m5/171-stranded-round-recovery.md`.
+
 ## Error shape
 
 `ErrorBody`/`ErrorDetail` are generated from

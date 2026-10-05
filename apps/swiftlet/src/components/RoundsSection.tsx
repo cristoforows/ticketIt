@@ -5,6 +5,7 @@ import { FeedbackHistory, FeedbackPanel, type AddFeedback } from "./FeedbackPane
 import { PermissionGrants, PermissionHistory, PermissionPanel, type DecidePermission, type RevokeGrant } from "./PermissionPanel";
 import { QuestionHistory, QuestionPanel, type AnswerQuestion } from "./QuestionPanel";
 import type { HealthView } from "./RunnerHealthPill";
+import { AttestationRecord, AttestCessationControl, type AttestCessation } from "./AttestCessation";
 import { activeTime, costFigure, countFigure, type UsageFigure } from "./roundUsage";
 import { Disclosure, EstimateTag, SecondaryButton, FailedTag, FieldLabel, FieldNote, InlineError, InterruptedTag, LocalTime, Markdown, ReceiptLine, StoppedTag } from "./ui";
 
@@ -16,7 +17,7 @@ export interface RoundRecords {
 
 export type LoadEarlierActivity = (roundId: string, before: string) => Promise<RoundActivityPage>;
 
-export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEarlierActivity, answer, onAnswer, onAnswered = () => {}, delivery = null, feedback, onAddFeedback, permissionDecision, onDecidePermission, onRevokeGrant, permissionGrants = [], permissionGrantCount = permissionGrants.length }: {
+export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEarlierActivity, answer, onAnswer, onAnswered = () => {}, delivery = null, feedback, onAddFeedback, permissionDecision, onDecidePermission, onRevokeGrant, permissionGrants = [], permissionGrantCount = permissionGrants.length, attestCessation, onAttestCessation }: {
   openRound: Ticket["openRound"];
   runnerHealth: HealthView;
   records?: RoundRecords;
@@ -32,6 +33,8 @@ export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEar
   onRevokeGrant?: RevokeGrant;
   permissionGrants?: Ticket["permissionGrants"];
   permissionGrantCount?: number;
+  attestCessation?: Ticket["allowedActions"]["attestCessation"];
+  onAttestCessation?: AttestCessation;
 }) {
   const runnerLost = openRound !== null && runnerHealth.kind === "loaded" && runnerHealth.health.state !== "connected";
   const awaitingOpenRound = openRound !== null && !records.rounds?.some((candidate) => candidate.id === openRound.id);
@@ -48,6 +51,12 @@ export function RoundsSection({ openRound, runnerHealth, records = {}, onLoadEar
           <span className="font-bold tracking-label uppercase">Runner cannot confirm execution</span> The runner reconnected but cannot confirm this Round is running. It stays open and the Ticket stays locked.
         </p>
       )}
+      {!runnerLost && openRound?.waitingReason === "runner_replaced" && (
+        <p role="status" data-testid="ticket-detail-runner-replaced" className="my-2 border-2 border-status-blocked-deep p-2 text-status-blocked-deep">
+          <span className="font-bold tracking-label uppercase">Runner replaced</span> The runner that claimed this Round was replaced. It stays open and the Ticket stays locked.
+        </p>
+      )}
+      {openRound && attestCessation && <AttestCessationControl roundId={openRound.id} availability={attestCessation} onAttest={onAttestCessation} onAttested={onAnswered} />}
       {!runnerLost && openRound?.waitingReason === "reconciling" && (
         <FieldNote role="status" data-testid="ticket-detail-reconciling">Reconciling with the runner</FieldNote>
       )}
@@ -123,6 +132,7 @@ function RoundEntry({ round, defaultOpen, onLoadEarlierActivity, grants }: { rou
             <p data-testid="ticket-detail-round-outcome-note" className="my-1 break-words whitespace-pre-wrap">{round.outcomeNote}</p>
           </section>
         )}
+        {round.attestation && <AttestationRecord attestation={round.attestation} />}
         {round.deliverable && <Deliverable deliverable={round.deliverable} />}
         <QuestionHistory questions={round.questions} awaiting={round.state === "waiting_for_input"} />
         <PermissionHistory requests={round.permissionRequests} checks={round.authorityChecks} checkCount={round.authorityCheckCount} awaiting={round.state === "waiting_for_input"} grants={grants} />

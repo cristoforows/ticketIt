@@ -72,6 +72,27 @@ func (e AssignTicketRequestType) Valid() bool {
 	}
 }
 
+// Defines values for AttestationBasis.
+const (
+	AttestationOther              AttestationBasis = "other"
+	AttestationRunnerHostOff      AttestationBasis = "runner_host_off"
+	AttestationRunnerProcessEnded AttestationBasis = "runner_process_ended"
+)
+
+// Valid indicates whether the value is a known member of the AttestationBasis enum.
+func (e AttestationBasis) Valid() bool {
+	switch e {
+	case AttestationOther:
+		return true
+	case AttestationRunnerHostOff:
+		return true
+	case AttestationRunnerProcessEnded:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AuthorityDecision.
 const (
 	AuthorityAllow AuthorityDecision = "allow"
@@ -312,6 +333,30 @@ func (e RoundEventType) Valid() bool {
 	}
 }
 
+// Defines values for RoundHolderHealth.
+const (
+	HolderConnected    RoundHolderHealth = "connected"
+	HolderDisconnected RoundHolderHealth = "disconnected"
+	HolderNotPaired    RoundHolderHealth = "not_paired"
+	HolderReplaced     RoundHolderHealth = "replaced"
+)
+
+// Valid indicates whether the value is a known member of the RoundHolderHealth enum.
+func (e RoundHolderHealth) Valid() bool {
+	switch e {
+	case HolderConnected:
+		return true
+	case HolderDisconnected:
+		return true
+	case HolderNotPaired:
+		return true
+	case HolderReplaced:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RoundState.
 const (
 	RoundClaimed         RoundState = "claimed"
@@ -353,6 +398,7 @@ const (
 	WaitingReconciling        RoundWaitingReason = "reconciling"
 	WaitingResuming           RoundWaitingReason = "resuming"
 	WaitingRunnerDisconnected RoundWaitingReason = "runner_disconnected"
+	WaitingRunnerReplaced     RoundWaitingReason = "runner_replaced"
 	WaitingStarting           RoundWaitingReason = "starting"
 	WaitingStopping           RoundWaitingReason = "stopping"
 	WaitingWorking            RoundWaitingReason = "working"
@@ -372,6 +418,8 @@ func (e RoundWaitingReason) Valid() bool {
 	case WaitingResuming:
 		return true
 	case WaitingRunnerDisconnected:
+		return true
+	case WaitingRunnerReplaced:
 		return true
 	case WaitingStarting:
 		return true
@@ -670,6 +718,17 @@ type AssignTicketRequest struct {
 // AssignTicketRequestType defines model for AssignTicketRequest.Type.
 type AssignTicketRequestType string
 
+// AttestCessationRequest defines model for AttestCessationRequest.
+type AttestCessationRequest struct {
+	Basis AttestationBasis `json:"basis"`
+
+	// Note Required with `other`. Counted in Unicode code points. Not blank; no control characters but tab and line feed.
+	Note *string `json:"note,omitempty"`
+}
+
+// AttestationBasis defines model for AttestationBasis.
+type AttestationBasis string
+
 // AuthorityCheckRequest A scope matches a grant when `account` and `action` are the same and `resource` is the same string; `resource` must fit the pattern the Connected Account declares for `action`. The declarations are Galley's static configuration. The controlled substitute account `controlled` declares `read_note` and `write_note` on `notes/<name>` and `post_message` on `channels/<name>`, where `<name>` is 1 to 64 of `a-z`, `0-9` and `-`, starting with a letter or digit.
 type AuthorityCheckRequest struct {
 	Account string `json:"account"`
@@ -713,6 +772,12 @@ type CessationEvent string
 type ChangeTicketStatusRequest struct {
 	// Status A Ticket's lifecycle stage (CONTEXT.md, "Status"). Moves between these values are validated against the persisted current Status per D3 S2 (docs/decisions/d3-agent-template-compatibility.md). `Done` is reachable only through explicit Accept.
 	Status TicketStatus `json:"status"`
+}
+
+// ClaimWorkRequest defines model for ClaimWorkRequest.
+type ClaimWorkRequest struct {
+	// IdempotencyKey One per claim attempt, reused until a definite answer. Taken verbatim; not blank; no control characters but tab and line feed.
+	IdempotencyKey string `json:"idempotencyKey"`
 }
 
 // ClaimedFeedback defines model for ClaimedFeedback.
@@ -1098,6 +1163,24 @@ type RoundActivityPage struct {
 	EarlierActivityCursor *EarlierActivityCursor `json:"earlierActivityCursor"`
 }
 
+// RoundAttestation The Owner's assertion that execution ceased, not Galley's proof.
+type RoundAttestation struct {
+	AttestedAt time.Time        `json:"attestedAt"`
+	Basis      AttestationBasis `json:"basis"`
+	ClaimEpoch int              `json:"claimEpoch"`
+
+	// HolderHealth The runner that claimed the Round, as Galley saw it at the attestation. `replaced`: it is not the Owner's current runner.
+	HolderHealth     RoundHolderHealth `json:"holderHealth"`
+	HolderLastSeenAt *time.Time        `json:"holderLastSeenAt"`
+	Note             *string           `json:"note"`
+
+	// ReconcileExecution The Round's last recorded Reconcile belief; null when it had none.
+	ReconcileExecution *HeldExecution `json:"reconcileExecution"`
+
+	// RoundState A claimed Round leaves the Ticket Ready; a running one has moved it to In Progress; one waiting for input has moved it to Blocked and keeps the Owner's slot.
+	RoundState OpenRoundState `json:"roundState"`
+}
+
 // RoundAuthorityCheck defines model for RoundAuthorityCheck.
 type RoundAuthorityCheck struct {
 	Account string `json:"account"`
@@ -1201,6 +1284,9 @@ type RoundFeedbackConsumer struct {
 	Sequence int    `json:"sequence"`
 }
 
+// RoundHolderHealth The runner that claimed the Round, as Galley saw it at the attestation. `replaced`: it is not the Owner's current runner.
+type RoundHolderHealth string
+
 // RoundQuestion defines model for RoundQuestion.
 type RoundQuestion struct {
 	Answer     *string    `json:"answer"`
@@ -1239,7 +1325,7 @@ type RoundUsage struct {
 	OutputTokens UsageCount `json:"outputTokens"`
 }
 
-// RoundWaitingReason What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `execution_unknown` (the Round awaits a Reconcile and the last Reconcile could not confirm execution), `reconciling` (the Round awaits a Reconcile otherwise), `stopping` (Stop requested), `resuming` (waiting for input, its question answered or its Permission request approved), `waiting_for_answer` (waiting on an unanswered question), `waiting_for_permission` (waiting on a Permission request not approved, declined included), `starting` (claimed) and `working` (running) applies.
+// RoundWaitingReason What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `runner_replaced` (the runner that claimed the Round is not the Owner's current runner), `execution_unknown` (the Round awaits a Reconcile and the last Reconcile could not confirm execution), `reconciling` (the Round awaits a Reconcile otherwise), `stopping` (Stop requested), `resuming` (waiting for input, its question answered or its Permission request approved), `waiting_for_answer` (waiting on an unanswered question), `waiting_for_permission` (waiting on a Permission request not approved, declined included), `starting` (claimed) and `working` (running) applies.
 type RoundWaitingReason string
 
 // RunnerClaim defines model for RunnerClaim.
@@ -1445,6 +1531,9 @@ type TicketAllowedActions struct {
 	// Answer Whether `openRound.question` can be answered. Unavailable with `answer_not_available` without one, `question_already_answered` once it is answered, and `stop_already_requested` once Stop is requested.
 	Answer TicketCommandAvailability `json:"answer"`
 
+	// AttestCessation Whether the Owner can attest that `openRound` has ceased; otherwise `attestation_not_available`.
+	AttestCessation TicketCommandAvailability `json:"attestCessation"`
+
 	// Feedback Whether feedback can be added to `delivery.roundId`; otherwise `feedback_not_available`.
 	Feedback TicketCommandAvailability `json:"feedback"`
 
@@ -1526,7 +1615,7 @@ type TicketOpenRound struct {
 	// StopRequestedAt When the Owner requested Stop; the Ticket shows Stopping. Not a Status.
 	StopRequestedAt *time.Time `json:"stopRequestedAt"`
 
-	// WaitingReason What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `execution_unknown` (the Round awaits a Reconcile and the last Reconcile could not confirm execution), `reconciling` (the Round awaits a Reconcile otherwise), `stopping` (Stop requested), `resuming` (waiting for input, its question answered or its Permission request approved), `waiting_for_answer` (waiting on an unanswered question), `waiting_for_permission` (waiting on a Permission request not approved, declined included), `starting` (claimed) and `working` (running) applies.
+	// WaitingReason What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `runner_replaced` (the runner that claimed the Round is not the Owner's current runner), `execution_unknown` (the Round awaits a Reconcile and the last Reconcile could not confirm execution), `reconciling` (the Round awaits a Reconcile otherwise), `stopping` (Stop requested), `resuming` (waiting for input, its question answered or its Permission request approved), `waiting_for_answer` (waiting on an unanswered question), `waiting_for_permission` (waiting on a Permission request not approved, declined included), `starting` (claimed) and `working` (running) applies.
 	WaitingReason RoundWaitingReason `json:"waitingReason"`
 }
 
@@ -1537,6 +1626,9 @@ type TicketRound struct {
 
 	// Agent The Agent assigned when the Round was claimed.
 	Agent TicketAssigneeAgent `json:"agent"`
+
+	// Attestation Set exactly when the Owner's attestation ended the Round.
+	Attestation *RoundAttestation `json:"attestation"`
 
 	// AuthorityCheckCount Every authority check the Round made, including those beyond `authorityChecks`.
 	AuthorityCheckCount int `json:"authorityCheckCount"`
@@ -1687,6 +1779,9 @@ type AdvanceDevClockJSONRequestBody = AdvanceDevClockRequest
 // CreateDiagnosticNoteJSONRequestBody defines body for CreateDiagnosticNote for application/json ContentType.
 type CreateDiagnosticNoteJSONRequestBody = CreateDiagnosticNoteRequest
 
+// ClaimWorkJSONRequestBody defines body for ClaimWork for application/json ContentType.
+type ClaimWorkJSONRequestBody = ClaimWorkRequest
+
 // ReconcileRunnerJSONRequestBody defines body for ReconcileRunner for application/json ContentType.
 type ReconcileRunnerJSONRequestBody = ReconcileRequest
 
@@ -1713,6 +1808,9 @@ type AssignTicketJSONRequestBody = AssignTicketRequest
 
 // ReorderTicketJSONRequestBody defines body for ReorderTicket for application/json ContentType.
 type ReorderTicketJSONRequestBody = ReorderTicketRequest
+
+// AttestRoundCessationJSONRequestBody defines body for AttestRoundCessation for application/json ContentType.
+type AttestRoundCessationJSONRequestBody = AttestCessationRequest
 
 // AddRoundFeedbackJSONRequestBody defines body for AddRoundFeedback for application/json ContentType.
 type AddRoundFeedbackJSONRequestBody = AddRoundFeedbackRequest
@@ -2144,6 +2242,9 @@ type ServerInterface interface {
 	// ListRoundActivity Page through a Round's activity
 	// (GET /api/tickets/{id}/rounds/{roundId}/activity)
 	ListRoundActivity(w http.ResponseWriter, r *http.Request, id string, roundId string, params ListRoundActivityParams)
+	// AttestRoundCessation Attest that an open Round's execution has ceased
+	// (POST /api/tickets/{id}/rounds/{roundId}/attest-cessation)
+	AttestRoundCessation(w http.ResponseWriter, r *http.Request, id string, roundId string)
 	// AddRoundFeedback Add feedback on a delivered Round for the next Round
 	// (POST /api/tickets/{id}/rounds/{roundId}/feedback)
 	AddRoundFeedback(w http.ResponseWriter, r *http.Request, id string, roundId string)
@@ -3090,6 +3191,41 @@ func (siw *ServerInterfaceWrapper) ListRoundActivity(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// AttestRoundCessation operation middleware
+func (siw *ServerInterfaceWrapper) AttestRoundCessation(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "roundId" -------------
+	var roundId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "roundId", r.PathValue("roundId"), &roundId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "roundId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AttestRoundCessation(w, r, id, roundId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // AddRoundFeedback operation middleware
 func (siw *ServerInterfaceWrapper) AddRoundFeedback(w http.ResponseWriter, r *http.Request) {
 
@@ -3461,6 +3597,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/rounds/{roundId}/permission-requests/{requestId}/decline", wrapper.DeclinePermissionRequest)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/grants/{grantId}/revoke", wrapper.RevokePermissionGrant)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/rounds/{roundId}/feedback", wrapper.AddRoundFeedback)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/tickets/{id}/rounds/{roundId}/attest-cessation", wrapper.AttestRoundCessation)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/session", wrapper.SignOut)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/session", wrapper.GetSession)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/runner-credential", wrapper.RevokeRunner)

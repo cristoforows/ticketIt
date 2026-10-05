@@ -1,6 +1,6 @@
 import type { components } from "./generated/schema";
 import { isAgentSummary } from "./agents";
-import { authenticatedFetch, isNullableString } from "./http";
+import { authenticatedFetch, GalleyError, isNullableString, parseErrorDetail } from "./http";
 import { parsePermissionRequest, parseRoundQuestion, TicketNotFoundError, type PermissionRequest, type RoundQuestion } from "./tickets";
 
 export type TicketRound = components["schemas"]["TicketRound"];
@@ -11,6 +11,9 @@ export type RoundDeliverable = components["schemas"]["RoundDeliverable"];
 export type RoundActivityPage = components["schemas"]["RoundActivityPage"];
 export type RoundFeedback = components["schemas"]["RoundFeedback"];
 export type RoundAuthorityCheck = components["schemas"]["RoundAuthorityCheck"];
+export type RoundAttestation = components["schemas"]["RoundAttestation"];
+export type AttestationBasis = components["schemas"]["AttestationBasis"];
+export type AttestCessationRequest = components["schemas"]["AttestCessationRequest"];
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
@@ -104,6 +107,39 @@ function parseAuthorityChecks(value: unknown): RoundAuthorityCheck[] | undefined
 
 const NOTED_STATES: readonly TicketRound["state"][] = ["stopped", "failed", "interrupted"];
 
+const ATTESTATION_BASES: readonly AttestationBasis[] = ["runner_process_ended", "runner_host_off", "other"];
+const OPEN_ROUND_STATES: readonly RoundAttestation["roundState"][] = ["claimed", "running", "waiting_for_input"];
+const HOLDER_HEALTH: readonly RoundAttestation["holderHealth"][] = ["connected", "disconnected", "replaced", "not_paired"];
+const HELD_EXECUTIONS: readonly string[] = ["running", "stopped", "unknown"];
+
+function parseAttestation(value: unknown): RoundAttestation | undefined {
+  const attestation = record(value);
+  if (
+    !attestation ||
+    typeof attestation.attestedAt !== "string" ||
+    !ATTESTATION_BASES.includes(attestation.basis as AttestationBasis) ||
+    !isNullableString(attestation.note) ||
+    (attestation.basis === "other" && attestation.note === null) ||
+    !OPEN_ROUND_STATES.includes(attestation.roundState as RoundAttestation["roundState"]) ||
+    !Number.isSafeInteger(attestation.claimEpoch) ||
+    !isNullableString(attestation.holderLastSeenAt) ||
+    !HOLDER_HEALTH.includes(attestation.holderHealth as RoundAttestation["holderHealth"]) ||
+    !(attestation.reconcileExecution === null || HELD_EXECUTIONS.includes(attestation.reconcileExecution as string))
+  ) {
+    return undefined;
+  }
+  return {
+    attestedAt: attestation.attestedAt,
+    basis: attestation.basis as AttestationBasis,
+    note: attestation.note,
+    roundState: attestation.roundState as RoundAttestation["roundState"],
+    claimEpoch: attestation.claimEpoch as number,
+    holderLastSeenAt: attestation.holderLastSeenAt,
+    holderHealth: attestation.holderHealth as RoundAttestation["holderHealth"],
+    reconcileExecution: attestation.reconcileExecution as RoundAttestation["reconcileExecution"],
+  };
+}
+
 function parseRound(value: unknown): TicketRound | undefined {
   const round = record(value);
   if (
@@ -128,7 +164,8 @@ function parseRound(value: unknown): TicketRound | undefined {
   const permissionRequests = parsePermissionRequests(round.permissionRequests);
   const authorityChecks = parseAuthorityChecks(round.authorityChecks);
   const authorityCheckCount = round.authorityCheckCount;
-  if (!usage || deliverable === undefined || outcomeNote === undefined || !activity || !questions || !feedback || !permissionRequests || !authorityChecks) return undefined;
+  const attestation = round.attestation === null ? null : round.state === "interrupted" ? parseAttestation(round.attestation) : undefined;
+  if (!usage || deliverable === undefined || outcomeNote === undefined || !activity || !questions || !feedback || !permissionRequests || !authorityChecks || attestation === undefined) return undefined;
   if (!Number.isSafeInteger(authorityCheckCount) || (authorityCheckCount as number) < authorityChecks.length) return undefined;
   const { id, name, kind } = round.agent;
   return {
@@ -149,6 +186,7 @@ function parseRound(value: unknown): TicketRound | undefined {
     permissionRequests,
     authorityChecks,
     authorityCheckCount: authorityCheckCount as number,
+    attestation,
   };
 }
 
@@ -174,4 +212,19 @@ export async function fetchRoundActivity(ticketId: string, roundId: string, befo
     throw new Error("Galley's activity page was missing a required field.");
   }
   return { activity, earlierActivityCursor: page.earlierActivityCursor };
+}
+
+/** A 404 here names the Ticket or Round together, so Galley's own message is shown. */
+export async function attestRoundCessation(ticketId: string, roundId: string, body: AttestCessationRequest): Promise<TicketRound> {
+  const path = `/api/tickets/${encodeURIComponent(ticketId)}/rounds/${encodeURIComponent(roundId)}/attest-cessation`;
+  const response = await authenticatedFetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const payload: unknown = await response.json().catch(() => undefined);
+  if (!response.ok) {
+    const detail = parseErrorDetail(record(payload)?.error);
+    if (detail) throw new GalleyError(detail);
+    throw new Error(`Galley returned an error response: ${response.status} ${response.statusText}`.trim());
+  }
+  const round = parseRound(payload);
+  if (!round) throw new Error("Galley's attested Round was missing a required field.");
+  return round;
 }

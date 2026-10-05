@@ -248,7 +248,7 @@ func TestQuestionRaised_IsAcceptedOnlyFromARunningRound(t *testing.T) {
 	})
 }
 
-func TestWaitingForInput_OnlyResumedAndStopConfirmedAreAccepted(t *testing.T) {
+func TestWaitingForInput_OnlyResumedStopConfirmedAndInterruptedAreAccepted(t *testing.T) {
 	f := newClaimFixture(t)
 	_, claim := f.waitingRound(t, "Only resume")
 	before := databaseSnapshot(t, f.pool)
@@ -258,12 +258,14 @@ func TestWaitingForInput_OnlyResumedAndStopConfirmedAreAccepted(t *testing.T) {
 		"usage_observed":    usageEvent(t, observationA, claim.ClaimEpoch, usageData(observationA)),
 		"delivered":         deliveredEvent(t, "k3", claim.ClaimEpoch, standardDeliverable()),
 		"failed":            blockedEndings[0].event(t, "k4", claim.ClaimEpoch, failedExplanation),
-		"interrupted":       blockedEndings[1].event(t, "k5", claim.ClaimEpoch, interruptedEvidence),
 	} {
 		t.Run(name, func(t *testing.T) { assertErrorCode(t, f.reportEvent(t, claim.RoundId, body), eventOutOfOrderCode) })
 	}
 	assertErrorCode(t, f.reportEvent(t, claim.RoundId, stopConfirmedEvent(t, "k6", claim.ClaimEpoch, stopEvidence)), stopNotRequestedCode)
 	assertSnapshotUnchanged(t, f.pool, before, "events a waiting Round does not take")
+	if rec := f.reportEvent(t, claim.RoundId, blockedEndings[1].event(t, "k5", claim.ClaimEpoch, interruptedEvidence)); rec.Code != http.StatusCreated {
+		t.Fatalf("interrupted while waiting for input: status=%d body=%s, want 201", rec.Code, rec.Body.String())
+	}
 }
 
 func TestAnswer_RecordsTheAnswerAndQueuesAnAnswerCommandWithoutMovingTheRound(t *testing.T) {

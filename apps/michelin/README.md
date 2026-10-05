@@ -51,6 +51,7 @@ when it exists.
 | `MICHELIN_HEARTBEAT_INTERVAL_MS` | `10000` | Wait between the end of one register/heartbeat request and the start of the next. Positive integer. |
 | `MICHELIN_CLAIM_INTERVAL_MS` | `5000` | Wait before each claim poll. Positive integer. |
 | `MICHELIN_COMMAND_INTERVAL_MS` | `1000` | Wait before each poll of the held Round's commands. Positive integer. |
+| `MICHELIN_REPORT_RETRY_MAX_MS` | `300000` | How long one Round event is retried, from its first failed attempt, before the Round is halted locally (see **Retry**). Positive integer. |
 | `MICHELIN_STATUS_INTERVAL_MS` | `10000` | Wait between the end of one status check and the start of the next. Positive integer. |
 | `MICHELIN_ENGINE_SCRIPT` | the built-in default script | Path of a JSON file holding the controlled engine's script (see "Controlled engine"). |
 
@@ -98,9 +99,16 @@ Three loops run side by side, and a fourth while a Round is held:
   or another failed heartbeat is retried as a heartbeat, so Galley's
   `registeredAt` does not move on a network blip.
 - **Claim:** every `MICHELIN_CLAIM_INTERVAL_MS`, while the runner loop
-  holds a successful registration, `POST /api/runner/claims` with no
-  body. `204` means no work and is not logged. On `201` Michelin logs the
-  Round and runs its script (next section). It does not poll claims
+  holds a successful registration, `POST /api/runner/claims` with
+  `{"idempotencyKey"}`, a new UUID per attempt. `204` means no work and
+  is not logged. On `201`, or `200` for a replay of the same key, Michelin
+  logs the Round and runs its script (next section). An unreachable
+  Galley, a timeout, an unreadable body or a `5xx` may have created a
+  Round, so the next claim reuses the key, before any Reconcile owed
+  while holding nothing; any other answer drops it. The key lives only
+  in memory: a restarted Michelin cannot recover a Round whose claim
+  answer it never saw, and the Owner attests that Round instead (#171).
+  It does not poll claims
   while a Round runs, and polls again once the script ends or the Round
   is abandoned locally. A claim is not a heartbeat, and a failed claim
   never stops the runner loop.
@@ -215,13 +223,25 @@ the same key, body, `occurredAt`, reference, `observationId` and deliverable. A
 retried usage observation therefore never records a second observation
 in Galley. Waits are 1, 2, 4, 8,
 16 then 30 seconds, repeating at 30. Both `200` (a replay) and `201` are
-success. Anything else is final: Michelin logs `round event refused;
+success. Retrying stops once `MICHELIN_REPORT_RETRY_MAX_MS` has passed
+since the event's first failed attempt: Michelin logs `report retry
+exhausted; round halted locally`, runs no further step, keeps the unsent
+event, and reconciles believing the Round `stopped` every
+`MICHELIN_CLAIM_INTERVAL_MS` until Galley answers. On
+`report_cessation` it sends the unsent event if it was an ending
+(`delivered`, `stop_confirmed`, `failed`, `interrupted`), byte for byte;
+otherwise it sends the cessation Galley names, with evidence naming the
+step, the time it halted and the bound. A refusal (a `409` among them)
+drops the Round; a replay is success. Authority checks and command
+acknowledgements are retried without this bound.
+Anything else is final: Michelin logs `round event refused;
 round abandoned locally` with Galley's error code (`400`, `401`, `404`
 `409` and `413` among them, including `observation_id_conflict`), stops that Round's script, and sends nothing
 further for it. It never closes, fails or unlocks the Round, and never
 exits. If Michelin restarts, it does not resume a Round it no longer
 holds; the restarted Michelin reconciles holding nothing, Galley
-records the Round's execution as unknown, and the Round stays open.
+records the Round's execution as unknown, and the Round stays open
+until the Owner attests that its execution has ceased (#171).
 
 **Stop.** A Stop for the claim's epoch ends a `wait` or a `hold` at
 once. An event already in flight, its retries and backoff included, is
@@ -331,6 +351,9 @@ context fields. The credential is never logged.
 | `delivery reported`, `engine delivered` | `info` | As above, plus Galley's `endedAt`; then the engine returns and polling resumes. |
 | `failure reported`, `engine failed`; `interruption reported`, `engine interrupted` | `info` | As above, plus Galley's `endedAt`; then the engine returns and polling resumes. |
 | `round event failed; retrying` | `warn` | `roundId`, `step`, `attempt`, `reason`, `httpStatus`, `errorCode`, `retryInMs`. |
+| `round event failed; retry bound reached` | `warn` | As `round event failed; retrying`, with `retryMaxMs` in place of `retryInMs`. |
+| `report retry exhausted; round halted locally` | `error` | `roundId`, `step`, `stepIndex`, `type` of the unsent event, `retryMaxMs`. |
+| `cessation reported` | `info` | As `progress reported`, plus `unsent`, the type of the event that never got through. |
 | `round event refused; round abandoned locally` | `error` | `roundId`, `step`, `attempt`, `httpStatus`, Galley's `errorCode`. |
 | `question raised` | `info` | `roundId`, `step` `ask`, `stepIndex`, `attempt`, `questionId`, `httpStatus`. |
 | `engine waiting for an answer` | `info` | `roundId`, `stepIndex`, `questionId`. |

@@ -53,9 +53,17 @@ func (f *claimFixture) queue(t *testing.T, title string) Ticket {
 	return queueTicketAs(t, f.handler, f.cookie, f.agent, title)
 }
 
+func claimCallWithKey(token, key string) runnerCall {
+	return runnerCall{method: http.MethodPost, path: "/api/runner/claims", token: token, body: fmt.Sprintf(`{"idempotencyKey":%q}`, key)}
+}
+
+func claimCall(token string) runnerCall {
+	return claimCallWithKey(token, uuid.NewString())
+}
+
 func (f *claimFixture) claim(t *testing.T) *httptest.ResponseRecorder {
 	t.Helper()
-	return f.do(t, runnerCall{method: http.MethodPost, path: "/api/runner/claims", token: f.token})
+	return f.do(t, claimCall(f.token))
 }
 
 func decodeClaim(t *testing.T, rec *httptest.ResponseRecorder) RunnerClaim {
@@ -236,7 +244,7 @@ func TestClaim_ConcurrentClaimsCreateExactlyOneRound(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-start
-				rec := f.do(t, runnerCall{method: http.MethodPost, path: "/api/runner/claims", token: f.token})
+				rec := f.do(t, claimCall(f.token))
 				codes[i], bodies[i] = rec.Code, rec.Body.String()
 			}()
 		}
@@ -358,7 +366,7 @@ func TestClaim_RechecksTheLockedTicket(t *testing.T) {
 			}
 			result := make(chan *httptest.ResponseRecorder, 1)
 			go func() {
-				result <- f.do(t, runnerCall{method: http.MethodPost, path: "/api/runner/claims", token: f.token})
+				result <- f.do(t, claimCall(f.token))
 			}()
 			waitForLockWaiter(t, f.pool, "FOR UPDATE")
 			if _, err := tx.Exec(ctx, change, top.Id); err != nil {
@@ -388,7 +396,7 @@ func TestClaim_ArchiveCommittedWhileTheClaimWaitsIsNotClaimed(t *testing.T) {
 	}
 	result := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
-		result <- f.do(t, runnerCall{method: http.MethodPost, path: "/api/runner/claims", token: f.token})
+		result <- f.do(t, claimCall(f.token))
 	}()
 	waitForLockWaiter(t, f.pool, "pg_advisory_xact_lock")
 	if rec := f.archive(t, queued.Id); rec.Code != http.StatusOK {
@@ -573,7 +581,7 @@ func TestRounds_IdentityIsGalleyIssuedAndHasNoEngineReference(t *testing.T) {
 		columns = append(columns, name)
 	}
 	rows.Close()
-	want := []string{"agent_id", "claim_epoch", "claimed_at", "ended_at", "id", "outcome_note", "owner_id", "public_id", "reconcile_execution", "reconcile_required", "reconciled_at", "sequence", "started_at", "state", "ticket_id", "waiting_permission_request_id", "waiting_question_id"}
+	want := []string{"agent_id", "claim_epoch", "claim_idempotency_key", "claim_payload", "claimed_at", "ended_at", "id", "outcome_note", "owner_id", "public_id", "reconcile_execution", "reconcile_required", "reconciled_at", "runner_id", "sequence", "started_at", "state", "ticket_id", "waiting_permission_request_id", "waiting_question_id"}
 	if !equalStrings(columns, want) {
 		t.Fatalf("rounds columns = %v, want %v (an engine execution reference is a separate record, ADR 0002)", columns, want)
 	}
