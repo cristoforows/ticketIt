@@ -100,7 +100,7 @@ func (s *server) ListRoundCommands(w http.ResponseWriter, r *http.Request, round
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
-	commands, found, err := pendingRoundCommands(ctx, s.pool, runner.ownerID, roundID)
+	commands, found, err := pendingRoundCommands(ctx, s.pool, runner.ownerID, runner.id, roundID)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to read the round's commands")
 		return
@@ -112,15 +112,15 @@ func (s *server) ListRoundCommands(w http.ResponseWriter, r *http.Request, round
 	writeJSON(w, http.StatusOK, RunnerCommandList{Commands: commands})
 }
 
-func pendingRoundCommands(ctx context.Context, db ticketDB, ownerID int64, roundID string) ([]RunnerCommand, bool, error) {
+func pendingRoundCommands(ctx context.Context, db ticketDB, ownerID, runnerID int64, roundID string) ([]RunnerCommand, bool, error) {
 	rows, err := db.Query(ctx, `SELECT c.public_id::text, c.type, c.claim_epoch, c.issued_at, q.question_id::text, q.answer, p.request_id::text, g.public_id::text
 		FROM rounds r
-		LEFT JOIN round_commands c ON c.owner_id = r.owner_id AND c.round_id = r.id AND c.acknowledged_at IS NULL AND r.state IN `+openRoundStatesSQL+`
+		LEFT JOIN round_commands c ON c.owner_id = r.owner_id AND c.round_id = r.id AND c.acknowledged_at IS NULL AND r.state IN `+openRoundStatesSQL+` AND r.runner_id = $5
 		LEFT JOIN round_questions q ON q.owner_id = c.owner_id AND q.id = c.question_id
 		LEFT JOIN permission_requests p ON p.owner_id = c.owner_id AND p.id = c.permission_request_id
 		LEFT JOIN permission_grants g ON g.owner_id = p.owner_id AND g.request_id = p.id
 		WHERE r.owner_id = $1 AND r.public_id = $2::uuid
-		ORDER BY c.type = $3 DESC, c.type = $4 DESC, c.issued_at, c.id`, ownerID, roundID, string(RunnerCommandStop), string(RunnerCommandAuthorityChanged))
+		ORDER BY c.type = $3 DESC, c.type = $4 DESC, c.issued_at, c.id`, ownerID, roundID, string(RunnerCommandStop), string(RunnerCommandAuthorityChanged), runnerID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -171,51 +171,55 @@ func (s *server) AcknowledgeRoundCommand(w http.ResponseWriter, r *http.Request,
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), ticketTimeout)
 	defer cancel()
-	ack, found, conflict, err := acknowledgeRoundCommand(ctx, s.pool, runner.ownerID, roundID, commandID, req.Outcome, s.clockNow())
+	ack, found, rejection, err := acknowledgeRoundCommand(ctx, s.pool, runner.ownerID, runner.id, roundID, commandID, req.Outcome, s.clockNow())
 	switch {
 	case err != nil:
 		writeError(w, http.StatusServiceUnavailable, "database_unavailable", "failed to acknowledge the command")
 	case !found:
 		writeError(w, http.StatusNotFound, "not_found", roundOrCommandNotFoundMessage)
-	case conflict:
-		writeError(w, http.StatusConflict, commandAlreadyAcknowledgedCode, commandAlreadyAcknowledgedMessage)
+	case rejection != nil:
+		writeError(w, rejection.status, rejection.code, rejection.message)
 	default:
 		writeJSON(w, http.StatusOK, ack)
 	}
 }
 
-func acknowledgeRoundCommand(ctx context.Context, pool *pgxpool.Pool, ownerID int64, roundID, commandID string, outcome RunnerCommandAckOutcome, now time.Time) (RoundCommandAcknowledgement, bool, bool, error) {
+func acknowledgeRoundCommand(ctx context.Context, pool *pgxpool.Pool, ownerID, runnerID int64, roundID, commandID string, outcome RunnerCommandAckOutcome, now time.Time) (RoundCommandAcknowledgement, bool, *roundEventRejection, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
-		return RoundCommandAcknowledgement{}, false, false, err
+		return RoundCommandAcknowledgement{}, false, nil, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
 	var rowID int64
+	var holderID *int64
 	var acknowledgedAt *time.Time
 	var stored *string
-	err = tx.QueryRow(ctx, `SELECT c.id, c.acknowledged_at, c.ack_outcome
+	err = tx.QueryRow(ctx, `SELECT c.id, r.runner_id, c.acknowledged_at, c.ack_outcome
 		FROM round_commands c JOIN rounds r ON r.owner_id = c.owner_id AND r.id = c.round_id
 		WHERE c.owner_id = $1 AND r.public_id = $2::uuid AND c.public_id = $3::uuid
-		FOR UPDATE OF c`, ownerID, roundID, commandID).Scan(&rowID, &acknowledgedAt, &stored)
+		FOR UPDATE OF c`, ownerID, roundID, commandID).Scan(&rowID, &holderID, &acknowledgedAt, &stored)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return RoundCommandAcknowledgement{}, false, false, nil
+		return RoundCommandAcknowledgement{}, false, nil, nil
 	}
 	if err != nil {
-		return RoundCommandAcknowledgement{}, false, false, err
+		return RoundCommandAcknowledgement{}, false, nil, err
+	}
+	if !runnerHolds(holderID, runnerID) {
+		return RoundCommandAcknowledgement{}, true, runnerNotHolderRejection(), nil
 	}
 	if acknowledgedAt != nil {
 		if RunnerCommandAckOutcome(*stored) != outcome {
-			return RoundCommandAcknowledgement{}, true, true, nil
+			return RoundCommandAcknowledgement{}, true, &roundEventRejection{http.StatusConflict, commandAlreadyAcknowledgedCode, commandAlreadyAcknowledgedMessage}, nil
 		}
-		return RoundCommandAcknowledgement{Id: commandID, AcknowledgedAt: acknowledgedAt.UTC(), Outcome: outcome}, true, false, nil
+		return RoundCommandAcknowledgement{Id: commandID, AcknowledgedAt: acknowledgedAt.UTC(), Outcome: outcome}, true, nil, nil
 	}
 	var at time.Time
 	if err := tx.QueryRow(ctx, `UPDATE round_commands SET acknowledged_at = $2, ack_outcome = $3 WHERE id = $1 RETURNING acknowledged_at`,
 		rowID, now, string(outcome)).Scan(&at); err != nil {
-		return RoundCommandAcknowledgement{}, true, false, err
+		return RoundCommandAcknowledgement{}, true, nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return RoundCommandAcknowledgement{}, true, false, err
+		return RoundCommandAcknowledgement{}, true, nil, err
 	}
-	return RoundCommandAcknowledgement{Id: commandID, AcknowledgedAt: at.UTC(), Outcome: outcome}, true, false, nil
+	return RoundCommandAcknowledgement{Id: commandID, AcknowledgedAt: at.UTC(), Outcome: outcome}, true, nil, nil
 }

@@ -90,11 +90,11 @@ function galley(handlers: { reconcile?: (() => Response)[]; claims?: (() => Resp
   return { fetchFn, calls, of, events, reconciles, order };
 }
 
-function setup(fetchFn: FetchFn, script: EngineScript, commandIntervalMs = 1_000_000) {
+function setup(fetchFn: FetchFn, script: EngineScript, commandIntervalMs = 1_000_000, reportRetryMaxMs?: number) {
   const lines: string[] = [];
   const logger = createLogger((line) => lines.push(line));
   const registration = { ...newRegistration(), registered: true };
-  const loop = startClaimLoop({ galleyUrl: GALLEY, intervalMs: 1000, commandIntervalMs, fetch: fetchFn, logger, credential: credential(), registration, requestTimeoutMs: 300, engineScript: script });
+  const loop = startClaimLoop({ galleyUrl: GALLEY, intervalMs: 1000, commandIntervalMs, fetch: fetchFn, logger, credential: credential(), registration, requestTimeoutMs: 300, engineScript: script, reportRetryMaxMs });
   const messages = () => lines.map((line) => (JSON.parse(line) as { msg: string }).msg);
   return { loop, registration, messages, lines };
 }
@@ -402,6 +402,39 @@ describe("claim loop with a Reconcile owed", () => {
     await vi.advanceTimersByTimeAsync(5000);
     expect(g.of(`/api/runner/rounds/${ROUND}/authority-checks`)).toHaveLength(0);
     expect(g.events()).toEqual(["execution_started", "stop_confirmed"]);
+    await loop.stop();
+  });
+});
+
+describe("a Round halted at the report retry bound", () => {
+  it("reconciles believing it stopped, at claim cadence, and reports the cessation Galley names", async () => {
+    const calls: Call[] = [];
+    let reconciles = 0;
+    const fetchFn = vi.fn<FetchFn>(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      const raw = typeof init?.body === "string" ? init.body : undefined;
+      calls.push({ path, body: raw === undefined ? undefined : JSON.parse(raw) });
+      if (path === "/api/runner/claims") return calls.filter((call) => call.path === path).length === 1 ? json(CLAIM, 201) : noWork();
+      if (path === `/api/runner/rounds/${ROUND}/commands`) return json({ commands: [] });
+      if (path === "/api/runner/reconcile") {
+        reconciles++;
+        return reconciles < 3 ? json({ error: { code: "database_unavailable", message: "x" } }, 503) : reconciled("report_cessation", { cessationEvent: "interrupted" })();
+      }
+      if (path === `/api/runner/rounds/${ROUND}/events`) {
+        const type = (JSON.parse(raw!) as { type: string }).type;
+        return type === "progress" ? json({ error: { code: "database_unavailable", message: "x" } }, 503) : eventResponse(raw!);
+      }
+      throw new Error(`unexpected ${path}`);
+    });
+    const { loop, messages } = setup(fetchFn, { steps: [{ step: "start" }, { step: "progress", note: "p" }, { step: "deliver", bodyMarkdown: "# D", summary: "s", criteriaAssessment: "c" }] }, 1_000_000, 7000);
+    await vi.advanceTimersByTimeAsync(60_000);
+    const events = calls.filter((call) => call.path === `/api/runner/rounds/${ROUND}/events`).map((call) => call.body as { type: string; idempotencyKey: string });
+    expect(events.map((event) => event.type)).toEqual(["execution_started", "progress", "progress", "progress", "progress", "interrupted"]);
+    expect(events.at(-1)!.idempotencyKey).toBe(`${ROUND}:halted`);
+    expect(calls.filter((call) => call.path === "/api/runner/reconcile").map((call) => call.body)).toEqual([held("stopped"), held("stopped"), held("stopped")]);
+    expect(messages()).toContain("report retry exhausted; round halted locally");
+    expect(messages()).toContain("cessation reported");
+    expect(messages()).not.toContain("delivery reported");
     await loop.stop();
   });
 });

@@ -4,6 +4,7 @@ import { callGalley, INVALID_JSON, isRecord, type GalleyRequest, type Outcome, t
 
 export type RegisterRunnerRequest = components["schemas"]["RegisterRunnerRequest"];
 export type RunnerClaim = components["schemas"]["RunnerClaim"];
+export type ClaimWorkRequest = components["schemas"]["ClaimWorkRequest"];
 export type ClaimedFeedback = components["schemas"]["ClaimedFeedback"];
 export type RoundEventRequest = components["schemas"]["RoundEventRequest"];
 export type RoundEventResult = components["schemas"]["RoundEventResult"];
@@ -73,9 +74,10 @@ async function runnerCall(request: RunnerRequest, path: string, body: string | u
   });
 }
 
-export function claimWork(request: RunnerRequest): Promise<ClaimResult> {
-  const headers = { accept: "application/json", authorization: request.credential.authorizationHeader() };
-  return callGalley<RunnerClaim | null, ClaimFailure>(request, "api/runner/claims", { method: "POST", headers }, async (response, readJson) => {
+export function claimWork(request: RunnerRequest, idempotencyKey: string): Promise<ClaimResult> {
+  const headers = { accept: "application/json", "content-type": "application/json", authorization: request.credential.authorizationHeader() };
+  const body = JSON.stringify({ idempotencyKey } satisfies ClaimWorkRequest);
+  return callGalley<RunnerClaim | null, ClaimFailure>(request, "api/runner/claims", { method: "POST", headers, body }, async (response, readJson) => {
     if (response.status === 204) {
       await response.body?.cancel();
       return { ok: true, value: null };
@@ -84,7 +86,7 @@ export function claimWork(request: RunnerRequest): Promise<ClaimResult> {
       await response.body?.cancel();
       return { ok: false, failure: { reason: "credential_rejected", httpStatus: 401 } };
     }
-    if (response.status !== 201) {
+    if (response.status !== 201 && response.status !== 200) {
       await response.body?.cancel();
       return { ok: false, failure: { reason: "http_status", httpStatus: response.status } };
     }
@@ -95,6 +97,23 @@ export function claimWork(request: RunnerRequest): Promise<ClaimResult> {
     const claim = parseClaim(payload);
     return typeof claim === "string" ? { ok: false, failure: { reason: "invalid_body", error: claim } } : { ok: true, value: claim };
   });
+}
+
+// A claim whose answer never arrived may have created a Round, so it is asked again under the same key.
+export function claimKeyOutlives(result: ClaimResult): boolean {
+  if (result.ok) {
+    return false;
+  }
+  switch (result.failure.reason) {
+    case "unreachable":
+    case "timeout":
+    case "invalid_body":
+      return true;
+    case "http_status":
+      return result.failure.httpStatus >= 500;
+    default:
+      return false;
+  }
 }
 
 function parseClaim(payload: unknown): RunnerClaim | string {

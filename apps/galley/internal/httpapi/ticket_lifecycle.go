@@ -166,7 +166,7 @@ func containsStatus(statuses []TicketStatus, target TicketStatus) bool {
 
 var statusTargets = []TicketStatus{Backlog, Ready, InProgress, Blocked, InReview, Done}
 
-func allowedActionsForTicket(state ticketWorkflowState, condition TicketCompletionCondition) TicketAllowedActions {
+func allowedActionsForTicket(state ticketWorkflowState, condition TicketCompletionCondition, cessation cessationFacts) TicketAllowedActions {
 	actions := TicketAllowedActions{
 		StatusChanges:          []TicketStatus{},
 		StatusChangeRejections: []TicketStatusChangeRejection{},
@@ -175,6 +175,7 @@ func allowedActionsForTicket(state ticketWorkflowState, condition TicketCompleti
 		Answer:                 commandAvailability(decideWaitingAnswer(state)),
 		PermissionDecision:     commandAvailability(decideWaitingPermission(state)),
 		Feedback:               commandAvailability(decideFeedback(state, state.deliveredRoundID != "")),
+		AttestCessation:        commandAvailability(decideCessationAttestation(cessation)),
 	}
 	if rejection := decideTicketMutation(state.ticketLock, false); rejection != nil {
 		actions.Accept = commandAvailability(rejection)

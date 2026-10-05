@@ -2,7 +2,7 @@ import { once } from "node:events";
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import { signIn, signInWithoutBrowser } from "../support/sign-in";
 import { pairRunnerViaApi, startMichelin, type EngineScriptStep, type RunningMichelin } from "../support/runner";
-import { answerQuestionDirect, assignTicketDirect, changeTicketStatusDirect, createAgent, createTicket, listRounds, requestStopDirect, updateTicketDirect, type Ticket } from "../support/tickets";
+import { answerQuestionDirect, assignTicketDirect, attestCessationDirect, changeTicketStatusDirect, createAgent, createTicket, listRounds, requestStopDirect, updateTicketDirect, type Ticket } from "../support/tickets";
 
 const RUNNING = "Reconciled with the runner: execution running";
 const UNKNOWN = "Reconciled with the runner: the runner cannot confirm execution";
@@ -136,7 +136,6 @@ test("a Stop queued while the runner was away reaches it in the Reconcile answer
   }
 });
 
-// Leaves the Round open with no runner able to end it: run.sh resets the database after this spec.
 test("a restarted runner cannot confirm the Round an earlier process held: it stays open, the Ticket stays locked, and the slip and receipt say so", async ({ playwright, browser, request }) => {
   const baseURL = process.env.E2E_BASE_URL;
   const api = await playwright.request.newContext({ baseURL });
@@ -185,6 +184,8 @@ test("a restarted runner cannot confirm the Round an earlier process held: it st
     await expect(page.getByTestId("ticket-detail-locked")).toBeVisible();
     await expect(page.getByTestId("ticket-detail-round-note")).toContainText([UNKNOWN]);
 
+    expect((await attestCessationDirect(api, queued.id, roundId, "runner_process_ended")).status).toBe(200);
+    expect(await ticket(api, queued.id)).toMatchObject({ status: "Blocked", openRound: null });
     await exitCleanly(restarted);
     exited = true;
   } finally {

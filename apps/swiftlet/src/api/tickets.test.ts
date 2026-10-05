@@ -16,7 +16,7 @@ const TICKET = {
       available: false,
       reason: { code: "agent_readiness_incomplete", message: "this Ticket needs a goal", missing: ["goal"] },
     },
-    stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } },
+    stop: { available: false, reason: { code: "stop_not_available", message: "Stop needs an open Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } },
   },
   template: "Basic",
   completionCondition: "humanAcceptance",
@@ -48,7 +48,7 @@ describe("fetchTicket", () => {
   const agent = TICKET.assigneeAgent;
   const round = { id: "66666666-6666-4666-8666-666666666666", sequence: 1, state: "running", agent, claimedAt: "2026-10-02T10:00:00Z", startedAt: "2026-10-02T10:00:01Z", waitingReason: "working", question: null, permissionRequest: null };
 
-  it.each(["starting", "working", "waiting_for_answer", "waiting_for_permission", "resuming", "stopping", "runner_disconnected", "reconciling", "execution_unknown"])("keeps Galley's waiting reason %s", async (waitingReason) => {
+  it.each(["starting", "working", "waiting_for_answer", "waiting_for_permission", "resuming", "stopping", "runner_disconnected", "runner_replaced", "reconciling", "execution_unknown"])("keeps Galley's waiting reason %s", async (waitingReason) => {
     const open = { ...TICKET, status: "InProgress", openRound: { ...round, stopRequestedAt: null, waitingReason } };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => open }));
     expect((await fetchTicket(TICKET.id)).openRound?.waitingReason).toBe(waitingReason);
@@ -61,7 +61,7 @@ describe("fetchTicket", () => {
       openRound: { ...round, stopRequestedAt: "2026-10-02T10:00:05Z", waitingReason: "stopping", question: null, permissionRequest: null },
       permissionGrants: [],
       permissionGrantCount: 0,
-      allowedActions: { ...TICKET.allowedActions, stop: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } },
+      allowedActions: { ...TICKET.allowedActions, stop: { available: false, reason: { code: "stop_already_requested", message: "Stop is already requested for this Round" } }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } },
     };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => stopping }));
     const ticket = await fetchTicket(TICKET.id);
@@ -74,7 +74,7 @@ describe("fetchTicket", () => {
   const permissionWaiting = { ...round, state: "waiting_for_input", stopRequestedAt: null, waitingReason: "waiting_for_permission", question: null, permissionRequest: PERMISSION_REQUEST };
 
   it("reads the Permission request a waiting Round holds, the decision availability and the Ticket's grants", async () => {
-    const payload = { ...TICKET, status: "Blocked", openRound: permissionWaiting, permissionGrants: [GRANT], permissionGrantCount: 1, allowedActions: { ...TICKET.allowedActions, permissionDecision: { available: true } } };
+    const payload = { ...TICKET, status: "Blocked", openRound: permissionWaiting, permissionGrants: [GRANT], permissionGrantCount: 1, allowedActions: { ...TICKET.allowedActions, permissionDecision: { available: true }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } } };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => payload }));
     const ticket = await fetchTicket(TICKET.id);
     expect(ticket.openRound).toEqual(permissionWaiting);
@@ -106,7 +106,7 @@ describe("fetchTicket", () => {
 
   it("reads live and expired time grants, a renewal request and the grant count", async () => {
     const renewal = { ...PERMISSION_REQUEST, renewsGrantId: EXPIRED_GRANT.id };
-    const payload = { ...TICKET, status: "Blocked", openRound: { ...permissionWaiting, permissionRequest: renewal }, permissionGrants: [EXPIRED_GRANT, TIME_GRANT, GRANT], permissionGrantCount: 57, allowedActions: { ...TICKET.allowedActions, permissionDecision: { available: true } } };
+    const payload = { ...TICKET, status: "Blocked", openRound: { ...permissionWaiting, permissionRequest: renewal }, permissionGrants: [EXPIRED_GRANT, TIME_GRANT, GRANT], permissionGrantCount: 57, allowedActions: { ...TICKET.allowedActions, permissionDecision: { available: true }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } } };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => payload }));
     const ticket = await fetchTicket(TICKET.id);
     expect(ticket.openRound?.permissionRequest).toEqual(renewal);
@@ -134,6 +134,11 @@ describe("fetchTicket", () => {
   ])("rejects a Ticket with %s", async (_name, grant) => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => ({ ...TICKET, permissionGrants: [grant], permissionGrantCount: 1 }) }));
     await expect(fetchTicket(TICKET.id)).rejects.toThrow("missing a required field");
+  });
+
+  it("keeps an available attestation", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => ({ ...TICKET, allowedActions: { ...TICKET.allowedActions, attestCessation: { available: true } } }) }));
+    expect((await fetchTicket(TICKET.id)).allowedActions.attestCessation).toEqual({ available: true });
   });
 
   it("keeps an approved request with its grant while the Round resumes", async () => {
@@ -182,7 +187,9 @@ describe("fetchTicket", () => {
     ["an approval without its grant", { ...TICKET, openRound: { ...permissionWaiting, permissionRequest: { ...PERMISSION_REQUEST, decision: "approved", decidedAt: "2026-10-02T10:00:09Z" } } }],
     ["a decline with a grant", { ...TICKET, openRound: { ...permissionWaiting, permissionRequest: { ...PERMISSION_REQUEST, decision: "declined", decidedAt: "2026-10-02T10:00:09Z", grantId: GRANT.id } } }],
     ["an unknown decision", { ...TICKET, openRound: { ...permissionWaiting, permissionRequest: { ...PERMISSION_REQUEST, decision: "deferred", decidedAt: "2026-10-02T10:00:09Z" } } }],
-    ["no Permission decision availability", { ...TICKET, allowedActions: { ...TICKET.allowedActions, permissionDecision: undefined } }],
+    ["no Permission decision availability", { ...TICKET, allowedActions: { ...TICKET.allowedActions, permissionDecision: undefined, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } } }],
+    ["no attestation availability", { ...TICKET, allowedActions: { ...TICKET.allowedActions, attestCessation: undefined } }],
+    ["an attestation availability that is not a boolean", { ...TICKET, allowedActions: { ...TICKET.allowedActions, attestCessation: { available: "yes" } } }],
     ["no permissionGrants field", { ...TICKET, permissionGrants: undefined }],
     ["a grant of another form", { ...TICKET, permissionGrants: [{ ...GRANT, form: "always" }], permissionGrantCount: 1 }],
     ["a grant of an unknown state", { ...TICKET, permissionGrants: [{ ...GRANT, state: "suspended" }], permissionGrantCount: 1 }],
@@ -253,7 +260,7 @@ describe("addRoundFeedback", () => {
   });
 
   it("reads the Feedback availability", async () => {
-    const payload = { ...TICKET, allowedActions: { ...TICKET.allowedActions, feedback: { available: true }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } } };
+    const payload = { ...TICKET, allowedActions: { ...TICKET.allowedActions, feedback: { available: true }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } } };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 201, statusText: "", json: async () => payload }));
     expect((await addRoundFeedback("t1", "r1", "Cover Asia too")).allowedActions.feedback).toEqual({ available: true });
   });

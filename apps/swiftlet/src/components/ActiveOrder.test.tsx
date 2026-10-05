@@ -16,7 +16,7 @@ const ACTIVE = {
   status: "InProgress",
   permissionGrants: [],
   permissionGrantCount: 0,
-  allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason: locked }, rework: unavailable("rework_not_available"), stop: { available: true }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } } },
+  allowedActions: { statusChangeRejections: [], statusChanges: [], accept: { available: false, reason: locked }, rework: unavailable("rework_not_available"), stop: { available: true }, answer: { available: false, reason: { code: "answer_not_available", message: "Answer needs a question the Round waits on" } }, feedback: { available: false, reason: { code: "feedback_not_available", message: "Feedback needs a delivered Round" } }, permissionDecision: { available: false, reason: { code: "permission_decision_not_available", message: "A Permission decision needs a request the Round waits on" } }, attestCessation: { available: false, reason: { code: "attestation_not_available", message: "attestation needs an open Round" } } },
   template: "Basic",
   completionCondition: "humanAcceptance",
   assigneeType: "agent",
@@ -72,6 +72,7 @@ describe.each(views)("the active order slip on the $name", ({ prefix, row, query
     ["working", "Working"],
     ["stopping", "Stopping"],
     ["runner_disconnected", "Runner disconnected"],
+    ["runner_replaced", "Runner replaced"],
     ["reconciling", "Reconciling with the runner"],
     ["execution_unknown", "Runner cannot confirm execution"],
   ])("labels the Galley reason %s as %s, beside a decorative delivery indicator", async (waitingReason, label) => {

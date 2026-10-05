@@ -98,6 +98,7 @@ func newHandler(cfg config.Config, logger *slog.Logger, srv *server) http.Handle
 	mux.HandleFunc("/api/tickets/{id}/rounds/{roundId}/activity", methodNotAllowedHandler("GET"))
 	mux.HandleFunc("/api/tickets/{id}/rounds/{roundId}/questions/{questionId}/answer", methodNotAllowedHandler("POST"))
 	mux.HandleFunc("/api/tickets/{id}/rounds/{roundId}/feedback", methodNotAllowedHandler("POST"))
+	mux.HandleFunc("/api/tickets/{id}/rounds/{roundId}/attest-cessation", methodNotAllowedHandler("POST"))
 	mux.HandleFunc("/api/tickets/{id}/rounds/{roundId}/permission-requests/{requestId}/approve", methodNotAllowedHandler("POST"))
 	mux.HandleFunc("/api/tickets/{id}/rounds/{roundId}/permission-requests/{requestId}/decline", methodNotAllowedHandler("POST"))
 	mux.HandleFunc("/api/grants/{grantId}/revoke", methodNotAllowedHandler("POST"))

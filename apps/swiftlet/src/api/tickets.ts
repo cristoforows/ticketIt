@@ -58,7 +58,7 @@ export class TicketNotFoundError extends Error {
 }
 
 type WaitingReason = NonNullable<Ticket["openRound"]>["waitingReason"];
-const WAITING_REASONS: readonly WaitingReason[] = ["starting", "working", "waiting_for_answer", "waiting_for_permission", "resuming", "stopping", "runner_disconnected", "reconciling", "execution_unknown"];
+const WAITING_REASONS: readonly WaitingReason[] = ["starting", "working", "waiting_for_answer", "waiting_for_permission", "resuming", "stopping", "runner_disconnected", "runner_replaced", "reconciling", "execution_unknown"];
 type OpenRoundState = NonNullable<Ticket["openRound"]>["state"];
 const OPEN_ROUND_STATES: readonly OpenRoundState[] = ["claimed", "running", "waiting_for_input"];
 
@@ -261,6 +261,7 @@ function parseTicket(payload: unknown): Ticket {
   const answer = parseCommandAvailability(actions?.answer);
   const feedback = parseCommandAvailability(actions?.feedback);
   const permissionDecision = parseCommandAvailability(actions?.permissionDecision);
+  const attestCessation = parseCommandAvailability(actions?.attestCessation);
   const permissionGrants = Array.isArray(record.permissionGrants) ? record.permissionGrants.map(parsePermissionGrant) : undefined;
   const agent = record.assigneeAgent;
   const openRound = parseOpenRound(record.openRound);
@@ -307,6 +308,7 @@ function parseTicket(payload: unknown): Ticket {
     !answer ||
     !feedback ||
     !permissionDecision ||
+    !attestCessation ||
     !permissionGrants ||
     !permissionGrants.every((grant) => grant !== undefined) ||
     !Number.isSafeInteger(record.permissionGrantCount) ||
@@ -327,6 +329,7 @@ function parseTicket(payload: unknown): Ticket {
       answer,
       feedback,
       permissionDecision,
+      attestCessation,
     },
     template: record.template as Ticket["template"],
     completionCondition: record.completionCondition as Ticket["completionCondition"],

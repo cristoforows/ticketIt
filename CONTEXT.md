@@ -141,7 +141,7 @@ The owner's comment on a delivered **Round** while its **Ticket** is **In Review
 _Avoid_: Answer when referring to a comment for a later round; review feedback when referring to comments outside ticketIt.
 
 **Interrupted**:
-The terminal outcome of a **Round** whose runner reported, with its own evidence, that the work stopped unexpectedly before delivery; lost contact alone never makes a round Interrupted. The **Ticket** becomes **Blocked**, and the round's activity, usage and the runner's evidence remain part of its history. Returning execution capacity does not start another round; only the owner's explicit move back to **Ready** does.
+The terminal outcome of a **Round** whose runner reported, with its own evidence, that the work stopped unexpectedly before delivery, or whose **Stranded Round** the owner ended by **Cessation Attestation**; lost contact alone never makes a round Interrupted. The **Ticket** becomes **Blocked**, and the round's activity, usage and the runner's evidence remain part of its history. Returning execution capacity does not start another round; only the owner's explicit move back to **Ready** does.
 _Avoid_: Failed when only an unexpected interruption, rather than a work failure, is known.
 
 **Stopping**:
@@ -149,7 +149,7 @@ The condition of an open **Round** after the owner has requested Stop and before
 _Avoid_: Stopped while the round is still open.
 
 **Waiting Reason**:
-What an open **Round** is waiting on, as the owner sees it: Starting, Working, Waiting for your answer, Waiting for a Permission, Resuming, **Stopping**, Runner disconnected, Reconciling with the runner, or Runner cannot confirm execution (**Execution Unknown**). Lost contact with the runner outranks the others, then Execution Unknown, then a pending **Reconcile**; none ends the round. It is not a **Status**.
+What an open **Round** is waiting on, as the owner sees it: Starting, Working, Waiting for your answer, Waiting for a Permission, Resuming, **Stopping**, Runner disconnected, Runner replaced, Reconciling with the runner, or Runner cannot confirm execution (**Execution Unknown**). Lost contact with the runner outranks the others, then a replaced runner, then Execution Unknown, then a pending **Reconcile**; none ends the round. It is not a **Status**.
 _Avoid_: Status, round state when referring to this owner-facing reason.
 
 **Reconcile**:
@@ -158,7 +158,15 @@ _Avoid_: Recovery when referring to this account; the round is not ended or retr
 
 **Execution Unknown**:
 The condition of an open **Round** whose runner reconnected but cannot confirm its execution is running, such as after a restart. The round stays open and its **Ticket** stays locked; belief that the work stopped is never evidence that it did.
-_Avoid_: Interrupted, which needs the runner's own evidence.
+_Avoid_: Interrupted, which needs the runner's own evidence or a **Cessation Attestation**.
+
+**Stranded Round**:
+An open **Round** no runner can end: its runner is disconnected, has been replaced by a re-paired one, or cannot confirm its execution. It stays open and its **Ticket** stays locked, however long, until the runner's own event ends it or the owner gives a **Cessation Attestation**.
+_Avoid_: Abandoned or timed out; time alone never ends a round.
+
+**Cessation Attestation**:
+The owner's explicit statement, with its basis, that a **Stranded Round**'s execution has ceased. It ends the round as **Interrupted**, the one Interrupted ending without the runner's evidence, and moves the **Ticket** to **Blocked**; activity, usage and work done are kept, and nothing done is undone. It is not available while a connected runner holds the round without reporting its execution unknown. If the execution was still running, its work continues outside ticketIt.
+_Avoid_: Stop, which needs the runner's confirmation; force-close.
 
 **Stopped**:
 The terminal outcome of a **Round** whose runner has confirmed its execution ended following the owner's explicit stop request. Its **Ticket** returns to **Backlog** with the Stopped **Badge**, an ordinary Badge the owner may remove without changing the outcome; the round's activity and usage remain part of its history. Only an explicit move to Ready starts another round.

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UnauthenticatedError } from "./session";
-import { fetchRoundActivity, fetchTicketRounds } from "./rounds";
+import { attestRoundCessation, fetchRoundActivity, fetchTicketRounds } from "./rounds";
+import { GalleyError } from "./http";
 import { TicketNotFoundError } from "./tickets";
 
 const usage = {
@@ -27,7 +28,7 @@ const STOPPED = {
   feedback: [],
   permissionRequests: [],
   authorityChecks: [],
-  authorityCheckCount: 0,
+  authorityCheckCount: 0, attestation: null,
   usage,
   deliverable: null,
 };
@@ -73,7 +74,7 @@ describe("fetchTicketRounds", () => {
   });
 
   it("keeps a Round's Permission requests, its latest authority checks and their count", async () => {
-    const withChecks = { ...STOPPED, permissionRequests: [REQUEST], authorityChecks: [DENY, ALLOW], authorityCheckCount: 60 };
+    const withChecks = { ...STOPPED, permissionRequests: [REQUEST], authorityChecks: [DENY, ALLOW], authorityCheckCount: 60, attestation: null };
     answer([withChecks]);
     expect(await fetchTicketRounds("t")).toEqual([withChecks]);
   });
@@ -81,7 +82,7 @@ describe("fetchTicketRounds", () => {
   it("keeps a deny that names the expired grant and the renewal request it raised", async () => {
     const expiredGrantId = "14141414-1414-4141-8141-141414141414";
     const renewal = { ...REQUEST, renewsGrantId: expiredGrantId };
-    const withRenewal = { ...STOPPED, permissionRequests: [renewal], authorityChecks: [{ ...DENY, expiredGrantId }, ALLOW], authorityCheckCount: 2 };
+    const withRenewal = { ...STOPPED, permissionRequests: [renewal], authorityChecks: [{ ...DENY, expiredGrantId }, ALLOW], authorityCheckCount: 2, attestation: null };
     answer([withRenewal]);
     expect(await fetchTicketRounds("t")).toEqual([withRenewal]);
   });
@@ -117,17 +118,17 @@ describe("fetchTicketRounds", () => {
     ["no permissionRequests field", { ...STOPPED, permissionRequests: undefined }],
     ["a Permission request approved without its grant", { ...STOPPED, permissionRequests: [{ ...REQUEST, grantId: null }] }],
     ["no authorityChecks field", { ...STOPPED, authorityChecks: undefined }],
-    ["an allow without its grant", { ...STOPPED, authorityChecks: [{ ...ALLOW, grantId: null }], authorityCheckCount: 1 }],
-    ["a deny with a grant", { ...STOPPED, authorityChecks: [{ ...DENY, grantId: REQUEST.grantId }], authorityCheckCount: 1 }],
+    ["an allow without its grant", { ...STOPPED, authorityChecks: [{ ...ALLOW, grantId: null }], authorityCheckCount: 1, attestation: null }],
+    ["a deny with a grant", { ...STOPPED, authorityChecks: [{ ...DENY, grantId: REQUEST.grantId }], authorityCheckCount: 1, attestation: null }],
     ["a Permission request without renewsGrantId", { ...STOPPED, permissionRequests: [{ ...REQUEST, renewsGrantId: undefined }] }],
-    ["a check without expiredGrantId", { ...STOPPED, authorityChecks: [{ ...DENY, expiredGrantId: undefined }], authorityCheckCount: 1 }],
-    ["an allow that names an expired grant", { ...STOPPED, authorityChecks: [{ ...ALLOW, expiredGrantId: "14141414-1414-4141-8141-141414141414" }], authorityCheckCount: 1 }],
-    ["a numeric expiredGrantId", { ...STOPPED, authorityChecks: [{ ...DENY, expiredGrantId: 7 }], authorityCheckCount: 1 }],
-    ["an unknown decision", { ...STOPPED, authorityChecks: [{ ...DENY, decision: "maybe" }], authorityCheckCount: 1 }],
-    ["a check without checkedAt", { ...STOPPED, authorityChecks: [{ ...DENY, checkedAt: undefined }], authorityCheckCount: 1 }],
-    ["no authorityCheckCount field", { ...STOPPED, authorityCheckCount: undefined }],
-    ["a count below the checks listed", { ...STOPPED, authorityChecks: [DENY, ALLOW], authorityCheckCount: 1 }],
-    ["a fractional count", { ...STOPPED, authorityCheckCount: 0.5 }],
+    ["a check without expiredGrantId", { ...STOPPED, authorityChecks: [{ ...DENY, expiredGrantId: undefined }], authorityCheckCount: 1, attestation: null }],
+    ["an allow that names an expired grant", { ...STOPPED, authorityChecks: [{ ...ALLOW, expiredGrantId: "14141414-1414-4141-8141-141414141414" }], authorityCheckCount: 1, attestation: null }],
+    ["a numeric expiredGrantId", { ...STOPPED, authorityChecks: [{ ...DENY, expiredGrantId: 7 }], authorityCheckCount: 1, attestation: null }],
+    ["an unknown decision", { ...STOPPED, authorityChecks: [{ ...DENY, decision: "maybe" }], authorityCheckCount: 1, attestation: null }],
+    ["a check without checkedAt", { ...STOPPED, authorityChecks: [{ ...DENY, checkedAt: undefined }], authorityCheckCount: 1, attestation: null }],
+    ["no authorityCheckCount field", { ...STOPPED, authorityCheckCount: undefined, attestation: null }],
+    ["a count below the checks listed", { ...STOPPED, authorityChecks: [DENY, ALLOW], authorityCheckCount: 1, attestation: null }],
+    ["a fractional count", { ...STOPPED, authorityCheckCount: 0.5, attestation: null }],
   ])("refuses %s", async (_name, round) => {
     answer([round]);
     await expect(fetchTicketRounds("t")).rejects.toThrow("Galley's Round list was missing a required field.");
@@ -165,5 +166,59 @@ describe("fetchRoundActivity", () => {
     await expect(fetchRoundActivity("t", "r", "1")).rejects.toBeInstanceOf(UnauthenticatedError);
     respond({ error: { code: "invalid_cursor", message: "bad" } }, 400);
     await expect(fetchRoundActivity("t", "r", "1")).rejects.toThrow("400");
+  });
+});
+
+const ATTESTATION = { attestedAt: "2026-10-01T10:05:00Z", basis: "other", note: "Unplugged it", roundState: "running", claimEpoch: 2, holderLastSeenAt: "2026-10-01T10:04:00Z", holderHealth: "disconnected", reconcileExecution: "unknown" };
+const ATTESTED = { ...STOPPED, state: "interrupted", outcomeNote: "Ended by Owner attestation: other.", attestation: ATTESTATION };
+
+describe("a Round ended by attestation", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("keeps the attestation of an Interrupted Round", async () => {
+    const claimed = { ...ATTESTED, attestation: { ...ATTESTATION, basis: "runner_host_off", note: null, roundState: "claimed", holderLastSeenAt: null, holderHealth: "replaced", reconcileExecution: null } };
+    answer([ATTESTED, claimed]);
+    expect(await fetchTicketRounds("t")).toEqual([ATTESTED, claimed]);
+  });
+
+  it.each([
+    ["on a Round that did not end Interrupted", { ...STOPPED, attestation: ATTESTATION }],
+    ["missing", (({ attestation: _a, ...rest }) => rest)(ATTESTED)],
+    ["with an unknown basis", { ...ATTESTED, attestation: { ...ATTESTATION, basis: "timeout" } }],
+    ["with Other and no note", { ...ATTESTED, attestation: { ...ATTESTATION, note: null } }],
+    ["with an ended Round state", { ...ATTESTED, attestation: { ...ATTESTATION, roundState: "delivered" } }],
+    ["with an unknown holder health", { ...ATTESTED, attestation: { ...ATTESTATION, holderHealth: "gone" } }],
+    ["with an unknown execution", { ...ATTESTED, attestation: { ...ATTESTATION, reconcileExecution: "maybe" } }],
+    ["without a claim epoch", { ...ATTESTED, attestation: { ...ATTESTATION, claimEpoch: "2" } }],
+  ])("rejects an attestation %s", async (_name, round) => {
+    answer([round]);
+    await expect(fetchTicketRounds("t")).rejects.toThrow("Galley's Round list was missing a required field.");
+  });
+});
+
+describe("attestRoundCessation", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("posts the basis and note and returns the attested Round", async () => {
+    const fetchFn = vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => ATTESTED });
+    vi.stubGlobal("fetch", fetchFn);
+    expect(await attestRoundCessation("t/1", "r 1", { basis: "other", note: "Unplugged it" })).toEqual(ATTESTED);
+    const [url, init] = fetchFn.mock.calls[0]!;
+    expect(url).toBe("/api/tickets/t%2F1/rounds/r%201/attest-cessation");
+    expect(init.method).toBe("POST");
+    expect(init.headers).toMatchObject({ "Content-Type": "application/json" });
+    expect(JSON.parse(init.body)).toEqual({ basis: "other", note: "Unplugged it" });
+  });
+
+  it("throws Galley's refusal", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 400, statusText: "Bad Request", json: async () => ({ error: { code: "attestation_not_available", message: "attestation needs an open Round" } }) }));
+    const refusal = attestRoundCessation("t", "r", { basis: "runner_host_off" });
+    await expect(refusal).rejects.toBeInstanceOf(GalleyError);
+    await expect(refusal).rejects.toMatchObject({ code: "attestation_not_available", message: "attestation needs an open Round" });
+  });
+
+  it("throws on a Round body that is not a Round", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "", json: async () => ({ ...ATTESTED, attestation: undefined }) }));
+    await expect(attestRoundCessation("t", "r", { basis: "runner_host_off" })).rejects.toThrow("Galley's attested Round was missing a required field.");
   });
 });

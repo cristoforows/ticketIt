@@ -15,6 +15,7 @@ export const waitingReasonLabels: Record<WaitingReason, string> = {
   resuming: "Resuming",
   stopping: "Stopping",
   runner_disconnected: "Runner disconnected",
+  runner_replaced: "Runner replaced",
   reconciling: "Reconciling with the runner",
   execution_unknown: "Runner cannot confirm execution",
 };

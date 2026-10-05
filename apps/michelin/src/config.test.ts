@@ -6,13 +6,14 @@ const TOKEN = `tir_${"a".repeat(43)}`;
 const base = { MICHELIN_RUNNER_TOKEN: TOKEN };
 
 describe("loadConfig", () => {
-  it("defaults to Galley's dev address, 10 second status and heartbeat intervals, a 5 second claim interval and a 1 second command interval", () => {
+  it("defaults to Galley's dev address, 10 second status and heartbeat intervals, a 5 second claim interval and a 1 second command interval and a 5 minute report retry bound", () => {
     const config = loadConfig(base);
     expect(config.galleyUrl.href).toBe("http://localhost:8080/");
     expect(config.statusIntervalMs).toBe(10_000);
     expect(config.heartbeatIntervalMs).toBe(10_000);
     expect(config.claimIntervalMs).toBe(5_000);
     expect(config.commandIntervalMs).toBe(1_000);
+    expect(config.reportRetryMaxMs).toBe(300_000);
     expect(config.runnerCredential.authorizationHeader()).toBe(`Bearer ${TOKEN}`);
   });
 
@@ -24,19 +25,21 @@ describe("loadConfig", () => {
       MICHELIN_HEARTBEAT_INTERVAL_MS: "500",
       MICHELIN_CLAIM_INTERVAL_MS: "750",
       MICHELIN_COMMAND_INTERVAL_MS: "125",
+      MICHELIN_REPORT_RETRY_MAX_MS: "60000",
     });
     expect(config.galleyUrl.href).toBe("https://galley.example.test:9000/base/");
     expect(config.statusIntervalMs).toBe(250);
     expect(config.heartbeatIntervalMs).toBe(500);
     expect(config.claimIntervalMs).toBe(750);
     expect(config.commandIntervalMs).toBe(125);
+    expect(config.reportRetryMaxMs).toBe(60_000);
   });
 
   it.each(["not a url", "", "ftp://localhost:8080", "localhost:8080"])("rejects GALLEY_URL %j", (value) => {
     expect(() => loadConfig({ ...base, GALLEY_URL: value })).toThrow(ConfigError);
   });
 
-  it.each(["MICHELIN_STATUS_INTERVAL_MS", "MICHELIN_HEARTBEAT_INTERVAL_MS", "MICHELIN_CLAIM_INTERVAL_MS", "MICHELIN_COMMAND_INTERVAL_MS"])("rejects bad %s values", (name) => {
+  it.each(["MICHELIN_STATUS_INTERVAL_MS", "MICHELIN_HEARTBEAT_INTERVAL_MS", "MICHELIN_CLAIM_INTERVAL_MS", "MICHELIN_COMMAND_INTERVAL_MS", "MICHELIN_REPORT_RETRY_MAX_MS"])("rejects bad %s values", (name) => {
     for (const value of ["0", "-5", "1.5", "abc", "", "1e3", " 10"]) {
       expect(() => loadConfig({ ...base, [name]: value })).toThrow(ConfigError);
     }
@@ -106,11 +109,11 @@ describe("loadConfig", () => {
 
   it("reports every problem at once", () => {
     try {
-      loadConfig({ GALLEY_URL: "nope", MICHELIN_STATUS_INTERVAL_MS: "0", MICHELIN_HEARTBEAT_INTERVAL_MS: "x", MICHELIN_CLAIM_INTERVAL_MS: "-1", MICHELIN_COMMAND_INTERVAL_MS: "0", MICHELIN_ENGINE_SCRIPT: "" });
+      loadConfig({ GALLEY_URL: "nope", MICHELIN_STATUS_INTERVAL_MS: "0", MICHELIN_HEARTBEAT_INTERVAL_MS: "x", MICHELIN_CLAIM_INTERVAL_MS: "-1", MICHELIN_COMMAND_INTERVAL_MS: "0", MICHELIN_REPORT_RETRY_MAX_MS: "0", MICHELIN_ENGINE_SCRIPT: "" });
       expect.unreachable();
     } catch (error) {
       expect(error).toBeInstanceOf(ConfigError);
-      expect((error as ConfigError).problems).toHaveLength(7);
+      expect((error as ConfigError).problems).toHaveLength(8);
     }
   });
 });

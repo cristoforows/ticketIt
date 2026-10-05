@@ -602,6 +602,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tickets/{id}/rounds/{roundId}/attest-cessation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                roundId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Attest that an open Round's execution has ceased
+         * @description The Owner's assertion, after making sure, that the Round's execution has stopped. Available on an unarchived Ticket's open Round unless the runner that claimed it is the Owner's current runner, connected by Galley's clock, and its last Reconcile did not report `unknown`; see `allowedActions.attestCessation`. Records the attestation with what Galley observed, ends the Round `interrupted` (even with a Stop pending, which is never delivered) with the explanation `Ended by Owner attestation: <basis>.`, appends one activity note, frees the Owner's slot and moves the Ticket to Blocked. Activity, usage and work already reported are kept. A later report for the Round is `round_not_open`. A repeat after it took effect returns the stored result; any other refusal is `400 attestation_not_available`, changing nothing. A bad body is `400 invalid_request`, before the lookup. An unknown, malformed or foreign Ticket or Round id, or a Round not of that Ticket, returns the shared 404.
+         */
+        post: operations["attestRoundCessation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/session": {
         parameters: {
             query?: never;
@@ -721,7 +744,7 @@ export interface paths {
         put?: never;
         /**
          * Reconcile what the runner holds with Galley
-         * @description The runner states the Round it holds, its claim epoch and what it believes about execution, or that it holds nothing. Galley answers the Round's state, one disposition and the Round's unacknowledged commands, Stop first. It never ends a Round or changes its state, its Ticket's Status or the Owner's slot. With nothing held it answers about the Owner's open Round, or `round: null` when there is none. Checked in order: more than one `held` entry, or an invalid `claimEpoch` or `execution`, is `400 invalid_request`; an unknown, malformed or foreign `roundId` returns the shared 404; then `409 stale_claim_epoch` for a `claimEpoch` other than the Round's and `409 round_not_open` for a Round that has ended. A rejection changes nothing, and so does a repeat. Not a heartbeat.
+         * @description The runner states the Round it holds, its claim epoch and what it believes about execution, or that it holds nothing. Galley answers the Round's state, one disposition and the Round's unacknowledged commands, Stop first. It never ends a Round or changes its state, its Ticket's Status or the Owner's slot. With nothing held it answers about the Owner's open Round, or `round: null` when there is none. Checked in order: more than one `held` entry, or an invalid `claimEpoch` or `execution`, is `400 invalid_request`; an unknown, malformed or foreign `roundId` returns the shared 404; then `409 runner_not_holder` for a runner other than the one that claimed it, `409 stale_claim_epoch` for a `claimEpoch` other than the Round's and `409 round_not_open` for a Round that has ended. With nothing held, an open Round another runner claimed is answered as `unknown` with no commands. A rejection changes nothing, and so does a repeat. Not a heartbeat.
          */
         post: operations["reconcileRunner"];
         delete?: never;
@@ -741,7 +764,7 @@ export interface paths {
         put?: never;
         /**
          * Claim the next Round
-         * @description Claims the Owner's highest-priority Ticket that is requesting Agent work and creates its Round. `204` when nothing is requesting work, a Round is already open, or the runner is not connected. Not a heartbeat.
+         * @description Claims the Owner's highest-priority Ticket that is requesting Agent work and creates its Round, held by the calling runner. Checked in order: a bad body is `400 invalid_request`; a key already used by this Owner returns `409 idempotency_key_conflict` when another runner used it, `409 claim_not_replayable` once its Round has left `claimed`, and otherwise `200` with the body first returned; then `204` when the runner is not connected, a Round is already open, or nothing is requesting work. `204` means no Round exists for the key. Not a heartbeat.
          */
         post: operations["claimWork"];
         delete?: never;
@@ -763,7 +786,7 @@ export interface paths {
         put?: never;
         /**
          * Report an execution event for a Round
-         * @description An event is a fact the runner reports, recorded once per `(roundId, idempotencyKey)`. The same key with the same payload returns the original result with `200`; a different payload is `409 idempotency_key_conflict`. Checked in that order, then `409 stale_claim_epoch` for a `claimEpoch` other than the Round's, `409 round_not_open` for a Round that has ended, and `409 event_out_of_order` for a type the Round's state cannot take: `execution_started` needs a claimed Round; `progress`, `usage_observed`, `delivered`, `failed`, `interrupted`, `question_raised` and `permission_requested` a running one; `resumed` one waiting for input, and then `409 answer_not_supplied` unless its `questionId` is the question the Round waits on and the Owner has answered it, or `409 approval_not_supplied` unless its `requestId` is the Permission request the Round waits on and the Owner has approved it; `stop_confirmed` any open Round, and then `409 stop_not_requested` unless the Owner requested Stop. `question_raised` records the question, moves the Round to `waiting_for_input` and the Ticket from In Progress to Blocked, and keeps the Owner's slot; its `idempotencyKey` must equal `data.questionId`. `permission_requested` does the same for a Permission request; its `idempotencyKey` must equal `data.requestId`, and a scope the Connected Account does not declare is `400 capability_not_supported`. A `renewsGrantId` that does not name a `time` grant of this Owner, the Round's Agent and the same scope or full access to the same Connected Account, expired by Galley's clock and not revoked, is `400 invalid_renewal`, checked after `event_out_of_order`. `resumed` moves the Round back to `running` and the Ticket to In Progress. A `usage_observed` whose `observationId` is already recorded for another Round is `409 observation_id_conflict`. `delivered` retains the deliverable, ends the Round as `delivered`, frees the Owner's slot and moves the Ticket from In Progress to In Review, never Done. `stop_confirmed` ends the Round as `stopped` with its evidence, frees the slot and moves the Ticket to Backlog with the Stopped Badge. `failed` and `interrupted` end the Round as `failed` or `interrupted` with the explanation or evidence, free the slot and move the Ticket from In Progress to Blocked; no Round starts until the Owner moves it to Ready. A body over 8 MiB is `413 request_too_large`. A rejection changes nothing. An unknown, malformed or foreign Round id returns the shared 404. A runner that is not Connected is still accepted, and an event is not a heartbeat.
+         * @description An event is a fact the runner reports, recorded once per `(roundId, idempotencyKey)`. A runner other than the one that claimed the Round is `409 runner_not_holder`. The same key with the same payload returns the original result with `200`; a different payload is `409 idempotency_key_conflict`. Checked in that order, then `409 stale_claim_epoch` for a `claimEpoch` other than the Round's, `409 round_not_open` for a Round that has ended, and `409 event_out_of_order` for a type the Round's state cannot take: `execution_started` needs a claimed Round; `interrupted` any open Round; `progress`, `usage_observed`, `delivered`, `failed`, `question_raised` and `permission_requested` a running one; `resumed` one waiting for input, and then `409 answer_not_supplied` unless its `questionId` is the question the Round waits on and the Owner has answered it, or `409 approval_not_supplied` unless its `requestId` is the Permission request the Round waits on and the Owner has approved it; `stop_confirmed` any open Round, and then `409 stop_not_requested` unless the Owner requested Stop. `question_raised` records the question, moves the Round to `waiting_for_input` and the Ticket from In Progress to Blocked, and keeps the Owner's slot; its `idempotencyKey` must equal `data.questionId`. `permission_requested` does the same for a Permission request; its `idempotencyKey` must equal `data.requestId`, and a scope the Connected Account does not declare is `400 capability_not_supported`. A `renewsGrantId` that does not name a `time` grant of this Owner, the Round's Agent and the same scope or full access to the same Connected Account, expired by Galley's clock and not revoked, is `400 invalid_renewal`, checked after `event_out_of_order`. `resumed` moves the Round back to `running` and the Ticket to In Progress. A `usage_observed` whose `observationId` is already recorded for another Round is `409 observation_id_conflict`. `delivered` retains the deliverable, ends the Round as `delivered`, frees the Owner's slot and moves the Ticket from In Progress to In Review, never Done. `stop_confirmed` ends the Round as `stopped` with its evidence, frees the slot and moves the Ticket to Backlog with the Stopped Badge. `failed` and `interrupted` end the Round as `failed` or `interrupted` with the explanation or evidence, free the slot and move the Ticket to Blocked; no Round starts until the Owner moves it to Ready. A body over 8 MiB is `413 request_too_large`. A rejection changes nothing. An unknown, malformed or foreign Round id returns the shared 404. A runner that is not Connected is still accepted, and an event is not a heartbeat.
          */
         post: operations["reportRoundEvent"];
         delete?: never;
@@ -785,7 +808,7 @@ export interface paths {
         put?: never;
         /**
          * Check whether the Round's Agent holds authority for a scope
-         * @description Answers from the grants Galley holds when the check runs, and records the check, allow or deny, in the Round's history. `allow` needs an active grant for the Round's Agent that is either `ticket` form for the Round's Ticket or `time` form whose `expiresAt` is after Galley's clock at the check, and that holds either the same `account`, `action` and `resource`, or full access to the same `account`; anything else is `deny`, including a Connected Account with no grant. A grant for the exact scope is named before a full-access grant. A scope the Connected Account does not declare is `400 capability_not_supported`, whatever the grants. Then `409 stale_claim_epoch` for an `epoch` other than the Round's, `409 round_not_open` for a Round that has ended, `409 runner_disconnected` while the runner is not connected by Galley's clock, `409 reconcile_required` while the Round awaits a Reconcile, and `409 round_not_running` for one claimed or waiting for input. A rejection records nothing and is not a deny. An unknown, malformed or foreign Round id returns the shared 404.
+         * @description Answers from the grants Galley holds when the check runs, and records the check, allow or deny, in the Round's history. `allow` needs an active grant for the Round's Agent that is either `ticket` form for the Round's Ticket or `time` form whose `expiresAt` is after Galley's clock at the check, and that holds either the same `account`, `action` and `resource`, or full access to the same `account`; anything else is `deny`, including a Connected Account with no grant. A grant for the exact scope is named before a full-access grant. A scope the Connected Account does not declare is `400 capability_not_supported`, whatever the grants. Then `409 runner_not_holder` for a runner other than the one that claimed the Round, `409 stale_claim_epoch` for an `epoch` other than the Round's, `409 round_not_open` for a Round that has ended, `409 runner_disconnected` while the runner is not connected by Galley's clock, `409 reconcile_required` while the Round awaits a Reconcile, and `409 round_not_running` for one claimed or waiting for input. A rejection records nothing and is not a deny. An unknown, malformed or foreign Round id returns the shared 404.
          */
         post: operations["checkRoundAuthority"];
         delete?: never;
@@ -805,7 +828,7 @@ export interface paths {
         };
         /**
          * Pull a Round's unacknowledged commands
-         * @description The Round's unacknowledged commands: a Stop first, then the rest oldest `issuedAt` first; none once the Round has ended. A command stays listed until it is acknowledged. An unknown, malformed or foreign Round id returns the shared 404.
+         * @description The Round's unacknowledged commands: a Stop first, then the rest oldest `issuedAt` first; none once the Round has ended or for a runner other than the one that claimed it. A command stays listed until it is acknowledged. An unknown, malformed or foreign Round id returns the shared 404.
          */
         get: operations["listRoundCommands"];
         put?: never;
@@ -830,7 +853,7 @@ export interface paths {
         put?: never;
         /**
          * Acknowledge a pulled command
-         * @description Records the runner's outcome and Galley's time once. A repeat with the same outcome returns the stored acknowledgement; another outcome is `409 command_already_acknowledged` and changes nothing. Not checked against the claim epoch, and never changes the Round or the Ticket. A Round or command id that is unknown, malformed, foreign or not that Round's returns the shared 404.
+         * @description Records the runner's outcome and Galley's time once. A runner other than the one that claimed the Round is `409 runner_not_holder`. A repeat with the same outcome returns the stored acknowledgement; another outcome is `409 command_already_acknowledged`. Either changes nothing. Not checked against the claim epoch, and never changes the Round or the Ticket. A Round or command id that is unknown, malformed, foreign or not that Round's returns the shared 404.
          */
         post: operations["acknowledgeRoundCommand"];
         delete?: never;
@@ -998,10 +1021,10 @@ export interface components {
          */
         OpenRoundState: "claimed" | "running" | "waiting_for_input";
         /**
-         * @description What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `execution_unknown` (the Round awaits a Reconcile and the last Reconcile could not confirm execution), `reconciling` (the Round awaits a Reconcile otherwise), `stopping` (Stop requested), `resuming` (waiting for input, its question answered or its Permission request approved), `waiting_for_answer` (waiting on an unanswered question), `waiting_for_permission` (waiting on a Permission request not approved, declined included), `starting` (claimed) and `working` (running) applies.
+         * @description What an open Round waits on, from Galley's state alone. When more than one holds, the first of `runner_disconnected` (the runner health window has lapsed or no runner is paired), `runner_replaced` (the runner that claimed the Round is not the Owner's current runner), `execution_unknown` (the Round awaits a Reconcile and the last Reconcile could not confirm execution), `reconciling` (the Round awaits a Reconcile otherwise), `stopping` (Stop requested), `resuming` (waiting for input, its question answered or its Permission request approved), `waiting_for_answer` (waiting on an unanswered question), `waiting_for_permission` (waiting on a Permission request not approved, declined included), `starting` (claimed) and `working` (running) applies.
          * @enum {string}
          */
-        RoundWaitingReason: "starting" | "working" | "stopping" | "runner_disconnected" | "waiting_for_answer" | "resuming" | "waiting_for_permission" | "reconciling" | "execution_unknown";
+        RoundWaitingReason: "starting" | "working" | "stopping" | "runner_disconnected" | "waiting_for_answer" | "resuming" | "waiting_for_permission" | "reconciling" | "execution_unknown" | "runner_replaced";
         RoundQuestion: {
             /**
              * Format: uuid
@@ -1242,6 +1265,34 @@ export interface components {
             authorityChecks: components["schemas"]["RoundAuthorityCheck"][];
             /** @description Every authority check the Round made, including those beyond `authorityChecks`. */
             authorityCheckCount: number;
+            /** @description Set exactly when the Owner's attestation ended the Round. */
+            attestation: components["schemas"]["RoundAttestation"] | null;
+        };
+        /** @enum {string} */
+        AttestationBasis: "runner_process_ended" | "runner_host_off" | "other";
+        AttestCessationRequest: {
+            basis: components["schemas"]["AttestationBasis"];
+            /** @description Required with `other`. Counted in Unicode code points. Not blank; no control characters but tab and line feed. */
+            note?: string;
+        };
+        /**
+         * @description The runner that claimed the Round, as Galley saw it at the attestation. `replaced`: it is not the Owner's current runner.
+         * @enum {string}
+         */
+        RoundHolderHealth: "connected" | "disconnected" | "replaced" | "not_paired";
+        /** @description The Owner's assertion that execution ceased, not Galley's proof. */
+        RoundAttestation: {
+            /** Format: date-time */
+            attestedAt: string;
+            basis: components["schemas"]["AttestationBasis"];
+            note: string | null;
+            roundState: components["schemas"]["OpenRoundState"];
+            claimEpoch: number;
+            /** Format: date-time */
+            holderLastSeenAt: string | null;
+            holderHealth: components["schemas"]["RoundHolderHealth"];
+            /** @description The Round's last recorded Reconcile belief; null when it had none. */
+            reconcileExecution: components["schemas"]["HeldExecution"] | null;
         };
         RoundDeliverable: {
             bodyMarkdown: string;
@@ -1325,6 +1376,8 @@ export interface components {
             feedback: components["schemas"]["TicketCommandAvailability"];
             /** @description Whether `openRound.permissionRequest` can be approved or declined. Unavailable with `permission_decision_not_available` without one, `permission_already_decided` once it is decided, and `stop_already_requested` once Stop is requested. */
             permissionDecision: components["schemas"]["TicketCommandAvailability"];
+            /** @description Whether the Owner can attest that `openRound` has ceased; otherwise `attestation_not_available`. */
+            attestCessation: components["schemas"]["TicketCommandAvailability"];
         };
         TicketStatusChangeRejection: {
             status: components["schemas"]["TicketStatus"];
@@ -1496,6 +1549,10 @@ export interface components {
         ReconcileResult: {
             /** @description Null when nothing was held and the Owner has no open Round. */
             round: components["schemas"]["ReconciledRound"] | null;
+        };
+        ClaimWorkRequest: {
+            /** @description One per claim attempt, reused until a definite answer. Taken verbatim; not blank; no control characters but tab and line feed. */
+            idempotencyKey: string;
         };
         RunnerClaim: {
             /** Format: uuid */
@@ -2818,6 +2875,42 @@ export interface operations {
             };
         };
     };
+    attestRoundCessation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                roundId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttestCessationRequest"];
+            };
+        };
+        responses: {
+            /** @description The ended Round, with its attestation. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketRound"];
+                };
+            };
+            /** @description Error. See `ErrorBody`. Includes `attestation_not_available`. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     getSession: {
         parameters: {
             query?: never;
@@ -3043,7 +3136,7 @@ export interface operations {
                     "application/json": components["schemas"]["ReconcileResult"];
                 };
             };
-            /** @description Error. See `ErrorBody`. Includes `stale_claim_epoch` and `round_not_open`. */
+            /** @description Error. See `ErrorBody`. Includes `runner_not_holder`, `stale_claim_epoch` and `round_not_open`. */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3061,8 +3154,21 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClaimWorkRequest"];
+            };
+        };
         responses: {
+            /** @description A replay; the Round and body this key first claimed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunnerClaim"];
+                };
+            };
             /** @description The Round created by this claim. */
             201: {
                 headers: {
@@ -3079,7 +3185,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Error. See `ErrorBody`. */
+            /** @description Error. See `ErrorBody`. Includes `idempotency_key_conflict` and `claim_not_replayable`. */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3123,7 +3229,7 @@ export interface operations {
                     "application/json": components["schemas"]["RoundEventResult"];
                 };
             };
-            /** @description Error. See `ErrorBody`. Includes `idempotency_key_conflict`, `stale_claim_epoch`, `round_not_open`, `event_out_of_order`, `stop_not_requested`, `answer_not_supplied`, `approval_not_supplied`, `capability_not_supported`, `invalid_renewal`, `observation_id_conflict` and `request_too_large`. */
+            /** @description Error. See `ErrorBody`. Includes `runner_not_holder`, `idempotency_key_conflict`, `stale_claim_epoch`, `round_not_open`, `event_out_of_order`, `stop_not_requested`, `answer_not_supplied`, `approval_not_supplied`, `capability_not_supported`, `invalid_renewal`, `observation_id_conflict` and `request_too_large`. */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3158,7 +3264,7 @@ export interface operations {
                     "application/json": components["schemas"]["AuthorityCheckResult"];
                 };
             };
-            /** @description Error. See `ErrorBody`. Includes `capability_not_supported`, `stale_claim_epoch`, `round_not_open`, `runner_disconnected`, `reconcile_required` and `round_not_running`. */
+            /** @description Error. See `ErrorBody`. Includes `capability_not_supported`, `runner_not_holder`, `stale_claim_epoch`, `round_not_open`, `runner_disconnected`, `reconcile_required` and `round_not_running`. */
             default: {
                 headers: {
                     [name: string]: unknown;
@@ -3225,7 +3331,7 @@ export interface operations {
                     "application/json": components["schemas"]["RoundCommandAcknowledgement"];
                 };
             };
-            /** @description Error. See `ErrorBody`. Includes `command_already_acknowledged`. */
+            /** @description Error. See `ErrorBody`. Includes `runner_not_holder` and `command_already_acknowledged`. */
             default: {
                 headers: {
                     [name: string]: unknown;

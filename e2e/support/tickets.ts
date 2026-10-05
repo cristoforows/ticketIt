@@ -44,6 +44,21 @@ export interface Round {
   usage: RoundUsage;
   /** Set exactly when `state` is `delivered` (issue #136). */
   deliverable: { bodyMarkdown: string; summary: string; criteriaAssessment: string } | null;
+  /** Set exactly when the Owner's attestation ended the Round (issue #171). */
+  attestation: RoundAttestation | null;
+}
+
+export type AttestationBasis = "runner_process_ended" | "runner_host_off" | "other";
+
+export interface RoundAttestation {
+  attestedAt: string;
+  basis: AttestationBasis;
+  note: string | null;
+  roundState: "claimed" | "running" | "waiting_for_input";
+  claimEpoch: number;
+  holderLastSeenAt: string | null;
+  holderHealth: "connected" | "disconnected" | "replaced" | "not_paired";
+  reconcileExecution: "running" | "stopped" | "unknown" | null;
 }
 
 export interface RoundQuestion {
@@ -122,7 +137,7 @@ export interface RoundActivityPage {
   earlierActivityCursor: string | null;
 }
 
-export type WaitingReason = "starting" | "working" | "waiting_for_answer" | "waiting_for_permission" | "resuming" | "stopping" | "runner_disconnected" | "reconciling" | "execution_unknown";
+export type WaitingReason = "starting" | "working" | "waiting_for_answer" | "waiting_for_permission" | "resuming" | "stopping" | "runner_disconnected" | "reconciling" | "execution_unknown" | "runner_replaced";
 
 export interface UsageCount {
   sum: number | null;
@@ -159,6 +174,7 @@ export interface Ticket {
     answer: { available: boolean; reason?: ErrorDetail };
     feedback: { available: boolean; reason?: ErrorDetail };
     permissionDecision: { available: boolean; reason?: ErrorDetail };
+    attestCessation: { available: boolean; reason?: ErrorDetail };
     statusChangeRejections: { status: TicketStatus; reason: ErrorDetail }[];
   };
   requestingAgentWork: boolean;
@@ -316,6 +332,13 @@ export type GrantChoice = ({ form: "ticket" } | { form: "time"; expiresAt: strin
 
 export async function decidePermissionDirect(from: Api, id: string, roundId: string, requestId: string, decision: "approve" | "decline", grant: GrantChoice = { form: "ticket" }): Promise<TicketCommandResult> {
   return ticketCommand(from, "POST", `/api/tickets/${id}/rounds/${roundId}/permission-requests/${requestId}/${decision}`, decision === "approve" ? grant : undefined);
+}
+
+/** Same purpose as changeTicketStatusDirect, for the Owner's cessation attestation. */
+export async function attestCessationDirect(from: Api, id: string, roundId: string, basis: AttestationBasis, note?: string): Promise<{ status: number; round?: Round; errorCode?: string }> {
+  const response = await apiOf(from).post(`/api/tickets/${id}/rounds/${roundId}/attest-cessation`, { data: note === undefined ? { basis } : { basis, note } });
+  const body = await response.json();
+  return response.ok() ? { status: response.status(), round: body as Round } : { status: response.status(), errorCode: body?.error?.code };
 }
 
 export type TicketAssignee = { type: "owner" } | { type: "agent"; agentId: string };

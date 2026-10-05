@@ -8,6 +8,7 @@ export interface Config {
   heartbeatIntervalMs: number;
   claimIntervalMs: number;
   commandIntervalMs: number;
+  reportRetryMaxMs: number;
   runnerCredential: RunnerCredential;
   engineScript: EngineScript;
 }
@@ -28,6 +29,7 @@ const DEFAULT_GALLEY_URL = "http://localhost:8080";
 const DEFAULT_INTERVAL_MS = 10_000;
 const DEFAULT_CLAIM_INTERVAL_MS = 5_000;
 const DEFAULT_COMMAND_INTERVAL_MS = 1_000;
+const DEFAULT_REPORT_RETRY_MAX_MS = 300_000;
 
 export function loadConfig(
   env: Readonly<Record<string, string | undefined>>,
@@ -40,6 +42,7 @@ export function loadConfig(
   const heartbeatIntervalMs = parseInterval("MICHELIN_HEARTBEAT_INTERVAL_MS", env["MICHELIN_HEARTBEAT_INTERVAL_MS"], problems);
   const claimIntervalMs = parseInterval("MICHELIN_CLAIM_INTERVAL_MS", env["MICHELIN_CLAIM_INTERVAL_MS"], problems, DEFAULT_CLAIM_INTERVAL_MS);
   const commandIntervalMs = parseInterval("MICHELIN_COMMAND_INTERVAL_MS", env["MICHELIN_COMMAND_INTERVAL_MS"], problems, DEFAULT_COMMAND_INTERVAL_MS);
+  const reportRetryMaxMs = parseInterval("MICHELIN_REPORT_RETRY_MAX_MS", env["MICHELIN_REPORT_RETRY_MAX_MS"], problems, DEFAULT_REPORT_RETRY_MAX_MS);
   const runnerCredential = resolveRunnerCredential(env, problems);
   const engineScript = loadEngineScript(env["MICHELIN_ENGINE_SCRIPT"], readScriptFile, problems);
 
@@ -50,12 +53,13 @@ export function loadConfig(
     heartbeatIntervalMs === undefined ||
     claimIntervalMs === undefined ||
     commandIntervalMs === undefined ||
+    reportRetryMaxMs === undefined ||
     runnerCredential === undefined ||
     engineScript === undefined
   ) {
     throw new ConfigError(problems);
   }
-  return { galleyUrl, statusIntervalMs, heartbeatIntervalMs, claimIntervalMs, commandIntervalMs, runnerCredential, engineScript };
+  return { galleyUrl, statusIntervalMs, heartbeatIntervalMs, claimIntervalMs, commandIntervalMs, reportRetryMaxMs, runnerCredential, engineScript };
 }
 
 function parseGalleyUrl(raw: string, problems: string[]): URL | undefined {

@@ -13,11 +13,11 @@ import {
   type RunnerClaim,
 } from "./galley/runner.ts";
 import type { Logger } from "./logger.ts";
-import type { GateResult } from "./reconciler.ts";
+import type { GateResult, ReconcileOutcome } from "./reconciler.ts";
 import { sleep } from "./statusLoop.ts";
 
 interface PendingEvent {
-  step: "start" | "progress" | "usage" | "deliver" | "fail" | "interrupt" | "stop" | "ask" | "resume" | "request" | "act";
+  step: "start" | "progress" | "usage" | "deliver" | "fail" | "interrupt" | "stop" | "ask" | "resume" | "request" | "act" | "cease";
   stepIndex: number;
   event: RoundEventRequest;
   reported: string;
@@ -50,14 +50,21 @@ export interface EngineOptions {
   // Aborted when Galley's Reconcile answers hold or refuses the Round: the engine leaves it without reporting.
   dropped?: AbortSignal;
   onHalted?: () => void;
+  reportRetryMaxMs?: number;
 }
 
 export interface EngineReconcile {
   gate(): Promise<GateResult>;
   require(): void;
+  settle(): Promise<ReconcileOutcome>;
+  intervalMs: number;
 }
 
-type SendOutcome = "sent" | "abandoned" | "aborted" | "stop";
+type SendOutcome = "sent" | "abandoned" | "aborted" | "stop" | "halted";
+
+export const DEFAULT_REPORT_RETRY_MAX_MS = 300_000;
+
+const TERMINAL_ENDINGS: Partial<Record<RoundEventRequest["type"], EngineOutcome>> = { delivered: "delivered", stop_confirmed: "stopped", failed: "failed", interrupted: "interrupted" };
 
 const RETRY_BASE_MS = 1_000;
 const RETRY_CAP_MS = 30_000;
@@ -143,6 +150,61 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
   const awaitAnswer: AwaitAnswer = options.awaitAnswer ?? ((_questionId, until) => untilAborted(until).then(() => undefined));
   const awaitApproval: AwaitApproval = options.awaitApproval ?? ((_requestId, until) => untilAborted(until).then(() => undefined));
   let waitingFor: "answer" | "approval" | undefined;
+  let haltedOutcome: EngineOutcome = "abandoned";
+  const retryMaxMs = options.reportRetryMaxMs ?? DEFAULT_REPORT_RETRY_MAX_MS;
+  // Only Galley's Reconcile answer, given the stopped belief, says how the Round may end: the unsent ending if there was one,
+  // otherwise the cessation Galley names.
+  const recoverHalted = async (unsent: PendingEvent): Promise<EngineOutcome> => {
+    options.onHalted?.();
+    const haltedAt = deps.now();
+    logger.error("report retry exhausted; round halted locally", { roundId, step: unsent.step, stepIndex: unsent.stepIndex, type: unsent.event.type, retryMaxMs });
+    const reconcile = options.reconcile;
+    if (reconcile === undefined) {
+      return "abandoned";
+    }
+    for (;;) {
+      await deps.sleep(reconcile.intervalMs, AbortSignal.any([signal, dropped]));
+      const gone = left();
+      if (gone !== undefined) {
+        return gone;
+      }
+      const answer = await reconcile.settle();
+      if (answer.kind === "aborted") {
+        return "aborted";
+      }
+      if (answer.kind === "drop" || answer.kind === "hold") {
+        return "abandoned";
+      }
+      if (answer.kind !== "cessation") {
+        continue;
+      }
+      const ending = TERMINAL_ENDINGS[unsent.event.type] !== undefined
+        ? unsent
+        : {
+            step: "cease" as const,
+            stepIndex: unsent.stepIndex,
+            event: envelope(answer.event, `${roundId}:halted`, {
+              evidence: [...`Halted locally at step ${unsent.stepIndex + 1} of ${steps.length} (${unsent.event.type}) at ${haltedAt.toISOString()}: report retry bound of ${retryMaxMs} ms reached`].slice(0, NOTE_MAX_LENGTH).join(""),
+            }),
+            reported: "cessation reported",
+            context: { unsent: unsent.event.type },
+          };
+      const sent = await sendEvent(options, deps, ending, { gated: false, retryMaxMs });
+      if (sent === "sent") {
+        return TERMINAL_ENDINGS[ending.event.type] ?? "abandoned";
+      }
+      if (sent !== "halted") {
+        return sent === "aborted" ? "aborted" : "abandoned";
+      }
+    }
+  };
+  const send = async (pending: PendingEvent): Promise<SendOutcome> => {
+    const outcome = await sendEvent(options, deps, pending, { gated: true, retryMaxMs });
+    if (outcome === "halted") {
+      haltedOutcome = await recoverHalted(pending);
+    }
+    return outcome;
+  };
   // Sent only once the engine has ceased: Galley ends the Round on this event alone.
   const stopped = async (): Promise<EngineOutcome> => {
     options.onHalted?.();
@@ -154,16 +216,16 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
         ? `before step ${stepIndex + 1}`
         : `after step ${steps.length}`;
     const evidence = `Stopped ${position} of ${steps.length}${commandId === undefined ? "" : ` on Stop command ${commandId}`}`;
-    const outcome = await sendEvent(options, deps, {
+    const outcome = await send({
       step: "stop",
       stepIndex,
       event: envelope("stop_confirmed", `${roundId}:stop`, { evidence }),
       reported: "stop confirmation reported",
       context: {},
     });
-    return outcome === "sent" ? "stopped" : outcome === "stop" ? "abandoned" : outcome;
+    return outcome === "sent" ? "stopped" : outcome === "halted" ? haltedOutcome : outcome === "stop" ? "abandoned" : outcome;
   };
-  const settle = (outcome: Exclude<SendOutcome, "sent">): Promise<EngineOutcome> | EngineOutcome => (outcome === "stop" ? stopped() : outcome);
+  const settle = (outcome: Exclude<SendOutcome, "sent">): Promise<EngineOutcome> | EngineOutcome => (outcome === "stop" ? stopped() : outcome === "halted" ? haltedOutcome : outcome);
   let stepIndex = 0;
   for (const step of steps) {
     const gone = left();
@@ -212,7 +274,7 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
         break;
       case "ask": {
         const questionId = questionIdFor(roundId, stepIndex);
-        const raised = await sendEvent(options, deps, {
+        const raised = await send({
           step: "ask",
           stepIndex,
           event: envelope("question_raised", questionId, { questionId, text: step.question }),
@@ -233,7 +295,7 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
           return stopped();
         }
         waitingFor = undefined;
-        const resumed = await sendEvent(options, deps, {
+        const resumed = await send({
           step: "resume",
           stepIndex,
           event: envelope("resumed", `${roundId}:${stepIndex}`, { questionId }),
@@ -277,7 +339,7 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
         }
         const requestId = requestIdFor(roundId, stepIndex);
         const renewal = first.expiredGrantId === undefined ? {} : { renewsGrantId: first.expiredGrantId };
-        const requested = await sendEvent(options, deps, {
+        const requested = await send({
           step: "request",
           stepIndex,
           event: envelope("permission_requested", requestId, { requestId, ...scope, ...renewal }),
@@ -298,7 +360,7 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
           return stopped();
         }
         waitingFor = undefined;
-        const resumed = await sendEvent(options, deps, {
+        const resumed = await send({
           step: "resume",
           stepIndex,
           event: envelope("resumed", `${roundId}:${stepIndex}:resumed`, { requestId }),
@@ -322,7 +384,7 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
         return left() ?? stopped();
     }
     if (pending !== undefined) {
-      const outcome = await sendEvent(options, deps, pending);
+      const outcome = await send(pending);
       if (outcome !== "sent") {
         return settle(outcome);
       }
@@ -339,7 +401,7 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
         return "interrupted";
       }
       if (pending.step === "start" && claim.ticket.feedback.length > 0) {
-        const noted = await sendEvent(options, deps, {
+        const noted = await send({
           step: "progress",
           stepIndex,
           event: envelope("progress", `${roundId}:${stepIndex}:feedback`, { note: feedbackNote(claim.ticket.feedback) }),
@@ -364,8 +426,9 @@ export async function runControlledEngine(options: EngineOptions): Promise<Engin
   return "completed";
 }
 
-async function sendEvent(options: EngineOptions, deps: EngineDeps, pending: PendingEvent): Promise<SendOutcome> {
+async function sendEvent(options: EngineOptions, deps: EngineDeps, pending: PendingEvent, bound: { gated: boolean; retryMaxMs: number }): Promise<SendOutcome> {
   const { logger, signal, claim } = options;
+  let firstFailedAt: number | undefined;
   const request = { fetch: options.fetch, galleyUrl: options.galleyUrl, signal, timeoutMs: options.requestTimeoutMs, credential: options.credential };
   let event = pending.event;
   let cessationLetThrough = false;
@@ -373,7 +436,7 @@ async function sendEvent(options: EngineOptions, deps: EngineDeps, pending: Pend
     if (options.dropped?.aborted) {
       return "abandoned";
     }
-    if (options.reconcile !== undefined && !cessationLetThrough) {
+    if (options.reconcile !== undefined && bound.gated && !cessationLetThrough) {
       const gate = await options.reconcile.gate();
       if (gate.kind === "aborted" || gate.kind === "drop") {
         return gate.kind === "aborted" ? "aborted" : "abandoned";
@@ -420,6 +483,12 @@ async function sendEvent(options: EngineOptions, deps: EngineDeps, pending: Pend
     if (!isRetryable(report.failure)) {
       logger.error("round event refused; round abandoned locally", { ...context, durationMs: report.durationMs, ...report.failure });
       return "abandoned";
+    }
+    const failedAt = deps.now().getTime();
+    firstFailedAt ??= failedAt;
+    if (failedAt - firstFailedAt >= bound.retryMaxMs) {
+      logger.warn("round event failed; retry bound reached", { ...context, durationMs: report.durationMs, ...report.failure, retryMaxMs: bound.retryMaxMs });
+      return "halted";
     }
     const retryInMs = retryDelayMs(attempt);
     logger.warn("round event failed; retrying", { ...context, durationMs: report.durationMs, ...report.failure, retryInMs });

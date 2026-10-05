@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -138,12 +139,12 @@ export function runnerCalls(runner: APIRequestContext, token: string) {
       return (await response.json() as { round: ReconciledRound | null }).round;
     },
     async claim(): Promise<RunnerClaim> {
-      const response = await runner.post("/api/runner/claims", { headers });
+      const response = await runner.post("/api/runner/claims", { headers, data: { idempotencyKey: randomUUID() } });
       expect(response.status()).toBe(201);
       return response.json();
     },
     async claimStatus(): Promise<number> {
-      return (await runner.post("/api/runner/claims", { headers })).status();
+      return (await runner.post("/api/runner/claims", { headers, data: { idempotencyKey: randomUUID() } })).status();
     },
     async commands(roundId: string): Promise<RunnerCommand[]> {
       const response = await runner.get(`/api/runner/rounds/${roundId}/commands`, { headers });

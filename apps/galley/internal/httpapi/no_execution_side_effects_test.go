@@ -30,6 +30,7 @@ var knownPublicTables = []string{
 	"permission_grants",
 	"permission_requests",
 	"round_activity",
+	"round_attestations",
 	"round_authority_checks",
 	"round_commands",
 	"round_deliverables",
@@ -245,7 +246,7 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 			}
 		case "round_activity", "usage_observations":
 			if after != before[table] {
-				t.Errorf("%s row count changed from %d to %d -- a manual action recorded Round activity or usage; only a runner's progress or usage_observed event, or its Reconcile changing the recorded execution, may", table, before[table], after)
+				t.Errorf("%s row count changed from %d to %d -- a manual action recorded Round activity or usage; only a runner's progress or usage_observed event, its Reconcile changing the recorded execution, or the Owner's attestation, may", table, before[table], after)
 			}
 		case "round_deliverables":
 			if after != before[table] {
@@ -262,6 +263,10 @@ func TestManualLifecycleActionsCreateNoExecutionRecords(t *testing.T) {
 		case "permission_requests", "permission_grants", "round_authority_checks":
 			if after != before[table] {
 				t.Errorf("%s row count changed from %d to %d -- a manual action recorded a Permission request, grant or authority check; only a runner's permission_requested event, the Owner's approval of it and a runner's authority check may", table, before[table], after)
+			}
+		case "round_attestations":
+			if after != before[table] {
+				t.Errorf("%s row count changed from %d to %d -- a manual lifecycle action recorded an attestation; only the Owner's attest-cessation command may", table, before[table], after)
 			}
 		case "round_feedback":
 			if after != before[table] {
