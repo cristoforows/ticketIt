@@ -155,7 +155,7 @@ A board is an isolated context and always belongs to a team. A user who wants a 
 
 A board can be served by several runners. Each runner is paired to its board the way v1 pairs one, and each holds an API key scoped to runner calls on that board and not to a user's session. Two runners may share the same key. Data isolation rests on the board boundary: a runner only ever holds the data of the one board it is paired to.
 
-Permission to move a Ticket to Ready is separate from permission to view the board. A Ticket moved to Ready by a user without that permission is not eligible, and no runner picks it up.
+Anyone with permission on the board can move a Ticket to Ready, and a runner picks it up like any other eligible Ticket. There is no separate Ready permission.
 
 Open questions:
 
