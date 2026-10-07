@@ -157,13 +157,13 @@ A board can be served by several runners. Each runner is paired to its board the
 
 Anyone with permission on the board can move a Ticket to Ready, and a runner picks it up like any other eligible Ticket. There is no separate Ready permission.
 
-A board's data is keyed by a board identifier, which replaces the Owner as the scope of every record and query. A Ticket's `owner_id` stays as ordinary metadata (who owns the Ticket) and no longer scopes access. A board's provider key and GitHub token belong to the team that owns it. The team pairs and runs its own Michelin runners; v2 does not host runners.
+A board's data is keyed by a board identifier, which replaces the Owner as the scope of every record and query. A Ticket's `owner_id` stays as ordinary metadata (who owns the Ticket) and no longer scopes access. The team pairs and runs its own Michelin runners; v2 does not host runners.
 
 The team and its board own the workflow, so usage, cost and the dashboard are scoped per board. Usage is not attributed to individual users.
 
 A runner is a machine that takes work. A Ticket is claimed by exactly one runner, and each runner holds at most one open Round at a time. Runners on the same board work in parallel on different Tickets, so a board has as many open Rounds as it has busy runners. v1's single open Round per Owner is this rule with one runner, and v1 keeps one runner.
 
-The team's provider API key (OpenRouter, or any later provider) is shared by all of the board's runners. The claim, heartbeats and Round fencing use the runner's own identity, never the provider key. Health is per runner: a runner that fails is unhealthy on its own. A provider outage is a separate condition that can make every runner using that key fail to execute without any of them being unhealthy.
+A provider API key (OpenRouter now, other providers later) belongs to a runner, not to the board. Two runners on one board may use different keys or the same key. The claim, heartbeats and Round fencing use the runner's own identity, never a provider key. Health is per runner: a runner that fails is unhealthy on its own. A provider outage is a separate condition that makes every runner using that key fail to execute without any of them being unhealthy.
 
 v1 already scopes every record and query to the Owner, fences a Round to the runner that claimed it, and keeps credential resolution behind a boundary. See [open-decisions.md](open-decisions.md) for the credential direction.
 
