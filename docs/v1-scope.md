@@ -151,15 +151,17 @@ Later Booth views may filter Tickets by Booth and Assignee.
 
 ### Multi-user boards (v2 direction, not assigned)
 
-A board is not a user's property. A board belongs to one user or to a team, and any authenticated user can open a board they have permission on. v1's one owner per deployment is the single-user case of this.
+A board is an isolated context, not a user's property. It belongs to one user or to a team, and any authenticated user can open a board they have permission on. v1's one owner per deployment is the single-user case.
 
-A runner serves boards regardless of who owns them, so the unit of isolation is the task. Each claim, Round, credential and workspace carries one board's data and never another's. Isolation then has to hold in the runner (checkouts, engine sessions, logs, secrets), not only in Galley's queries, and runner credentials have to be scoped to runner calls and not to a user's session.
+One runner serves exactly one board, and a board is served by one runner. Isolation of data therefore rests on the board boundary: a runner's checkouts, engine sessions, logs and credentials only ever hold that board's data, and a runner credential is scoped to runner calls on that board and not to a user's session. A team board's runner serves the team.
+
+Permission to move a Ticket to Ready is separate from permission to view the board. A Ticket moved to Ready by a user without that permission is not eligible, and the runner does not pick it up.
 
 Open questions:
 
-- Whether `owner_id` becomes a board id with a membership table, and what happens to the per-Owner single open Round slot and runner credential.
+- Whether `owner_id` becomes a board id with a membership table, and what happens to the single open Round slot and the runner credential, which are per Owner in v1.
 - Whose provider key and GitHub token a team board uses.
-- Whether one runner may serve several boards, or each board needs its own.
+- Who runs the runner for a board: its owner on their own machine, or a hosted runner per board (container isolation is a v2 priority).
 - How usage and spending roll up per board and per user.
 
 v1 already scopes every record and query to the Owner, fences a Round to the runner that claimed it, and keeps credential resolution behind a boundary. See [open-decisions.md](open-decisions.md) for the credential direction.
