@@ -151,17 +151,18 @@ Later Booth views may filter Tickets by Booth and Assignee.
 
 ### Multi-user boards (v2 direction, not assigned)
 
-A board is an isolated context, not a user's property. It belongs to one user or to a team, and any authenticated user can open a board they have permission on. v1's one owner per deployment is the single-user case.
+A board is an isolated context and always belongs to a team. A user who wants a board of their own creates a team, and the board comes with it. Any authenticated user with permission on the team's board can open it. v1's one owner per deployment is the single-user case.
 
-One runner serves exactly one board, and a board is served by one runner. Isolation of data therefore rests on the board boundary: a runner's checkouts, engine sessions, logs and credentials only ever hold that board's data, and a runner credential is scoped to runner calls on that board and not to a user's session. A team board's runner serves the team.
+A board can be served by several runners. Each runner is paired to its board the way v1 pairs one, and each holds an API key scoped to runner calls on that board and not to a user's session. Two runners may share the same key. Data isolation rests on the board boundary: a runner only ever holds the data of the one board it is paired to.
 
-Permission to move a Ticket to Ready is separate from permission to view the board. A Ticket moved to Ready by a user without that permission is not eligible, and the runner does not pick it up.
+Permission to move a Ticket to Ready is separate from permission to view the board. A Ticket moved to Ready by a user without that permission is not eligible, and no runner picks it up.
 
 Open questions:
 
-- Whether `owner_id` becomes a board id with a membership table, and what happens to the single open Round slot and the runner credential, which are per Owner in v1.
-- Whose provider key and GitHub token a team board uses.
-- Who runs the runner for a board: its owner on their own machine, or a hosted runner per board (container isolation is a v2 priority).
+- Whether `owner_id` becomes a board or team id with a membership table, and what becomes of the single open Round slot, which is per Owner in v1, once a board has several runners.
+- How Round fencing and runner health work when runners can share a key, since v1 identifies a runner by its credential ([#193](https://github.com/cristoforows/ticketIt/issues/193)).
+- Whose provider key and GitHub token a board uses.
+- Who runs a board's runners: team members on their own machines, or hosted runners (container isolation is a v2 priority).
 - How usage and spending roll up per board and per user.
 
 v1 already scopes every record and query to the Owner, fences a Round to the runner that claimed it, and keeps credential resolution behind a boundary. See [open-decisions.md](open-decisions.md) for the credential direction.
