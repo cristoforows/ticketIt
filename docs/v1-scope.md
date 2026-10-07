@@ -149,6 +149,28 @@ Distinguish estimates and reported costs; missing data is unknown rather than ze
 
 Later Booth views may filter Tickets by Booth and Assignee.
 
+### Multi-user boards (v2 direction, not assigned)
+
+A board is an isolated context and always belongs to a team. A user who wants a board of their own creates a team, and the board comes with it. Any authenticated user with permission on the team's board can open it. v1's one owner per deployment is the single-user case.
+
+A board can be served by several runners. Each runner is paired to its board the way v1 pairs one, and each holds its own runner credential, scoped to runner calls on that board and not to a user's session. Data isolation rests on the board boundary: a runner only ever holds the data of the one board it is paired to.
+
+Anyone with permission on the board can move a Ticket to Ready, and a runner picks it up like any other eligible Ticket. There is no separate Ready permission.
+
+A board's data is keyed by a board identifier, which replaces the Owner as the scope of every record and query. A Ticket's `owner_id` stays as ordinary metadata (who owns the Ticket) and no longer scopes access. The team pairs and runs its own Michelin runners; v2 does not host runners.
+
+The team and its board own the workflow, so usage, cost and the dashboard are scoped per board. Usage is not attributed to individual users.
+
+A runner is a machine that takes work. A Ticket is claimed by exactly one runner, and each runner holds at most one open Round at a time. Runners on the same board work in parallel on different Tickets, so a board has as many open Rounds as it has busy runners. v1's single open Round per Owner is this rule with one runner, and v1 keeps one runner.
+
+A provider API key (OpenRouter now, other providers later) belongs to a runner, not to the board. Two runners on one board may use different keys or the same key. The key is stored in Galley and set through Swiftlet, and Galley hands it to the runner it belongs to. Pairing a runner stays a manual step: the runner credential is copied between Swiftlet and Michelin as in v1.
+
+The GitHub token is also stored in Galley and, like the provider key, belongs to a runner. Most configuration and secrets live in Galley, and Michelin is only a runner: the one thing it needs from a person is pairing. What a runner is provisioned with is the tools and MCP servers its work needs.
+
+The claim, heartbeats and Round fencing use the runner's own identity, never a provider key. Health is per runner: a runner that fails is unhealthy on its own. A provider outage is a separate condition that makes every runner using that key fail to execute without any of them being unhealthy.
+
+v1 already scopes every record and query to the Owner, fences a Round to the runner that claimed it, and keeps credential resolution behind a boundary. See [open-decisions.md](open-decisions.md) for the credential direction.
+
 ## Acceptance
 
 Both native research and OpenCode coding belong to v1. M7 research and M8 coding can proceed independently after their shared M5/M6 prerequisites; research is not a blocker for coding. See [acceptance-scenarios.md](acceptance-scenarios.md) for complete hosted acceptance in M10. Deployment feasibility checks and integration gates are part of the build plan, not claims that the behavior is already available.

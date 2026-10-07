@@ -474,6 +474,8 @@ The hosting-comparison acceptance ticket is a demonstration after a provisional 
 
 Container isolation and the messaging-connected Manager Agent are v2 priorities. Booths, sprints, custom templates, RAG, editors, skill bundles, budget enforcement, additional account/storage providers, web-managed credentials/multiple owners, and remote/service-packaged runners remain later work unless explicitly promoted.
 
+The multi-user direction (boards owned by a user or a team, one runner serving several boards) is recorded in [v1-scope.md](v1-scope.md), "Multi-user boards".
+
 ## Updating decisions
 
 When a decision is made, update this register, the affected detail document, and the scope/plan if behavior changes. Add an ADR only for a hard-to-reverse, surprising choice made through a real trade-off. Do not put implementation decisions into the domain glossary.
