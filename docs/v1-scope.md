@@ -161,10 +161,9 @@ A board's data is keyed by a board identifier, which replaces the Owner as the s
 
 The team and its board own the workflow, so usage, cost and the dashboard are scoped per board. Usage is not attributed to individual users.
 
-Open questions:
+A runner is a machine that takes work. A Ticket is claimed by exactly one runner, and each runner holds at most one open Round at a time. Runners on the same board work in parallel on different Tickets, so a board has as many open Rounds as it has busy runners. v1's single open Round per Owner is this rule with one runner, and v1 keeps one runner.
 
-- What becomes of the single open Round slot, which is per Owner in v1, once a board has several runners.
-- How Round fencing and runner health work when runners can share a key, since v1 identifies a runner by its credential ([#193](https://github.com/cristoforows/ticketIt/issues/193)).
+Runners may share a key, so each runner process also receives an instance ID from Galley when it registers. The claim, heartbeats and Round fencing use that ID, not the key, so a runner that dies or restarts is told apart from one that keeps working.
 
 v1 already scopes every record and query to the Owner, fences a Round to the runner that claimed it, and keeps credential resolution behind a boundary. See [open-decisions.md](open-decisions.md) for the credential direction.
 
