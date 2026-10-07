@@ -153,7 +153,7 @@ Later Booth views may filter Tickets by Booth and Assignee.
 
 A board is an isolated context and always belongs to a team. A user who wants a board of their own creates a team, and the board comes with it. Any authenticated user with permission on the team's board can open it. v1's one owner per deployment is the single-user case.
 
-A board can be served by several runners. Each runner is paired to its board the way v1 pairs one, and each holds an API key scoped to runner calls on that board and not to a user's session. Two runners may share the same key. Data isolation rests on the board boundary: a runner only ever holds the data of the one board it is paired to.
+A board can be served by several runners. Each runner is paired to its board the way v1 pairs one, and each holds its own runner credential, scoped to runner calls on that board and not to a user's session. Data isolation rests on the board boundary: a runner only ever holds the data of the one board it is paired to.
 
 Anyone with permission on the board can move a Ticket to Ready, and a runner picks it up like any other eligible Ticket. There is no separate Ready permission.
 
@@ -163,7 +163,7 @@ The team and its board own the workflow, so usage, cost and the dashboard are sc
 
 A runner is a machine that takes work. A Ticket is claimed by exactly one runner, and each runner holds at most one open Round at a time. Runners on the same board work in parallel on different Tickets, so a board has as many open Rounds as it has busy runners. v1's single open Round per Owner is this rule with one runner, and v1 keeps one runner.
 
-Runners may share a key, so each runner process also receives an instance ID from Galley when it registers. The claim, heartbeats and Round fencing use that ID, not the key, so a runner that dies or restarts is told apart from one that keeps working.
+The team's provider API key (OpenRouter, or any later provider) is shared by all of the board's runners. The claim, heartbeats and Round fencing use the runner's own identity, never the provider key. Health is per runner: a runner that fails is unhealthy on its own. A provider outage is a separate condition that can make every runner using that key fail to execute without any of them being unhealthy.
 
 v1 already scopes every record and query to the Owner, fences a Round to the runner that claimed it, and keeps credential resolution behind a boundary. See [open-decisions.md](open-decisions.md) for the credential direction.
 
