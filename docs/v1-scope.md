@@ -157,12 +157,12 @@ A board can be served by several runners. Each runner is paired to its board the
 
 Anyone with permission on the board can move a Ticket to Ready, and a runner picks it up like any other eligible Ticket. There is no separate Ready permission.
 
+A board's data is keyed by a board identifier, which replaces the Owner as the scope of every record and query. A Ticket's `owner_id` stays as ordinary metadata (who owns the Ticket) and no longer scopes access. A board's provider key and GitHub token belong to the team that owns it. The team pairs and runs its own Michelin runners; v2 does not host runners.
+
 Open questions:
 
-- Whether `owner_id` becomes a board or team id with a membership table, and what becomes of the single open Round slot, which is per Owner in v1, once a board has several runners.
+- What becomes of the single open Round slot, which is per Owner in v1, once a board has several runners.
 - How Round fencing and runner health work when runners can share a key, since v1 identifies a runner by its credential ([#193](https://github.com/cristoforows/ticketIt/issues/193)).
-- Whose provider key and GitHub token a board uses.
-- Who runs a board's runners: team members on their own machines, or hosted runners (container isolation is a v2 priority).
 - How usage and spending roll up per board and per user.
 
 v1 already scopes every record and query to the Owner, fences a Round to the runner that claimed it, and keeps credential resolution behind a boundary. See [open-decisions.md](open-decisions.md) for the credential direction.
